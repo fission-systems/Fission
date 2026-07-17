@@ -52,6 +52,8 @@ fn apply_hir_presentation_passes(func: &mut HirFunction) {
         changed |= recover_while_from_gotos(&mut func.body);
         // Structuring often emits `while (1) { if (!c) break; body }` → `while (c)`.
         changed |= fold_while_true_break_guard(&mut func.body);
+        // `i = 0; while (i < n) { …; i = i + 1; }` → `for (i = 0; i < n; i = i + 1)`.
+        changed |= fold_seed_while_to_for(&mut func.body);
         // `if (c) { x = a; } else { x = b; }` → `x = c ? a : b` (pure values only).
         changed |= fold_if_else_pure_same_var_assign(&mut func.body);
         // `if (c) { return a; } else { return b; }` → `return c ? a : b` (pure values).
@@ -1115,6 +1117,140 @@ fn body_is_goto_recoverable(stmts: &[HirStmt]) -> bool {
     // Fallthrough/else bodies used in recovery must not define labels (would
     // break outer label indexing). Nested if/return/assign/goto are fine.
     !stmts.iter().any(|s| matches!(s, HirStmt::Label(_)))
+}
+
+/// Pure assign of a single var: `name = pure_expr`.
+fn pure_var_assign(stmt: &HirStmt) -> Option<(&str, &HirExpr)> {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } if expr_is_presentation_pure(rhs) => Some((name.as_str(), rhs)),
+        _ => None,
+    }
+}
+
+/// `i = init; while (cond) { body…; i = update; }` → `for (i = init; cond; i = update)`.
+///
+/// Presentation-only: init/update must be presentation-pure. Body may contain
+/// calls (loop body is not reordered). Rejects multi-def induction or missing tail.
+fn fold_seed_while_to_for(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= fold_seed_while_to_for(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= fold_seed_while_to_for(then_body);
+                changed |= fold_seed_while_to_for(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= fold_seed_while_to_for(&mut case.body);
+                }
+                changed |= fold_seed_while_to_for(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0;
+    while i + 1 < stmts.len() {
+        let Some((ind_name, _)) = pure_var_assign(&stmts[i]) else {
+            i += 1;
+            continue;
+        };
+        let ind_name = ind_name.to_string();
+        let HirStmt::While { cond, body } = &stmts[i + 1] else {
+            i += 1;
+            continue;
+        };
+        if body.is_empty() {
+            i += 1;
+            continue;
+        }
+        let Some((upd_name, _)) = pure_var_assign(body.last().unwrap()) else {
+            i += 1;
+            continue;
+        };
+        if upd_name != ind_name {
+            i += 1;
+            continue;
+        }
+        // Cond should mention induction (avoid folding unrelated seed+while).
+        if count_uses_in_expr(cond, &ind_name) == 0 {
+            i += 1;
+            continue;
+        }
+        // Body (excluding trailing update) must not re-assign induction (for clarity).
+        let body_core = &body[..body.len() - 1];
+        if body_core.iter().any(|s| assigns_var_name(s, &ind_name)) {
+            i += 1;
+            continue;
+        }
+
+        let init_stmt = stmts[i].clone();
+        let HirStmt::While { cond, body } = stmts[i + 1].clone() else {
+            unreachable!();
+        };
+        let update_stmt = body.last().cloned().unwrap();
+        let for_body: Vec<HirStmt> = body[..body.len() - 1].to_vec();
+        stmts[i] = HirStmt::For {
+            init: Some(Box::new(init_stmt)),
+            cond: Some(cond),
+            update: Some(Box::new(update_stmt)),
+            body: for_body,
+        };
+        stmts.remove(i + 1);
+        changed = true;
+        // Re-scan from same index (new For may nest folds later via recursion).
+        i += 1;
+    }
+    changed
+}
+
+fn assigns_var_name(stmt: &HirStmt, name: &str) -> bool {
+    match stmt {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(n),
+            ..
+        } => n == name,
+        HirStmt::Block(b) | HirStmt::While { body: b, .. } | HirStmt::DoWhile { body: b, .. } => {
+            b.iter().any(|s| assigns_var_name(s, name))
+        }
+        HirStmt::For {
+            init,
+            update,
+            body,
+            ..
+        } => {
+            init.as_ref()
+                .is_some_and(|s| assigns_var_name(s, name))
+                || update.as_ref().is_some_and(|s| assigns_var_name(s, name))
+                || body.iter().any(|s| assigns_var_name(s, name))
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(|s| assigns_var_name(s, name))
+                || else_body.iter().any(|s| assigns_var_name(s, name))
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|c| c.body.iter().any(|s| assigns_var_name(s, name)))
+                || default.iter().any(|s| assigns_var_name(s, name))
+        }
+        _ => false,
+    }
 }
 
 /// `while (1) { if (!cond) break; body… }` → `while (cond) { body… }`.
@@ -4398,6 +4534,189 @@ mod tests {
             !layered.hir.contains("param_10") && layered.hir.contains('+'),
             "HIR may fold aliases:\n{}",
             layered.hir
+        );
+    }
+
+    /// `i = 0; while (i < n) { …; i = i + 1; }` → `for (i = 0; i < n; i = i + 1)`.
+    #[test]
+    fn hir_presentation_folds_seed_while_to_for() {
+        let i32 = int_ty(32, true);
+        let func = HirFunction {
+            name: "sum_range".into(),
+            params: vec![param("n")],
+            locals: vec![local("i"), local("acc")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("acc".into()),
+                    rhs: HirExpr::Const(0, i32.clone()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".into()),
+                    rhs: HirExpr::Const(0, i32.clone()),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLt,
+                        lhs: Box::new(HirExpr::Var("i".into())),
+                        rhs: Box::new(HirExpr::Var("n".into())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("acc".into()),
+                            rhs: HirExpr::Binary {
+                                op: HirBinaryOp::Add,
+                                lhs: Box::new(HirExpr::Var("acc".into())),
+                                rhs: Box::new(HirExpr::Var("i".into())),
+                                ty: i32.clone(),
+                            },
+                        },
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("i".into()),
+                            rhs: HirExpr::Binary {
+                                op: HirBinaryOp::Add,
+                                lhs: Box::new(HirExpr::Var("i".into())),
+                                rhs: Box::new(HirExpr::Const(1, i32.clone())),
+                                ty: i32.clone(),
+                            },
+                        },
+                    ],
+                },
+                HirStmt::Return(Some(HirExpr::Var("acc".into()))),
+            ],
+            ..Default::default()
+        };
+        // Dual-layer: NIR keeps while; HIR presentation folds to for.
+        let layered = render_layered_pseudocode(&func, &MlilPreviewOptions::default());
+        assert!(
+            layered.nir.contains("while (") && !layered.nir.contains("for ("),
+            "NIR oracle must keep while:\n{}",
+            layered.nir
+        );
+        assert!(
+            layered.hir.contains("for (") && !layered.hir.contains("while ("),
+            "HIR should fold seed+while → for:\n{}",
+            layered.hir
+        );
+        assert!(
+            layered.hir.contains("acc") && layered.hir.contains("return"),
+            "loop body and return must remain:\n{}",
+            layered.hir
+        );
+
+        let mut polished = func;
+        apply_hir_presentation(&mut polished);
+        assert!(
+            matches!(
+                polished
+                    .body
+                    .iter()
+                    .find(|s| matches!(s, HirStmt::For { .. } | HirStmt::While { .. })),
+                Some(HirStmt::For { .. })
+            ),
+            "expected For after presentation, body={:?}",
+            polished.body
+        );
+    }
+
+    /// Mid-body redefinition of the induction blocks for-fold (presentation-safe).
+    /// Use a non-pure mid assign so self-update fold cannot merge it into the tail.
+    #[test]
+    fn hir_presentation_does_not_for_fold_when_induction_reassigned_in_body() {
+        let i32 = int_ty(32, true);
+        let mut func = HirFunction {
+            name: "messy".into(),
+            params: vec![param("n")],
+            locals: vec![local("i")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("i".into()),
+                    rhs: HirExpr::Const(0, i32.clone()),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLt,
+                        lhs: Box::new(HirExpr::Var("i".into())),
+                        rhs: Box::new(HirExpr::Var("n".into())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("i".into()),
+                            rhs: HirExpr::Call {
+                                target: "other".into(),
+                                args: vec![],
+                                ty: i32.clone(),
+                            },
+                        },
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("i".into()),
+                            rhs: HirExpr::Binary {
+                                op: HirBinaryOp::Add,
+                                lhs: Box::new(HirExpr::Var("i".into())),
+                                rhs: Box::new(HirExpr::Const(1, i32.clone())),
+                                ty: i32.clone(),
+                            },
+                        },
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            func.body.iter().any(|s| matches!(s, HirStmt::While { .. })),
+            "must keep While when induction is reassigned mid-body: {:?}",
+            func.body
+        );
+        assert!(
+            !func.body.iter().any(|s| matches!(s, HirStmt::For { .. })),
+            "must not emit For for messy induction: {:?}",
+            func.body
+        );
+    }
+
+    /// Seed unrelated to while condition must not fold.
+    #[test]
+    fn hir_presentation_does_not_for_fold_unrelated_seed() {
+        let i32 = int_ty(32, true);
+        let mut func = HirFunction {
+            name: "unrelated".into(),
+            params: vec![param("n")],
+            locals: vec![local("x"), local("i")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(0, i32.clone()),
+                },
+                HirStmt::While {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLt,
+                        lhs: Box::new(HirExpr::Var("i".into())),
+                        rhs: Box::new(HirExpr::Var("n".into())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("i".into()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("i".into())),
+                            rhs: Box::new(HirExpr::Const(1, i32.clone())),
+                            ty: i32.clone(),
+                        },
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            func.body.iter().any(|s| matches!(s, HirStmt::While { .. })),
+            "unrelated seed must not become for-init: {:?}",
+            func.body
         );
     }
 }
