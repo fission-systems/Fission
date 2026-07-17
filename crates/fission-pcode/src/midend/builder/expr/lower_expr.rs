@@ -3157,12 +3157,21 @@ impl<'a> PreviewBuilder<'a> {
     /// - `IntSRight` of `low` (or short ZExt/SExt/Copy/Cast chain to `low`)
     /// - `IntSExt` of `low` (after peeling Copy/Cast wrappers)
     /// - `SubPiece(IntSExt(low), offset == low.size)` — SLEIGH CDQ high half
-    /// - `IntZExt` / `Copy` / `Cast` wrappers around the above only
+    /// - `IntZExt` / `Copy` / `Cast` wrappers **around the above only**
     ///
-    /// Reject bare `Copy(low)`, bare `IntZExt(low)`, or logical `IntRight` alone.
+    /// Reject bare `Copy(low)`, bare `IntZExt(low)`, or logical `IntRight` alone —
+    /// peeling wrappers must land on SAR/SExt/SubPiece(SExt), never on `low` itself.
     fn varnode_is_sign_fill_of(&self, high: &Varnode, low: &Varnode) -> bool {
+        let low_key = VarnodeKey::from(low);
         let mut current = high.clone();
         for _ in 0..8 {
+            // High reduced to exact `low` without an intervening SAR/SExt/
+            // SubPiece(SExt) is not sign-fill (e.g. Piece(Copy(L), L)).
+            // Use exact key match only — register alias helpers can be broader
+            // than "same value" and must not reject SubPiece high halves.
+            if VarnodeKey::from(&current) == low_key {
+                return false;
+            }
             let Some((_, hop)) = self.lookup_def_site(&current) else {
                 return false;
             };
@@ -3231,7 +3240,8 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     return false;
                 }
-                // Peel width/copy wrappers on the high side only.
+                // Peel width/copy wrappers on the high side only — never treat
+                // the peeled-to `low` as fill (checked at loop head).
                 PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt => {
                     let Some(input) = hop.inputs.first() else {
                         return false;

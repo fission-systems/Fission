@@ -257,10 +257,10 @@ fn extract_cdq_low_from_wide_dividend(expr: &HirExpr) -> Option<HirExpr> {
 }
 
 fn expr_is_sign_fill_of(hi: &HirExpr, low: &HirExpr, shift_amt: i64) -> bool {
-    // Prefer arithmetic SAR. Accept Shr only when the shift base is a *signed*
-    // widen/cast of `low` (SLEIGH SubPiece(SExt) residual often prints as >>
-    // of a signed longlong of the low half). Reject pure logical high-half of
-    // an unsigned/logical chain (see logical_shr_is_not_cdq_sign_fill).
+    // Prefer arithmetic SAR. Accept Shr only when the shift *base type* is a
+    // signed int (SLEIGH SubPiece of IntSExt residual often lowers as >> of a
+    // signed longlong of the low half). Reject pure logical high-half of an
+    // unsigned chain (see logical_shr_is_not_cdq_sign_fill / bare_copy test).
     let hi = strip_casts(hi);
     match hi {
         HirExpr::Binary {
@@ -273,7 +273,6 @@ fn expr_is_sign_fill_of(hi: &HirExpr, low: &HirExpr, shift_amt: i64) -> bool {
                 return false;
             };
             let base = strip_casts(lhs.as_ref());
-            // Allow SAR/Shr base to be cast/widen of low.
             let base_ok = base == *low
                 || matches!(
                     &base,
@@ -289,14 +288,14 @@ fn expr_is_sign_fill_of(hi: &HirExpr, low: &HirExpr, shift_amt: i64) -> bool {
             // Shr residual: require signed-typed base (CDQ-class signed fill).
             matches!(expr_type(lhs.as_ref()), NirType::Int { signed: true, .. })
                 || matches!(
-                    &base,
+                    lhs.as_ref(),
                     HirExpr::Cast {
                         ty: NirType::Int { signed: true, .. },
                         ..
                     }
                 )
                 || matches!(
-                    lhs.as_ref(),
+                    &base,
                     HirExpr::Cast {
                         ty: NirType::Int { signed: true, .. },
                         ..
@@ -1148,6 +1147,30 @@ mod cdq_tests {
         assert!(
             collapse_cdq_style_signed_mod_div(&expr).is_none(),
             "logical Shr must not count as CDQ sign-fill"
+        );
+    }
+
+    #[test]
+    fn bare_copy_high_half_is_not_cdq_sign_fill() {
+        // (copy(x) << 32 | x) % y — high is not SAR/SExt of x.
+        let x = HirExpr::Var("x".into());
+        let wide = HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                lhs: Box::new(x.clone()),
+                rhs: Box::new(HirExpr::Const(32, i32_ty())),
+                ty: u64_ty(),
+            }),
+            rhs: Box::new(HirExpr::Cast {
+                ty: u64_ty(),
+                expr: Box::new(x),
+            }),
+            ty: u64_ty(),
+        };
+        assert!(
+            collapse_cdq_style_signed_mod_div(&mod_vars(wide, "y")).is_none(),
+            "bare copy/var high half must not collapse as CDQ"
         );
     }
 }
