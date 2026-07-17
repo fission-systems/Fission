@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use super::util::*;
+use crate::prelude::*;
 
 pub fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> {
     normalize_signed_power_of_two_mod(expr)
@@ -13,57 +13,25 @@ pub fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> {
 /// when `hi` is a sign-fill of `lo` (SAR by k-1 or k).
 ///
 /// Measured on x86 `cdq; idiv` remainder for signed `a % b` (gcd-class loops).
-/// Fold CDQ-style wide dividends across `t = wide; …; x = t % d` in a stmt list.
+///
+/// Sequential scan (not whole-block last-wins):
+/// - bind `t → wide` only while `t` is live with that CDQ RHS;
+/// - kill `t` on any reassign of `t`;
+/// - kill entries whose free vars are redefined before the mod/div use.
 pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
-    let mut pure: std::collections::HashMap<String, HirExpr> = std::collections::HashMap::new();
-    for stmt in stmts.iter() {
-        if let HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs,
-        } = stmt
-        {
-            if extract_cdq_low_from_wide_dividend(rhs).is_some() {
-                pure.insert(name.clone(), rhs.clone());
-            }
-        }
-    }
-    for stmt in stmts.iter_mut() {
-        match stmt {
-            HirStmt::Assign { lhs, rhs } => {
-                // Direct collapse: x = wide % d
-                if let Some(collapsed) = collapse_cdq_style_signed_mod_div(rhs) {
-                    *rhs = collapsed;
-                    changed = true;
-                    continue;
-                }
-                // Across temp: t = wide; x = t % d
-                if let HirExpr::Binary {
-                    op: bin_op @ (HirBinaryOp::Mod | HirBinaryOp::Div),
-                    lhs: mod_lhs,
-                    rhs: div,
-                    ty,
-                } = rhs
-                {
-                    if let HirExpr::Var(name) = mod_lhs.as_ref() {
-                        if let Some(wide) = pure.get(name) {
-                            let candidate = HirExpr::Binary {
-                                op: *bin_op,
-                                lhs: Box::new(wide.clone()),
-                                rhs: div.clone(),
-                                ty: ty.clone(),
-                            };
-                            if let Some(collapsed) = collapse_cdq_style_signed_mod_div(&candidate) {
-                                *rhs = collapsed;
-                                let _ = lhs;
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-            }
+    // Live CDQ temps: name → (wide expr, free vars of wide).
+    let mut live: std::collections::HashMap<String, (HirExpr, std::collections::HashSet<String>)> =
+        std::collections::HashMap::new();
+
+    for i in 0..stmts.len() {
+        // Nested structures first (independent scopes).
+        match &mut stmts[i] {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 changed |= collapse_cdq_signed_mod_in_stmts(body);
+                // Conservative: control transfer may clobber linear live set.
+                live.clear();
+                continue;
             }
             HirStmt::If {
                 then_body,
@@ -72,32 +40,140 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
             } => {
                 changed |= collapse_cdq_signed_mod_in_stmts(then_body);
                 changed |= collapse_cdq_signed_mod_in_stmts(else_body);
+                live.clear();
+                continue;
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
-                if let Some(i) = init {
-                    if let HirStmt::Block(b) = i.as_mut() {
+                if let Some(init_stmt) = init {
+                    if let HirStmt::Block(b) = init_stmt.as_mut() {
                         changed |= collapse_cdq_signed_mod_in_stmts(b);
                     }
                 }
-                if let Some(u) = update {
-                    if let HirStmt::Block(b) = u.as_mut() {
+                if let Some(upd) = update {
+                    if let HirStmt::Block(b) = upd.as_mut() {
                         changed |= collapse_cdq_signed_mod_in_stmts(b);
                     }
                 }
                 changed |= collapse_cdq_signed_mod_in_stmts(body);
+                live.clear();
+                continue;
             }
             HirStmt::Switch { cases, default, .. } => {
-                for case in cases {
+                for case in cases.iter_mut() {
                     changed |= collapse_cdq_signed_mod_in_stmts(&mut case.body);
                 }
                 changed |= collapse_cdq_signed_mod_in_stmts(default);
+                live.clear();
+                continue;
             }
             _ => {}
         }
+
+        // Kill live temps whose free vars are written by this stmt's LHS.
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(written),
+            ..
+        } = &stmts[i]
+        {
+            let written = written.clone();
+            live.retain(|_k, (_wide, frees)| !frees.contains(&written));
+            // Kill the temp itself on any reassignment.
+            live.remove(&written);
+        }
+
+        let HirStmt::Assign { lhs, rhs } = &mut stmts[i] else {
+            continue;
+        };
+
+        // Direct collapse: x = wide % d
+        if let Some(collapsed) = collapse_cdq_style_signed_mod_div(rhs) {
+            *rhs = collapsed;
+            changed = true;
+            // After collapse, if lhs is a name, it is not a CDQ wide temp.
+            if let HirLValue::Var(name) = lhs {
+                live.remove(name);
+            }
+            continue;
+        }
+
+        // Across temp: t = wide; …; x = t % d  (t still live, free vars not killed).
+        if let HirExpr::Binary {
+            op: bin_op @ (HirBinaryOp::Mod | HirBinaryOp::Div),
+            lhs: mod_lhs,
+            rhs: div,
+            ty,
+        } = rhs
+        {
+            if let HirExpr::Var(name) = mod_lhs.as_ref() {
+                if let Some((wide, _frees)) = live.get(name) {
+                    let candidate = HirExpr::Binary {
+                        op: *bin_op,
+                        lhs: Box::new(wide.clone()),
+                        rhs: div.clone(),
+                        ty: ty.clone(),
+                    };
+                    if let Some(collapsed) = collapse_cdq_style_signed_mod_div(&candidate) {
+                        *rhs = collapsed;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Bind or rebind after processing uses (so same-stmt x = t % d cannot
+        // use a pure just bound on this line).
+        if let HirLValue::Var(name) = lhs {
+            if extract_cdq_low_from_wide_dividend(rhs).is_some() {
+                let mut frees = std::collections::HashSet::new();
+                collect_free_var_names(rhs, &mut frees);
+                live.insert(name.clone(), (rhs.clone(), frees));
+            } else {
+                live.remove(name);
+            }
+        }
     }
     changed
+}
+
+fn collect_free_var_names(expr: &HirExpr, out: &mut std::collections::HashSet<String>) {
+    match expr {
+        HirExpr::Var(n) => {
+            out.insert(n.clone());
+        }
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => {
+            collect_free_var_names(expr, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_free_var_names(lhs, out);
+            collect_free_var_names(rhs, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_free_var_names(cond, out);
+            collect_free_var_names(then_expr, out);
+            collect_free_var_names(else_expr, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                collect_free_var_names(a, out);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => collect_free_var_names(ptr, out),
+        HirExpr::Index { base, index, .. } => {
+            collect_free_var_names(base, out);
+            collect_free_var_names(index, out);
+        }
+    }
 }
 pub fn collapse_cdq_style_signed_mod_div(expr: &HirExpr) -> Option<HirExpr> {
     let HirExpr::Binary {
@@ -117,10 +193,7 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &HirExpr) -> Option<HirExpr> {
         NirType::Int { bits, .. } => bits.max(32),
         _ => 32,
     };
-    let signed_ty = NirType::Int {
-        bits,
-        signed: true,
-    };
+    let signed_ty = NirType::Int { bits, signed: true };
     Some(HirExpr::Binary {
         op: *op,
         lhs: Box::new(HirExpr::Cast {
@@ -184,10 +257,14 @@ fn extract_cdq_low_from_wide_dividend(expr: &HirExpr) -> Option<HirExpr> {
 }
 
 fn expr_is_sign_fill_of(hi: &HirExpr, low: &HirExpr, shift_amt: i64) -> bool {
+    // Prefer arithmetic SAR. Accept Shr only when the shift base is a *signed*
+    // widen/cast of `low` (SLEIGH SubPiece(SExt) residual often prints as >>
+    // of a signed longlong of the low half). Reject pure logical high-half of
+    // an unsigned/logical chain (see logical_shr_is_not_cdq_sign_fill).
     let hi = strip_casts(hi);
     match hi {
         HirExpr::Binary {
-            op: HirBinaryOp::Sar | HirBinaryOp::Shr,
+            op: bin_op @ (HirBinaryOp::Sar | HirBinaryOp::Shr),
             lhs,
             rhs: shift,
             ..
@@ -196,14 +273,35 @@ fn expr_is_sign_fill_of(hi: &HirExpr, low: &HirExpr, shift_amt: i64) -> bool {
                 return false;
             };
             let base = strip_casts(lhs.as_ref());
-            // Allow SAR base to be cast/widen of low.
+            // Allow SAR/Shr base to be cast/widen of low.
             let base_ok = base == *low
                 || matches!(
                     &base,
                     HirExpr::Cast { expr, .. } if strip_casts(expr.as_ref()) == *low
                 );
             let shift_ok = *s == shift_amt || *s == shift_amt - 1 || *s == 31 || *s == 63;
-            base_ok && shift_ok
+            if !base_ok || !shift_ok {
+                return false;
+            }
+            if matches!(bin_op, HirBinaryOp::Sar) {
+                return true;
+            }
+            // Shr residual: require signed-typed base (CDQ-class signed fill).
+            matches!(expr_type(lhs.as_ref()), NirType::Int { signed: true, .. })
+                || matches!(
+                    &base,
+                    HirExpr::Cast {
+                        ty: NirType::Int { signed: true, .. },
+                        ..
+                    }
+                )
+                || matches!(
+                    lhs.as_ref(),
+                    HirExpr::Cast {
+                        ty: NirType::Int { signed: true, .. },
+                        ..
+                    }
+                )
         }
         _ => false,
     }
@@ -775,7 +873,7 @@ pub fn recognize_magic_number_division(expr: &HirExpr) -> Option<HirExpr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn var(name: &str) -> HirExpr {
         HirExpr::Var(name.to_string())
@@ -835,11 +933,8 @@ mod cdq_tests {
         }
     }
 
-    #[test]
-    fn collapse_cdq_style_mod_from_piece_or_pattern() {
-        // ((longlong)x >> 32)<<32 | (ulonglong)x  % y
-        let x = HirExpr::Var("param_10".into());
-        let y = HirExpr::Var("param_18".into());
+    fn cdq_wide(low_name: &str) -> HirExpr {
+        let x = HirExpr::Var(low_name.into());
         let sar = HirExpr::Binary {
             op: HirBinaryOp::Sar,
             lhs: Box::new(HirExpr::Cast {
@@ -862,7 +957,7 @@ mod cdq_tests {
                 expr: Box::new(sar),
             }),
         };
-        let wide = HirExpr::Binary {
+        HirExpr::Binary {
             op: HirBinaryOp::Or,
             lhs: Box::new(HirExpr::Binary {
                 op: HirBinaryOp::Shl,
@@ -875,13 +970,21 @@ mod cdq_tests {
                 expr: Box::new(x),
             }),
             ty: u64_ty(),
-        };
-        let expr = HirExpr::Binary {
+        }
+    }
+
+    fn mod_vars(lhs: HirExpr, rhs_name: &str) -> HirExpr {
+        HirExpr::Binary {
             op: HirBinaryOp::Mod,
-            lhs: Box::new(wide),
-            rhs: Box::new(y),
+            lhs: Box::new(lhs),
+            rhs: Box::new(HirExpr::Var(rhs_name.into())),
             ty: u64_ty(),
-        };
+        }
+    }
+
+    #[test]
+    fn collapse_cdq_style_mod_from_piece_or_pattern() {
+        let expr = mod_vars(cdq_wide("param_10"), "param_18");
         let out = collapse_cdq_style_signed_mod_div(&expr).expect("collapse");
         match out {
             HirExpr::Binary {
@@ -895,5 +998,156 @@ mod cdq_tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn stmt_collapse_adjacent_temp_fold() {
+        // t = wide(a); x = t % d  →  x = (int)a % (int)d
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("t".into()),
+                rhs: cdq_wide("a"),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".into()),
+                rhs: mod_vars(HirExpr::Var("t".into()), "d"),
+            },
+        ];
+        assert!(collapse_cdq_signed_mod_in_stmts(&mut stmts));
+        match &stmts[1] {
+            HirStmt::Assign {
+                rhs:
+                    HirExpr::Binary {
+                        op: HirBinaryOp::Mod,
+                        lhs,
+                        rhs,
+                        ..
+                    },
+                ..
+            } => {
+                assert!(
+                    matches!(strip_casts(lhs), HirExpr::Var(n) if n == "a"),
+                    "expected low half a, got {lhs:?}"
+                );
+                assert!(matches!(strip_casts(rhs), HirExpr::Var(n) if n == "d"));
+            }
+            other => panic!("unexpected stmt: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stmt_collapse_multi_def_kill_does_not_mis_substitute() {
+        // t = wide(a); x = t % d1; t = wide(b); y = t % d2
+        // x must use a; y must use b (not last-wins for x).
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("t".into()),
+                rhs: cdq_wide("a"),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".into()),
+                rhs: mod_vars(HirExpr::Var("t".into()), "d1"),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("t".into()),
+                rhs: cdq_wide("b"),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("y".into()),
+                rhs: mod_vars(HirExpr::Var("t".into()), "d2"),
+            },
+        ];
+        assert!(collapse_cdq_signed_mod_in_stmts(&mut stmts));
+        let low_of = |stmt: &HirStmt| -> String {
+            match stmt {
+                HirStmt::Assign {
+                    rhs:
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Mod,
+                            lhs,
+                            ..
+                        },
+                    ..
+                } => match strip_casts(lhs) {
+                    HirExpr::Var(n) => n,
+                    other => panic!("expected var low, got {other:?}"),
+                },
+                other => panic!("expected assign mod, got {other:?}"),
+            }
+        };
+        assert_eq!(low_of(&stmts[1]), "a");
+        assert_eq!(low_of(&stmts[3]), "b");
+    }
+
+    #[test]
+    fn stmt_collapse_free_var_redef_kills_live_temp() {
+        // t = wide(a); a = 0; x = t % d  → must NOT rewrite x to use new a.
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("t".into()),
+                rhs: cdq_wide("a"),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("a".into()),
+                rhs: HirExpr::Const(0, i32_ty()),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".into()),
+                rhs: mod_vars(HirExpr::Var("t".into()), "d"),
+            },
+        ];
+        let _ = collapse_cdq_signed_mod_in_stmts(&mut stmts);
+        // x should still be t % d (Var form), not (int)a % …
+        match &stmts[2] {
+            HirStmt::Assign {
+                rhs:
+                    HirExpr::Binary {
+                        op: HirBinaryOp::Mod,
+                        lhs,
+                        ..
+                    },
+                ..
+            } => {
+                assert!(
+                    matches!(lhs.as_ref(), HirExpr::Var(n) if n == "t"),
+                    "free-var redef must kill temp fold; got {lhs:?}"
+                );
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn logical_shr_is_not_cdq_sign_fill() {
+        // ( (x >> 32 logical) << 32 | x ) % y must NOT collapse.
+        let x = HirExpr::Var("x".into());
+        let shr = HirExpr::Binary {
+            op: HirBinaryOp::Shr,
+            lhs: Box::new(HirExpr::Cast {
+                ty: u64_ty(),
+                expr: Box::new(x.clone()),
+            }),
+            rhs: Box::new(HirExpr::Const(32, i32_ty())),
+            ty: u64_ty(),
+        };
+        let wide = HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                lhs: Box::new(shr),
+                rhs: Box::new(HirExpr::Const(32, i32_ty())),
+                ty: u64_ty(),
+            }),
+            rhs: Box::new(HirExpr::Cast {
+                ty: u64_ty(),
+                expr: Box::new(x),
+            }),
+            ty: u64_ty(),
+        };
+        let expr = mod_vars(wide, "y");
+        assert!(
+            collapse_cdq_style_signed_mod_div(&expr).is_none(),
+            "logical Shr must not count as CDQ sign-fill"
+        );
     }
 }

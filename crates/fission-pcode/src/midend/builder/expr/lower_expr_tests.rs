@@ -1697,8 +1697,8 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
 /// x86 CDQ + IDIV remainder: Piece(sign_fill, low) then IntSRem → low % div (signed).
 #[test]
 fn cdq_piece_int_srem_uses_low_half_only() {
-    use crate::midend::cspec::test_maps::apply_preview_cspec;
     use crate::PcodeFunction;
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
 
     let eax = register(0x0, 4);
     let edx = register(0x8, 4);
@@ -1735,24 +1735,111 @@ fn cdq_piece_int_srem_uses_low_half_only() {
                 Some(rem.clone()),
                 vec![wide, divisor],
             ),
-            op(
-                3,
-                PcodeOpcode::Return,
-                None,
-                vec![constant(0), rem],
-            ),
+            op(3, PcodeOpcode::Return, None, vec![constant(0), rem]),
         ],
     );
     let pcode = PcodeFunction {
         blocks: vec![block],
     };
     let code = render_mlil_preview(&pcode, "srem_cdq", 0x1000, &options).expect("preview");
-    assert!(
-        code.contains('%'),
-        "expected remainder form:\n{code}"
-    );
+    assert!(code.contains('%'), "expected remainder form:\n{code}");
     assert!(
         !code.contains("<< 32") && !code.contains("<<32"),
         "CDQ piece dividend must collapse:\n{code}"
+    );
+}
+
+/// SLEIGH idiv form: IntSExt → SubPiece(hi) → (ZExt(hi)<<32)|ZExt(lo) → IntSRem.
+#[test]
+fn cdq_sext_subpiece_or_int_srem_uses_low_half_only() {
+    use crate::PcodeFunction;
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let eax = register(0x0, 4);
+    let edx = register(0x8, 4);
+    let mut sext = varnode(0x510);
+    sext.size = 8;
+    let mut hi_z = varnode(0x518);
+    hi_z.size = 8;
+    let mut lo_z = varnode(0x520);
+    lo_z.size = 8;
+    let mut shifted = varnode(0x528);
+    shifted.size = 8;
+    let mut wide = varnode(0x530);
+    wide.size = 8;
+    let mut rem = varnode(0x538);
+    rem.size = 8;
+    let mut div_sext = varnode(0x540);
+    div_sext.size = 8;
+    let divisor = register(0x10, 4);
+
+    let mut options = crate::midend::MlilPreviewOptions::default();
+    options.is_64bit = true;
+    options.pointer_size = 8;
+    apply_preview_cspec(&mut options);
+
+    let block = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntSExt,
+                Some(sext.clone()),
+                vec![eax.clone()],
+            ),
+            op(
+                1,
+                PcodeOpcode::SubPiece,
+                Some(edx.clone()),
+                vec![sext, constant_sized(4, 4)],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntZExt,
+                Some(hi_z.clone()),
+                vec![edx.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntLeft,
+                Some(shifted.clone()),
+                vec![hi_z, constant_sized(0x20, 4)],
+            ),
+            op(
+                4,
+                PcodeOpcode::IntZExt,
+                Some(lo_z.clone()),
+                vec![eax.clone()],
+            ),
+            op(
+                5,
+                PcodeOpcode::IntOr,
+                Some(wide.clone()),
+                vec![shifted, lo_z],
+            ),
+            op(
+                6,
+                PcodeOpcode::IntSExt,
+                Some(div_sext.clone()),
+                vec![divisor],
+            ),
+            op(
+                7,
+                PcodeOpcode::IntSRem,
+                Some(rem.clone()),
+                vec![wide, div_sext],
+            ),
+            op(8, PcodeOpcode::Return, None, vec![constant(0), rem]),
+        ],
+    );
+    let pcode = PcodeFunction {
+        blocks: vec![block],
+    };
+    let code = render_mlil_preview(&pcode, "srem_cdq_or", 0x1000, &options).expect("preview");
+    assert!(code.contains('%'), "expected remainder form:\n{code}");
+    assert!(
+        !code.contains("<< 32") && !code.contains("<<32") && !code.contains("|"),
+        "CDQ Or/Shl dividend must collapse:\n{code}"
     );
 }

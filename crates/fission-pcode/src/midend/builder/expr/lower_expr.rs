@@ -3027,11 +3027,11 @@ impl<'a> PreviewBuilder<'a> {
                 .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
             // Remainder/quotient lane is the machine width of the low half (EAX),
             // not the 64-bit piece — match signed C `%` / `/` on that width.
-            let bits = low.size.saturating_mul(8).max(output.size.saturating_mul(8));
-            let ty = NirType::Int {
-                bits,
-                signed: true,
-            };
+            let bits = low
+                .size
+                .saturating_mul(8)
+                .max(output.size.saturating_mul(8));
+            let ty = NirType::Int { bits, signed: true };
             let lhs = HirExpr::Cast {
                 ty: ty.clone(),
                 expr: Box::new(lhs),
@@ -3074,8 +3074,15 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    /// CDQ-class dividend: `Piece(H, L)` where `H` is arithmetic sign-fill of `L`,
-    /// or a direct `IntSExt(L)`. Returns `L` so SRem/SDiv lower as C signed `%`/`/`.
+    /// CDQ-class dividend low half for signed rem/div.
+    ///
+    /// Recognized forms (x86 `cdq; idiv` / SLEIGH):
+    /// - `Piece(H, L)` with `H` arithmetic sign-fill of `L`
+    /// - direct `IntSExt(L)` as the wide dividend
+    /// - `IntOr(IntLeft(H, k), L')` with `k == 8*sizeof(L)`, `L'` zero/copy of `L`,
+    ///   and `H` the high half of `IntSExt(L)` (SubPiece) or other CDQ sign-fill
+    ///
+    /// Returns `L` so SRem/SDiv lower as C signed `%`/`/` on that half-width.
     fn try_cdq_signed_dividend_low(&self, dividend: &Varnode) -> Option<Varnode> {
         let (_, def) = self.lookup_def_site(dividend)?;
         match def.opcode {
@@ -3089,44 +3096,158 @@ impl<'a> PreviewBuilder<'a> {
                     None
                 }
             }
+            // SLEIGH idiv form: (ZExt(hi) << 32) | ZExt(lo) built via IntOr/IntLeft.
+            PcodeOpcode::IntOr if def.inputs.len() >= 2 => self
+                .try_cdq_low_from_or_shl_dividend(&def.inputs[0], &def.inputs[1])
+                .or_else(|| self.try_cdq_low_from_or_shl_dividend(&def.inputs[1], &def.inputs[0])),
             _ => None,
         }
     }
 
-    fn varnode_is_sign_fill_of(&self, high: &Varnode, low: &Varnode) -> bool {
-        let Some((_, hop)) = self.lookup_def_site(high) else {
-            return false;
-        };
-        match hop.opcode {
-            PcodeOpcode::IntSRight | PcodeOpcode::IntRight => {
-                let Some(base) = hop.inputs.first() else {
-                    return false;
-                };
-                if !self.varnode_related_to_cdq_low(base, low) {
-                    return false;
-                }
-                let Some(shift) = hop.inputs.get(1) else {
-                    return false;
-                };
-                let shift_amt = if shift.is_constant {
-                    shift.constant_val as i64
-                } else {
-                    return false;
-                };
-                // CDQ: SAR L, 31  or SAR (sext L), 32  (word-width shift).
-                let bits = i64::from(low.size.saturating_mul(8));
-                shift_amt == bits - 1 || shift_amt == bits || shift_amt == 31 || shift_amt == 63
-            }
-            PcodeOpcode::IntSExt | PcodeOpcode::IntZExt | PcodeOpcode::Copy | PcodeOpcode::Cast => {
-                hop.inputs
-                    .first()
-                    .is_some_and(|base| self.varnode_related_to_cdq_low(base, low))
-            }
-            _ => false,
+    /// Match `shifted_high | low_ext` where `shifted_high` is `IntLeft(H, k)`
+    /// with `k` equal to the low half width in bits, and `H` is CDQ sign-fill of
+    /// the core of `low_ext`.
+    fn try_cdq_low_from_or_shl_dividend(
+        &self,
+        shifted_high: &Varnode,
+        low_ext: &Varnode,
+    ) -> Option<Varnode> {
+        let (_, left_def) = self.lookup_def_site(shifted_high)?;
+        if left_def.opcode != PcodeOpcode::IntLeft || left_def.inputs.len() < 2 {
+            return None;
         }
+        let high = &left_def.inputs[0];
+        let shift = &left_def.inputs[1];
+        if !shift.is_constant {
+            return None;
+        }
+        let shift_amt = shift.constant_val as u32;
+        // Peel ZExt/Copy/Cast on the low side to the machine-width half.
+        let low = self.peel_cdq_width_ext(low_ext)?;
+        let low_bits = u32::from(low.size.saturating_mul(8));
+        if shift_amt != low_bits && shift_amt != 32 && shift_amt != 64 {
+            return None;
+        }
+        if !self.varnode_is_sign_fill_of(high, &low) {
+            return None;
+        }
+        Some(low)
     }
 
-    /// `base` is `low`, an alias, or a short ZExt/SExt/Copy chain from `low`.
+    /// Peel ZExt / Copy / Cast wrappers (width promotion of the low half).
+    fn peel_cdq_width_ext(&self, vn: &Varnode) -> Option<Varnode> {
+        let mut current = vn.clone();
+        for _ in 0..6 {
+            let Some((_, op)) = self.lookup_def_site(&current) else {
+                return Some(current);
+            };
+            match op.opcode {
+                PcodeOpcode::IntZExt | PcodeOpcode::Copy | PcodeOpcode::Cast => {
+                    current = op.inputs.first()?.clone();
+                }
+                _ => return Some(current),
+            }
+        }
+        Some(current)
+    }
+
+    /// True when `high` is CDQ-class **arithmetic** sign-fill of `low`.
+    ///
+    /// Accept:
+    /// - `IntSRight` of `low` (or short ZExt/SExt/Copy/Cast chain to `low`)
+    /// - `IntSExt` of `low` (after peeling Copy/Cast wrappers)
+    /// - `SubPiece(IntSExt(low), offset == low.size)` — SLEIGH CDQ high half
+    /// - `IntZExt` / `Copy` / `Cast` wrappers around the above only
+    ///
+    /// Reject bare `Copy(low)`, bare `IntZExt(low)`, or logical `IntRight` alone.
+    fn varnode_is_sign_fill_of(&self, high: &Varnode, low: &Varnode) -> bool {
+        let mut current = high.clone();
+        for _ in 0..8 {
+            let Some((_, hop)) = self.lookup_def_site(&current) else {
+                return false;
+            };
+            match hop.opcode {
+                // Only arithmetic right-shift is CDQ-class sign fill via shift.
+                PcodeOpcode::IntSRight => {
+                    let Some(base) = hop.inputs.first() else {
+                        return false;
+                    };
+                    if !self.varnode_related_to_cdq_low(base, low) {
+                        return false;
+                    }
+                    let Some(shift) = hop.inputs.get(1) else {
+                        return false;
+                    };
+                    if !shift.is_constant {
+                        return false;
+                    }
+                    let shift_amt = shift.constant_val as i64;
+                    // CDQ: SAR L, 31  or SAR (sext L), 32  (word-width shift).
+                    let bits = i64::from(low.size.saturating_mul(8));
+                    return shift_amt == bits - 1
+                        || shift_amt == bits
+                        || shift_amt == 31
+                        || shift_amt == 63;
+                }
+                // Full signed widen of low is a valid wide-dividend form.
+                PcodeOpcode::IntSExt => {
+                    return hop
+                        .inputs
+                        .first()
+                        .is_some_and(|base| self.varnode_related_to_cdq_low(base, low));
+                }
+                // High half of sign-extend: SubPiece(SExt(L), offset == |L|).
+                PcodeOpcode::SubPiece if hop.inputs.len() >= 2 => {
+                    let base = &hop.inputs[0];
+                    let offset = &hop.inputs[1];
+                    if !offset.is_constant {
+                        return false;
+                    }
+                    let off = offset.constant_val as u64;
+                    if off != u64::from(low.size) {
+                        return false;
+                    }
+                    // base must be IntSExt(low) (possibly through Copy/Cast).
+                    let mut sext_vn = base.clone();
+                    for _ in 0..4 {
+                        let Some((_, sop)) = self.lookup_def_site(&sext_vn) else {
+                            return false;
+                        };
+                        match sop.opcode {
+                            PcodeOpcode::IntSExt => {
+                                return sop
+                                    .inputs
+                                    .first()
+                                    .is_some_and(|b| self.varnode_related_to_cdq_low(b, low));
+                            }
+                            PcodeOpcode::Copy | PcodeOpcode::Cast => {
+                                let Some(input) = sop.inputs.first() else {
+                                    return false;
+                                };
+                                sext_vn = input.clone();
+                            }
+                            _ => return false,
+                        }
+                    }
+                    return false;
+                }
+                // Peel width/copy wrappers on the high side only.
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt => {
+                    let Some(input) = hop.inputs.first() else {
+                        return false;
+                    };
+                    current = input.clone();
+                }
+                // Logical right-shift alone is not sign-fill.
+                PcodeOpcode::IntRight => return false,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// `base` is `low`, an alias, or a short ZExt/SExt/Copy/Cast chain from `low`.
+    /// Used only as the *input* of IntSRight / IntSExt / SubPiece(SExt), not as high itself.
     fn varnode_related_to_cdq_low(&self, base: &Varnode, low: &Varnode) -> bool {
         if self.varnode_aliases_value(base, low) || VarnodeKey::from(base) == VarnodeKey::from(low)
         {

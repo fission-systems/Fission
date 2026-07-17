@@ -1,7 +1,7 @@
 # Decompiler change proposal: CDQ / signed rem collapse
 
 **Date:** 2026-07-18  
-**Status:** implementing  
+**Status:** measured / landed  
 **Gate:** ADR 0006 + measurement-only
 
 ## 1. Row anchor
@@ -13,29 +13,40 @@
 | Address | `0x1400017fd` |
 | Asm | `cdq; idiv dword [b]` → EDX remainder |
 
-### Current NIR
+### Baseline NIR (before)
 
 ```c
 xVar15 = (ulonglong)(int)((longlong)param_10 >> 32) << 32 | (ulonglong)param_10;
 param_18 = xVar15 % param_18;
 ```
 
-Should be signed `param_10 % param_18` (same evaluation as `idiv` rem).
+### After (measured)
+
+```c
+param_18 = (int)param_10 % (int)param_18;
+```
+
+(NIR + HIR; dead `xVar15` decl residual only.)
 
 ## 2. Owner
 
 | Layer | Verdict |
 |-------|---------|
-| SLEIGH | Correct CDQ = Piece(sign_fill, low) + IntSRem |
-| **Materialize / lower_binary** | **Primary** — treat CDQ piece dividend as the low half for SRem/SDiv |
-| Normalize | Optional residual fold of bit-or sign-fill patterns |
+| SLEIGH | Real form is `IntSExt` → `SubPiece` → `(ZExt(hi)<<32)\|ZExt(lo)` → `IntSRem` (not only Piece) |
+| **Materialize / lower_binary** | **Primary** — collapse CDQ-class wide dividends on SRem/SDiv |
+| Normalize | Residual fold + sequential live map (free-var kill) for across-temp uses |
 
 ## 3. Invariant
 
-When dividend of `IntSRem`/`IntSDiv` is `Piece(H, L)` and `H` is an arithmetic right-shift sign-fill of `L` (CDQ-class), the semantic dividend is the signed value of `L` alone.
+When dividend of `IntSRem`/`IntSDiv` is CDQ-class wide form of `L`:
+- `Piece(H, L)` with `H` = `IntSRight` / `IntSExt` / `SubPiece(IntSExt(L), |L|)`
+- or `IntOr(IntLeft(H, k), ZExt(L))` with the same `H`
+
+the semantic dividend is the signed value of `L` alone. Reject bare `Copy`/`IntZExt`/`IntRight` as sign-fill.
 
 ## 4. Validation
 
-1. Unit: piece+srem synthetic → `%` on low half only.
-2. Local remeasure `gcd` @ 0x1400017fd.
-3. `cargo nextest run -p fission-pcode`.
+1. Unit: Piece+SRem and SLEIGH Or/SubPiece+SRem → `%` on low half only.
+2. Normalize: adjacent temp, multi-def kill, free-var kill, logical Shr reject.
+3. Local remeasure `gcd` @ 0x1400017fd → signed `%` (measured).
+4. `cargo nextest run -p fission-pcode -p fission-midend-normalize` (1152 passed).
