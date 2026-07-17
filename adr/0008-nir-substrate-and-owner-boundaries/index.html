@@ -1017,6 +1017,8 @@ facts.</p>
 <ul>
 <li>Dual-layer print lives at crate-root <code>src/render/</code> (not nested under <code>nir/</code>).</li>
 <li>HIR polish is <code>render/presentation/</code>; shared sentinels in <code>nir/labels.rs</code>.</li>
+<li>Structured IR substrate is <code>nir/ir/</code> (compat alias <code>nir::types</code>).</li>
+<li>Preview entrypoints live in <code>nir/orchestrate.rs</code>.</li>
 <li>Smoke scan: <code>scripts/check/owner_boundaries.sh</code>.</li>
 </ul>
 <p>Existing cross-edges are migration debt, not precedent. They should be retired
