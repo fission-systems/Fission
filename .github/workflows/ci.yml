@@ -362,7 +362,8 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
-      crates: "fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode,fission-automation,fission-loader"
+      # loader → analysis-db → midend/pcode stack (ADR 0010 + 0012 owners)
+      crates: "fission-loader,fission-analysis-db,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode,fission-automation"
       profile: debug
 
   cli-smoke-linux:

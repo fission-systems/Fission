@@ -70,8 +70,10 @@ On **`push` to `main`**, Heavy runs the **release-critical** set only (so a gree
 L1 is achievable and meaningful for decompiler releases):
 
 - Linux (single nextest process): `fission-core`, midend crates, `loader`,
-  `pcode`, `static`, `decompiler`, `automation`, `cli`, `analysis-db`,
+  `analysis-db`, `pcode`, `static`, `decompiler`, `automation`, `cli`,
   `signatures`
+- L0 Fast Gate Linux also runs `fission-analysis-db` (typed program metadata;
+  ADR 0010) so PRs catch snapshot regressions without waiting for L1
 - Windows release tests (midend-structuring/pcode/decompiler/automation)
 - macOS release CLI build
 - Automation NIR-check (`--no-update-latest`)
