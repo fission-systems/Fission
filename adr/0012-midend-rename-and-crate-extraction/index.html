@@ -1123,7 +1123,7 @@ names should track the midend vocabulary.</p>
 <tr>
 <td>D</td>
 <td>Owner extraction</td>
-<td><strong>core</strong> owns ir/action_pipeline/wave_stats/helpers/vsa; <strong>normalize</strong> owns full normalize source; <strong>structuring</strong> owns pure free-function modules (cfg facts, cleanup, regions, irreducible, loop_analysis). PreviewBuilder-bound structuring remains in pcode.</td>
+<td><strong>core</strong> owns ir/action_pipeline/wave_stats/helpers/vsa; <strong>normalize</strong> owns full normalize source; <strong>structuring</strong> owns pure free-function modules + <code>StructuringHost</code> + graph/admission/CfgFactCache/compute_follow_blocks. PreviewBuilder-bound residual (collapse/guarded-tail/linear/switch/loops) remains in pcode behind host trait.</td>
 <td><strong>In progress</strong></td>
 </tr>
 <tr>
