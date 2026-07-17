@@ -1070,15 +1070,14 @@ names should track the midend vocabulary.</p>
 </tr>
 <tr>
 <td><code>fission_pcode::nir</code></td>
-<td><strong>Re-export alias</strong> of <code>midend</code> during migration</td>
+<td><strong>Removed</strong> — call sites use <code>midend</code></td>
 </tr>
 </tbody>
 </table>
-<p>Re-export period goals:</p>
+<p>Migration goals met for the alias path:</p>
 <ul>
-<li>External crates (<code>fission-decompiler</code>, <code>fission-static</code>, …) keep compiling.</li>
-<li>New code prefers <code>midend</code>.</li>
-<li>Alias removal is a follow-up once call sites migrate (tracked in this ADR).</li>
+<li>External crates (<code>fission-decompiler</code>, <code>fission-static</code>, bins) use <code>midend</code>.</li>
+<li>Prefer <code>midend</code> / facade crates in new code.</li>
 </ul>
 <h3 id="2-compat-cleanup-completed-with-this-decision">2. Compat cleanup (completed with this decision)<a class="headerlink" href="#2-compat-cleanup-completed-with-this-decision" title="Permanent link">&para;</a></h3>
 <p>Removed intermediate aliases that no longer had callers:</p>
@@ -1101,31 +1100,37 @@ names should track the midend vocabulary.</p>
 <td>A</td>
 <td><em>(in-tree)</em></td>
 <td><code>midend</code> rename + public owner modules</td>
-<td><strong>Now</strong></td>
+<td><strong>Done</strong></td>
 </tr>
 <tr>
 <td>B</td>
 <td><code>fission-midend-normalize</code></td>
 <td>Facade re-export of normalize surface</td>
-<td><strong>Scaffolded</strong></td>
+<td><strong>Expanded</strong> (<code>normalize_hir_function</code>, wave stats, API sigs)</td>
 </tr>
 <tr>
 <td>C</td>
 <td><code>fission-midend-structuring</code></td>
 <td>Facade re-export of structuring surface</td>
-<td><strong>Scaffolded</strong></td>
+<td><strong>Expanded</strong> (owner + shared IR types)</td>
+</tr>
+<tr>
+<td>D0</td>
+<td>Decouple reverse edges</td>
+<td><code>wave_stats</code> at midend root; callers migrate off <code>normalize::wave_stats</code></td>
+<td><strong>In progress</strong></td>
 </tr>
 <tr>
 <td>D</td>
 <td>Move implementation</td>
-<td>Code leaves <code>fission-pcode</code> into facades</td>
+<td>Code leaves <code>fission-pcode</code> into facades (needs midend-core for action_pipeline/vsa)</td>
 <td>Future</td>
 </tr>
 <tr>
 <td>E</td>
 <td>Drop <code>fission_pcode::nir</code> alias</td>
 <td>After workspace migration</td>
-<td>Future</td>
+<td><strong>Done</strong></td>
 </tr>
 </tbody>
 </table>
