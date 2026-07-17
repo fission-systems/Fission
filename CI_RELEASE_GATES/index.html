@@ -1125,8 +1125,10 @@
 L1 is achievable and meaningful for decompiler releases):</p>
 <ul>
 <li>Linux (single nextest process): <code>fission-core</code>, midend crates, <code>loader</code>,
-  <code>pcode</code>, <code>static</code>, <code>decompiler</code>, <code>automation</code>, <code>cli</code>, <code>analysis-db</code>,
+  <code>analysis-db</code>, <code>pcode</code>, <code>static</code>, <code>decompiler</code>, <code>automation</code>, <code>cli</code>,
   <code>signatures</code></li>
+<li>L0 Fast Gate Linux also runs <code>fission-analysis-db</code> (typed program metadata;
+  ADR 0010) so PRs catch snapshot regressions without waiting for L1</li>
 <li>Windows release tests (midend-structuring/pcode/decompiler/automation)</li>
 <li>macOS release CLI build</li>
 <li>Automation NIR-check (<code>--no-update-latest</code>)</li>
