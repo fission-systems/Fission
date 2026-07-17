@@ -23,7 +23,7 @@
     
     
       
-        <title>ADR 0013: Diagnostic print_expr vs dual-layer printer - Fission</title>
+        <title>ADR 0013: Diagnostic format_expr_key vs dual-layer printer - Fission</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#adr-0013-diagnostic-print_expr-vs-dual-layer-printer" class="md-skip">
+        <a href="#adr-0013-diagnostic-format_expr_key-vs-dual-layer-printer" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              ADR 0013: Diagnostic print_expr vs dual-layer printer
+              ADR 0013: Diagnostic format_expr_key vs dual-layer printer
             
           </span>
         </div>
@@ -984,21 +984,21 @@
   
 
 
-<h1 id="adr-0013-diagnostic-print_expr-vs-dual-layer-printer">ADR 0013: Diagnostic <code>print_expr</code> vs dual-layer printer<a class="headerlink" href="#adr-0013-diagnostic-print_expr-vs-dual-layer-printer" title="Permanent link">&para;</a></h1>
+<h1 id="adr-0013-diagnostic-format_expr_key-vs-dual-layer-printer">ADR 0013: Diagnostic <code>format_expr_key</code> vs dual-layer printer<a class="headerlink" href="#adr-0013-diagnostic-format_expr_key-vs-dual-layer-printer" title="Permanent link">&para;</a></h1>
 <p><strong>Status:</strong> Accepted<br />
 <strong>Last verified:</strong> 2026-07-17</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
 <p>Two different “print expression” surfaces exist after midend extraction:</p>
 <ol>
-<li><strong><code>fission_midend_core::print_expr</code></strong> (<code>util/print.rs</code>) — deterministic,
-   dependency-light stringization of <code>HirExpr</code> for <strong>keys, ordering, and
-   diagnostics</strong> inside normalize/structuring.</li>
+<li><strong><code>fission_midend_core::format_expr_key</code></strong> (<code>util/print.rs</code>, formerly
+   <code>print_expr</code>) — deterministic, dependency-light stringization of <code>HirExpr</code>
+   for <strong>keys, ordering, and diagnostics</strong> inside normalize/structuring.</li>
 <li><strong><code>fission_pcode::render::print_expr</code></strong> (<code>render/printer.rs</code>) — dual-layer
    <strong>C presentation</strong> (NIR/HIR profiles) governed by
    <a href="../0011-hir-presentation-contract/">ADR 0011</a>.</li>
 </ol>
 <p>They must not be confused: a normalize test that asserts C cast syntax belongs
-in <code>render/</code>, not in midend-core’s diagnostic printer.</p>
+in <code>render/</code>, not in midend-core’s diagnostic key formatter.</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1010,7 +1010,7 @@ in <code>render/</code>, not in midend-core’s diagnostic printer.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>fission_midend_core::print_expr</code></td>
+<td><code>fission_midend_core::format_expr_key</code></td>
 <td><code>fission-midend-core</code></td>
 <td>Sort keys, GVN/hash tie-breaks, log lines, unit diagnostics</td>
 </tr>
@@ -1024,27 +1024,26 @@ in <code>render/</code>, not in midend-core’s diagnostic printer.</p>
 <p>Rules:</p>
 <ol>
 <li><strong>Normalize / structuring free functions</strong> may only depend on midend-core’s
-   diagnostic printer (or pure <code>Debug</code>) — never on <code>render/</code>.</li>
+   diagnostic key formatter (or pure <code>Debug</code>) — never on <code>render/</code>.</li>
 <li><strong>Presentation quality</strong> (casts, CALLIND opaque form, spacing) is fixed in
-   <code>render/</code> under ADR 0011, not by changing midend-core <code>print_expr</code>.</li>
+   <code>render/</code> under ADR 0011, not by changing midend-core <code>format_expr_key</code>.</li>
 <li>When a test needs dual-layer C output, place it under <code>render/</code> or
    <code>midend/tests</code> that call <code>print_hir_function</code> / layered APIs, not midend-core
-   <code>print_expr</code>.</li>
+   <code>format_expr_key</code>.</li>
 </ol>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
 <p><strong>Positive</strong></p>
 <ul>
 <li>midend-normalize can stay free of <code>fission-pcode</code> / render cycles.</li>
 <li>Diagnostic keys stay stable for deterministic passes.</li>
+<li>Distinct names (<code>format_expr_key</code> vs render <code>print_expr</code>) reduce accidental mixing.</li>
 </ul>
 <p><strong>Costs</strong></p>
 <ul>
-<li>Two similar names (<code>print_expr</code>) — prefer fully qualified paths in new code.</li>
 <li>Diagnostic strings will not match Ghidra/C pretty-print; that is intentional.</li>
 </ul>
 <h2 id="follow-ups">Follow-ups<a class="headerlink" href="#follow-ups" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Optionally rename midend-core helper to <code>format_expr_key</code> to reduce confusion.</li>
 <li>Keep ADR 0011 as the authority for dual-layer presentation.</li>
 </ul>
 
