@@ -81,6 +81,7 @@ Read the nearest child file before editing those areas.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
 8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
 9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
+10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. Prefer the external fission-benchmark path ([`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)) or `benchmark/source_semantic_benchmark` with caches disabled. Estimates, assumed patterns, and nextest-only green are not quality evidence.
 
 ## Anti-Patterns
 
@@ -93,6 +94,8 @@ Read the nearest child file before editing those areas.
 - Do not link against, shell out to, bind to, or otherwise depend on `/Users/sjkim1127/Fission/vendor` code in production paths.
 - Do not claim success from one targeted test if crate-level regression remains.
 - Do not grow parallel x86-32 / x64 / ARM copies of the same materialize, loop-carried, join, or short-circuit rule; restate once as a common invariant and supply ISA data only through models (cspec/CC/SLEIGH).
+- **Do not invent presentation/structuring “quality” passes from synthetic shapes alone** (e.g. hand-built `while`→`for` IR) and call the work a decompiler improvement. Without a measured motivating row (or multi-row sample) and a remeasured after, report only “mechanical change / test coverage.”
+- **Do not use unit-test green as a substitute for benchmark measurement** when stating that pseudocode became more readable or more correct.
 
 ## Build / Test Commands
 
@@ -128,6 +131,30 @@ python3 benchmark/source_semantic_benchmark/run_source_semantic_benchmark.py --h
 ## Decompiler Quality Loop
 
 Use this loop for source-semantic or pseudocode-quality work, especially when a concrete row/function motivated the change.
+
+### Measurement-only gate (non-negotiable)
+
+**Quality claims require measurement. Unit tests alone never prove quality.**
+
+| Allowed as | Requires |
+|---|---|
+| Mechanical change (code + synthetic invariant tests) | nextest / crate checks; **no** “quality improved” language |
+| Semantic quality claim | Anchored row(s) + remeasured semantic/static/behavior deltas |
+| Readability / HIR presentation quality claim | Anchored real-binary decomp (or benchmark row) before/after; not fixture-only |
+| Official ranking / Pages claim | External release bake path only (never local docker as latest) |
+
+**Order of work (always):**
+
+1. **Observe** on a real binary/row (benchmark artifact, `fission_cli decomp`, or docker runner output).
+2. **Record baseline** (scores, gotos, line size, fail category, snippet).
+3. **Generalize** to an invariant (no function/address special cases).
+4. **Implement** at the canonical owner.
+5. **Remeasure** the same path with caches disabled.
+6. **Report** “quality improved” only if the measurement moved; otherwise “landed mechanical / tests only.”
+
+If there is no measured baseline, **do not start a “quality” implementation**. Optionally land a pure refactor or test harness, but label it non-quality.
+
+Applies to **NIR, HIR presentation, structuring, normalize, materialize, SLEIGH, and printer** surfaces. Printer/UI still must not be the semantic owner; measurement still applies if readability is claimed.
 
 ### Mandatory external benchmark (fission-benchmark docker)
 
@@ -178,18 +205,18 @@ semantic layer before production code changes.
 
 ### Pre-implementation gate
 
-Before adding production code for builder, materialize, normalize, structuring, or type/data recovery fixes, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) as required by [`docs/adr/0006-decompiler-quality-change-gate.md`](docs/adr/0006-decompiler-quality-change-gate.md). The proposal must show row anchor, owner proof, invariant proof, and validation matrix before implementation starts.
+Before adding production code for builder, materialize, normalize, structuring, type/data recovery, **or HIR presentation readability** fixes intended as quality work, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) as required by [`docs/adr/0006-decompiler-quality-change-gate.md`](docs/adr/0006-decompiler-quality-change-gate.md). The proposal must show **measured** row anchor, owner proof, invariant proof, and validation matrix before implementation starts. **No row measurement → no quality implementation.**
 
 Default to extending the existing owner/pass. Add a new pass, helper, or metric only when the proposal shows that no existing owner covers the invariant. Do not claim success from a targeted test alone; crate-level tests, focused row rerun, and smoke/automation regression checks are part of the quality claim.
 
-1. **Anchor the row:** record the source file, binary, address, function name, current behavior status, case pass count, semantic/static scores, and the top missing/extra features.
-2. **Find the owner:** prove whether the bug belongs to SLEIGH/raw p-code, NIR materialization, type recovery, structuring, cleanup, printer, or benchmark/automation. Fix behavior at that owner.
+1. **Anchor the row (measured):** record the source file, binary, address, function name, current behavior status, case pass count, semantic/static scores, top missing/extra features, and a short pseudocode/goto baseline. Synthetic IR alone is not an anchor.
+2. **Find the owner:** prove whether the bug belongs to SLEIGH/raw p-code, NIR materialization, type recovery, structuring, cleanup, HIR presentation, printer, or benchmark/automation. Fix behavior at that owner (not printer-only semantic patches).
 3. **Add focused coverage:** add or update the smallest targeted Rust/Python test that captures the invariant. Synthetic tests are necessary but not sufficient for decompiler-quality claims.
 4. **Make the scoped change:** keep production changes invariant-based, not function/address/sample-specific. Do not add runtime/build dependencies on `vendor/` reference tools.
 5. **Run local checks:** run the targeted test first, then the relevant crate checks/builds from the Build/Test section. If a known unrelated test is already failing, call it out explicitly.
-6. **Run the focused benchmark:** rerun the exact source-semantic row with no stale decompilation or behavior cache when measuring a semantic fix. Compare behavior status, case progress, stdout/stderr, line/byte size, and static feature gaps.
+6. **Run the focused benchmark / real decomp:** rerun the exact source-semantic row or the same PE/function decomp with no stale decompilation or behavior cache. Compare behavior status, case progress, stdout/stderr, line/byte size, static feature gaps, and readability proxies (e.g. goto count) as applicable.
 7. **Check regressions:** after a focused improvement, run the broader smoke manifest or automation lane. Existing pass rows must not regress, and weighted semantic/static scores should not drop without an explicit tradeoff.
-8. **Report both bars:** distinguish “mechanically changed” from “quality improved.” A merged test-only or telemetry-only change is not a semantic fix unless the row-level oracle moves.
+8. **Report both bars:** distinguish “mechanically changed” from “quality improved.” A merged test-only, telemetry-only, or fixture-only presentation change is **not** a quality fix unless the measured row (or agreed multi-row sample) moves.
 
 ## Regression-Prevention Workflow Prompt
 
@@ -239,8 +266,9 @@ Required principles:
 6. Consider Rust libraries only when a confirmed long-term bottleneck cannot be solved internally. Do not add C++ bindings.
 7. Prefer long-term maintainability and generalizable architecture over short-term output patches.
 8. Make proposals and implementations valid across multiple future quality cycles, with explicit observability and verification.
-9. Do not use estimates as evidence. Base claims on measured, reproducible data.
-10. The final success criterion is actual improvement in `benchmark/source_semantic_benchmark` semantic correctness and pseudocode quality.
+9. Do not use estimates as evidence. Base claims on measured, reproducible data only (Core Rule 10).
+10. The final success criterion is actual improvement in `benchmark/source_semantic_benchmark` and/or external fission-benchmark measurements — never synthetic fixtures alone.
+11. If a change was not motivated by a measured row, do not implement it as a “quality” pass; either measure first or ship it as non-quality mechanical work without quality claims.
 11. Prefer extending shared helpers (loop-carried update, same-block forward branch, return-join live-in, unconditional-copy merge) over new end-of-pipeline passes or ISA-local cleanups.
 
 Resource rules:
