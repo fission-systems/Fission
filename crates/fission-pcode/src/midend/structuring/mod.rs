@@ -42,16 +42,17 @@ pub(crate) use driver::{
 pub(crate) use graph::{capture_structuring_failure, 
     StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeKind, surface_structure_graph,
 };
-pub(crate) use linear::LinearBodyCachedOutcome;
+pub(crate) use linear::{
+    LinearBodyCachedOutcome, LinearBodyLoweringOutcome, LinearBodyRejectReason,
+};
 pub(crate) use regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,
 };
-pub(crate) use switch::SWITCH_FALLTHROUGH_SENTINEL;
+pub(crate) use crate::midend::SWITCH_FALLTHROUGH_SENTINEL;
 
 #[cfg(test)]
 pub(super) use driver::{
     discover_guarded_tail_candidates_for_test, promote_single_entry_guarded_tail_regions_for_test,
 };
-#[cfg(test)]
-pub(super) use linear::{LinearBodyLoweringOutcome, LinearBodyRejectReason};
+// LinearBodyLoweringOutcome / LinearBodyRejectReason re-exported above for all builds.

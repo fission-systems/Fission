@@ -179,6 +179,136 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn forwarding_block_defines_return_tail_live_in(&self, idx: usize, join_idx: usize) -> bool {
         PreviewBuilder::forwarding_block_defines_return_tail_live_in(self, idx, join_idx)
     }
+    fn shared_exit_for_indices(
+        &mut self,
+        indices: &[usize],
+    ) -> Result<Option<LinearExit>, MlilPreviewError> {
+        PreviewBuilder::shared_exit_for_indices(self, indices)
+    }
+    fn collect_jump_targets(&mut self) -> Result<std::collections::HashSet<u64>, MlilPreviewError> {
+        PreviewBuilder::collect_jump_targets(self)
+    }
+    fn accept_structured_region(
+        &mut self,
+        start_idx: usize,
+        skip_to: usize,
+        targeted: &std::collections::HashSet<u64>,
+    ) -> bool {
+        PreviewBuilder::accept_structured_region(self, start_idx, skip_to, targeted)
+    }
+    fn sese_region_proof_budget_exceeded(&self) -> bool {
+        PreviewBuilder::sese_region_proof_budget_exceeded(self)
+    }
+    fn region_has_external_entry(
+        &self,
+        region: &std::collections::HashSet<usize>,
+        header_idx: usize,
+    ) -> bool {
+        PreviewBuilder::region_has_external_entry(self, region, header_idx)
+    }
+    fn head_has_only_discardable_pure_ops(&self, block_idx: usize) -> bool {
+        let pcode_idx = PreviewBuilder::pcode_block_idx(self, block_idx);
+        let Some(block) = self.pcode.blocks.get(pcode_idx) else {
+            return false;
+        };
+        PreviewBuilder::for_condition_head_has_only_discardable_pure_ops(block)
+    }
+    fn cached_terminator_branch_targets(&self, block_idx: usize) -> Option<Vec<u64>> {
+        let term = self.terminator_cache.get(&block_idx)?;
+        let mut out = Vec::new();
+        match term {
+            LoweredTerminator::Goto(t) | LoweredTerminator::Fallthrough(Some(t)) => {
+                out.push(*t);
+            }
+            LoweredTerminator::Cond {
+                true_target,
+                false_target,
+                ..
+            } => {
+                out.push(*true_target);
+                if let Some(ft) = false_target {
+                    out.push(*ft);
+                }
+            }
+            LoweredTerminator::Switch {
+                targets,
+                default_target,
+                ..
+            } => {
+                out.extend(targets.iter().copied());
+                if let Some(dt) = default_target {
+                    out.push(*dt);
+                }
+            }
+            _ => {}
+        }
+        Some(out)
+    }
+    fn lower_linear_body_for_region_recovery_detailed(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
+        PreviewBuilder::lower_linear_body_for_region_recovery_detailed(
+            self, start_idx, exit, budget,
+        )
+    }
+    fn record_region_body_lowering_reject_reason(&mut self, reason: LinearBodyRejectReason) {
+        match reason {
+            LinearBodyRejectReason::ConditionalTailExitMismatch => {
+                self.telemetry.structuring.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count += 1;
+            }
+            LinearBodyRejectReason::SuccessorInlineRejected => {
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_body_lowering_successor_inline_rejected_count += 1;
+            }
+            LinearBodyRejectReason::RevisitCycle => {
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_body_lowering_revisit_cycle_count += 1;
+            }
+            LinearBodyRejectReason::UnsupportedTerminator
+            | LinearBodyRejectReason::TargetIndexMissing
+            | LinearBodyRejectReason::ExitMismatch
+            | LinearBodyRejectReason::BudgetTripped => {
+                self.telemetry
+                    .structuring
+                    .region_linearize_rejected_body_lowering_unsupported_terminator_count += 1;
+            }
+        }
+    }
+    fn bump_region_linearize_rejected_irreducible_cfg(&mut self) {
+        self.telemetry
+            .structuring
+            .region_linearize_rejected_irreducible_cfg_count += 1;
+    }
+    fn bump_region_linearize_rejected_non_structuring_failure(&mut self) {
+        self.telemetry
+            .structuring
+            .region_linearize_rejected_non_structuring_failure_count += 1;
+    }
+    fn bump_region_linearize_rejected_no_exit(&mut self) {
+        self.telemetry
+            .structuring
+            .region_linearize_rejected_no_exit_count += 1;
+    }
+    fn bump_region_linearize_rejected_body_lowering_failed(&mut self) {
+        self.telemetry
+            .structuring
+            .region_linearize_rejected_body_lowering_failed_count += 1;
+    }
+    fn bump_region_linearize_rejected_non_advancing(&mut self) {
+        self.telemetry
+            .structuring
+            .region_linearize_rejected_non_advancing_count += 1;
+    }
+    fn bump_region_linearize_structuring(&mut self) {
+        self.telemetry
+            .structuring
+            .region_linearize_structuring_count += 1;
+    }
     fn bump_region_proof_candidate(&mut self) {
         self.telemetry.structuring.region_proof_candidate_count += 1;
     }
@@ -210,6 +340,50 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         self.telemetry
             .structuring
             .condition_fold_rejected_side_effect += 1;
+    }
+    fn track_loop_control_rewrite_stats(
+        &mut self,
+        break_rewrites: usize,
+        continue_rewrites: usize,
+        skipped_nested_scope_count: usize,
+    ) {
+        self.telemetry.structuring.loop_control_rewrite_break_count += break_rewrites;
+        self.telemetry
+            .structuring
+            .loop_control_rewrite_continue_count += continue_rewrites;
+        self.telemetry
+            .structuring
+            .loop_control_rewrite_skipped_nested_scope_count += skipped_nested_scope_count;
+    }
+    fn bump_loop_control_explicit_reducer(&mut self) {
+        self.telemetry
+            .structuring
+            .loop_control_explicit_reducer_count += 1;
+    }
+    fn bump_loop_while_subgraph_lowered(&mut self) {
+        self.telemetry.structuring.loop_while_subgraph_lowered_count += 1;
+    }
+    fn bump_loop_multi_tail_dowhile_lowered(&mut self) {
+        self.telemetry
+            .structuring
+            .loop_multi_tail_dowhile_lowered_count += 1;
+    }
+    fn bump_loop_for_lowered(&mut self) {
+        self.telemetry.structuring.loop_for_lowered_count += 1;
+    }
+    fn bump_loop_multi_exit_break(&mut self) {
+        self.telemetry.structuring.loop_multi_exit_break_count += 1;
+    }
+    fn bump_switch_fallthrough_detected(&mut self, count: usize) {
+        self.telemetry.structuring.switch_fallthrough_detected_count += count;
+    }
+    fn bump_switch_emit_ready_failed(&mut self) {
+        self.telemetry.dispatcher.switch_emit_ready_failed_count += 1;
+        self.telemetry.structuring.region_proof_candidate_count += 1;
+        self.telemetry.structuring.region_emit_ready_failed_count += 1;
+    }
+    fn bump_proof_payload_direct_emit(&mut self) {
+        self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
     }
     fn invalidate_terminator_cache(&mut self, block_idx: usize) {
         self.terminator_cache.remove(&block_idx);

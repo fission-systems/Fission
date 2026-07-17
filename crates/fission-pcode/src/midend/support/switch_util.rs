@@ -1,42 +1,8 @@
 use super::*;
 
-pub(crate) fn recovered_switch_case_values(
-    targets: &[u64],
-    default_target: Option<u64>,
-    min_val: i64,
-    proof: Option<&DispatcherProofUnit>,
-) -> (Vec<(i64, u64)>, bool) {
-    if let Some(proof) = proof
-        && proof_supports_direct_emit(proof)
-    {
-        let recovered = proof
-            .recovered_cases
-            .iter()
-            .copied()
-            .filter(|(_, target)| Some(*target) != default_target)
-            .collect::<Vec<_>>();
-        if !recovered.is_empty() {
-            return (recovered, true);
-        }
-    }
-
-    (
-        targets
-            .iter()
-            .copied()
-            .enumerate()
-            .filter_map(|(ordinal, target)| {
-                (Some(target) != default_target).then_some((min_val + ordinal as i64, target))
-            })
-            .collect(),
-        false,
-    )
-}
-
-pub(crate) fn proof_supports_direct_emit(proof: &DispatcherProofUnit) -> bool {
-    crate::midend::structuring::EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready
-        && proof.recovered_cases.len() >= proof.selector_cardinality
-}
+pub(crate) use fission_midend_structuring::helpers::{
+    proof_supports_direct_emit, recovered_switch_case_values,
+};
 
 #[cfg(test)]
 mod tests {

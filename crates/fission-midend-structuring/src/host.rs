@@ -17,7 +17,10 @@
 //! Pure helpers that only touch `HirStmt`/`HirExpr` do **not** use this trait.
 
 use crate::cfg_analysis::{CfgFactCache, DomTree, SccAnalysis};
-use crate::linear_types::{IfLoweringBudget, LinearExit, LoweredTerminator};
+use crate::linear_types::{
+    IfLoweringBudget, LinearBodyLoweringOutcome, LinearBodyRejectReason, LinearExit,
+    LoweredTerminator,
+};
 use crate::loop_analysis::LoopBody;
 use fission_midend_core::ir::{HirExpr, HirStmt, MlilPreviewError, MlilPreviewOptions};
 use std::collections::HashSet;
@@ -107,6 +110,37 @@ pub trait StructuringHost {
     ) -> bool;
     fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool;
     fn forwarding_block_defines_return_tail_live_in(&self, idx: usize, join_idx: usize) -> bool;
+    fn shared_exit_for_indices(
+        &mut self,
+        indices: &[usize],
+    ) -> Result<Option<LinearExit>, MlilPreviewError>;
+    fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError>;
+    fn accept_structured_region(
+        &mut self,
+        start_idx: usize,
+        skip_to: usize,
+        targeted: &HashSet<u64>,
+    ) -> bool;
+    fn sese_region_proof_budget_exceeded(&self) -> bool;
+    fn region_has_external_entry(&self, region: &HashSet<usize>, header_idx: usize) -> bool;
+    /// Whether the condition head block has only pure ops discardable for for-loop form.
+    fn head_has_only_discardable_pure_ops(&self, block_idx: usize) -> bool;
+    /// Peek cached terminator branch targets for label pre-seeding (no lowering).
+    fn cached_terminator_branch_targets(&self, block_idx: usize) -> Option<Vec<u64>>;
+    /// Region-recovery linear body lowering (detailed reject reasons).
+    fn lower_linear_body_for_region_recovery_detailed(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError>;
+    fn record_region_body_lowering_reject_reason(&mut self, reason: LinearBodyRejectReason);
+    fn bump_region_linearize_rejected_irreducible_cfg(&mut self);
+    fn bump_region_linearize_rejected_non_structuring_failure(&mut self);
+    fn bump_region_linearize_rejected_no_exit(&mut self);
+    fn bump_region_linearize_rejected_body_lowering_failed(&mut self);
+    fn bump_region_linearize_rejected_non_advancing(&mut self);
+    fn bump_region_linearize_structuring(&mut self);
 
     // ── Telemetry ──────────────────────────────────────────────────────────
     fn bump_region_proof_candidate(&mut self);
@@ -119,6 +153,20 @@ pub trait StructuringHost {
     fn bump_condition_fold_and(&mut self, fold_count: usize);
     fn bump_condition_fold_or(&mut self, fold_count: usize);
     fn bump_condition_fold_rejected_side_effect(&mut self);
+    fn track_loop_control_rewrite_stats(
+        &mut self,
+        break_rewrites: usize,
+        continue_rewrites: usize,
+        skipped_nested_scope_count: usize,
+    );
+    fn bump_loop_control_explicit_reducer(&mut self);
+    fn bump_loop_while_subgraph_lowered(&mut self);
+    fn bump_loop_multi_tail_dowhile_lowered(&mut self);
+    fn bump_loop_for_lowered(&mut self);
+    fn bump_loop_multi_exit_break(&mut self);
+    fn bump_switch_fallthrough_detected(&mut self, count: usize);
+    fn bump_switch_emit_ready_failed(&mut self);
+    fn bump_proof_payload_direct_emit(&mut self);
 
     // ── Caches ─────────────────────────────────────────────────────────────
     /// Drop any cached terminator lowering for `block_idx` after CFG mutation.
@@ -136,5 +184,8 @@ pub trait StructuringHost {
     }
     fn analyze_cfg_dominators(&self) -> DomTree {
         self.cfg_facts().dominators().clone()
+    }
+    fn get_loop_body(&self, head_idx: usize) -> Option<&LoopBody> {
+        self.loop_bodies().iter().find(|lb| lb.head == head_idx)
     }
 }

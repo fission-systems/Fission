@@ -21,11 +21,15 @@ pub mod cleanup;
 pub mod collapse_loop;
 pub mod conditionals;
 pub mod graph;
+pub mod helpers;
 pub mod host;
 pub mod irreducible;
+pub mod linear_recovery;
 pub mod linear_types;
 pub mod loop_analysis;
+pub mod loops;
 pub mod regions;
+pub mod switch;
 
 pub use cfg_analysis::{
     CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
@@ -45,12 +49,28 @@ pub use admission::{
 };
 pub use linear_types::{
     CONDITION_RECOVERY_BUDGET_MS, CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey,
-    IfLoweringBudget, LinearBodyCacheKey, LinearExit, LoweredTerminator, structuring_diag_enabled,
+    ConditionalTailLoweringResult, ConditionalTailMismatchSubtype, IfLoweringBudget,
+    LinearBodyCacheKey, LinearBodyCachedOutcome, LinearBodyLoweringOutcome, LinearBodyRejectReason,
+    LinearExit, LoweredTerminator, MAX_LINEAR_STRUCTURING_DEPTH, NormalizedConditionalTailArm,
+    structuring_diag_enabled,
+};
+pub use linear_recovery::{
+    SESE_REGION_PROOF_BUDGET_MS, build_linear_sese_child_fallback,
+    region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
 };
 pub use conditionals::{
     is_trivial_structuring_stmt, try_lower_if, try_lower_if_else, try_lower_return_chain_arm,
     try_lower_short_circuit_and, try_lower_short_circuit_and_else, try_lower_short_circuit_if,
     try_lower_short_circuit_or, try_reduce_if_else_with_follow,
+};
+pub use helpers::{block_label, merge_equivalent_switch_cases, recovered_switch_case_values};
+pub use loops::{
+    lower_loop_body_subgraph, try_lower_dowhile, try_lower_for, try_lower_infloop,
+    try_lower_infloop_with_break, try_lower_multiblock_dowhile, try_lower_multiblock_infloop,
+    try_lower_while,
+};
+pub use switch::{
+    SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch,
 };
 
 pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats, SWITCH_FALLTHROUGH_SENTINEL};
