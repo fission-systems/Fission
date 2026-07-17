@@ -117,12 +117,67 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         let block = unsafe { &*block_ptr.add(pcode_idx) };
         PreviewBuilder::lower_block_stmts(self, block)
     }
+    fn lower_block_terminator(
+        &mut self,
+        block_idx: usize,
+    ) -> Result<LoweredTerminator, MlilPreviewError> {
+        PreviewBuilder::lower_block_terminator(self, block_idx)
+    }
     fn lower_return_join_expr_for_predecessor(
         &mut self,
         pred_idx: usize,
         join_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
         PreviewBuilder::lower_return_join_expr_for_predecessor(self, pred_idx, join_idx)
+    }
+    fn lower_linear_body(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+        PreviewBuilder::lower_linear_body(self, start_idx, exit)
+    }
+    fn lower_linear_body_with_budget(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+        PreviewBuilder::lower_linear_body_with_budget(self, start_idx, exit, budget)
+    }
+    fn linear_exit(&mut self, idx: usize) -> Result<Option<LinearExit>, MlilPreviewError> {
+        PreviewBuilder::linear_exit(self, idx)
+    }
+    fn linear_exit_with_budget(
+        &mut self,
+        idx: usize,
+        budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<Option<LinearExit>, MlilPreviewError> {
+        PreviewBuilder::linear_exit_with_budget(self, idx, budget)
+    }
+    fn shared_linear_exit(
+        &mut self,
+        lhs_idx: usize,
+        rhs_idx: usize,
+    ) -> Result<Option<LinearExit>, MlilPreviewError> {
+        PreviewBuilder::shared_linear_exit(self, lhs_idx, rhs_idx)
+    }
+    fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool {
+        PreviewBuilder::has_linear_body_cache(self, start_idx, exit)
+    }
+    fn can_inline_linear_successor(
+        &self,
+        from_idx: usize,
+        next_idx: usize,
+        visited: &std::collections::HashSet<usize>,
+    ) -> bool {
+        PreviewBuilder::can_inline_linear_successor(self, from_idx, next_idx, visited)
+    }
+    fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
+        PreviewBuilder::is_trivial_forwarding_block(self, idx, next_idx)
+    }
+    fn forwarding_block_defines_return_tail_live_in(&self, idx: usize, join_idx: usize) -> bool {
+        PreviewBuilder::forwarding_block_defines_return_tail_live_in(self, idx, join_idx)
     }
     fn bump_region_proof_candidate(&mut self) {
         self.telemetry.structuring.region_proof_candidate_count += 1;
@@ -139,6 +194,26 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn bump_region_emit_ready_failed(&mut self) {
         self.telemetry.structuring.region_emit_ready_failed_count += 1;
     }
+    fn bump_fas_virtual_goto(&mut self) {
+        self.telemetry.structuring.fas_virtual_goto_count += 1;
+    }
+    fn bump_select_bad_edge(&mut self) {
+        self.telemetry.structuring.structuring_select_bad_edge_count += 1;
+    }
+    fn bump_condition_fold_and(&mut self, fold_count: usize) {
+        self.telemetry.structuring.condition_fold_and_count += fold_count;
+    }
+    fn bump_condition_fold_or(&mut self, fold_count: usize) {
+        self.telemetry.structuring.condition_fold_or_count += fold_count;
+    }
+    fn bump_condition_fold_rejected_side_effect(&mut self) {
+        self.telemetry
+            .structuring
+            .condition_fold_rejected_side_effect += 1;
+    }
+    fn invalidate_terminator_cache(&mut self, block_idx: usize) {
+        self.terminator_cache.remove(&block_idx);
+    }
     fn emit_ready_trace_enabled(&self) -> bool {
         PreviewBuilder::emit_ready_trace_enabled_for_current_fn(self)
     }
@@ -150,6 +225,11 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn log_try_lower_if_reject(&self, idx: usize, reason: &str) {
         let addr = PreviewBuilder::block_start_address(self, idx);
-        PreviewBuilder::log_try_lower_if_reject(self, true, idx, addr, reason);
+        if structuring_diag_enabled() {
+            eprintln!(
+                "[DIAG] try_lower_if {}: idx={} block=0x{:x}",
+                reason, idx, addr
+            );
+        }
     }
 }

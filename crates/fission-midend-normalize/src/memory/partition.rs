@@ -217,7 +217,7 @@ fn parse_partitioned_access(
     Some(PartitionedMemoryAccess {
         kind,
         ptr: ptr.clone(),
-        base_repr: print_expr(&base),
+        base_repr: format_expr_key(&base),
         base,
         const_offset: parts.const_offset,
         stride,

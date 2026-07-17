@@ -20,8 +20,10 @@ pub(crate) fn is_register_varnode(vn: &Varnode) -> bool {
     is_register_space_id(vn.space_id)
 }
 
-pub(crate) const CONDITION_RECOVERY_BUDGET_MS: f64 = 10.0;
-pub(crate) const CONDITION_RECOVERY_SUBCALL_LIMIT: usize = 512;
+pub(crate) use fission_midend_structuring::{
+    CONDITION_RECOVERY_BUDGET_MS, CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey,
+    IfLoweringBudget, LinearBodyCacheKey, LinearExit, LoweredTerminator,
+};
 /// Initial SESE recovery is a proof pass, not the final fallback renderer.
 /// Once proof-oriented recovery exceeds this ceiling, callers should fail
 /// closed and let the cheaper whole-function linear fallback render payloads.
@@ -95,66 +97,6 @@ pub(crate) struct DefSite<'a> {
 pub(crate) struct LoweringSite {
     pub(crate) block_idx: usize,
     pub(crate) op_idx: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LoweredTerminator {
-    Fallthrough(Option<u64>),
-    Goto(u64),
-    Cond {
-        cond: HirExpr,
-        true_target: u64,
-        false_target: Option<u64>,
-    },
-    Switch {
-        expr: HirExpr,
-        targets: Vec<u64>,
-        default_target: Option<u64>, // Usually the last target or something specific
-        /// Offset to add to ordinal case indices when the switch selector was
-        /// adjusted by the compiler (e.g. `sel = orig - min_val`).
-        /// case value = `min_val + ordinal_index`.  Zero when unknown/unrecovered.
-        min_val: i64,
-        proof: Option<DispatcherProofUnit>,
-    },
-    Return(Option<HirExpr>),
-    Unsupported {
-        evidence: UnsupportedControlEvidence,
-        target_expr: Option<HirExpr>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum LinearExit {
-    Join(usize),
-    Return,
-    End,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct LinearBodyCacheKey {
-    pub(crate) start_idx: usize,
-    pub(crate) exit: LinearExit,
-    pub(crate) region_recovery: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ConditionalTailKey {
-    pub(crate) true_idx: usize,
-    pub(crate) false_idx: usize,
-    pub(crate) exit: LinearExit,
-    pub(crate) region_recovery: bool,
-}
-
-#[derive(Debug)]
-pub(crate) struct IfLoweringBudget {
-    pub(crate) enabled: bool,
-    pub(crate) start: Instant,
-    pub(crate) subcalls: usize,
-    pub(crate) tripped: bool,
-    pub(crate) idx: usize,
-    pub(crate) block_addr: u64,
-    pub(crate) label: &'static str,
-    pub(crate) structuring_start: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]

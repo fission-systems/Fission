@@ -172,7 +172,7 @@ mod tests {
         let HirStmt::If { cond, .. } = &func.body[1] else {
             panic!("expected preserved temp consumer to stay in the if condition");
         };
-        assert!(print_expr(cond).contains("uVar0"));
+        assert!(format_expr_key(cond).contains("uVar0"));
     }
 
     #[test]

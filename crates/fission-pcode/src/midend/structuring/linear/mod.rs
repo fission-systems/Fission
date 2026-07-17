@@ -1752,14 +1752,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn is_trivial_structuring_stmt(stmt: &HirStmt) -> bool {
-        match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs,
-            } => !expr_has_side_effecting_call(rhs),
-            HirStmt::Expr(expr) => !expr_has_side_effecting_call(expr),
-            _ => false,
-        }
+        fission_midend_structuring::is_trivial_structuring_stmt(stmt)
     }
 
     pub(super) fn fallthrough_index(&self, idx: usize) -> Option<usize> {

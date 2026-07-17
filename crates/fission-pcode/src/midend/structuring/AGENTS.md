@@ -3,6 +3,22 @@
 Generated: 2026-03-27
 Scope: `crates/fission-pcode/src/midend/structuring/`
 
+## Ownership (ADR 0012)
+
+Free-function owners live in `fission-midend-structuring` and take
+`&mut impl StructuringHost`. Production host is `PreviewBuilder`
+(`host_impl.rs`).
+
+| Area | Owner crate | Notes |
+|------|-------------|-------|
+| CFG facts, cleanup, regions, graph, admission | `fission-midend-structuring` | pure / host-free where possible |
+| Collapse-loop edge virtualization | `fission-midend-structuring::collapse_loop` | host free fns |
+| Conditionals (`try_lower_if*`, short-circuit) | `fission-midend-structuring::conditionals` | host free fns; thin wrappers here |
+| LinearExit / LoweredTerminator / budget | `fission-midend-structuring::linear_types` | re-exported via support |
+| Linear body, loops, switch, guarded_tail, driver | residual methods on `PreviewBuilder` | convert next |
+
+Prefer new work as `fn try_lower_*(host: &mut impl StructuringHost, ...)`.
+
 ## Overview
 
 This directory owns CFG-based reconstruction from flattened NIR/HIR into structured control flow. It is the main algorithmic hotspot for decompiler quality work.

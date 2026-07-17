@@ -1124,7 +1124,7 @@ fn collect_initializer_fingerprints(bindings: &[NirBinding]) -> Vec<(String, Opt
         .map(|binding| {
             (
                 binding.name.clone(),
-                binding.initializer.as_ref().map(print_expr),
+                binding.initializer.as_ref().map(format_expr_key),
             )
         })
         .collect()

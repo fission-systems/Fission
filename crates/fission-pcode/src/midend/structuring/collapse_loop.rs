@@ -1,11 +1,13 @@
 //! Function-level Ghidra-style iterative collapse (env-gated alternative to SESE tree).
+//!
+//! Edge virtualization free functions live in `fission-midend-structuring`; this
+//! module keeps the SESE-entry wrapper that still needs `PreviewBuilder`.
 
-use super::cfg_analysis::select_bad_edge;
 use super::*;
-
-pub(crate) fn collapse_loop_admission_enabled() -> bool {
-    std::env::var_os("FISSION_COLLAPSE_LOOP").is_some()
-}
+pub use fission_midend_structuring::collapse_loop::{
+    apply_virtual_goto_edge, collapse_loop_admission_enabled, is_virtual_goto_edge,
+    try_virtualize_one_bad_edge,
+};
 
 /// Collapse the full function body without SESE region decomposition.
 pub(crate) fn structure_cfg_via_collapse_loop(
@@ -21,49 +23,15 @@ impl<'a> PreviewBuilder<'a> {
         entry: usize,
         exit: usize,
     ) -> Result<bool, MlilPreviewError> {
-        let Some((from, to)) = select_bad_edge(
-            entry,
-            exit,
-            &self.successors,
-            &self.predecessors,
-            &self.fas_virtual_edges,
-        ) else {
-            return Ok(false);
-        };
-        Ok(self.apply_virtual_goto_edge(from, to))
+        try_virtualize_one_bad_edge(self, entry, exit)
     }
 
     pub(crate) fn apply_virtual_goto_edge(&mut self, from: usize, to: usize) -> bool {
-        if self
-            .fas_virtual_edges
-            .iter()
-            .any(|&(src, dst)| src == from && dst == to)
-        {
-            return false;
-        }
-        let Some(pos) = self
-            .successors
-            .get(from)
-            .and_then(|succs| succs.iter().position(|&succ| succ == to))
-        else {
-            return false;
-        };
-        self.successors[from].remove(pos);
-        if let Some(preds) = self.predecessors.get_mut(to) {
-            preds.retain(|&pred| pred != from);
-        }
-        self.fas_virtual_edges.push((from, to));
-        self.telemetry.structuring.fas_virtual_goto_count += 1;
-        self.telemetry.structuring.structuring_select_bad_edge_count += 1;
-        self.terminator_cache.remove(&from);
-        self.refresh_cfg_fact_cache();
-        true
+        apply_virtual_goto_edge(self, from, to)
     }
 
     pub(crate) fn is_virtual_goto_edge(&self, from: usize, to: usize) -> bool {
-        self.fas_virtual_edges
-            .iter()
-            .any(|&(src, dst)| src == from && dst == to)
+        is_virtual_goto_edge(self, from, to)
     }
 }
 

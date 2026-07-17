@@ -715,9 +715,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 }
 
-pub(crate) fn structuring_diag_enabled() -> bool {
-    std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
-}
+pub(crate) use fission_midend_structuring::structuring_diag_enabled;
 
 #[cfg(test)]
 pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(

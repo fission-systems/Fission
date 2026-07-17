@@ -20,7 +20,7 @@ pub mod prelude {
     pub use fission_midend_core::util::{
         cleanup_redundant_labels, collect_referenced_labels, expr_has_side_effecting_call,
         expr_type, fold_logical_chain, is_pure_intrinsic_call, negate_expr, next_temp_name,
-        print_expr, rename_vars_in_stmts, simplify_logical_expr, strip_casts,
+        format_expr_key, rename_vars_in_stmts, simplify_logical_expr, strip_casts,
     };
     pub use fission_midend_core::vsa::{
         apply_jump_resolver_pass, jump_resolver_candidate_count,

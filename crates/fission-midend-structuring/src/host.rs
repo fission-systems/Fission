@@ -17,6 +17,7 @@
 //! Pure helpers that only touch `HirStmt`/`HirExpr` do **not** use this trait.
 
 use crate::cfg_analysis::{CfgFactCache, DomTree, SccAnalysis};
+use crate::linear_types::{IfLoweringBudget, LinearExit, LoweredTerminator};
 use crate::loop_analysis::LoopBody;
 use fission_midend_core::ir::{HirExpr, HirStmt, MlilPreviewError, MlilPreviewOptions};
 use std::collections::HashSet;
@@ -63,11 +64,49 @@ pub trait StructuringHost {
 
     // ── Lowering hooks (HIR-only surface; p-code stays in the host) ────────
     fn lower_block_stmts(&mut self, block_idx: usize) -> Result<Vec<HirStmt>, MlilPreviewError>;
+    fn lower_block_terminator(
+        &mut self,
+        block_idx: usize,
+    ) -> Result<LoweredTerminator, MlilPreviewError>;
     fn lower_return_join_expr_for_predecessor(
         &mut self,
         pred_idx: usize,
         join_idx: usize,
     ) -> Result<Option<HirExpr>, MlilPreviewError>;
+    fn lower_linear_body(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError>;
+    fn lower_linear_body_with_budget(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError>;
+    fn linear_exit(
+        &mut self,
+        idx: usize,
+    ) -> Result<Option<LinearExit>, MlilPreviewError>;
+    fn linear_exit_with_budget(
+        &mut self,
+        idx: usize,
+        budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<Option<LinearExit>, MlilPreviewError>;
+    fn shared_linear_exit(
+        &mut self,
+        lhs_idx: usize,
+        rhs_idx: usize,
+    ) -> Result<Option<LinearExit>, MlilPreviewError>;
+    fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool;
+    fn can_inline_linear_successor(
+        &self,
+        from_idx: usize,
+        next_idx: usize,
+        visited: &HashSet<usize>,
+    ) -> bool;
+    fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool;
+    fn forwarding_block_defines_return_tail_live_in(&self, idx: usize, join_idx: usize) -> bool;
 
     // ── Telemetry ──────────────────────────────────────────────────────────
     fn bump_region_proof_candidate(&mut self);
@@ -75,6 +114,15 @@ pub trait StructuringHost {
     fn bump_promotion_rejected_by_shape(&mut self);
     fn bump_promotion_rejected_by_gate(&mut self);
     fn bump_region_emit_ready_failed(&mut self);
+    fn bump_fas_virtual_goto(&mut self);
+    fn bump_select_bad_edge(&mut self);
+    fn bump_condition_fold_and(&mut self, fold_count: usize);
+    fn bump_condition_fold_or(&mut self, fold_count: usize);
+    fn bump_condition_fold_rejected_side_effect(&mut self);
+
+    // ── Caches ─────────────────────────────────────────────────────────────
+    /// Drop any cached terminator lowering for `block_idx` after CFG mutation.
+    fn invalidate_terminator_cache(&mut self, block_idx: usize);
 
     // ── Diagnostics ────────────────────────────────────────────────────────
     fn emit_ready_trace_enabled(&self) -> bool;

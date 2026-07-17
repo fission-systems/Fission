@@ -1446,10 +1446,10 @@ fn deindirect_resolves_iat_load_to_symbol() {
 }
 
 // Dual-layer C rendering of CALLIND opaque targets lives in fission-pcode render
-// (ADR 0011). midend-core::print_expr is a deterministic key/diagnostic printer only.
+// (ADR 0011). midend-core::format_expr_key is a deterministic key/diagnostic printer only.
 #[test]
 fn diagnostic_print_expr_renders_callind_opaque_call_shape() {
-    use fission_midend_core::print_expr;
+    use fission_midend_core::format_expr_key;
 
     let expr = HirExpr::Call {
         target: "__fission_callind_opaque".to_string(),
@@ -1461,7 +1461,7 @@ fn diagnostic_print_expr_renders_callind_opaque_call_shape() {
         ty: NirType::Unknown,
     };
 
-    let rendered = print_expr(&expr);
+    let rendered = format_expr_key(&expr);
     assert_eq!(
         rendered,
         "__fission_callind_opaque(fn_ptr, arg1, arg2)"

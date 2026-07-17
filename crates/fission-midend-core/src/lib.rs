@@ -28,7 +28,8 @@ pub use labels::SWITCH_FALLTHROUGH_SENTINEL;
 /// Pure HIR helpers.
 pub use util::{
     cleanup_redundant_labels, collect_referenced_label_counts, collect_referenced_labels, expr_has_side_effecting_call, expr_type,
-    fold_logical_chain, is_pure_intrinsic_call, negate_expr, next_temp_name, print_expr,
+    fold_logical_chain, format_expr_key, format_lvalue_key, is_pure_intrinsic_call, negate_expr,
+    next_temp_name,
     rename_vars_in_stmts, simplify_logical_expr, strip_casts,
 };
 pub use abi_param::AbiState;

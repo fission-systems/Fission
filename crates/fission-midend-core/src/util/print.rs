@@ -1,4 +1,4 @@
-//! Deterministic expression rendering for normalize **keys** / **diagnostics**.
+//! Deterministic expression formatting for normalize **keys** / **diagnostics**.
 //!
 //! # Not the dual-layer C printer
 //!
@@ -7,19 +7,23 @@
 //! [ADR 0013](../../../../../docs/adr/0013-print-expr-vs-dual-layer-printer.md)).
 //! This helper exists so midend-normalize/structuring can format expressions
 //! without depending on the render crate (and without creating crate cycles).
+//!
+//! Named `format_expr_key` (not `print_expr`) to avoid confusion with the dual-layer
+//! presentation surface in `fission-pcode::render`.
 
 use crate::ir::{HirBinaryOp, HirExpr, HirLValue, HirUnaryOp};
 
-pub fn print_expr(expr: &HirExpr) -> String {
+/// Deterministic stringization of `HirExpr` for sort keys, GVN ties, and diagnostics.
+pub fn format_expr_key(expr: &HirExpr) -> String {
     match expr {
         HirExpr::Var(name) => name.clone(),
         HirExpr::AddressOfGlobal(name) => format!("&{name}"),
         HirExpr::Const(v, _) => v.to_string(),
-        HirExpr::Cast { ty, expr } => format!("({ty:?}){}", print_expr(expr)),
+        HirExpr::Cast { ty, expr } => format!("({ty:?}){}", format_expr_key(expr)),
         HirExpr::Unary { op, expr, .. } => match op {
-            HirUnaryOp::Not => format!("!{}", print_expr(expr)),
-            HirUnaryOp::Neg => format!("-{}", print_expr(expr)),
-            HirUnaryOp::BitNot => format!("~{}", print_expr(expr)),
+            HirUnaryOp::Not => format!("!{}", format_expr_key(expr)),
+            HirUnaryOp::Neg => format!("-{}", format_expr_key(expr)),
+            HirUnaryOp::BitNot => format!("~{}", format_expr_key(expr)),
         },
         HirExpr::Binary { op, lhs, rhs, .. } => {
             let op_s = match op {
@@ -42,7 +46,12 @@ pub fn print_expr(expr: &HirExpr) -> String {
                 HirBinaryOp::LogicalAnd => "&&",
                 HirBinaryOp::LogicalOr => "||",
             };
-            format!("({} {} {})", print_expr(lhs), op_s, print_expr(rhs))
+            format!(
+                "({} {} {})",
+                format_expr_key(lhs),
+                op_s,
+                format_expr_key(rhs)
+            )
         }
         HirExpr::Select {
             cond,
@@ -51,43 +60,57 @@ pub fn print_expr(expr: &HirExpr) -> String {
             ..
         } => format!(
             "({} ? {} : {})",
-            print_expr(cond),
-            print_expr(then_expr),
-            print_expr(else_expr)
+            format_expr_key(cond),
+            format_expr_key(then_expr),
+            format_expr_key(else_expr)
         ),
         HirExpr::Call { target, args, .. } => {
-            let args_s = args.iter().map(print_expr).collect::<Vec<_>>().join(", ");
+            let args_s = args
+                .iter()
+                .map(format_expr_key)
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("{target}({args_s})")
         }
-        HirExpr::Load { ptr, .. } => format!("*{}", print_expr(ptr)),
+        HirExpr::Load { ptr, .. } => format!("*{}", format_expr_key(ptr)),
         HirExpr::FieldAccess {
             base,
             field_name,
             ..
-        } => format!("{}.{}", print_expr(base), field_name),
+        } => format!("{}.{}", format_expr_key(base), field_name),
         HirExpr::Index { base, index, .. } => {
-            format!("{}[{}]", print_expr(base), print_expr(index))
+            format!(
+                "{}[{}]",
+                format_expr_key(base),
+                format_expr_key(index)
+            )
         }
         HirExpr::PtrOffset { base, offset } => {
-            format!("({} + {offset})", print_expr(base))
+            format!("({} + {offset})", format_expr_key(base))
         }
         HirExpr::AggregateCopy { src, size } => {
-            format!("memcpy({}, {size})", print_expr(src))
+            format!("memcpy({}, {size})", format_expr_key(src))
         }
     }
 }
 
-pub fn print_lvalue(lv: &HirLValue) -> String {
+/// Deterministic stringization of `HirLValue` for keys / diagnostics.
+pub fn format_lvalue_key(lv: &HirLValue) -> String {
     match lv {
         HirLValue::Var(n) => n.clone(),
-        HirLValue::Deref { ptr, .. } => format!("*{}", print_expr(ptr)),
+        HirLValue::Deref { ptr, .. } => format!("*{}", format_expr_key(ptr)),
         HirLValue::Index { base, index, .. } => {
-            format!("{}[{}]", print_expr(base), print_expr(index))
+            format!(
+                "{}[{}]",
+                format_expr_key(base),
+                format_expr_key(index)
+            )
         }
         HirLValue::FieldAccess {
             base,
             field_name,
             ..
-        } => format!("{}.{}", print_expr(base), field_name),
+        } => format!("{}.{}", format_expr_key(base), field_name),
     }
 }
+

@@ -84,7 +84,7 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
                 .then_with(|| lhs.key.stride.cmp(&rhs.key.stride))
                 .then_with(|| lhs.offset.cmp(&rhs.offset))
                 .then_with(|| lhs.count.cmp(&rhs.count))
-                .then_with(|| print_expr(&lhs.base).cmp(&print_expr(&rhs.base)))
+                .then_with(|| format_expr_key(&lhs.base).cmp(&format_expr_key(&rhs.base)))
                 .then_with(|| format!("{:?}", lhs.elem_ty).cmp(&format!("{:?}", rhs.elem_ty)))
         })
     });
@@ -614,7 +614,7 @@ fn parse_memory_slot_pattern(ptr: &HirExpr, elem_ty: &NirType) -> Option<MemoryS
         None => None,
     };
     let key = MemorySlotKey {
-        base_repr: print_expr(&base),
+        base_repr: format_expr_key(&base),
         offset: parts.const_offset,
         access_size,
         stride,

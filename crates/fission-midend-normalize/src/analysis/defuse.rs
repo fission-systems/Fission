@@ -1736,7 +1736,7 @@ fn best_repeated_pure_expr(expr: &HirExpr) -> Option<HirExpr> {
     candidates.sort_by(|a, b| {
         b.1.cmp(&a.1)
             .then_with(|| b.0.cmp(&a.0))
-            .then_with(|| print_expr(&a.2).cmp(&print_expr(&b.2)))
+            .then_with(|| format_expr_key(&a.2).cmp(&format_expr_key(&b.2)))
     });
     candidates.into_iter().next().map(|(_, _, expr)| expr)
 }
