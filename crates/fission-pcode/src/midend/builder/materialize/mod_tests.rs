@@ -31,6 +31,145 @@ fn call_result_observation_accepts_partial_return_register_reads() {
     assert!(builder.call_result_is_observed(&block, 0));
 }
 
+/// CALL as CFG terminator + successor `mov reg, eax` must count as observed
+/// (measured recursive dual-call pattern on PE x64 O0).
+#[test]
+fn call_result_observation_follows_successor_copy_of_return_register() {
+    let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
+    let mut call_block = block_at(
+        0x1000,
+        0,
+        vec![op(1, PcodeOpcode::Call, None, vec![constant(0x2000)])],
+    );
+    call_block.successors = vec![1];
+    let use_block = block_at(
+        0x1010,
+        1,
+        vec![op(
+            2,
+            PcodeOpcode::Copy,
+            Some(ebx),
+            vec![ret_eax],
+        )],
+    );
+    let pcode = pcode_function(vec![call_block.clone(), use_block]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+
+    assert!(
+        builder.call_result_is_observed(&call_block, 0),
+        "terminator CALL whose successor copies EAX must observe the call result"
+    );
+}
+
+/// End-to-end: terminator CALL + successor save of return reg must bind the
+/// call result into the save (`reg = f()` / `saved = ret`), not the pre-call
+/// argument temp that still occupied the return register storage.
+#[test]
+fn terminator_call_successor_save_uses_call_result_not_precall_arg() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+    use crate::midend::render_mlil_preview;
+
+    let eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let ecx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x8, 4);
+    let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    apply_preview_cspec(&mut options);
+
+    // Block 0: arg = 3; call f;  (CALL terminator)
+    // Block 1: ebx = eax; return ebx
+    let mut call_block = block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(eax.clone()),
+                vec![constant(3)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Copy,
+                Some(ecx.clone()),
+                vec![eax.clone()],
+            ),
+            op(2, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+        ],
+    );
+    call_block.successors = vec![1];
+    let use_block = block_at(
+        0x1010,
+        1,
+        vec![
+            op(3, PcodeOpcode::Copy, Some(ebx.clone()), vec![eax.clone()]),
+            op(
+                4,
+                PcodeOpcode::Return,
+                None,
+                vec![constant(0), ebx],
+            ),
+        ],
+    );
+    let pcode = pcode_function(vec![call_block, use_block]);
+    let code = render_mlil_preview(&pcode, "caller", 0x1000, &options).expect("preview");
+
+    // Must not treat the pre-call arg (3 / ecx staging) as the saved return.
+    let discards_result = code.contains("sub_2000")
+        && !code.lines().any(|l| {
+            let t = l.trim();
+            // assignment form: name = sub_2000(...)
+            t.contains("= sub_2000") || t.contains("=sub_2000")
+        });
+    assert!(
+        !discards_result,
+        "call result must be bound, not discarded as bare expression:\n{code}"
+    );
+    assert!(
+        code.contains("sub_2000"),
+        "expected a call to sub_2000:\n{code}"
+    );
+    // The saved copy should not simply re-export the literal pre-call arg.
+    assert!(
+        !code.contains("return 3;") && !code.contains("return 3 "),
+        "must not return the pre-call argument constant as if it were the call result:\n{code}"
+    );
+}
+
+#[test]
+fn call_result_observation_ignores_successor_that_clobbers_return_first() {
+    let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);
+    let mut call_block = block_at(
+        0x1000,
+        0,
+        vec![op(1, PcodeOpcode::Call, None, vec![constant(0x2000)])],
+    );
+    call_block.successors = vec![1];
+    let use_block = block_at(
+        0x1010,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(ret_eax.clone()),
+                vec![constant(0)],
+            ),
+            op(3, PcodeOpcode::Copy, Some(ebx), vec![ret_eax]),
+        ],
+    );
+    let pcode = pcode_function(vec![call_block.clone(), use_block]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+
+    assert!(
+        !builder.call_result_is_observed(&call_block, 0),
+        "successor that clobbers EAX before any use must not observe the prior call"
+    );
+}
+
 #[test]
 fn same_block_register_binding_splits_consumed_live_intervals() {
     let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);

@@ -305,6 +305,13 @@ impl<'a> PreviewBuilder<'a> {
         if redefined {
             return false;
         }
+        // CALL is frequently a CFG block terminator. The classic save pattern
+        // (`call f; mov reg, eax`) then lives in a **successor** block. Without
+        // this scan, the call lowers as a bare expression and the successor
+        // read reuses the pre-call argument temp in the return register.
+        if self.call_result_observed_in_successors(block, &ret_regs) {
+            return true;
+        }
         // CallInd often has no p-code use of RAX before an epilogue Return
         // (return address on the stack). The ABI still leaves the primary
         // return register live-out — materialize `ret = (*(fp))(…)` so return
@@ -313,6 +320,49 @@ impl<'a> PreviewBuilder<'a> {
             block.ops.get(op_idx).map(|op| op.opcode),
             Some(PcodeOpcode::CallInd)
         )
+    }
+
+    /// True when a successor uses an ABI primary-return register (or alias)
+    /// as an input before redefining it. Used when CALL is a block terminator
+    /// (or the return value is otherwise live-out of the call block).
+    fn call_result_observed_in_successors(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        ret_regs: &[Varnode],
+    ) -> bool {
+        for &succ_idx in &block.successors {
+            if self.return_reg_used_before_redefinition_in_block(succ_idx as usize, ret_regs) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn return_reg_used_before_redefinition_in_block(
+        &self,
+        block_idx: usize,
+        ret_regs: &[Varnode],
+    ) -> bool {
+        let Some(succ) = self.pcode.blocks.get(block_idx) else {
+            return false;
+        };
+        for candidate in &succ.ops {
+            if candidate.inputs.iter().any(|input| {
+                ret_regs
+                    .iter()
+                    .any(|ret_reg| self.varnode_aliases_value(ret_reg, input))
+            }) {
+                return true;
+            }
+            if let Some(output) = candidate.output.as_ref()
+                && ret_regs
+                    .iter()
+                    .any(|ret_reg| self.varnode_aliases_value(ret_reg, output))
+            {
+                return false;
+            }
+        }
+        false
     }
 
     fn ensure_call_result_binding(&mut self, site: LoweringSite, op: &PcodeOp) -> String {
