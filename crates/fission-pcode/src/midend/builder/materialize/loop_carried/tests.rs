@@ -1148,17 +1148,10 @@ fn m32_popcount_loop_carries_add_and_shr() {
     }
 }
 
-/// Measured pattern: `sum_array` gcc-m32 -O2 (CI 29594922653 / local remeasure).
-///
-/// Assembly: `eax = base; L: sum += *[eax]; eax += 4; cmp eax, end; jnz L`
-/// Load address, pointer update, and exit compare must share one loop-carried
-/// cursor binding — not a frozen preheader copy for the load.
-///
-/// Currently **fails** under materialize: load=`uVar0` (preheader seed) while
-/// stride update=`eax` (hw name). Tracked in
-/// `docs/proposals/2026-07-17-sum-array-loop-cursor.md`.
+/// Pointer-scan loop: load address and constant-stride update must share one
+/// loop-carried cursor binding — not a frozen preheader copy for the load.
+/// Shape: `cursor = base; L: sum += *cursor; cursor += 4; cmp cursor, end; jnz L`.
 #[test]
-#[ignore = "sum_array m32-O2 loop cursor split: see docs/proposals/2026-07-17-sum-array-loop-cursor.md"]
 fn loop_pointer_scan_load_and_add_share_cursor_binding() {
     let eax = reg(0x0, 4); // EAX on x86_32
     let edx = reg(0x8, 4); // EDX accumulator
@@ -1301,10 +1294,11 @@ fn loop_pointer_scan_load_and_add_share_cursor_binding() {
         load_ptr.as_str(),
         update_name,
         "load pointer and stride update must share one loop-carried cursor \
-         (measured sum_array m32-O2 bug: frozen base vs unbound eax). \
+         (frozen preheader base vs unbound update register). \
          load={load_ptr:?} update={update_name:?} preheader_init={cursor_init:?} body={loop_body:?}"
     );
-    // Prefer reusing the preheader seed name when it is the same register identity.
+    // Cursor must be the preheader seed binding, or an explicit copy of it
+    // into the shared name — never an unbound hardware register alone.
     assert!(
         load_ptr == cursor_init
             || loop_body.iter().any(|s| matches!(
@@ -1315,6 +1309,7 @@ fn loop_pointer_scan_load_and_add_share_cursor_binding() {
                     ..
                 } if name.as_str() == load_ptr.as_str() && src.as_str() == cursor_init
             )),
-        "cursor should be seeded from preheader init {cursor_init:?}: {loop_body:?}"
+        "cursor must be seeded from preheader init {cursor_init:?}: \
+         load={load_ptr:?} body={loop_body:?}"
     );
 }

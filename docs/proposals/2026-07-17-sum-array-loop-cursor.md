@@ -1,7 +1,7 @@
 # Decompiler change proposal: loop pointer cursor (sum_array)
 
 **Date:** 2026-07-17  
-**Status:** investigating  
+**Status:** implemented (local remeasure + nextest green; official ranking pending)  
 **Gate:** ADR 0006 + Agents.md Core Rule 10 (measurement-only)
 
 ## 1. Row anchor (measured)

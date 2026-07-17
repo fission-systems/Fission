@@ -42,9 +42,22 @@ impl<'a> PreviewBuilder<'a> {
             if !Self::is_anonymous_temp_binding_name(&name) {
                 return Some(name);
             }
+            // Anonymous preheader seed: keep for non-primary-return GPRs so the
+            // stride update reuses the seeded binding. Primary-return full
+            // registers may still prefer stack-param identity below.
+            let may_prefer_stack = output.size >= 4
+                && self.register_namer().is_primary_return_register(output);
+            if !may_prefer_stack {
+                return Some(name);
+            }
         }
         if let Some(name) = self.prior_materialized_loop_carried_input_name(op, output, proof) {
             if !Self::is_anonymous_temp_binding_name(&name) {
+                return Some(name);
+            }
+            let may_prefer_stack = output.size >= 4
+                && self.register_namer().is_primary_return_register(output);
+            if !may_prefer_stack {
                 return Some(name);
             }
         }
@@ -81,6 +94,10 @@ impl<'a> PreviewBuilder<'a> {
         // Partial primary-return lanes (AL): prefer an existing wide same-family
         // binding (xor-zero on EAX as `uVar1`/`eax`) over bare `al`, so the
         // accumulator reuses the zero seed (`sum += *p` not bare `al += *p`).
+        //
+        // Bare hardware must lose to a preheader-materialized seed (including
+        // anonymous) so pointer-scan loops keep `seed = base; *seed; seed += n`
+        // rather than an unbound `reg += n` after the seed binding was dropped.
         if output.size < 4 && self.register_namer().is_primary_return_register(output) {
             if let Some(wide) =
                 self.prior_materialized_local_wide_alias_name(block_idx, op_idx, output)
@@ -99,9 +116,35 @@ impl<'a> PreviewBuilder<'a> {
             (Some(stack), Some(hw)) if stack != hw && prefer_stack_over_hw => {
                 return Some(stack);
             }
-            (Some(_), Some(hw)) if !prefer_stack_over_hw => return Some(hw),
+            (Some(_), Some(hw)) if !prefer_stack_over_hw => {
+                // Prefer preheader seed (incl. anonymous) over bare hw.
+                if let Some(name) =
+                    self.prior_materialized_loop_carried_output_name(output, proof)
+                {
+                    return Some(name);
+                }
+                if let Some(name) =
+                    self.prior_materialized_loop_carried_input_name(op, output, proof)
+                {
+                    return Some(name);
+                }
+                return Some(hw);
+            }
             (Some(stack), _) => return Some(stack),
-            (None, Some(hw)) => return Some(hw),
+            (None, Some(hw)) => {
+                // Same: seeded binding beats unbound hardware identity.
+                if let Some(name) =
+                    self.prior_materialized_loop_carried_output_name(output, proof)
+                {
+                    return Some(name);
+                }
+                if let Some(name) =
+                    self.prior_materialized_loop_carried_input_name(op, output, proof)
+                {
+                    return Some(name);
+                }
+                return Some(hw);
+            }
             (None, None) => {}
         }
         // Last resort: keep anonymous merge/prior temp if that is all we have.
@@ -153,6 +196,116 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         best.map(|(_, name)| name)
+    }
+
+    /// When **reading** a register inside a natural loop that also **updates**
+    /// that register on a backedge (pointer-scan / induction), use the same
+    /// binding name the update will use.
+    ///
+    /// Without this, LOAD often resolves the preheader seed (`uVar = base`)
+    /// while INT_ADD prefers a bare hardware register name, producing a frozen
+    /// load base plus a distinct unbound cursor update (`*uVar` / `reg += n`).
+    pub(in crate::midend::builder) fn loop_body_carried_register_read_name(
+        &mut self,
+        vn: &Varnode,
+    ) -> Option<String> {
+        if vn.is_constant || !is_register_space_id(vn.space_id) {
+            return None;
+        }
+        if !Self::is_loop_carried_register_update_candidate(vn) {
+            return None;
+        }
+        let site = self.current_lowering_site?;
+        let site_block = self.pcode.blocks.get(site.block_idx)?;
+
+        // Prefer the name of a loop-carried self-update when we are reading that
+        // register as an input of the update op itself (eax = eax + 4).
+        // current_lowering_site already matches the update definition site.
+        if let Some(op) = site_block.ops.get(site.op_idx)
+            && let Some(out) = op.output.as_ref()
+            && (self.varnode_aliases_value(out, vn)
+                || VarnodeKey::from(out) == VarnodeKey::from(vn))
+            && self
+                .prove_loop_carried_register_update(site.block_idx, site.op_idx, out)
+                .is_some()
+        {
+            if let Some(name) =
+                self.loop_carried_output_binding_name(site_block, site.op_idx, op, out)
+            {
+                return Some(name);
+            }
+        }
+
+        // Otherwise, if some op in the same loop body updates `vn`, use that
+        // update's binding for this read (LOAD [eax] before ADD eax, 4).
+        // Must temporarily set current_lowering_site to the update op — binding
+        // helpers debug_assert that site matches the carried definition.
+        let loop_body_idxs: Vec<usize> = self
+            .loop_bodies
+            .iter()
+            .filter(|lb| lb.body.contains(&site.block_idx))
+            .min_by_key(|lb| lb.body.len())
+            .map(|lb| lb.body.iter().copied().collect())
+            .unwrap_or_default();
+        if loop_body_idxs.is_empty() {
+            return None;
+        }
+
+        for &bidx in &loop_body_idxs {
+            let op_count = self.pcode.blocks.get(bidx).map(|b| b.ops.len()).unwrap_or(0);
+            for op_idx in 0..op_count {
+                if bidx == site.block_idx && op_idx == site.op_idx {
+                    continue;
+                }
+                let (out_key, has_out) = {
+                    let block = match self.pcode.blocks.get(bidx) {
+                        Some(b) => b,
+                        None => continue,
+                    };
+                    let op = match block.ops.get(op_idx) {
+                        Some(o) => o,
+                        None => continue,
+                    };
+                    match op.output.as_ref() {
+                        Some(out) => (
+                            VarnodeKey::from(out),
+                            self.varnode_aliases_value(out, vn)
+                                || VarnodeKey::from(out) == VarnodeKey::from(vn),
+                        ),
+                        None => continue,
+                    }
+                };
+                if !has_out {
+                    continue;
+                }
+                // Re-borrow for prove / name selection under the update's site.
+                let name = self.with_lowering_site(
+                    crate::midend::builder::LoweringSite {
+                        block_idx: bidx,
+                        op_idx,
+                    },
+                    |this| {
+                        let block = this.pcode.blocks.get(bidx)?;
+                        let op = block.ops.get(op_idx)?;
+                        let out = op.output.as_ref()?;
+                        if VarnodeKey::from(out) != out_key {
+                            return None;
+                        }
+                        if this
+                            .prove_loop_carried_register_update(bidx, op_idx, out)
+                            .is_none()
+                        {
+                            return None;
+                        }
+                        this.loop_carried_output_binding_name(block, op_idx, op, out)
+                    },
+                );
+                if let Some(name) = name {
+                    return Some(name);
+                }
+            }
+        }
+        None
     }
 
     pub(super) fn loop_carried_passthrough_output_binding_name(

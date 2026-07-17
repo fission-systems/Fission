@@ -1884,6 +1884,13 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
             return Ok(HirExpr::Var(name));
         }
+        // Loop body: LOAD/use of a loop-carried register must share the binding
+        // that the loop's self-update (e.g. INT_ADD stride) will use — not a
+        // frozen preheader snapshot vs a distinct bare hardware name.
+        if let Some(name) = self.loop_body_carried_register_read_name(vn) {
+            let name = self.ensure_live_register_binding(&name, vn.size);
+            return Ok(HirExpr::Var(name));
+        }
         if let Some(expr) = self.loop_exit_materialized_register_binding(vn) {
             return Ok(expr);
         }
