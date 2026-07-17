@@ -6,15 +6,38 @@
 //! - Preserve evaluation count/order for calls and loads (no double-eval inlines).
 //! - Structural invariants only — no function/address/binary special cases.
 //! - Semantic recovery stays in normalize/structuring.
+//! - Post-pass structural firewall ([`invariants`]): on violation, restore pre-polish tree.
+
+mod invariants;
 
 use super::{
     HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding,
     NirBindingOrigin, NirType,
 };
+use invariants::check_hir_presentation_invariants;
 use std::collections::{HashMap, HashSet};
 
 /// Apply HIR-facing presentation polish in place.
+///
+/// On structural invariant failure (use-without-def, call/load inflation, empty
+/// if shells), restores the pre-polish tree so broken presentation never ships.
 pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
+    let before = func.clone();
+    apply_hir_presentation_passes(func);
+    if let Err(_violations) = check_hir_presentation_invariants(&before, func) {
+        // Prefer mechanical NIR-shaped tree over observationally broken HIR polish.
+        *func = before;
+        #[cfg(debug_assertions)]
+        {
+            // Surface in debug builds without aborting release decomp paths.
+            eprintln!(
+                "hir presentation invariants failed; restored pre-polish tree: {_violations:?}"
+            );
+        }
+    }
+}
+
+fn apply_hir_presentation_passes(func: &mut HirFunction) {
     for _ in 0..16 {
         let mut changed = false;
         changed |= flatten_redundant_blocks(&mut func.body);
@@ -41,7 +64,7 @@ pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
         changed |= strip_empty_else_arms(&mut func.body);
         // `if (c) {} else { body }` → `if (!c) { body }`.
         changed |= fold_empty_then_invert_else(&mut func.body);
-        // Prefer `x op k` over `k op x` in comparisons (and peel `!(x==0)` etc.).
+        // Prefer `x op k` over `k op x` in comparisons (and peel `!(eq/ne)` etc.).
         changed |= canonicalize_presentation_conditions(func);
         // `x = c ? a : b; return ~c ? x : a` (null-check join) → `return x` / fold.
         changed |= fold_redundant_select_return_join(&mut func.body);
@@ -2813,21 +2836,30 @@ fn remove_labels_not_in(stmts: &mut Vec<HirStmt>, keep: &HashSet<String>) -> boo
 
 fn eliminate_pure_dead_assigns(func: &mut HirFunction) -> bool {
     let formal: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
-    eliminate_pure_dead_in_stmts(&mut func.body, &formal)
+    // Whole-function use counts only. Nested subtree-local counts incorrectly
+    // treat `if { x = e; } return x;` as dead `x` (use lives outside the if body).
+    let mut any = false;
+    for _ in 0..16 {
+        let mut defs = HashMap::new();
+        count_defs_in_stmts(&func.body, &mut defs);
+        let use_counts: HashMap<String, usize> = defs
+            .keys()
+            .map(|n| (n.clone(), count_uses_in_stmts(&func.body, n)))
+            .collect();
+        let changed = eliminate_pure_dead_in_stmts(&mut func.body, &formal, &use_counts);
+        if !changed {
+            break;
+        }
+        any = true;
+    }
+    any
 }
 
-fn eliminate_pure_dead_in_stmts(stmts: &mut Vec<HirStmt>, formal: &HashSet<&str>) -> bool {
-    // Recompute uses on this subtree + siblings via whole list.
-    let names: Vec<String> = {
-        let mut defs = HashMap::new();
-        count_defs_in_stmts(stmts, &mut defs);
-        defs.into_keys().collect()
-    };
-    let use_counts: HashMap<String, usize> = names
-        .iter()
-        .map(|n| (n.clone(), count_uses_in_stmts(stmts, n)))
-        .collect();
-
+fn eliminate_pure_dead_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    formal: &HashSet<&str>,
+    use_counts: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     let before = stmts.len();
     stmts.retain(|stmt| match stmt {
@@ -2851,36 +2883,36 @@ fn eliminate_pure_dead_in_stmts(stmts: &mut Vec<HirStmt>, formal: &HashSet<&str>
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                changed |= eliminate_pure_dead_in_stmts(body, formal);
+                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= eliminate_pure_dead_in_stmts(then_body, formal);
-                changed |= eliminate_pure_dead_in_stmts(else_body, formal);
+                changed |= eliminate_pure_dead_in_stmts(then_body, formal, use_counts);
+                changed |= eliminate_pure_dead_in_stmts(else_body, formal, use_counts);
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
                     if let HirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= eliminate_pure_dead_in_stmts(b, formal);
+                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts);
                     }
                 }
                 if let Some(upd) = update {
                     if let HirStmt::Block(b) = upd.as_mut() {
-                        changed |= eliminate_pure_dead_in_stmts(b, formal);
+                        changed |= eliminate_pure_dead_in_stmts(b, formal, use_counts);
                     }
                 }
-                changed |= eliminate_pure_dead_in_stmts(body, formal);
+                changed |= eliminate_pure_dead_in_stmts(body, formal, use_counts);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= eliminate_pure_dead_in_stmts(&mut case.body, formal);
+                    changed |= eliminate_pure_dead_in_stmts(&mut case.body, formal, use_counts);
                 }
-                changed |= eliminate_pure_dead_in_stmts(default, formal);
+                changed |= eliminate_pure_dead_in_stmts(default, formal, use_counts);
             }
             _ => {}
         }
@@ -4077,6 +4109,113 @@ mod tests {
         assert!(
             !code.contains("if (") && code.contains('?') && code.contains("return"),
             "expected if-return + fallthrough return → ternary:\n{code}"
+        );
+    }
+
+    /// Regression: pure assigns inside if/else used after the if must not be
+    /// deleted by nested dead-elim (whole-function use counts required).
+    #[test]
+    fn hir_presentation_keeps_branch_defs_used_after_if() {
+        let mut func = HirFunction {
+            name: "branch_join".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SGt,
+                        lhs: Box::new(HirExpr::Var("param_1".into())),
+                        rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Const(1, int_ty(32, true)),
+                    }],
+                    else_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Const(-1, int_ty(32, true)),
+                    }],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        // Must return a concrete value, not an undefined local.
+        assert!(
+            code.contains("return")
+                && (code.contains('1') || code.contains('-') || code.contains('?')),
+            "branch join value must survive presentation:\n{code}"
+        );
+        assert!(
+            !code.contains("return x") && !code.contains("return xVar"),
+            "must not return an undefined join temp:\n{code}"
+        );
+    }
+
+    /// signum-like: positive branch + else select must keep a defined return.
+    #[test]
+    fn hir_presentation_signum_like_keeps_defined_return() {
+        let mut func = HirFunction {
+            name: "signum_like".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("xVar9"), local("sf")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    // NIR-ish: `0 < param_1` (const-left; canonicalize may commute).
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLt,
+                        lhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                        rhs: Box::new(HirExpr::Var("param_1".into())),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("xVar9".into()),
+                        rhs: HirExpr::Const(1, int_ty(32, true)),
+                    }],
+                    else_body: vec![
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("sf".into()),
+                            rhs: HirExpr::Binary {
+                                op: HirBinaryOp::SLt,
+                                lhs: Box::new(HirExpr::Var("param_1".into())),
+                                rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                                ty: NirType::Bool,
+                            },
+                        },
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("xVar9".into()),
+                            rhs: HirExpr::Select {
+                                cond: Box::new(HirExpr::Unary {
+                                    op: HirUnaryOp::Not,
+                                    expr: Box::new(HirExpr::Var("sf".into())),
+                                    ty: NirType::Bool,
+                                }),
+                                then_expr: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                                else_expr: Box::new(HirExpr::Const(-1, int_ty(32, true))),
+                                ty: int_ty(32, true),
+                            },
+                        },
+                    ],
+                },
+                HirStmt::Return(Some(HirExpr::Var("xVar9".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            code.contains("return")
+                && (code.contains('1') || code.contains('0') || code.contains('-')),
+            "signum-like must keep defined return values:\n{code}"
+        );
+        assert!(
+            !code.contains("return xVar9") && !code.contains("return xVar"),
+            "must not return undefined xVar after presentation:\n{code}"
         );
     }
 

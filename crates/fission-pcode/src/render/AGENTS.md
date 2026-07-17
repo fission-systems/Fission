@@ -56,6 +56,8 @@ nir (types / builder / normalize / structuring / labels)
 4. Preserve single evaluation of calls/loads.
 5. Focused tests under `presentation` / `layered` / `globals` for every new transform.
 6. Real-binary verification with `fission_cli decomp --layer both` when motivated by a PE row.
+7. Dead pure-assign elim must use **whole-function** use counts (never subtree-local).
+8. Rely on `presentation/invariants.rs` post-pass firewall; on violation polish is rolled back.
 
 ## Rules (don’t)
 
@@ -64,6 +66,7 @@ nir (types / builder / normalize / structuring / labels)
 3. No required widening-cast peel.
 4. No semantic oracle / primary benchmark `code` retarget to HIR.
 5. No `nir::normalize` / `nir::structuring` imports from render.
+6. No nested dead-elim that drops branch defs still live after the if/loop.
 
 ## Validation
 
@@ -72,3 +75,6 @@ scripts/check/owner_boundaries.sh
 cargo nextest run -p fission-pcode -- layered globals presentation
 cargo nextest run -p fission-pcode
 ```
+
+Structural firewall codes: `use_without_def`, `call_count_increased`,
+`load_count_increased`, `empty_if_shell` (see ADR 0011 §7).

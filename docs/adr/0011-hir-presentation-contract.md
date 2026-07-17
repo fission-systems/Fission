@@ -101,10 +101,33 @@ For HIR-only production changes:
    and HIR in the PR—not an expected mockup alone.
 4. Confirm NIR string / `code_nir` still carries mechanical form the change did
    not intend to alter.
+5. Structural presentation firewall (see §7) must stay green: new passes that
+   break use-def / call-count checks must either fix the pass or be rejected.
 
 Full ADR 0006 proposal is **not** required for pure presentation edits. If a
 change must alter normalize/structuring to “make HIR nice,” it is a semantic
 change and ADR 0006 applies.
+
+### 7. Structural presentation firewall (runtime)
+
+After the fixed-point polish, `apply_hir_presentation` runs a structural
+checker (`render/presentation/invariants.rs`) against the pre-polish tree:
+
+| Check | Meaning |
+|-------|---------|
+| `use_without_def` | Non-param local used but never assigned (classic over-DCE) |
+| `call_count_increased` | Real call sites increased (multi-eval risk) |
+| `load_count_increased` | Load sites increased (multi-eval risk) |
+| `empty_if_shell` | `if` with effectively empty then **and** else |
+
+On any violation, presentation **restores the pre-polish tree** (HIR falls back
+to the mechanical form) rather than shipping a broken polish. This is the HIR
+analogue of NIR’s crate-level regression net: not a semantic oracle, but a
+hard stop on observationally invalid rewrites.
+
+Dead pure-assign elimination must use **whole-function** use counts. Nested
+subtree-local use maps are forbidden (they treat `if { x = e; } return x;` as
+dead `x`).
 
 ### 6. Metrics
 
