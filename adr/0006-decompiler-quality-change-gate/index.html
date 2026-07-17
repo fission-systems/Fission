@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1014,15 +1014,19 @@ dashboard cell while weakening the decompiler architecture.</p>
 normalize, structuring, and type/data recovery. UI, printer-only, benchmark, and
 dashboard changes can report quality, but they do not count as semantic fixes.
 Readability-only HIR presentation is governed separately by
-<a href="../0011-hir-presentation-contract/">ADR 0011</a> (lighter gate; no oracle swap).</p>
+<a href="../0011-hir-presentation-contract/">ADR 0011</a> (clone-only; no oracle swap) but
+<strong>still requires measured evidence</strong> for any quality claim (repo root Agents.md
+Core Rule 10: measurement-only). Synthetic fixtures alone are not a quality claim.</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
-<p>Every semantic decompiler-quality change must pass a pre-implementation proposal
-gate before production code is added. Use
+<p>Every decompiler-quality change (semantic <strong>or</strong> claimed readability) must pass
+a pre-implementation proposal gate before production code is added as a quality
+fix. Use
 <a href="../../templates/DECOMPILER_CHANGE_PROPOSAL/"><code>docs/templates/DECOMPILER_CHANGE_PROPOSAL.md</code></a>
 and record the chain:</p>
 <ol>
-<li><strong>Row anchor:</strong> the binary, function, address, current output, semantic case
-   count, and failure category that motivated the work.</li>
+<li><strong>Row anchor (measured):</strong> the binary, function, address, current output,
+   semantic case count, and failure category that motivated the work — from a
+   real decomp/benchmark run, not a hand-built IR fixture alone.</li>
 <li><strong>Owner proof:</strong> evidence that the bug belongs to SLEIGH/raw p-code,
    builder/materialize, normalize, structuring, type/data recovery, printer, or
    benchmark/automation.</li>
@@ -1129,7 +1133,7 @@ stable.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
