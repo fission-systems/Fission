@@ -56,7 +56,7 @@ main push ──► L0 Fast Gate ──► L1 Heavy (async)
 
 1. Land changes on `main`; wait for **CI Fast Gate** and **CI Heavy Validation**
    green on that commit.
-2. Actions → **Release Tag (CI green)** → set `tag` (`v0.1.3`) and `ref` (`main` or SHA).
+2. Actions → **Release Tag (CI green)** → set `tag` (`v0.1.4`) and `ref` (`main` or SHA).
 3. Workflow verifies L0+L1, runs L2, pushes the tag.
 4. **CD Release** builds Linux/macOS/Windows assets automatically.
 5. Edit GitHub Release notes; complete remaining checklist in

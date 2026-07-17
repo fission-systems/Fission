@@ -72,5 +72,6 @@ nav:
     - Versioning: VERSIONING.md
     - Release: RELEASE.md
   - Release Notes:
+    - Fission 0.1.4: changelog/v0.1.4.md
     - Fission 0.1.3: changelog/v0.1.3.md
     - Fission 0.1.2: changelog/v0.1.2.md
