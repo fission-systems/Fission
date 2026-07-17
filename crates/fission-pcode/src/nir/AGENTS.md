@@ -37,7 +37,7 @@ nir/
 | Telemetry fields | `types.rs` | `NirBuildStats` is canonical |
 | PreviewBuilder state | `mod.rs`, `builder/mod.rs` | Keep builder state/projection aligned |
 | Structuring rules | `structuring/` | Read child AGENT there first |
-| Output formatting | `printer.rs` | Printer is downstream of semantics |
+| Output formatting | `render/` (`printer.rs`, `hir_presentation.rs`) | Printer + HIR presentation; see `render/AGENTS.md`, [ADR 0011](../../../../docs/adr/0011-hir-presentation-contract.md) |
 | Synthetic regression tests | `tests/` | Prefer adding targeted NIR tests here |
 | Normalize pass layout | `normalize/AGENTS.md` | Directory map for `arith/`, `pipeline/`, etc. |
 

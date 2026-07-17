@@ -1,8 +1,11 @@
 //! HIR presentation pass — readability-only tree polish before HIR print.
 //!
-//! Must not change control-flow structure or expression meaning beyond
-//! presentation (alias/temp folding for printing, unused local drop, sugar).
-//! Semantic recovery stays in normalize/; NIR print uses the pre-presentation tree.
+//! Contract: [`docs/adr/0011-hir-presentation-contract.md`] and `render/AGENTS.md`.
+//!
+//! - Clone-only: NIR print uses the pre-presentation tree.
+//! - Preserve evaluation count/order for calls and loads (no double-eval inlines).
+//! - Structural invariants only — no function/address/binary special cases.
+//! - Semantic recovery stays in normalize/structuring.
 
 use super::super::*;
 use std::collections::{HashMap, HashSet};
@@ -3035,6 +3038,210 @@ mod tests {
         assert!(
             layered.hir.contains("param_1") && layered.hir.contains("if"),
             "HIR should be structured on param_1:\n{}",
+            layered.hir
+        );
+    }
+
+    fn count_calls_in_stmts(stmts: &[HirStmt]) -> usize {
+        stmts.iter().map(count_calls_in_stmt).sum()
+    }
+
+    fn count_calls_in_stmt(stmt: &HirStmt) -> usize {
+        match stmt {
+            HirStmt::Assign { rhs, .. } => count_calls_in_expr(rhs),
+            HirStmt::Expr(e) | HirStmt::Return(Some(e)) => count_calls_in_expr(e),
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. } => count_calls_in_stmts(b),
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                count_calls_in_expr(cond)
+                    + count_calls_in_stmts(then_body)
+                    + count_calls_in_stmts(else_body)
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                init.as_ref().map_or(0, |s| count_calls_in_stmt(s))
+                    + cond.as_ref().map_or(0, |e| count_calls_in_expr(e))
+                    + update.as_ref().map_or(0, |s| count_calls_in_stmt(s))
+                    + count_calls_in_stmts(body)
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                count_calls_in_expr(expr)
+                    + cases
+                        .iter()
+                        .map(|c| count_calls_in_stmts(&c.body))
+                        .sum::<usize>()
+                    + count_calls_in_stmts(default)
+            }
+            _ => 0,
+        }
+    }
+
+    fn count_calls_in_expr(expr: &HirExpr) -> usize {
+        match expr {
+            HirExpr::Call { args, .. } => 1 + args.iter().map(count_calls_in_expr).sum::<usize>(),
+            HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => count_calls_in_expr(expr),
+            HirExpr::Binary { lhs, rhs, .. } => count_calls_in_expr(lhs) + count_calls_in_expr(rhs),
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                count_calls_in_expr(cond)
+                    + count_calls_in_expr(then_expr)
+                    + count_calls_in_expr(else_expr)
+            }
+            HirExpr::Load { ptr, .. }
+            | HirExpr::PtrOffset { base: ptr, .. }
+            | HirExpr::FieldAccess { base: ptr, .. }
+            | HirExpr::AggregateCopy { src: ptr, .. } => count_calls_in_expr(ptr),
+            HirExpr::Index { base, index, .. } => {
+                count_calls_in_expr(base) + count_calls_in_expr(index)
+            }
+            _ => 0,
+        }
+    }
+
+    /// ADR 0011: multi-use call result must not be inlined into multiple call sites.
+    #[test]
+    fn hir_presentation_does_not_duplicate_multi_use_call() {
+        let mut func = HirFunction {
+            name: "multi_use_call".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x"), local("y")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Call {
+                        target: "side_effect".into(),
+                        args: vec![HirExpr::Var("param_1".into())],
+                        ty: int_ty(32, true),
+                    },
+                },
+                // Second use of x — must keep materialization (one call only).
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("y".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("x".into())),
+                        rhs: Box::new(HirExpr::Const(1, int_ty(32, true))),
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("x".into())),
+                    rhs: Box::new(HirExpr::Var("y".into())),
+                    ty: int_ty(32, true),
+                })),
+            ],
+            ..Default::default()
+        };
+        let before = count_calls_in_stmts(&func.body);
+        assert_eq!(before, 1, "fixture must start with one call");
+        apply_hir_presentation(&mut func);
+        let after = count_calls_in_stmts(&func.body);
+        assert_eq!(
+            after, 1,
+            "presentation must not re-execute call; body={:?}",
+            func.body
+        );
+        let code = crate::nir::print_hir_function(&func);
+        assert_eq!(
+            code.matches("side_effect").count(),
+            1,
+            "printed HIR must mention call once:\n{code}"
+        );
+    }
+
+    /// ADR 0011: single-eval collapse of call into return is OK (still one call).
+    #[test]
+    fn hir_presentation_collapses_single_use_call_return_without_duplicating() {
+        let mut func = HirFunction {
+            name: "once_call".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Call {
+                        target: "once".into(),
+                        args: vec![HirExpr::Var("param_1".into())],
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert_eq!(count_calls_in_stmts(&func.body), 1);
+        let code = crate::nir::print_hir_function(&func);
+        assert!(
+            code.contains("return") && code.matches("once(").count() == 1,
+            "single-use call may fold into return once:\n{code}"
+        );
+    }
+
+    /// ADR 0011: layered render must not mutate the input tree; NIR keeps homes.
+    #[test]
+    fn layered_render_does_not_mutate_input_and_keeps_nir_mechanical() {
+        let func = HirFunction {
+            name: "add_like".into(),
+            params: vec![param("param_1"), param("param_2")],
+            locals: vec![local("param_10"), local("param_18"), local("uVar6")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_10".into()),
+                    rhs: HirExpr::Var("param_1".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_18".into()),
+                    rhs: HirExpr::Var("param_2".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("uVar6".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("param_10".into())),
+                        rhs: Box::new(HirExpr::Var("param_18".into())),
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("uVar6".into()))),
+            ],
+            ..Default::default()
+        };
+        let before = func.clone();
+        let layered = render_layered_pseudocode(&func, &MlilPreviewOptions::default());
+        assert_eq!(
+            func, before,
+            "render_layered_pseudocode must not mutate the input HirFunction"
+        );
+        assert!(
+            layered.nir.contains("param_10") && layered.nir.contains("uVar6"),
+            "NIR must stay mechanical:\n{}",
+            layered.nir
+        );
+        assert!(
+            !layered.hir.contains("param_10") && layered.hir.contains('+'),
+            "HIR may fold aliases:\n{}",
             layered.hir
         );
     }

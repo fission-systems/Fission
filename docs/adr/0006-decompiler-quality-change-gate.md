@@ -14,6 +14,8 @@ dashboard cell while weakening the decompiler architecture.
 The first guarded scope is the core semantic layer: builder, materialize,
 normalize, structuring, and type/data recovery. UI, printer-only, benchmark, and
 dashboard changes can report quality, but they do not count as semantic fixes.
+Readability-only HIR presentation is governed separately by
+[ADR 0011](0011-hir-presentation-contract.md) (lighter gate; no oracle swap).
 
 ## Decision
 
