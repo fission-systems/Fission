@@ -546,3 +546,6 @@ pub fn find_earliest_owned_join_label_with_diag(
         None
     }
 
+#[cfg(test)]
+#[path = "suffix_window_tests.rs"]
+mod suffix_window_tests;

@@ -1,3 +1,9 @@
+//! Guarded-tail promotion residual: telemetry mark_* and trace helpers.
+//!
+//! Free promote/execute bodies live in `fission-midend-structuring::guarded_tail`.
+//! Methods here only bump `StructuringTelemetry` fields or read PreviewBuilder
+//! diagnostic env (legitimate host residual under ADR 0012).
+
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {

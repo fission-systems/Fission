@@ -217,6 +217,7 @@ pub trait StructuringHost {
     fn bump_switch_fallthrough_detected(&mut self, count: usize);
     fn bump_switch_emit_ready_failed(&mut self);
     fn bump_proof_payload_direct_emit(&mut self);
+    fn bump_sese_child_localized_linear(&mut self);
 
     // ── Caches ─────────────────────────────────────────────────────────────
     /// Drop any cached terminator lowering for `block_idx` after CFG mutation.

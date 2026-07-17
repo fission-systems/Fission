@@ -19,15 +19,20 @@ Free-function owners live in `fission-midend-structuring` and take
 | LinearExit / LoweredTerminator / budget / outcomes | `fission-midend-structuring::linear_types` | re-exported via support |
 | Region linear recovery | `fission-midend-structuring::linear_recovery` | free fns |
 | Linear body (`lower_linear_body*`, exits, cond tails) | `fission-midend-structuring::linear_body` | free fns; cache via host |
-| Multiblock linear fallback | `fission-midend-structuring::linear_multiblock` | free; p-code trivial-op opcode tables residual on host |
+| Multiblock linear fallback | `fission-midend-structuring::linear_multiblock` | free |
+| P-code trivial opcode tables | residual on `PreviewBuilder` | `PcodeOpcode`/`Varnode` host residual |
 | Guarded-tail pure HIR rewrites | `fission-midend-structuring::guarded_tail_pure` | free fns |
 | Guarded-tail types + promote entry | `fission-midend-structuring::guarded_tail` | free promote/discover |
 | Guarded-tail pure HIR (`pure_hir`) | `fission-midend-structuring::guarded_tail::pure_hir` | free pure helpers |
 | Guarded-tail canonicalize/execute bodies | `fission-midend-structuring::guarded_tail::bodies` | free fns + residual host hooks |
+| Guarded-tail telemetry mark_* | residual on `PreviewBuilder` | `StructuringTelemetry` bumps only |
 | Driver admission / region scaffold pure helpers | `fission-midend-structuring::driver_pure` | free fns |
 | Collapse-rule dispatch (SESE tier-1) | `fission-midend-structuring::sese_driver` | free `apply_collapse_rule` |
-| SESE collapse loop + final scan | `fission-midend-structuring::sese_driver` | free `build_sese_region_body` / `reconstruct_sese_final_body` |
-| Guarded-tail suffix pure + with-diag + callee pure | `fission-midend-structuring::guarded_tail::{pure_hir,suffix_window}` | free; host residual only supplies call-effect / binary facts |
+| SESE collapse loop + final scan | `fission-midend-structuring::sese_driver` | free `build_sese_region_body` |
+| SESE discovery / tree structure | `fission-midend-structuring::sese_discovery` | free `structure_cfg_via_sese` |
+| Orphan-goto repair | `fission-midend-structuring::orphan_repair` | free `try_repair_orphan_gotos` |
+| Guarded-tail suffix pure + with-diag + callee pure | `fission-midend-structuring::guarded_tail::{pure_hir,suffix_window}` | free; host residual supplies call-effect / binary facts |
+| Host data adapters | `host_impl.rs` | binary / type_context / inventory bridges only |
 
 Prefer new work as `fn try_lower_*(host: &mut impl StructuringHost, ...)`.
 

@@ -468,6 +468,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn bump_proof_payload_direct_emit(&mut self) {
         self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
     }
+    fn bump_sese_child_localized_linear(&mut self) {
+        self.telemetry.structuring.sese_child_localized_linear_count += 1;
+    }
     fn invalidate_terminator_cache(&mut self, block_idx: usize) {
         self.terminator_cache.remove(&block_idx);
     }
@@ -768,6 +771,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
             self, stmt_idx, stmt,
         )
     }
+
+    // ── Host residual data adapters (binary / type_context / inventory) ──
+    // Pure logic lives in midend free-fns; these only read PreviewBuilder state.
 
     fn call_effect_summary_for_target(
         &self,

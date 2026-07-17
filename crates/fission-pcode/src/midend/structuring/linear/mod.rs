@@ -1,5 +1,9 @@
-//! Linear body thin wrappers + p-code trivial-op residual.
-//! Multiblock fallback / core linear body: `fission-midend-structuring`.
+//! Linear body thin wrappers + **p-code opcode residual** (ADR 0012).
+//!
+//! Free owners live in `fission-midend-structuring::{linear_body,linear_multiblock}`.
+//! Residual on `PreviewBuilder` is intentionally limited to SLEIGH/p-code facts:
+//! `is_trivial_tail_op` / `is_trivial_forwarding_op` / `varnodes_overlap` use
+//! `PcodeOpcode` + `Varnode` and cannot move without a pcode dependency in midend.
 
 use super::*;
 
