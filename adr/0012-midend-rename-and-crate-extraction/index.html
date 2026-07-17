@@ -1123,8 +1123,8 @@ names should track the midend vocabulary.</p>
 <tr>
 <td>D</td>
 <td><code>fission-midend-core</code> + move</td>
-<td>Shared substrate facade scaffolded; physical <code>ir</code>/<code>action_pipeline</code>/<code>wave_stats</code> move still future</td>
-<td><strong>Scaffolded</strong></td>
+<td><strong>Physical move complete</strong> for <code>ir/</code>, <code>action_pipeline/</code>, <code>wave_stats</code>, <code>labels</code>, and <code>NirBuildStats</code> merge helpers. <code>fission-pcode</code> re-exports them and depends on core (dependency inverted).</td>
+<td><strong>In progress</strong> (substrate done; normalize/structuring source still in pcode)</td>
 </tr>
 <tr>
 <td>E</td>
@@ -1159,12 +1159,15 @@ before crates).</p>
 <li>~~Migrate <code>fission-decompiler</code> / <code>fission-static</code> imports to <code>midend</code>.~~ <strong>Done</strong></li>
 <li>~~Remove <code>pub use midend as nir</code> when greps are clean.~~ <strong>Done</strong> (Phase E)</li>
 <li>~~Scaffold <code>fission-midend-core</code> and route facade IR types through it.~~ <strong>Done</strong></li>
-<li><strong>Physical midend-core move:</strong> lift <code>ir/</code>, <code>action_pipeline/</code>, and
-   <code>wave_stats</code> out of <code>fission-pcode</code> into <code>fission-midend-core</code> (break
-   pcode→core cycle by inverting ownership; keep builder/vsa in pcode or
-   co-extract as needed).</li>
-<li>Promote normalize/structuring facades from re-export to owned source trees;
-   then have decompiler/static depend on facades for owner entrypoints.</li>
+<li>~~Physical midend-core move for <code>ir/</code>, <code>action_pipeline/</code>, <code>wave_stats</code>, labels, stats merge.~~ <strong>Done</strong></li>
+<li>P-code adapters: <code>seed_nir_render_options</code>, <code>nir_admission_facts_from_pcode</code>,
+     <code>indirect_control_classification_from_pcode</code> remain in <code>fission-pcode</code>.</li>
+<li>Cspec helpers that formerly were inherent methods on <code>NirRenderOptions</code> are free functions.</li>
+<li><strong>Normalize/structuring source move:</strong> blocked on decoupling <code>support</code> /
+   <code>var_rename</code> / <code>vsa</code> (normalize) and <code>PreviewBuilder</code> method blocks
+   (structuring). Facades + decompiler/static deps on core/facades established.</li>
+<li>After owner source moves, drop deep re-exports from <code>fission-pcode</code> where
+   callers have migrated to facade crates.</li>
 </ol>
 
 
