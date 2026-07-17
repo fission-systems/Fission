@@ -9,14 +9,20 @@ use std::collections::{HashMap, HashSet};
 
 /// Apply HIR-facing presentation polish in place.
 pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
-    for _ in 0..8 {
+    for _ in 0..12 {
         let mut changed = false;
         changed |= flatten_redundant_blocks(&mut func.body);
         changed |= propagate_pure_var_aliases(func);
         changed |= fold_self_update_after_seed(&mut func.body);
+        // Shared `goto L; ... L: return e` → direct returns (enables if-else recovery).
+        changed |= expand_goto_shared_returns(&mut func.body);
         changed |= collapse_trivial_assign_returns(&mut func.body);
+        // O0-style `if (c) goto L; body; L:` → structured if/else for readability.
+        changed |= recover_if_else_from_gotos(&mut func.body);
+        changed |= prune_unreachable_after_total_return(&mut func.body);
         changed |= inline_single_use_pure_assigns(func);
         changed |= eliminate_pure_dead_assigns(func);
+        changed |= remove_unreferenced_labels(&mut func.body);
         if !changed {
             break;
         }
@@ -638,26 +644,39 @@ fn fold_self_update_after_seed(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-/// Collapse `x = pure; return x` → `return pure`.
+/// Collapse `x = pure; return x` → `return pure` (labels between are skipped).
 fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut i = 0;
-    while i + 1 < stmts.len() {
-        let replacement = match (&stmts[i], &stmts[i + 1]) {
-            (
-                HirStmt::Assign {
-                    lhs: HirLValue::Var(name),
-                    rhs,
-                },
-                HirStmt::Return(Some(HirExpr::Var(ret))),
-            ) if name == ret && expr_is_presentation_pure(rhs) => Some(rhs.clone()),
-            _ => None,
-        };
-        if let Some(expr) = replacement {
-            stmts[i + 1] = HirStmt::Return(Some(expr));
-            stmts.remove(i);
-            changed = true;
+    while i < stmts.len() {
+        let HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        } = &stmts[i]
+        else {
+            i += 1;
             continue;
+        };
+        if !expr_is_presentation_pure(rhs) {
+            i += 1;
+            continue;
+        }
+        let name = name.clone();
+        let rhs = rhs.clone();
+        // Skip pure labels between assign and return.
+        let mut j = i + 1;
+        while j < stmts.len() && matches!(&stmts[j], HirStmt::Label(_)) {
+            j += 1;
+        }
+        if j < stmts.len() {
+            if let HirStmt::Return(Some(HirExpr::Var(ret))) = &stmts[j] {
+                if ret == &name {
+                    stmts[j] = HirStmt::Return(Some(rhs));
+                    stmts.remove(i);
+                    changed = true;
+                    continue;
+                }
+            }
         }
         i += 1;
     }
@@ -798,14 +817,27 @@ fn find_single_use_target(stmts: &[HirStmt], start: usize, name: &str) -> Option
     for (idx, stmt) in stmts.iter().enumerate().skip(start) {
         let uses = count_uses_in_stmt(stmt, name);
         if uses > 0 {
-            if found.is_some() || uses != 1 {
+            if found.is_some() {
                 return None;
             }
-            // Only inline into simple consumers at this presentation layer.
-            if !matches!(
-                stmt,
-                HirStmt::Assign { .. } | HirStmt::Return(_) | HirStmt::Expr(_)
-            ) {
+            // Assign / return / expr, or predicate-only use in if/while.
+            let ok = match stmt {
+                HirStmt::Assign { .. } | HirStmt::Return(_) | HirStmt::Expr(_) => uses == 1,
+                HirStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    count_uses_in_expr(cond, name) == uses
+                        && count_uses_in_stmts(then_body, name) == 0
+                        && count_uses_in_stmts(else_body, name) == 0
+                }
+                HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+                    count_uses_in_expr(cond, name) == uses && count_uses_in_stmts(body, name) == 0
+                }
+                _ => false,
+            };
+            if !ok {
                 return None;
             }
             found = Some(idx);
@@ -829,6 +861,638 @@ fn find_single_use_target(stmts: &[HirStmt], start: usize, name: &str) -> Option
         }
     }
     found
+}
+
+// ── Goto / label presentation recovery ───────────────────────────────────────
+
+fn invert_cond(cond: HirExpr) -> HirExpr {
+    match cond {
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr,
+            ..
+        } => *expr,
+        other => HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(other),
+            ty: NirType::Bool,
+        },
+    }
+}
+
+fn if_is_single_goto(stmt: &HirStmt) -> Option<(&HirExpr, &str)> {
+    match stmt {
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } if else_body.is_empty() => match then_body.as_slice() {
+            [HirStmt::Goto(label)] => Some((cond, label.as_str())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn stmts_have_label(stmts: &[HirStmt], label: &str) -> bool {
+    stmts.iter().any(|s| match s {
+        HirStmt::Label(l) => l == label,
+        HirStmt::Block(b)
+        | HirStmt::While { body: b, .. }
+        | HirStmt::DoWhile { body: b, .. }
+        | HirStmt::For { body: b, .. } => stmts_have_label(b, label),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => stmts_have_label(then_body, label) || stmts_have_label(else_body, label),
+        HirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|c| stmts_have_label(&c.body, label))
+                || stmts_have_label(default, label)
+        }
+        _ => false,
+    })
+}
+
+fn count_goto_refs(stmts: &[HirStmt], label: &str) -> usize {
+    stmts.iter().map(|s| count_goto_refs_stmt(s, label)).sum()
+}
+
+fn count_goto_refs_stmt(stmt: &HirStmt, label: &str) -> usize {
+    match stmt {
+        HirStmt::Goto(l) => usize::from(l == label),
+        HirStmt::Block(b) | HirStmt::While { body: b, .. } | HirStmt::DoWhile { body: b, .. } => {
+            count_goto_refs(b, label)
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => count_goto_refs(then_body, label) + count_goto_refs(else_body, label),
+        HirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .map(|c| count_goto_refs(&c.body, label))
+                .sum::<usize>()
+                + count_goto_refs(default, label)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_ref().map_or(0, |s| count_goto_refs_stmt(s, label))
+                + update
+                    .as_ref()
+                    .map_or(0, |s| count_goto_refs_stmt(s, label))
+                + count_goto_refs(body, label)
+        }
+        _ => 0,
+    }
+}
+
+fn replace_goto_with_return(stmts: &mut [HirStmt], label: &str, ret: &Option<HirExpr>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Goto(l) if l == label => {
+                *stmt = HirStmt::Return(ret.clone());
+                changed = true;
+            }
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. } => {
+                changed |= replace_goto_with_return(b, label, ret);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= replace_goto_with_return(then_body, label, ret);
+                changed |= replace_goto_with_return(else_body, label, ret);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= replace_goto_with_return(&mut case.body, label, ret);
+                }
+                changed |= replace_goto_with_return(default, label, ret);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(i) = init {
+                    changed |=
+                        replace_goto_with_return(std::slice::from_mut(i.as_mut()), label, ret);
+                }
+                if let Some(u) = update {
+                    changed |=
+                        replace_goto_with_return(std::slice::from_mut(u.as_mut()), label, ret);
+                }
+                changed |= replace_goto_with_return(body, label, ret);
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+/// `…; goto L; …; L: return e;` → replace gotos with `return e` (presentation).
+fn expand_goto_shared_returns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    // Recurse into nested structured bodies first.
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= expand_goto_shared_returns(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= expand_goto_shared_returns(then_body);
+                changed |= expand_goto_shared_returns(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= expand_goto_shared_returns(&mut case.body);
+                }
+                changed |= expand_goto_shared_returns(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0;
+    while i + 1 < stmts.len() {
+        if let (HirStmt::Label(label), HirStmt::Return(ret)) = (&stmts[i], &stmts[i + 1]) {
+            let label = label.clone();
+            let ret = ret.clone();
+            if count_goto_refs(stmts, &label) > 0 {
+                changed |= replace_goto_with_return(stmts, &label, &ret);
+                // Drop the label if nothing targets it anymore; keep the return
+                // for fall-through predecessors.
+                if count_goto_refs(stmts, &label) == 0 {
+                    if matches!(&stmts[i], HirStmt::Label(l) if l == &label) {
+                        stmts.remove(i);
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    changed
+}
+
+fn body_is_goto_recoverable(stmts: &[HirStmt]) -> bool {
+    // Fallthrough/else bodies used in recovery must not define labels (would
+    // break outer label indexing). Nested if/return/assign/goto are fine.
+    !stmts.iter().any(|s| matches!(s, HirStmt::Label(_)))
+}
+
+/// Recover structured if/else from O0 `if (c) goto` / label shapes.
+fn recover_if_else_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= recover_if_else_from_gotos(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= recover_if_else_from_gotos(then_body);
+                changed |= recover_if_else_from_gotos(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= recover_if_else_from_gotos(&mut case.body);
+                }
+                changed |= recover_if_else_from_gotos(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0;
+    while i < stmts.len() {
+        if try_recover_if_else_at(stmts, i) {
+            changed = true;
+            // Restart from i so nested/adjacent patterns can fire.
+            continue;
+        }
+        i += 1;
+    }
+    changed
+}
+
+fn try_recover_if_else_at(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
+    // After goto→return expansion: `if (C) return a; return b;` → if/else.
+    if try_recover_if_return_else_fallthrough(stmts, i) {
+        return true;
+    }
+
+    let Some((cond, lelse)) = if_is_single_goto(&stmts[i]) else {
+        return false;
+    };
+    let cond = cond.clone();
+    let lelse = lelse.to_string();
+
+    // Find Label(lelse) after i.
+    let Some(le_idx) = stmts
+        .iter()
+        .enumerate()
+        .skip(i + 1)
+        .find_map(|(idx, s)| match s {
+            HirStmt::Label(l) if l == &lelse => Some(idx),
+            _ => None,
+        })
+    else {
+        return false;
+    };
+
+    let fallthrough = &stmts[i + 1..le_idx];
+    if !body_is_goto_recoverable(fallthrough) {
+        return false;
+    }
+
+    // Pattern: if (C) goto Lelse; THEN; goto Lend; Label(Lelse); ELSE; Label(Lend);
+    if let Some(HirStmt::Goto(lend)) = fallthrough.last() {
+        let lend = lend.clone();
+        if let Some(lend_idx) = stmts
+            .iter()
+            .enumerate()
+            .skip(le_idx + 1)
+            .find_map(|(idx, s)| match s {
+                HirStmt::Label(l) if l == &lend => Some(idx),
+                _ => None,
+            })
+        {
+            let else_body = &stmts[le_idx + 1..lend_idx];
+            if body_is_goto_recoverable(else_body) && !stmts_have_label(else_body, &lend) {
+                // if (C) { else_body } else { THEN without final goto }
+                let then_for_c: Vec<HirStmt> = else_body.to_vec();
+                let else_for_c: Vec<HirStmt> = fallthrough[..fallthrough.len() - 1].to_vec();
+                let mut rebuilt = Vec::with_capacity(stmts.len());
+                rebuilt.extend_from_slice(&stmts[..i]);
+                rebuilt.push(HirStmt::If {
+                    cond,
+                    then_body: then_for_c,
+                    else_body: else_for_c,
+                });
+                // Keep Label(lend) and tail for other fallthroughs.
+                rebuilt.extend_from_slice(&stmts[lend_idx..]);
+                *stmts = rebuilt;
+                return true;
+            }
+        }
+    }
+
+    // Pattern: if (C) goto Lelse; THEN...; Label(Lelse); ELSE...
+    // where THEN has no trailing shared lend label — both sides are self-contained
+    // (typically after goto→return expansion).
+    let then_body = fallthrough.to_vec();
+    // ELSE runs from after Lelse until next top-level label or end. If the next
+    // statement after Lelse is another Label that is not needed, take until end
+    // of contiguous non-label run... Actually for:
+    //   if (C) goto L; THEN; L: ELSE_STMTS...
+    // ELSE is everything after L until we cannot safely absorb — use rest of list
+    // only when THEN is terminal (ends with return/goto/break/continue) so control
+    // never falls from THEN into ELSE without the label.
+    let then_terminal = then_body.last().is_some_and(|s| {
+        matches!(
+            s,
+            HirStmt::Return(_) | HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue
+        )
+    });
+    if then_terminal || then_body.is_empty() {
+        // Take else body as statements after label until next Label (exclusive) or end.
+        let else_end = stmts[le_idx + 1..]
+            .iter()
+            .position(|s| matches!(s, HirStmt::Label(_)))
+            .map(|p| le_idx + 1 + p)
+            .unwrap_or(stmts.len());
+        let else_body = stmts[le_idx + 1..else_end].to_vec();
+        if body_is_goto_recoverable(&else_body) {
+            // if (C) goto Lelse → when C, run else_body; when !C, run then_body
+            let mut rebuilt = Vec::with_capacity(stmts.len());
+            rebuilt.extend_from_slice(&stmts[..i]);
+            rebuilt.push(HirStmt::If {
+                cond,
+                then_body: else_body,
+                else_body: then_body,
+            });
+            rebuilt.extend_from_slice(&stmts[else_end..]);
+            *stmts = rebuilt;
+            return true;
+        }
+    }
+
+    // Pattern: if (C) goto Lskip; BODY; Label(Lskip);  (no else body — skip only)
+    // → if (!C) { BODY }
+    if le_idx + 1 == stmts.len()
+        || !matches!(&stmts[le_idx + 1], HirStmt::Label(_)) && count_goto_refs(stmts, &lelse) == 1
+    {
+        // If there is content after the label that is not exclusively the else of
+        // this if, only recover skip when nothing after label belongs to an else
+        // that was meant to pair — i.e. when fallthrough is the only body and
+        // label has a single goto ref.
+        if count_goto_refs(stmts, &lelse) == 1 && body_is_goto_recoverable(fallthrough) {
+            // Only pure skip when there is no "else" material that should pair —
+            // empty after label OR after label continues sequential code that
+            // both paths should reach (fallthrough from label).
+            // if (!C) { fallthrough }; Label; tail
+            let mut rebuilt = Vec::with_capacity(stmts.len());
+            rebuilt.extend_from_slice(&stmts[..i]);
+            if !fallthrough.is_empty() {
+                rebuilt.push(HirStmt::If {
+                    cond: invert_cond(cond),
+                    then_body: fallthrough.to_vec(),
+                    else_body: vec![],
+                });
+            }
+            // Keep label for fallthrough join if still needed by others; if single
+            // ref (this if, now removed), drop label.
+            if count_goto_refs(&stmts[le_idx + 1..], &lelse) > 0 {
+                rebuilt.extend_from_slice(&stmts[le_idx..]);
+            } else {
+                rebuilt.extend_from_slice(&stmts[le_idx + 1..]);
+            }
+            *stmts = rebuilt;
+            return true;
+        }
+    }
+
+    false
+}
+
+/// `if (C) { return …; } <terminal fallthrough>` → if/else.
+fn try_recover_if_return_else_fallthrough(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
+    let HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = &stmts[i]
+    else {
+        return false;
+    };
+    if !else_body.is_empty() {
+        return false;
+    }
+    let then_is_return = matches!(then_body.as_slice(), [HirStmt::Return(_)]);
+    if !then_is_return {
+        return false;
+    }
+    if i + 1 >= stmts.len() {
+        return false;
+    }
+    // Absorb a straight-line terminal suffix as the else branch.
+    let mut end = i + 1;
+    while end < stmts.len() {
+        match &stmts[end] {
+            HirStmt::Label(_) => break,
+            HirStmt::Return(_) => {
+                end += 1;
+                break;
+            }
+            HirStmt::Assign { .. } | HirStmt::Expr(_) => {
+                end += 1;
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } if matches!(then_body.as_slice(), [HirStmt::Return(_)])
+                && (else_body.is_empty()
+                    || matches!(else_body.as_slice(), [HirStmt::Return(_)])) =>
+            {
+                // Nested already-structured if-return may be part of else.
+                end += 1;
+            }
+            _ => break,
+        }
+    }
+    if end == i + 1 {
+        return false;
+    }
+    // Else must end terminal.
+    if !matches!(
+        stmts[end - 1],
+        HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue
+    ) {
+        return false;
+    }
+    let cond = cond.clone();
+    let then_body = then_body.clone();
+    let else_body = stmts[i + 1..end].to_vec();
+    let mut rebuilt = Vec::with_capacity(stmts.len());
+    rebuilt.extend_from_slice(&stmts[..i]);
+    rebuilt.push(HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    });
+    rebuilt.extend_from_slice(&stmts[end..]);
+    *stmts = rebuilt;
+    true
+}
+
+/// Drop fallthrough stmts after an if whose every branch already returns.
+fn prune_unreachable_after_total_return(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= prune_unreachable_after_total_return(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= prune_unreachable_after_total_return(then_body);
+                changed |= prune_unreachable_after_total_return(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for c in cases {
+                    changed |= prune_unreachable_after_total_return(&mut c.body);
+                }
+                changed |= prune_unreachable_after_total_return(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0;
+    while i < stmts.len() {
+        if stmt_seq_always_returns(std::slice::from_ref(&stmts[i])) {
+            let before = stmts.len();
+            stmts.truncate(i + 1);
+            if stmts.len() != before {
+                changed = true;
+            }
+            break;
+        }
+        i += 1;
+    }
+    changed
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SeqExit {
+    /// Every path ends in `return`.
+    Return,
+    /// Some path falls through the end of the sequence/statement.
+    Fallthrough,
+    /// Some path leaves via goto/break/continue (or mixed non-return exit).
+    Other,
+}
+
+fn stmt_seq_always_returns(stmts: &[HirStmt]) -> bool {
+    matches!(seq_exit(stmts), SeqExit::Return)
+}
+
+fn seq_exit(stmts: &[HirStmt]) -> SeqExit {
+    let mut i = 0;
+    while i < stmts.len() {
+        match stmt_exit(&stmts[i]) {
+            SeqExit::Return => return SeqExit::Return,
+            SeqExit::Other => return SeqExit::Other,
+            SeqExit::Fallthrough => i += 1,
+        }
+    }
+    SeqExit::Fallthrough
+}
+
+fn stmt_exit(stmt: &HirStmt) -> SeqExit {
+    match stmt {
+        HirStmt::Return(_) => SeqExit::Return,
+        HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue => SeqExit::Other,
+        HirStmt::Block(b) => seq_exit(b),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let t = seq_exit(then_body);
+            let e = if else_body.is_empty() {
+                SeqExit::Fallthrough
+            } else {
+                seq_exit(else_body)
+            };
+            merge_branch_exit(t, e)
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            if cases.is_empty() {
+                return SeqExit::Fallthrough;
+            }
+            let mut acc = seq_exit(default);
+            for case in cases {
+                acc = merge_branch_exit(acc, seq_exit(&case.body));
+            }
+            acc
+        }
+        // Assigns/labels fall through; loops conservatively may fall through.
+        _ => SeqExit::Fallthrough,
+    }
+}
+
+fn merge_branch_exit(a: SeqExit, b: SeqExit) -> SeqExit {
+    use SeqExit::*;
+    match (a, b) {
+        (Return, Return) => Return,
+        (Fallthrough, Fallthrough) => Fallthrough,
+        (Return, Fallthrough) | (Fallthrough, Return) => Fallthrough,
+        _ => Other,
+    }
+}
+
+fn remove_unreferenced_labels(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut labels = HashSet::new();
+    collect_labels(stmts, &mut labels);
+    let mut referenced = HashSet::new();
+    for lab in &labels {
+        if count_goto_refs(stmts, lab) > 0 {
+            referenced.insert(lab.clone());
+        }
+    }
+    remove_labels_not_in(stmts, &referenced)
+}
+
+fn collect_labels(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for s in stmts {
+        match s {
+            HirStmt::Label(l) => {
+                out.insert(l.clone());
+            }
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => collect_labels(b, out),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_labels(then_body, out);
+                collect_labels(else_body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for c in cases {
+                    collect_labels(&c.body, out);
+                }
+                collect_labels(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn remove_labels_not_in(stmts: &mut Vec<HirStmt>, keep: &HashSet<String>) -> bool {
+    let before = stmts.len();
+    stmts.retain(|s| match s {
+        HirStmt::Label(l) => keep.contains(l),
+        _ => true,
+    });
+    let mut changed = stmts.len() != before;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= remove_labels_not_in(b, keep);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= remove_labels_not_in(then_body, keep);
+                changed |= remove_labels_not_in(else_body, keep);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for c in cases {
+                    changed |= remove_labels_not_in(&mut c.body, keep);
+                }
+                changed |= remove_labels_not_in(default, keep);
+            }
+            _ => {}
+        }
+    }
+    changed
 }
 
 fn eliminate_pure_dead_assigns(func: &mut HirFunction) -> bool {
@@ -1226,6 +1890,192 @@ mod tests {
                 [HirStmt::Return(Some(HirExpr::Var(n)))] if n == "param_1"
             ),
             "must not drop the shift: {code}"
+        );
+    }
+
+    fn le(lhs: &str, rhs: &str) -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Le,
+            lhs: Box::new(HirExpr::Var(lhs.into())),
+            rhs: Box::new(HirExpr::Var(rhs.into())),
+            ty: NirType::Bool,
+        }
+    }
+
+    #[test]
+    fn hir_presentation_recovers_clamp_goto_diamond() {
+        // O0 clamp shape: param homes + if-goto join return.
+        let func = HirFunction {
+            name: "clamp".into(),
+            params: vec![param("param_1"), param("param_2"), param("param_3")],
+            locals: vec![
+                local("param_10"),
+                local("param_18"),
+                local("param_20"),
+                local("rax"),
+            ],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_10".into()),
+                    rhs: HirExpr::Var("param_1".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_18".into()),
+                    rhs: HirExpr::Var("param_2".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_20".into()),
+                    rhs: HirExpr::Var("param_3".into()),
+                },
+                HirStmt::If {
+                    cond: le("param_18", "param_10"),
+                    then_body: vec![HirStmt::Goto("L1".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rax".into()),
+                    rhs: HirExpr::Var("param_18".into()),
+                },
+                HirStmt::Goto("Lret".into()),
+                HirStmt::Label("L1".into()),
+                HirStmt::If {
+                    cond: le("param_10", "param_20"),
+                    then_body: vec![HirStmt::Goto("L2".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rax".into()),
+                    rhs: HirExpr::Var("param_20".into()),
+                },
+                HirStmt::Goto("Lret".into()),
+                HirStmt::Label("L2".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rax".into()),
+                    rhs: HirExpr::Var("param_10".into()),
+                },
+                HirStmt::Label("Lret".into()),
+                HirStmt::Return(Some(HirExpr::Var("rax".into()))),
+            ],
+            ..Default::default()
+        };
+
+        let options = MlilPreviewOptions::default();
+        let layered = render_layered_pseudocode(&func, &options);
+        assert!(
+            layered.nir.contains("goto") || layered.nir.contains("param_10"),
+            "NIR keeps mechanical control:\n{}",
+            layered.nir
+        );
+        assert!(
+            !layered.hir.contains("goto"),
+            "HIR should eliminate gotos:\n{}",
+            layered.hir
+        );
+        assert!(
+            !layered.hir.contains("param_10")
+                && !layered.hir.contains("param_18")
+                && !layered.hir.contains("param_20"),
+            "HIR should fold param homes:\n{}",
+            layered.hir
+        );
+        assert!(
+            layered.hir.contains("param_1")
+                && layered.hir.contains("param_2")
+                && layered.hir.contains("param_3"),
+            "HIR should mention formals:\n{}",
+            layered.hir
+        );
+        assert!(
+            layered.hir.contains("if"),
+            "HIR should be structured if/else:\n{}",
+            layered.hir
+        );
+    }
+
+    #[test]
+    fn hir_presentation_recovers_signum_goto_diamond() {
+        let func = HirFunction {
+            name: "signum".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("param_10"), local("iVar4"), local("xVar9")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("param_10".into()),
+                    rhs: HirExpr::Var("param_1".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("iVar4".into()),
+                    rhs: HirExpr::Var("param_10".into()),
+                },
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::LogicalOr,
+                        lhs: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::Eq,
+                            lhs: Box::new(HirExpr::Var("iVar4".into())),
+                            rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                            ty: NirType::Bool,
+                        }),
+                        rhs: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::SLt,
+                            lhs: Box::new(HirExpr::Var("iVar4".into())),
+                            rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                            ty: NirType::Bool,
+                        }),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Goto("La".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar9".into()),
+                    rhs: HirExpr::Const(1, int_ty(32, true)),
+                },
+                HirStmt::Goto("Lret".into()),
+                HirStmt::Label("La".into()),
+                HirStmt::If {
+                    cond: HirExpr::Binary {
+                        op: HirBinaryOp::SLe,
+                        lhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                        rhs: Box::new(HirExpr::Var("param_10".into())),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![HirStmt::Goto("Lb".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar9".into()),
+                    rhs: HirExpr::Const(-1, int_ty(32, true)),
+                },
+                HirStmt::Goto("Lret".into()),
+                HirStmt::Label("Lb".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar9".into()),
+                    rhs: HirExpr::Const(0, int_ty(32, true)),
+                },
+                HirStmt::Label("Lret".into()),
+                HirStmt::Return(Some(HirExpr::Var("xVar9".into()))),
+            ],
+            ..Default::default()
+        };
+
+        let layered = render_layered_pseudocode(&func, &MlilPreviewOptions::default());
+        assert!(
+            !layered.hir.contains("goto"),
+            "HIR should eliminate gotos:\n{}",
+            layered.hir
+        );
+        assert!(
+            !layered.hir.contains("param_10") && !layered.hir.contains("iVar4"),
+            "HIR should fold aliases/temps:\n{}",
+            layered.hir
+        );
+        assert!(
+            layered.hir.contains("param_1") && layered.hir.contains("if"),
+            "HIR should be structured on param_1:\n{}",
+            layered.hir
         );
     }
 }
