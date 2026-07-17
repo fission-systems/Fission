@@ -12,35 +12,108 @@ permissions:
 
 concurrency:
   group: ci-fast-${{ github.workflow }}-${{ github.ref }}
-  # PR: supersede stale runs. Push/main (and dispatch): queue instead of killing mid-checkout on slow runners.
+  # PR: supersede stale runs. Push/main: queue instead of killing mid-job.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Step 1: Security & Lint (Ubuntu, ~10 min)
+  # Cheap path filter: docs/wiki-only changes skip multi-minute test matrices.
+  changes:
+    name: 🔎 Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          lfs: false
+          submodules: false
+
+      - name: Classify changed paths
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin "${{ github.base_ref }}" --depth=1
+            BASE="origin/${{ github.base_ref }}"
+            CHANGED=$(git diff --name-only "$BASE"...HEAD || true)
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BEFORE="${{ github.event.before }}"
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              CHANGED=$(git show --name-only --pretty=format: HEAD || true)
+            else
+              CHANGED=$(git diff --name-only "$BEFORE"...HEAD || true)
+            fi
+          else
+            # workflow_dispatch: always run code path
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          # Code / build-relevant paths
+          if echo "$CHANGED" | grep -Eq '^(crates/|utils/|\.github/|scripts/|Cargo\.(toml|lock)|rust-toolchain|deny\.toml|clippy\.toml|\.cargo/)'; then
+            CODE=true
+          else
+            CODE=false
+          fi
+
+          # Pure docs/wiki/markdown-only
+          NON_DOC=$(echo "$CHANGED" | grep -Ev '^(docs/|wiki/|\.github/(ISSUE_TEMPLATE|pull_request_template\.md|prompts)/|.*\.md$)' || true)
+          if [ -z "$NON_DOC" ] && [ -n "$CHANGED" ]; then
+            DOCS_ONLY=true
+            CODE=false
+          else
+            DOCS_ONLY=false
+          fi
+
+          # Empty diff (rare): treat as code to avoid false green
+          if [ -z "$CHANGED" ]; then
+            CODE=true
+            DOCS_ONLY=false
+          fi
+
+          echo "code=${CODE}" >> "$GITHUB_OUTPUT"
+          echo "docs_only=${DOCS_ONLY}" >> "$GITHUB_OUTPUT"
+          echo "Resolved: code=${CODE} docs_only=${DOCS_ONLY}"
+
+  # Step 1: Security & Lint (Ubuntu)
   security-check:
     name: 🔒 Security Check
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/reusable-security-check.yml
 
   lint-format:
     name: 📋 Lint & Format
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/reusable-lint-format.yml
     with:
       os: ubuntu-latest
-      # `fission-signatures` enables `clippy::pedantic`; `-D warnings` makes pedantic findings release-blocking until we baseline cleanup (FIDBF casts, Win constants).
+      # `fission-signatures` enables `clippy::pedantic`; `-D warnings` makes pedantic findings release-blocking until we baseline cleanup.
       exclude_crates: "fission-signatures,fission-dioxus"
 
   # Anti-overfitting lint: blocks function/address-specific patterns in NIR,
   # and verifies MAX_STRUCTURING_PASSES constant is declared.
   pass-gate-lint:
     name: 🛡️ Pass-Gate Lint (anti-overfitting)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           lfs: false
+          submodules: false
 
       - name: Check for function/address-specific patterns in NIR pipeline
         run: |
@@ -51,7 +124,9 @@ jobs:
             -e 'function_name.*==\|==.*function_name' \
             -e 'addr\s*==\s*0x[0-9a-fA-F]' \
             crates/fission-pcode/src/midend/structuring/ \
-            crates/fission-pcode/src/midend/normalize/ 2>/dev/null || true)
+            crates/fission-pcode/src/midend/normalize/ \
+            crates/fission-midend-structuring/src/ \
+            crates/fission-midend-normalize/src/ 2>/dev/null || true)
           if [ -n "$PATTERN_HITS" ]; then
             echo "❌ Function/address-specific pattern detected in NIR pipeline:"
             echo "$PATTERN_HITS"
@@ -86,62 +161,73 @@ jobs:
           set -euo pipefail
           git fetch origin ${{ github.base_ref }} --depth=1
           CHANGED=$(git diff origin/${{ github.base_ref }}...HEAD --name-only)
-          if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/src/midend/" -e "^crates/fission-pcode/src/render/"; then
-            if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/tests/" -e "^crates/fission-pcode/.*test"; then
+          if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/src/midend/" \
+              -e "^crates/fission-pcode/src/render/" \
+              -e "^crates/fission-midend-structuring/" \
+              -e "^crates/fission-midend-normalize/" \
+              -e "^crates/fission-midend-core/"; then
+            if echo "$CHANGED" | grep -q -e "tests/" -e ".*test" -e ".*_tests\.rs"; then
               echo "✅ Targeted tests included."
             elif git diff origin/${{ github.base_ref }}...HEAD -- \
                 crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
+                crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
+                crates/fission-midend-core/ \
                 | grep -q "+.*#\[test\]"; then
               echo "✅ Inline tests added."
             else
-              echo "❌ Targeted test missing for NIR/render changes."
-              echo "Any change to crates/fission-pcode/src/midend/ or src/render/ must include targeted tests."
+              echo "❌ Targeted test missing for NIR/render/midend changes."
+              echo "Any change to midend/render owners must include targeted tests."
               exit 1
             fi
           else
-            echo "ℹ️ No NIR/render changes detected."
+            echo "ℹ️ No NIR/render/midend changes detected."
           fi
 
       - name: Enforce Sleigh Exact Match Parity
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
-          # No need to fetch origin again since it was done in the previous step
           if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/"; then
             echo "🔍 Sleigh changes detected. Checking exact match parity."
             echo "In a full CI environment, this will run parity tests and fail on 1-byte mismatch."
-            # The test-linux step runs `cargo nextest run -p fission-sleigh` which will fail on parity mismatch
             echo "✅ Parity enforcement active."
           else
             echo "ℹ️ No Sleigh changes detected."
           fi
 
-  # Step 2: Core Tests (Linux, ~15 min)
+  # Step 2: Core Tests (Linux) — always on code changes
   test-linux:
     name: 🧪 Tests (Linux)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
-      crates: "fission-pcode,fission-automation,fission-loader"
+      # Include midend crates (ADR 0012 free-fn owners) with pcode/automation/loader.
+      crates: "fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-pcode,fission-automation,fission-loader"
       profile: debug
 
   # Real end-to-end CLI on checked-in PE (after Linux tests gate the stack)
   cli-smoke-linux:
     name: 🧭 CLI Smoke (Linux · PE sample)
     needs: [test-linux]
+    if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/reusable-cli-smoke.yml
     with:
       profile: debug
 
-  # NIR Regression Gate — semantic quality blocker on every PR/push
+  # NIR Regression Gate — semantic quality blocker on every PR/push (code path)
   nir-regression-gate:
     name: 🔬 NIR Regression Gate
     needs: [test-linux]
+    if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/reusable-nir-regression-gate.yml
 
-  # Step 3: Build & Test (macOS, ~20 min parallel with linux)
+  # Multi-OS: main push + dispatch only (PR stays Linux-fast; Heavy still covers platforms on main).
   build-macos:
     name: 🍎 Build & Test (macOS)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: macos-latest
@@ -150,16 +236,18 @@ jobs:
 
   test-macos:
     name: 🧪 Tests (macOS)
-    needs: build-macos
+    needs: [changes, build-macos]
+    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: macos-latest
-      crates: "fission-pcode,fission-automation,fission-loader"
+      crates: "fission-midend-structuring,fission-pcode,fission-automation,fission-loader"
       profile: debug
 
-  # Step 4: Windows build & test (all events — main push and PR)
   build-windows:
     name: 🪟 Build (Windows)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: windows-latest
@@ -168,11 +256,12 @@ jobs:
 
   test-windows:
     name: 🧪 Tests (Windows)
-    needs: build-windows
+    needs: [changes, build-windows]
+    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
-      crates: "fission-pcode,fission-decompiler,fission-automation"
+      crates: "fission-midend-structuring,fission-pcode,fission-decompiler,fission-automation"
       profile: debug
       timeout_minutes: 90
 
@@ -181,6 +270,7 @@ jobs:
     name: ✅ CI Summary
     needs:
       [
+        changes,
         security-check,
         lint-format,
         pass-gate-lint,
@@ -195,39 +285,43 @@ jobs:
     steps:
       - name: Check Status
         run: |
-          if [ "${{ needs.security-check.result }}" != "success" ]; then
-            echo "❌ Security check failed"
+          set -euo pipefail
+
+          # Docs/wiki-only: Fast Gate green without multi-minute crates
+          if [ "${{ needs.changes.outputs.docs_only }}" = "true" ]; then
+            echo "✅ Docs/wiki-only change — Fast Gate short-circuit (no code jobs required)."
+            exit 0
+          fi
+
+          require() {
+            local name="$1"
+            local result="$2"
+            # skipped is OK for multi-OS jobs on PRs
+            if [ "$result" = "skipped" ]; then
+              echo "ℹ️  ${name} skipped"
+              return 0
+            fi
+            if [ "$result" != "success" ]; then
+              echo "❌ ${name} failed (result=${result})"
+              return 1
+            fi
+            echo "✅ ${name}"
+          }
+
+          FAILED=0
+          require "Security check" "${{ needs.security-check.result }}" || FAILED=1
+          require "Lint/format" "${{ needs.lint-format.result }}" || FAILED=1
+          require "Pass-gate lint" "${{ needs.pass-gate-lint.result }}" || FAILED=1
+          require "Linux tests" "${{ needs.test-linux.result }}" || FAILED=1
+          require "CLI smoke" "${{ needs.cli-smoke-linux.result }}" || FAILED=1
+          require "NIR Regression Gate" "${{ needs.nir-regression-gate.result }}" || FAILED=1
+          require "macOS tests" "${{ needs.test-macos.result }}" || FAILED=1
+          require "Windows tests" "${{ needs.test-windows.result }}" || FAILED=1
+
+          if [ "$FAILED" -ne 0 ]; then
             exit 1
           fi
-          if [ "${{ needs.lint-format.result }}" != "success" ]; then
-            echo "❌ Lint/format check failed"
-            exit 1
-          fi
-          if [ "${{ needs.test-linux.result }}" != "success" ]; then
-            echo "❌ Linux tests failed"
-            exit 1
-          fi
-          if [ "${{ needs.cli-smoke-linux.result }}" != "success" ]; then
-            echo "❌ CLI smoke failed"
-            exit 1
-          fi
-          if [ "${{ needs.nir-regression-gate.result }}" != "success" ]; then
-            echo "❌ NIR Regression Gate failed — decompiler quality regression detected"
-            exit 1
-          fi
-          if [ "${{ needs.pass-gate-lint.result }}" != "success" ]; then
-            echo "❌ Pass-gate lint failed — overfitting pattern or missing cap detected"
-            exit 1
-          fi
-          if [ "${{ needs.test-macos.result }}" != "success" ]; then
-            echo "❌ macOS tests failed"
-            exit 1
-          fi
-          if [ "${{ needs.test-windows.result }}" != "success" ]; then
-            echo "❌ Windows tests failed"
-            exit 1
-          fi
-          echo "✅ All CI checks passed!"
+          echo "✅ All required CI Fast Gate checks passed!"
           echo ""
-          echo "ℹ️  L1 Heavy CI runs on main push + nightly (Miri, coverage, MSRV, NIR-check, …)."
+          echo "ℹ️  PR path is Linux-first (macOS/Windows run on main push + L1 Heavy)."
           echo "ℹ️  Releases require L0+L1 green and L2 Release E2E — see docs/CI_RELEASE_GATES.md."

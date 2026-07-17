@@ -29,11 +29,19 @@ on:
       retries:
         type: number
         required: false
-        default: 2
-        description: "Number of retries for flaky tests (nextest --retries)"
+        default: 1
+        description: "nextest --retries for flaky tests (1 = one retry)"
+      install_gui_sysdeps:
+        type: boolean
+        required: false
+        default: false
+        description: "Install webkit/GTK sysdeps (only needed for dioxus / full GUI workspace)"
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUST_BACKTRACE: "1"
 
 jobs:
   test:
@@ -41,71 +49,95 @@ jobs:
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
       - uses: actions/checkout@v7
-
         with:
           lfs: false
-          submodules: recursive
-
+          # wiki submodule is not needed for crate tests
+          submodules: false
 
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
+        with:
+          # Share cache across Fast Gate / Heavy jobs on the same OS+profile.
+          shared-key: fission-test-${{ runner.os }}-${{ inputs.profile }}
+          cache-on-failure: true
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Install system dependencies (Linux)
+      - name: Install system dependencies (Linux · base)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
             libssl-dev \
-            librsvg2-dev \
-            libayatana-appindicator3-dev \
             build-essential \
-            file
+            file \
+            pkg-config
 
-      # --- Specific crates mode ---
+      - name: Install system dependencies (Linux · GUI)
+        if: runner.os == 'Linux' && inputs.install_gui_sysdeps
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev
+
+      # --- Specific crates mode (single cargo/nextest process) ---
       - name: Run Tests (Specific Crates) [nextest]
         if: ${{ inputs.crates != '' }}
         shell: bash
         run: |
+          set -euo pipefail
           crates="${{ inputs.crates }}"
+          package_flags=()
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
           for crate in "${CRATE_ARRAY[@]}"; do
             crate="$(echo "$crate" | tr -d '[:space:]')"
-            echo "Testing crate: $crate"
-            cargo nextest run \
-              -p "$crate" \
-              --locked \
-              --no-fail-fast \
-              --retries ${{ inputs.retries }} \
-              ${{ inputs.profile == 'release' && '--release' || '' }}
+            [ -z "$crate" ] && continue
+            package_flags+=(-p "$crate")
           done
+          if [ "${#package_flags[@]}" -eq 0 ]; then
+            echo "No crates specified"
+            exit 1
+          fi
+          echo "Testing packages: ${package_flags[*]}"
+          cargo nextest run \
+            "${package_flags[@]}" \
+            --locked \
+            --no-fail-fast \
+            --retries ${{ inputs.retries }} \
+            ${{ inputs.profile == 'release' && '--release' || '' }}
 
-      # Doctests: nextest does not run doctests — run separately with cargo test --doc
+      # Doctests: nextest does not run doctests — run once with multi -p
       - name: Run Doctests (Specific Crates)
         if: ${{ inputs.crates != '' }}
         shell: bash
         run: |
+          set -euo pipefail
           crates="${{ inputs.crates }}"
+          package_flags=()
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
           for crate in "${CRATE_ARRAY[@]}"; do
             crate="$(echo "$crate" | tr -d '[:space:]')"
-            cargo test --doc -p "$crate" --locked \
-              ${{ inputs.profile == 'release' && '--release' || '' }} || true
+            [ -z "$crate" ] && continue
+            package_flags+=(-p "$crate")
           done
+          # Soft: doctests are not release-blocking in Fast Gate historically.
+          cargo test --doc "${package_flags[@]}" --locked \
+            ${{ inputs.profile == 'release' && '--release' || '' }} || true
 
       # --- Full workspace mode ---
       - name: Run Full Test Suite (All Crates) [nextest]
         if: ${{ inputs.crates == '' }}
         shell: bash
         run: |
+          set -euo pipefail
           exclude_flags=()
           if [ -n "${{ inputs.exclude_crates }}" ]; then
             IFS=',' read -ra EX <<< "${{ inputs.exclude_crates }}"
@@ -122,13 +154,15 @@ jobs:
             --no-fail-fast \
             --retries ${{ inputs.retries }} \
             ${{ inputs.profile == 'release' && '--release' || '' }}
-          # Also run excluded crates separately
-          cargo nextest run \
-            -p fission-static \
-            --locked \
-            --no-fail-fast \
-            --retries ${{ inputs.retries }} \
-            ${{ inputs.profile == 'release' && '--release' || '' }}
+          # fission-static is often excluded from workspace GUI path; still test it.
+          if echo "${{ inputs.exclude_crates }}" | tr ',' '\n' | grep -qx 'fission-static'; then
+            cargo nextest run \
+              -p fission-static \
+              --locked \
+              --no-fail-fast \
+              --retries ${{ inputs.retries }} \
+              ${{ inputs.profile == 'release' && '--release' || '' }}
+          fi
 
       - name: Run Workspace Doctests
         if: ${{ inputs.crates == '' }}

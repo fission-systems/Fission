@@ -59,10 +59,11 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 - Main branch push
 - Manual trigger
 
-**Runtime:** ~40 minutes
+**Runtime:** ~15–25 minutes on **PRs** (Linux-first); ~40 minutes on **main** push (adds macOS/Windows).
 
 **Validation steps:**
 ```
+✓ Path filter (docs/wiki-only short-circuit)
 ✓ Security Check
   ├─ cargo deny (CVE, licenses, sources)
   └─ cargo audit (known vulnerabilities)
@@ -71,28 +72,29 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
   ├─ rustfmt check
   └─ clippy (0 warnings)
 
-✓ Core Tests
+✓ Core + midend Tests (Linux, single nextest multi -p)
+  ├─ fission-midend-{core,normalize,structuring}
   ├─ fission-pcode
   ├─ fission-automation
   └─ fission-loader
 
 ✓ CLI smoke (Linux, after core tests)
-  ├─ `fission_cli` on `benchmark/binary/x86-64/window/small/binary/c/test_functions.exe` (tracked C source cross-compiles with MinGW on the runner; `.exe` is gitignored) — `info`, `list --json`, then `decomp --json` at an address from the list or the documented fallback
-  └─ MinGW APT deps cached via `awalsh128/cache-apt-pkgs-action` in `reusable-cli-smoke.yml` / `reusable-benchmark.yml` (bump `version` input if runner image invalidates restore)
+  ├─ `fission_cli` on PE sample — `info`, `list --json`, `decomp --json`
+  └─ MinGW APT deps cached via `awalsh128/cache-apt-pkgs-action` in `reusable-cli-smoke.yml`
 
-✓ Platform Builds
-  ├─ Linux (ubuntu-latest)
-  ├─ Windows (windows-latest)
-  └─ macOS (macos-latest)
+✓ Platform Builds (main push / dispatch; **skipped on PR** for speed)
+  ├─ Windows tests (after release CLI build)
+  └─ macOS tests (after release CLI build)
+  (PR multi-OS coverage: L1 Heavy on merge to main)
 ```
 
 **Success criteria:**
-- [ ] All security checks passed
+- [ ] All security checks passed (code path)
 - [ ] No formatting errors
 - [ ] No lint warnings (`-D warnings`)
-- [ ] All tests passed
-- [ ] CLI smoke passed (PE sample commands)
-- [ ] All platforms built successfully
+- [ ] Linux core+midend tests passed
+- [ ] CLI smoke + NIR regression gate passed
+- [ ] On main: macOS + Windows Fast Gate jobs passed
 
 **If it fails:**
 ```bash

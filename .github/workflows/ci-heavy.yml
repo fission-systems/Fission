@@ -27,17 +27,9 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
-      # Decompiler / CLI stack only — excludes GUI (dioxus), emulator diagnostics,
-      # and other non-gate crates that need extra sysdeps or are not release-blocking.
-      crates: "fission-core,fission-loader,fission-pcode,fission-decompiler,fission-automation,fission-cli,fission-analysis-db,fission-signatures"
-      profile: debug
-
-  test-linux-static:
-    name: 🧪 Tests (fission-static)
-    uses: ./.github/workflows/reusable-run-tests.yml
-    with:
-      os: ubuntu-latest
-      crates: "fission-static"
+      # Decompiler / CLI stack + midend free-fn owners + static facts.
+      # Single nextest process (reusable-run-tests multi -p) — no separate static job.
+      crates: "fission-core,fission-midend-core,fission-midend-normalize,fission-midend-structuring,fission-loader,fission-pcode,fission-static,fission-decompiler,fission-automation,fission-cli,fission-analysis-db,fission-signatures"
       profile: debug
 
   build-windows-heavy:
@@ -54,12 +46,12 @@ jobs:
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: windows-latest
-      crates: "fission-pcode,fission-decompiler,fission-automation"
+      crates: "fission-midend-structuring,fission-pcode,fission-decompiler,fission-automation"
       profile: release
       timeout_minutes: 120
 
   build-macos-heavy:
-    name: 🍎 Heavy Build & Test (macOS)
+    name: 🍎 Heavy Build (macOS)
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: macos-latest
@@ -78,7 +70,7 @@ jobs:
     name: 🦀 MSRV Check
     uses: ./.github/workflows/reusable-msrv.yml
     with:
-      crates: "fission-pcode,fission-loader,fission-decompiler,fission-automation"
+      crates: "fission-midend-structuring,fission-pcode,fission-loader,fission-decompiler,fission-automation"
 
   # ── Extended (nightly + manual only; not required for main-push L1) ───────
   test-linux-full:
@@ -112,7 +104,6 @@ jobs:
     name: ✅ Heavy Validation Summary
     needs:
       - test-linux-release-critical
-      - test-linux-static
       - build-macos-heavy
       - test-windows-heavy
       - nir-check
@@ -153,7 +144,6 @@ jobs:
           }
 
           require_success "Release-critical Linux tests" "${{ needs.test-linux-release-critical.result }}"
-          require_success "fission-static tests" "${{ needs.test-linux-static.result }}"
           require_success "macOS heavy build" "${{ needs.build-macos-heavy.result }}"
           require_success "Windows heavy tests" "${{ needs.test-windows-heavy.result }}"
           require_success "NIR-Check" "${{ needs.nir-check.result }}"

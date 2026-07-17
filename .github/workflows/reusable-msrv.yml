@@ -10,7 +10,7 @@ on:
       crates:
         type: string
         required: false
-        default: "fission-pcode,fission-loader,fission-decompiler,fission-automation"
+        default: "fission-midend-structuring,fission-pcode,fission-loader,fission-decompiler,fission-automation"
         description: "Crates to check against MSRV (comma-separated)"
 
 env:
