@@ -80,10 +80,11 @@ pub use driver_pure::{
     region_selector_or_condition, switch_stmt_has_scaffold_only_arms,
 };
 pub use linear_body::{
-    can_inline_linear_successor, can_inline_linear_successor_for_region, has_linear_body_cache,
-    linear_exit, linear_exit_with_budget, lower_conditional_tail, lower_linear_body,
-    lower_linear_body_for_region_recovery_detailed, lower_linear_body_with_budget,
-    shared_exit_for_indices, shared_linear_exit,
+    can_inline_linear_successor, can_inline_linear_successor_for_region,
+    canonicalize_region_target_for_exit_for_test, find_shared_tail_entries_for_region_for_test,
+    has_linear_body_cache, linear_exit, linear_exit_with_budget, lower_conditional_tail,
+    lower_linear_body, lower_linear_body_for_region_recovery_detailed,
+    lower_linear_body_with_budget, shared_exit_for_indices, shared_linear_exit,
 };
 pub use conditionals::{
     is_trivial_structuring_stmt, try_lower_if, try_lower_if_else, try_lower_return_chain_arm,

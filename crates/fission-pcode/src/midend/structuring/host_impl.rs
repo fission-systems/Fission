@@ -827,7 +827,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
 
     fn switch_recovery_cfg_admitted(&self, idx: usize) -> bool {
-        PreviewBuilder::switch_recovery_cfg_admitted_impl(self, idx)
+        fission_midend_structuring::switch_recovery_cfg_admitted(self, idx)
     }
 
     fn has_same_start_address_peer(&self, idx: usize) -> bool {

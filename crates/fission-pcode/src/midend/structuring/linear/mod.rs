@@ -1,20 +1,18 @@
-//! Linear body thin wrappers + **p-code opcode residual** (ADR 0012).
+//! Linear body: **p-code opcode residual** on PreviewBuilder (ADR 0012).
 //!
-//! Free owners live in `fission-midend-structuring::{linear_body,linear_multiblock}`.
-//! Residual on `PreviewBuilder` is intentionally limited to SLEIGH/p-code facts:
-//! `is_trivial_tail_op` / `is_trivial_forwarding_op` / `varnodes_overlap` use
-//! `PcodeOpcode` + `Varnode` and cannot move without a pcode dependency in midend.
+//! Free owners: `fission-midend-structuring::{linear_body,linear_multiblock}`.
+//! Tests and host call free-fns directly; this module keeps only SLEIGH/p-code
+//! helpers (`is_trivial_forwarding_op`, jump-target inventory, etc.).
 
 use super::*;
 
+// Re-export free-fn surface for midend callers that still import via structuring::linear.
 pub use fission_midend_structuring::{
-    can_inline_linear_successor, can_inline_linear_successor_for_region, has_linear_body_cache,
-    linear_exit, linear_exit_with_budget, lower_conditional_tail, lower_linear_body,
-    lower_linear_body_for_region_recovery_detailed, lower_linear_body_with_budget,
-    shared_exit_for_indices, shared_linear_exit,
-};
-pub use fission_midend_structuring::linear_body::{
+    can_inline_linear_successor, can_inline_linear_successor_for_region,
     canonicalize_region_target_for_exit_for_test, find_shared_tail_entries_for_region_for_test,
+    has_linear_body_cache, linear_exit, linear_exit_with_budget, lower_conditional_tail,
+    lower_linear_body, lower_linear_body_for_region_recovery_detailed,
+    lower_linear_body_with_budget, shared_exit_for_indices, shared_linear_exit,
 };
 
 mod recovery;
@@ -22,123 +20,8 @@ mod types;
 pub use types::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(crate) fn lower_linear_body(
-        &mut self,
-        start_idx: usize,
-        exit: LinearExit,
-    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
-        lower_linear_body(self, start_idx, exit)
-    }
-
-    pub(super) fn lower_linear_body_with_budget(
-        &mut self,
-        start_idx: usize,
-        exit: LinearExit,
-        budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
-        lower_linear_body_with_budget(self, start_idx, exit, budget)
-    }
-
-    pub(crate) fn lower_linear_body_for_region_recovery_detailed(
-        &mut self,
-        start_idx: usize,
-        exit: LinearExit,
-        budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
-        lower_linear_body_for_region_recovery_detailed(self, start_idx, exit, budget)
-    }
-
-    pub(crate) fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool {
-        has_linear_body_cache(self, start_idx, exit)
-    }
-
-    pub(super) fn linear_exit(
-        &mut self,
-        start_idx: usize,
-    ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        linear_exit(self, start_idx)
-    }
-
-    pub(super) fn linear_exit_with_budget(
-        &mut self,
-        start_idx: usize,
-        budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        linear_exit_with_budget(self, start_idx, budget)
-    }
-
-    pub(super) fn shared_linear_exit(
-        &mut self,
-        lhs_idx: usize,
-        rhs_idx: usize,
-    ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        shared_linear_exit(self, lhs_idx, rhs_idx)
-    }
-
-    pub(super) fn shared_exit_for_indices(
-        &mut self,
-        indices: &[usize],
-    ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        shared_exit_for_indices(self, indices)
-    }
-
-    pub(super) fn can_inline_linear_successor(
-        &self,
-        idx: usize,
-        next_idx: usize,
-        visited: &HashSet<usize>,
-    ) -> bool {
-        can_inline_linear_successor(self, idx, next_idx, visited)
-    }
-
-    pub(super) fn lower_conditional_tail(
-        &mut self,
-        origin_idx: usize,
-        cond: HirExpr,
-        true_target: u64,
-        false_target: Option<u64>,
-        exit: LinearExit,
-        depth: usize,
-        budget: Option<&mut IfLoweringBudget>,
-        region_recovery: bool,
-    ) -> Result<ConditionalTailLoweringResult, MlilPreviewError> {
-        lower_conditional_tail(
-            self,
-            origin_idx,
-            cond,
-            true_target,
-            false_target,
-            exit,
-            depth,
-            budget,
-            region_recovery,
-        )
-    }
-
-    pub(crate) fn find_shared_tail_entries_for_region_for_test(
-        &self,
-        origin_idx: usize,
-        true_start_idx: usize,
-        false_start_idx: usize,
-        join_idx: usize,
-    ) -> (Vec<usize>, Option<&'static str>) {
-        find_shared_tail_entries_for_region_for_test(
-            self,
-            origin_idx,
-            true_start_idx,
-            false_start_idx,
-            join_idx,
-        )
-    }
-
-    pub(crate) fn canonicalize_region_target_for_exit_for_test(
-        &self,
-        origin_idx: usize,
-        target_idx: usize,
-        exit: LinearExit,
-    ) -> Option<usize> {
-        canonicalize_region_target_for_exit_for_test(self, origin_idx, target_idx, exit)
-    }
+    // Linear free-fns are invoked via StructuringHost (host_impl) or tests
+    // (`fission_midend_structuring::lower_linear_body`, etc.). No inherent thin wraps.
 
     pub(super) fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
         if idx >= next_idx {
@@ -174,22 +57,6 @@ impl<'a> PreviewBuilder<'a> {
         let layout_idx = self.pcode_block_idx(idx);
         self.layout_fallthrough[layout_idx]
             .filter(|succ| self.successors[layout_idx].contains(succ))
-    }
-
-    pub(crate) fn build_proof_first_linear_multiblock_body(
-        &mut self,
-    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        self.build_linear_multiblock_body_inner(true)
-    }
-
-    pub(crate) fn switch_recovery_cfg_admitted_impl(&self, start_idx: usize) -> bool {
-        fission_midend_structuring::switch_recovery_cfg_admitted(self, start_idx)
-    }
-
-    pub(super) fn build_linear_multiblock_body(
-        &mut self,
-    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        self.build_linear_multiblock_body_inner(false)
     }
 
     pub(super) fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
@@ -459,26 +326,6 @@ impl<'a> PreviewBuilder<'a> {
                 | PcodeOpcode::PtrAdd
                 | PcodeOpcode::PtrSub
         )
-    }
-
-    fn lower_structured_switch_terminator(
-        &mut self,
-        expr: &HirExpr,
-        targets: &[u64],
-        default_target: Option<u64>,
-        min_val: i64,
-        proof: Option<&DispatcherProofUnit>,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError>  {
-        fission_midend_structuring::lower_structured_switch_terminator(
-            self, expr, targets, default_target, min_val, proof,
-        )
-    }
-
-    fn build_linear_multiblock_body_inner(
-        &mut self,
-        try_switch_recovery: bool,
-    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        fission_midend_structuring::build_linear_multiblock_body(self, try_switch_recovery)
     }
 
     fn is_linear_tail_terminator(&self, idx: usize, opcode: PcodeOpcode) -> bool {

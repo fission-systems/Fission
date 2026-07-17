@@ -1,4 +1,9 @@
 use super::super::*;
+use fission_midend_structuring::{
+    canonicalize_region_target_for_exit_for_test, find_shared_tail_entries_for_region_for_test,
+    has_linear_body_cache, lower_linear_body, lower_linear_body_for_region_recovery_detailed,
+};
+
 #[test]
 fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
     let cond = uniq(0x4f0, 1);
@@ -124,8 +129,8 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = builder
-        .lower_linear_body_for_region_recovery_detailed(0, LinearExit::Join(7), None)
+    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
+        0, LinearExit::Join(7), None)
         .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
@@ -207,11 +212,11 @@ fn region_canonicalization_respects_origin_guard() {
     let builder = PreviewBuilder::new(&func, &options, None);
 
     assert_eq!(
-        builder.canonicalize_region_target_for_exit_for_test(0, 1, LinearExit::Join(4)),
+        canonicalize_region_target_for_exit_for_test(&builder, 0, 1, LinearExit::Join(4)),
         Some(4)
     );
     assert_eq!(
-        builder.canonicalize_region_target_for_exit_for_test(2, 1, LinearExit::Join(4)),
+        canonicalize_region_target_for_exit_for_test(&builder, 2, 1, LinearExit::Join(4)),
         None
     );
 }
@@ -326,8 +331,8 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = builder
-        .lower_linear_body_for_region_recovery_detailed(0, LinearExit::Join(5), None)
+    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
+        0, LinearExit::Join(5), None)
         .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
@@ -477,8 +482,8 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = builder
-        .lower_linear_body_for_region_recovery_detailed(0, LinearExit::Join(6), None)
+    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
+        0, LinearExit::Join(6), None)
         .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
@@ -648,8 +653,8 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = builder
-        .lower_linear_body_for_region_recovery_detailed(0, LinearExit::Join(6), None)
+    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
+        0, LinearExit::Join(6), None)
         .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
@@ -755,7 +760,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let builder = PreviewBuilder::new(&func, &options, None);
-    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 6);
+    let (shared, subtype) = find_shared_tail_entries_for_region_for_test(&builder, 0, 2, 1, 6);
     assert_eq!(shared.first().copied(), Some(5));
     assert_eq!(subtype, None);
 }
@@ -874,7 +879,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let builder = PreviewBuilder::new(&func, &options, None);
-    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 6);
+    let (shared, subtype) = find_shared_tail_entries_for_region_for_test(&builder, 0, 2, 1, 6);
     assert!(shared.is_empty());
     assert_eq!(subtype, Some("SideEntryOrExit"));
 }
@@ -993,7 +998,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let builder = PreviewBuilder::new(&func, &options, None);
-    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 7);
+    let (shared, subtype) = find_shared_tail_entries_for_region_for_test(&builder, 0, 2, 1, 7);
     assert_eq!(subtype, None);
     assert_eq!(shared, vec![6, 5]);
 }
@@ -1099,7 +1104,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let builder = PreviewBuilder::new(&func, &options, None);
-    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 3, 1, 6);
+    let (shared, subtype) = find_shared_tail_entries_for_region_for_test(&builder, 0, 3, 1, 6);
     assert_eq!(subtype, None);
     assert_eq!(shared.first().copied(), Some(4));
 }
@@ -1179,7 +1184,7 @@ fn region_follow_discovery_rejects_local_cycle_without_index_shortcut() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let builder = PreviewBuilder::new(&func, &options, None);
-    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 4);
+    let (shared, subtype) = find_shared_tail_entries_for_region_for_test(&builder, 0, 2, 1, 4);
     assert!(shared.is_empty());
     // Since Fission now detects the irreducible loop mathematically and isolates the
     // irregular back-edge, the remaining DAG falls back smoothly via SideEntryOrExit
