@@ -591,7 +591,7 @@ impl<'a> PreviewBuilder<'a> {
         reads
     }
 
-    pub(super) fn try_build_guarded_tail_trial(
+    pub(crate) fn try_build_guarded_tail_trial(
         &mut self,
         body: &[HirStmt],
         idx: usize,
@@ -658,7 +658,7 @@ impl<'a> PreviewBuilder<'a> {
             .all(|stmt| Self::guarded_tail_stmt_is_execution_safe(stmt, label))
     }
 
-    pub(super) fn verify_guarded_tail_trial(
+    pub(crate) fn verify_guarded_tail_trial(
         &mut self,
         body: &[HirStmt],
         idx: usize,
@@ -1011,7 +1011,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn build_guarded_tail_execution_plan(
+    pub(crate) fn build_guarded_tail_execution_plan(
         &mut self,
         body: &[HirStmt],
         idx: usize,
@@ -1108,7 +1108,7 @@ impl<'a> PreviewBuilder<'a> {
         Self::replace_var_in_stmt(stmt, &merge.binding_name, &replacement_expr);
     }
 
-    pub(super) fn execute_guarded_tail_plan(
+    pub(crate) fn execute_guarded_tail_plan(
         &mut self,
         body: &mut Vec<HirStmt>,
         idx: usize,
@@ -1171,7 +1171,7 @@ impl<'a> PreviewBuilder<'a> {
         self.telemetry.structuring.promoted_region_count += 1;
     }
 
-    pub(super) fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]) {
+    pub(crate) fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]) {
         for stmt in body {
             match stmt {
                 HirStmt::Block(inner)

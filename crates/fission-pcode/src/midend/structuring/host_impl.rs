@@ -382,8 +382,14 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn bump_region_proof_candidate(&mut self) {
         self.telemetry.structuring.region_proof_candidate_count += 1;
     }
+    fn bump_region_proof_completed(&mut self) {
+        self.telemetry.structuring.region_proof_completed_count += 1;
+    }
     fn bump_guarded_tail_candidate(&mut self) {
         self.telemetry.structuring.guarded_tail_candidate_count += 1;
+    }
+    fn bump_promotion_candidate(&mut self) {
+        self.telemetry.structuring.promotion_candidate_count += 1;
     }
     fn bump_promotion_rejected_by_shape(&mut self) {
         self.telemetry.structuring.promotion_rejected_by_shape_count += 1;
@@ -475,5 +481,76 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
                 reason, idx, addr
             );
         }
+    }
+
+    fn try_build_guarded_tail_trial(
+        &mut self,
+        body: &[HirStmt],
+        idx: usize,
+        referenced: &std::collections::HashMap<String, usize>,
+    ) -> Option<
+        Result<
+            fission_midend_structuring::guarded_tail::GuardedTailTrial,
+            fission_midend_structuring::guarded_tail::GuardedTailWitnessRejection,
+        >,
+    > {
+        PreviewBuilder::try_build_guarded_tail_trial(self, body, idx, referenced)
+    }
+    fn verify_guarded_tail_trial(
+        &mut self,
+        body: &[HirStmt],
+        idx: usize,
+        trial: &fission_midend_structuring::guarded_tail::GuardedTailTrial,
+    ) -> fission_midend_structuring::guarded_tail::GuardedTailVerification {
+        PreviewBuilder::verify_guarded_tail_trial(self, body, idx, trial)
+    }
+    fn build_guarded_tail_execution_plan(
+        &mut self,
+        body: &[HirStmt],
+        idx: usize,
+        trial: &fission_midend_structuring::guarded_tail::GuardedTailTrial,
+        verification: &fission_midend_structuring::guarded_tail::GuardedTailVerification,
+    ) -> Result<
+        fission_midend_structuring::guarded_tail::GuardedTailExecutionPlan,
+        fission_midend_structuring::guarded_tail::GuardedTailExecutionRejection,
+    > {
+        PreviewBuilder::build_guarded_tail_execution_plan(self, body, idx, trial, verification)
+    }
+    fn execute_guarded_tail_plan(
+        &mut self,
+        body: &mut Vec<HirStmt>,
+        idx: usize,
+        trial: fission_midend_structuring::guarded_tail::GuardedTailTrial,
+        plan: fission_midend_structuring::guarded_tail::GuardedTailExecutionPlan,
+        cond: HirExpr,
+    ) {
+        PreviewBuilder::execute_guarded_tail_plan(self, body, idx, trial, plan, cond)
+    }
+    fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]) {
+        PreviewBuilder::discover_guarded_tail_candidates_in_body(self, body)
+    }
+    fn mark_promotion_shape_rejection(
+        &mut self,
+        reason: fission_midend_structuring::guarded_tail::PromotionShapeRejection,
+    ) {
+        PreviewBuilder::mark_promotion_shape_rejection(self, reason)
+    }
+    fn mark_promotion_gate_rejection(
+        &mut self,
+        reason: fission_midend_structuring::guarded_tail::PromotionGateRejection,
+    ) {
+        PreviewBuilder::mark_promotion_gate_rejection(self, reason)
+    }
+    fn mark_guarded_tail_execution_rejection(
+        &mut self,
+        reason: fission_midend_structuring::guarded_tail::GuardedTailExecutionRejection,
+    ) {
+        PreviewBuilder::mark_guarded_tail_execution_rejection(self, reason)
+    }
+    fn mark_guarded_tail_canonicalization_failure(
+        &mut self,
+        failure: fission_midend_structuring::guarded_tail::GuardedTailCanonicalizationFailure,
+    ) {
+        PreviewBuilder::mark_guarded_tail_canonicalization_failure(self, failure)
     }
 }

@@ -17,6 +17,10 @@
 //! Pure helpers that only touch `HirStmt`/`HirExpr` do **not** use this trait.
 
 use crate::cfg_analysis::{CfgFactCache, DomTree, SccAnalysis};
+use crate::guarded_tail::types::{
+    GuardedTailCanonicalizationFailure, GuardedTailExecutionPlan, GuardedTailExecutionRejection,
+    GuardedTailTrial, GuardedTailVerification, PromotionGateRejection, PromotionShapeRejection,
+};
 use crate::linear_types::{
     ConditionalTailKey, ConditionalTailMismatchSubtype, IfLoweringBudget,
     LinearBodyCacheKey, LinearBodyCachedOutcome, LinearBodyLoweringOutcome,
@@ -24,7 +28,7 @@ use crate::linear_types::{
 };
 use crate::loop_analysis::LoopBody;
 use fission_midend_core::ir::{HirExpr, HirStmt, MlilPreviewError, MlilPreviewOptions};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Context required by free-function structuring algorithms.
 pub trait StructuringHost {
@@ -184,7 +188,9 @@ pub trait StructuringHost {
 
     // ── Telemetry ──────────────────────────────────────────────────────────
     fn bump_region_proof_candidate(&mut self);
+    fn bump_region_proof_completed(&mut self);
     fn bump_guarded_tail_candidate(&mut self);
+    fn bump_promotion_candidate(&mut self);
     fn bump_promotion_rejected_by_shape(&mut self);
     fn bump_promotion_rejected_by_gate(&mut self);
     fn bump_region_emit_ready_failed(&mut self);
@@ -217,6 +223,43 @@ pub trait StructuringHost {
     fn emit_ready_trace(&self, message: &str);
     fn guarded_tail_trace_enabled(&self) -> bool;
     fn log_try_lower_if_reject(&self, idx: usize, reason: &str);
+
+    // ── Guarded-tail residual hooks (deep canonicalize/execution still host) ─
+    fn try_build_guarded_tail_trial(
+        &mut self,
+        body: &[HirStmt],
+        idx: usize,
+        referenced: &HashMap<String, usize>,
+    ) -> Option<Result<GuardedTailTrial, crate::guarded_tail::types::GuardedTailWitnessRejection>>;
+    fn verify_guarded_tail_trial(
+        &mut self,
+        body: &[HirStmt],
+        idx: usize,
+        trial: &GuardedTailTrial,
+    ) -> GuardedTailVerification;
+    fn build_guarded_tail_execution_plan(
+        &mut self,
+        body: &[HirStmt],
+        idx: usize,
+        trial: &GuardedTailTrial,
+        verification: &GuardedTailVerification,
+    ) -> Result<GuardedTailExecutionPlan, GuardedTailExecutionRejection>;
+    fn execute_guarded_tail_plan(
+        &mut self,
+        body: &mut Vec<HirStmt>,
+        idx: usize,
+        trial: GuardedTailTrial,
+        plan: GuardedTailExecutionPlan,
+        cond: HirExpr,
+    );
+    fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]);
+    fn mark_promotion_shape_rejection(&mut self, reason: PromotionShapeRejection);
+    fn mark_promotion_gate_rejection(&mut self, reason: PromotionGateRejection);
+    fn mark_guarded_tail_execution_rejection(&mut self, reason: GuardedTailExecutionRejection);
+    fn mark_guarded_tail_canonicalization_failure(
+        &mut self,
+        failure: GuardedTailCanonicalizationFailure,
+    );
 
     // ── Derived CFG helpers ────────────────────────────────────────────────
     fn analyze_cfg_scc(&self) -> SccAnalysis {

@@ -27,40 +27,19 @@ impl CollapseDriver {
         idx: usize,
         follow: Option<usize>,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        match rule {
-            CollapseRule::Switch => builder.try_lower_switch(idx),
-            CollapseRule::ForLoop => builder.try_lower_for(idx),
-            CollapseRule::DoWhile => {
-                let mut dw = builder.try_lower_dowhile(idx)?;
-                if dw.is_none() {
-                    dw = builder.try_lower_multiblock_dowhile(idx)?;
-                }
-                Ok(dw)
-            }
-            CollapseRule::WhileDo => builder.try_lower_while(idx),
-            CollapseRule::InfLoopBreak => builder.try_lower_infloop_with_break(idx),
-            CollapseRule::InfLoop => {
-                let mut inf = builder.try_lower_infloop(idx);
-                if inf.is_err() || matches!(inf, Ok(None)) {
-                    inf = builder.try_lower_multiblock_infloop(idx);
-                }
-                inf
-            }
-            CollapseRule::Conditional => {
-                let mut cond = builder.try_lower_short_circuit_if(idx);
-                if cond.is_err() || matches!(cond, Ok(None)) {
-                    cond = builder.try_reduce_if_else_with_follow(idx, follow);
-                }
-                if cond.is_err() || matches!(cond, Ok(None)) {
-                    cond = builder.try_lower_if_else(idx);
-                }
-                if cond.is_err() || matches!(cond, Ok(None)) {
-                    cond = builder.try_lower_if(idx);
-                }
-                cond
-            }
-            CollapseRule::Sequence | CollapseRule::Unstructured => Ok(None),
-        }
+        // Map local CollapseRule to free-function owner dispatch.
+        let free_rule = match rule {
+            CollapseRule::Switch => fission_midend_structuring::CollapseRule::Switch,
+            CollapseRule::ForLoop => fission_midend_structuring::CollapseRule::ForLoop,
+            CollapseRule::DoWhile => fission_midend_structuring::CollapseRule::DoWhile,
+            CollapseRule::WhileDo => fission_midend_structuring::CollapseRule::WhileDo,
+            CollapseRule::InfLoopBreak => fission_midend_structuring::CollapseRule::InfLoopBreak,
+            CollapseRule::InfLoop => fission_midend_structuring::CollapseRule::InfLoop,
+            CollapseRule::Conditional => fission_midend_structuring::CollapseRule::Conditional,
+            CollapseRule::Sequence => fission_midend_structuring::CollapseRule::Sequence,
+            CollapseRule::Unstructured => fission_midend_structuring::CollapseRule::Unstructured,
+        };
+        fission_midend_structuring::apply_collapse_rule(builder, free_rule, idx, follow)
     }
 
     pub(crate) fn run(builder: &mut PreviewBuilder<'_>) -> Result<Vec<HirStmt>, MlilPreviewError> {

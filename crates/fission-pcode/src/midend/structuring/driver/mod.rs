@@ -105,19 +105,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn promote_guarded_tail_regions_until_stable(&mut self, body: &mut Vec<HirStmt>) {
-        let mut iterations = 0;
-        while self.promote_single_entry_guarded_tail_regions(body) {
-            iterations += 1;
-            if iterations >= 30 {
-                if structuring_diag_enabled() {
-                    eprintln!(
-                        "[DIAG] promote_single_entry_guarded_tail_regions: budget tripped at {} iterations",
-                        iterations
-                    );
-                }
-                break;
-            }
-        }
+        fission_midend_structuring::promote_guarded_tail_regions_until_stable(self, body)
     }
 
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {

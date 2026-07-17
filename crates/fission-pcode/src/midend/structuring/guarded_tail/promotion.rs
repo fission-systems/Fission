@@ -94,7 +94,7 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn mark_promotion_shape_rejection(&mut self, reason: PromotionShapeRejection) {
+    pub(crate) fn mark_promotion_shape_rejection(&mut self, reason: PromotionShapeRejection) {
         self.telemetry.structuring.promotion_rejected_by_shape_count += 1;
         match reason {
             PromotionShapeRejection::MissingTerminalJoinTarget => {
@@ -110,7 +110,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn mark_noncanonical_layout_rejection(&mut self) {
+    pub(crate) fn mark_noncanonical_layout_rejection(&mut self) {
         self.telemetry
             .structuring
             .discovery_rejected_noncanonical_layout_count += 1;
@@ -171,7 +171,7 @@ impl<'a> PreviewBuilder<'a> {
         self.record_blockgraph_region_proof(&proof);
     }
 
-    fn mark_guarded_tail_witness_rejection(&mut self, reason: GuardedTailWitnessRejection) {
+    pub(crate) fn mark_guarded_tail_witness_rejection(&mut self, reason: GuardedTailWitnessRejection) {
         match reason {
             GuardedTailWitnessRejection::MissingTerminalJoin => {
                 self.telemetry
@@ -197,7 +197,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn mark_guarded_tail_execution_rejection(
+    pub(crate) fn mark_guarded_tail_execution_rejection(
         &mut self,
         reason: GuardedTailExecutionRejection,
     ) {
@@ -220,7 +220,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn mark_guarded_tail_canonicalization_failure(
+    pub(crate) fn mark_guarded_tail_canonicalization_failure(
         &mut self,
         reason: GuardedTailCanonicalizationFailure,
     ) {
@@ -276,7 +276,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn mark_promotion_gate_rejection(&mut self, reason: PromotionGateRejection) {
+    pub(crate) fn mark_promotion_gate_rejection(&mut self, reason: PromotionGateRejection) {
         self.telemetry.structuring.promotion_rejected_by_gate_count += 1;
         match reason {
             PromotionGateRejection::MustEmitLabel => {
@@ -325,79 +325,13 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         body: &mut Vec<HirStmt>,
     ) -> bool {
-        let (normalized, alias_rewrites) = normalize_guarded_tail_layout(std::mem::take(body));
-        *body = normalized;
-        let referenced = collect_referenced_label_counts(body);
-        let mut changed = alias_rewrites > 0;
-        let mut idx = 0usize;
-        while idx < body.len() {
-            let HirStmt::If { cond, .. } = &body[idx] else {
-                idx += 1;
-                continue;
-            };
-            let Some(trial) = self.try_build_guarded_tail_trial(body, idx, &referenced) else {
-                idx += 1;
-                continue;
-            };
-            let trial = match trial {
-                Ok(trial) => trial,
-                Err(reason) => {
-                    self.mark_guarded_tail_execution_rejection(
-                        GuardedTailExecutionRejection::Witness(reason),
-                    );
-                    match reason {
-                        GuardedTailWitnessRejection::MissingTerminalJoin => {
-                            self.mark_promotion_shape_rejection(
-                                PromotionShapeRejection::MissingTerminalJoinTarget,
-                            );
-                        }
-                        GuardedTailWitnessRejection::AmbiguousFollow => {
-                            self.mark_promotion_shape_rejection(
-                                PromotionShapeRejection::EmptyNonterminalTail,
-                            );
-                        }
-                        GuardedTailWitnessRejection::AliasInterleaveConflict => {}
-                        GuardedTailWitnessRejection::NonCanonicalLayout => {}
-                        GuardedTailWitnessRejection::SideEntryConflict => {}
-                    }
-                    idx += 1;
-                    continue;
-                }
-            };
-            let legality = trial.witness.region_legality();
-            self.telemetry.structuring.region_proof_candidate_count += 1;
-            if legality.is_complete_for(RegionKind::GuardedTail) {
-                self.telemetry.structuring.region_proof_completed_count += 1;
-            }
-            let verification = self.verify_guarded_tail_trial(body, idx, &trial);
-            if let Some(reason) = verification.rejection_reason {
-                self.mark_guarded_tail_execution_rejection(reason);
-                idx += 1;
-                continue;
-            }
-
-            self.telemetry.structuring.guarded_tail_candidate_count += 1;
-            self.telemetry.structuring.promotion_candidate_count += 1;
-            let plan =
-                match self.build_guarded_tail_execution_plan(body, idx, &trial, &verification) {
-                    Ok(plan) => plan,
-                    Err(reason) => {
-                        self.mark_guarded_tail_execution_rejection(reason);
-                        idx += 1;
-                        continue;
-                    }
-                };
-            self.execute_guarded_tail_plan(body, idx, trial, plan, cond.clone());
-            changed = true;
-            idx += 1;
-        }
-        changed
+        fission_midend_structuring::promote_single_entry_guarded_tail_regions(self, body)
     }
 
     pub(crate) fn discover_guarded_tail_candidates(&mut self, body: &[HirStmt]) {
-        let (normalized, _) = normalize_guarded_tail_layout(body.to_vec());
-        self.discover_guarded_tail_candidates_in_body(&normalized);
+        fission_midend_structuring::discover_guarded_tail_candidates(self, body)
     }
+
 
     pub(crate) fn accept_structured_region(
         &mut self,

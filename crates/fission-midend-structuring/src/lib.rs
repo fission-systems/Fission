@@ -21,6 +21,7 @@ pub mod cleanup;
 pub mod collapse_loop;
 pub mod conditionals;
 pub mod graph;
+pub mod guarded_tail;
 pub mod guarded_tail_pure;
 pub mod driver_pure;
 pub mod helpers;
@@ -33,6 +34,7 @@ pub mod loop_analysis;
 pub mod loops;
 pub mod regions;
 pub mod switch;
+pub mod sese_driver;
 
 pub use cfg_analysis::{
     CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
@@ -61,6 +63,10 @@ pub use linear_recovery::{
     SESE_REGION_PROOF_BUDGET_MS, build_linear_sese_child_fallback,
     region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
 };
+pub use guarded_tail::{
+    discover_guarded_tail_candidates, promote_guarded_tail_regions_until_stable,
+    promote_single_entry_guarded_tail_regions,
+};
 pub use guarded_tail_pure::{
     count_var_defs_stmt, count_var_reads_stmt, expr_contains_var, replace_var_in_expr,
     replace_var_in_stmt,
@@ -86,6 +92,7 @@ pub use loops::{
     try_lower_infloop_with_break, try_lower_multiblock_dowhile, try_lower_multiblock_infloop,
     try_lower_while,
 };
+pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule};
 pub use switch::{
     SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch,
 };
