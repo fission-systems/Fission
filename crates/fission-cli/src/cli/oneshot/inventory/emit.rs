@@ -40,7 +40,7 @@ use fission_decompiler::rust_sleigh::bounds::{
 };
 #[cfg(not(feature = "native_decomp"))]
 use fission_decompiler::{
-    IndirectControlClassification, NirBuildStats, NirHintStats, NirRenderOptions, PcodeFunction,
+    IndirectControlClassification, NirBuildStats, NirHintStats, PcodeFunction,
 };
 #[cfg(not(feature = "native_decomp"))]
 use fission_decompiler::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
@@ -743,7 +743,7 @@ fn build_inventory_candidate_entry_rust(
             pcode_op_count = metrics.1;
             auto_eligible = auto_nir_eligible(binary, &pcode);
 
-            let mut options = NirRenderOptions::from_loaded_binary(binary);
+            let mut options = fission_decompiler::seed_nir_render_options(binary);
             options.pe_x64_only = config.pe_x64_only;
             options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
 

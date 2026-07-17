@@ -13,6 +13,7 @@ categories = ["development-tools"]
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
+fission-midend-core = { path = "../fission-midend-core" }
 fission-signatures = { path = "../fission-signatures" }
 anyhow = "1.0"
 thiserror = "2.0"

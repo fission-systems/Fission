@@ -22,6 +22,9 @@ fission-core = { path = "../fission-core" }
 fission-analysis-db = { path = "../fission-analysis-db" }
 fission-loader = { path = "../fission-loader" }
 fission-pcode = { path = "../fission-pcode" }
+fission-midend-core = { path = "../fission-midend-core" }
+fission-midend-normalize = { path = "../fission-midend-normalize" }
+fission-midend-structuring = { path = "../fission-midend-structuring" }
 fission-signatures = { path = "../fission-signatures" }
 fission-static = { path = "../fission-static" }
 fission-sleigh = { path = "../fission-sleigh" }

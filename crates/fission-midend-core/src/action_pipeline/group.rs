@@ -1,26 +1,26 @@
 //! Action groups and fixpoint repeat semantics.
 
-use super::super::ir::HirFunction;
+use crate::ir::HirFunction;
 use super::budget::hir_shape;
 use super::concept::GhidraActionConcept;
 use super::pass::{Pass, PassCtx, PassOutcome, run_pass_logged};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Repeat {
+pub enum Repeat {
     Once,
     UntilStable { max_rounds: usize },
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Gate {
+pub enum Gate {
     Always,
     NotLargeFunction,
     Custom(fn(&HirFunction) -> bool),
 }
 
 impl Gate {
-    pub(crate) fn allows(self, func: &HirFunction) -> bool {
+    pub fn allows(self, func: &HirFunction) -> bool {
         match self {
             Gate::Always => true,
             Gate::NotLargeFunction => !super::budget::is_large_hir_function(func),
@@ -29,16 +29,16 @@ impl Gate {
     }
 }
 
-pub(crate) struct ActionGroup {
-    pub(crate) name: &'static str,
-    pub(crate) concept: GhidraActionConcept,
-    pub(crate) gate: Gate,
-    pub(crate) repeat: Repeat,
-    pub(crate) passes: Vec<Box<dyn Pass>>,
+pub struct ActionGroup {
+    pub name: &'static str,
+    pub concept: GhidraActionConcept,
+    pub gate: Gate,
+    pub repeat: Repeat,
+    pub passes: Vec<Box<dyn Pass>>,
 }
 
 impl ActionGroup {
-    pub(crate) fn new(name: &'static str, concept: GhidraActionConcept) -> Self {
+    pub fn new(name: &'static str, concept: GhidraActionConcept) -> Self {
         Self {
             name,
             concept,
@@ -48,27 +48,27 @@ impl ActionGroup {
         }
     }
 
-    pub(crate) fn with_gate(mut self, gate: Gate) -> Self {
+    pub fn with_gate(mut self, gate: Gate) -> Self {
         self.gate = gate;
         self
     }
 
-    pub(crate) fn with_repeat(mut self, repeat: Repeat) -> Self {
+    pub fn with_repeat(mut self, repeat: Repeat) -> Self {
         self.repeat = repeat;
         self
     }
 
-    pub(crate) fn pass(mut self, pass: Box<dyn Pass>) -> Self {
+    pub fn pass(mut self, pass: Box<dyn Pass>) -> Self {
         self.passes.push(pass);
         self
     }
 
-    pub(crate) fn passes(mut self, passes: Vec<Box<dyn Pass>>) -> Self {
+    pub fn passes(mut self, passes: Vec<Box<dyn Pass>>) -> Self {
         self.passes.extend(passes);
         self
     }
 
-    pub(crate) fn run(&self, ctx: &mut PassCtx<'_>) -> bool {
+    pub fn run(&self, ctx: &mut PassCtx<'_>) -> bool {
         if !self.gate.allows(ctx.func) {
             return false;
         }

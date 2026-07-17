@@ -3,7 +3,7 @@ use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPrototypeSummary, NirFunctionHints,
-    NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
+    NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
     infer_entry_register_param_arity,
 };
 use fission_analysis_db::SymbolKind;
@@ -470,7 +470,7 @@ fn build_preview_callee_summaries(
         &pcode,
         &detail,
     );
-    let mut options = NirRenderOptions::from_loaded_binary(binary);
+    let mut options = crate::seed_nir_render_options(binary);
     apply_spec_overrides(binary, &mut options);
     let register_namer = RegisterNamer::from_options(&options);
     let prototype = infer_entry_register_param_arity(&pcode, &register_namer).map(|arity| {

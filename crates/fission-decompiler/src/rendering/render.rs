@@ -76,7 +76,7 @@ pub(crate) fn nir_options_with_recovery(
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> NirRenderOptions {
-    let options = NirRenderOptions::from_loaded_binary(binary);
+    let options = crate::seed_nir_render_options(binary);
     apply_nir_recovery_flags(
         options,
         region_linearize_structuring,

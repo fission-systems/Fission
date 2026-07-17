@@ -17,14 +17,13 @@ structuring, and render/printer.
 
 ```text
 midend/
-├── ir/             # Structured IR substrate (Hir*, options, NirBuildStats)
+├── (ir, action_pipeline, wave_stats, labels → crates/fission-midend-core)
 ├── builder/        # Preview/NIR lowering from p-code (see builder/AGENTS.md)
 ├── normalize/      # HIR normalization passes (see normalize/AGENTS.md)
 ├── structuring/    # CFG-driven reconstruction to higher-level HIR
 ├── orchestrate.rs  # render_mlil_preview* / render_nir* entrypoints
-├── labels.rs       # Shared sentinels (fallthrough, …)
 ├── tests/          # Synthetic NIR/structuring integration tests
-├── mod.rs          # Re-exports + owner wiring
+├── mod.rs          # Re-exports + owner wiring (+ midend-core re-exports)
 └── (print lives in crate-root `src/render/`)
 ```
 

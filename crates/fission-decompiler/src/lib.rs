@@ -16,6 +16,11 @@
 
 pub use fission_pcode::*;
 
+/// Prefer midend facades for shared IR and owner entrypoints (ADR 0012).
+pub use fission_midend_core as midend_core;
+pub use fission_midend_normalize as midend_normalize;
+pub use fission_midend_structuring as midend_structuring;
+
 // ─── Submodule hierarchy ────────────────────────────────────────────────────
 
 pub mod context;
@@ -97,7 +102,7 @@ mod orchestration_tests {
             function_name: Some("sub_401000"),
             engine_mode: NirEngineMode::Legacy,
             timeout_ms: None,
-            render_options: Some(NirRenderOptions::from_loaded_binary(&binary)),
+            render_options: Some(crate::seed_nir_render_options(&binary)),
         };
         let result = decompile_prebuilt_pcode(&pcode, &request).expect("prebuilt");
         assert!(result.code.is_none());
@@ -119,7 +124,7 @@ mod orchestration_tests {
             "sub_401000",
             NirEngineMode::Legacy,
             None,
-            NirRenderOptions::from_loaded_binary(&binary),
+            crate::seed_nir_render_options(&binary),
         )
         .expect("legacy mode selection");
 

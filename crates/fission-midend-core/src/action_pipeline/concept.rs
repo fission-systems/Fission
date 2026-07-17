@@ -1,9 +1,9 @@
 //! Clean-room mapping from Ghidra decompiler action concepts to Fission stages.
 
-use super::super::ir::NirBuildStats;
+use crate::ir::NirBuildStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum GhidraActionConcept {
+pub enum GhidraActionConcept {
     FuncdataBuild,
     HeritageValueRecovery,
     Normalize,
@@ -13,7 +13,7 @@ pub(crate) enum GhidraActionConcept {
 }
 
 impl GhidraActionConcept {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             GhidraActionConcept::FuncdataBuild => "funcdata_build",
             GhidraActionConcept::HeritageValueRecovery => "heritage_value_recovery",
@@ -24,7 +24,7 @@ impl GhidraActionConcept {
         }
     }
 
-    pub(crate) const fn ghidra_reference(self) -> &'static str {
+    pub const fn ghidra_reference(self) -> &'static str {
         match self {
             GhidraActionConcept::FuncdataBuild => "Funcdata",
             GhidraActionConcept::HeritageValueRecovery => "Heritage",
@@ -39,7 +39,7 @@ impl GhidraActionConcept {
         }
     }
 
-    pub(crate) const fn fission_owner(self) -> &'static str {
+    pub const fn fission_owner(self) -> &'static str {
         match self {
             GhidraActionConcept::FuncdataBuild => "nir::builder",
             GhidraActionConcept::HeritageValueRecovery => "nir::builder::materialize",
@@ -51,7 +51,7 @@ impl GhidraActionConcept {
     }
 }
 
-pub(crate) const GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE: [GhidraActionConcept; 6] = [
+pub const GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE: [GhidraActionConcept; 6] = [
     GhidraActionConcept::FuncdataBuild,
     GhidraActionConcept::HeritageValueRecovery,
     GhidraActionConcept::Normalize,
@@ -60,7 +60,7 @@ pub(crate) const GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE: [GhidraActionConcept; 6] = [
     GhidraActionConcept::PrintC,
 ];
 
-pub(crate) fn record_ghidra_action_stage(stats: &mut NirBuildStats, concept: GhidraActionConcept) {
+pub fn record_ghidra_action_stage(stats: &mut NirBuildStats, concept: GhidraActionConcept) {
     stats.ghidra_action_stage_count += 1;
     match concept {
         GhidraActionConcept::FuncdataBuild => stats.ghidra_action_funcdata_build_count += 1,
@@ -76,12 +76,12 @@ pub(crate) fn record_ghidra_action_stage(stats: &mut NirBuildStats, concept: Ghi
     }
 }
 
-pub(crate) fn record_ghidra_clean_room_pipeline_complete(stats: &mut NirBuildStats) {
+pub fn record_ghidra_clean_room_pipeline_complete(stats: &mut NirBuildStats) {
     stats.ghidra_clean_room_pipeline_complete_count += 1;
 }
 
 /// Returns true when a pass at `concept` would violate the expected stage boundary.
-pub(crate) fn stage_boundary_violation(
+pub fn stage_boundary_violation(
     expected: GhidraActionConcept,
     observed: GhidraActionConcept,
 ) -> bool {

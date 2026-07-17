@@ -46,7 +46,7 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
     // Sourced from the checked-in `.slaspec` register model under
     // `utils/sleigh-specs/languages`. We deliberately do NOT read Ghidra's packaged `.sla`
     // (`vendor/`): `vendor/` is a reference-only corpus and must not be a production
-    // dependency. `NirRenderOptions::from_loaded_binary` already seeds `sla_register_map`
+    // dependency. `crate::seed_nir_render_options` via `seed_nir_render_options` seeds `sla_register_map`
     // from the same model via `ensure_sla_register_map()`; we keep that map when present.
     let Some(model) = fission_pcode::midend::cspec::register_model_for_language(language_id) else {
         return;
@@ -101,7 +101,7 @@ pub(crate) fn finish_rust_sleigh_render(
     userops: std::collections::HashMap<u32, String>,
     evidence: &mut RustSleighPipelineEvidence,
 ) -> Result<RustSleighDecompileResult, String> {
-    let mut options = NirRenderOptions::from_loaded_binary(binary);
+    let mut options = crate::seed_nir_render_options(binary);
     options.pe_x64_only = config.pe_x64_only;
     options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
     options.userops = userops;

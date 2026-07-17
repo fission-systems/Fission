@@ -30,7 +30,7 @@ impl<'a> DecompileRequest<'a> {
         let mut options = self
             .render_options
             .clone()
-            .unwrap_or_else(|| NirRenderOptions::from_loaded_binary(self.binary));
+            .unwrap_or_else(|| crate::seed_nir_render_options(self.binary));
 
         if let Some(func) = self.binary.function_at(self.function_address) {
             options.is_data_ref_origin = func

@@ -546,7 +546,7 @@ mod tests {
             "{}",
             0x401000,
             "sub_401000",
-            NirRenderOptions::from_loaded_binary(&binary),
+            crate::seed_nir_render_options(&binary),
             type_context,
         );
         assert_eq!(
@@ -605,7 +605,7 @@ mod tests {
             "sub_401000",
             NirEngineMode::Legacy,
             None,
-            NirRenderOptions::from_loaded_binary(&binary),
+            crate::seed_nir_render_options(&binary),
         )
         .expect("legacy preview selection from pcode");
 
@@ -630,7 +630,7 @@ mod tests {
             "sub_401000",
             NirEngineMode::Auto,
             None,
-            NirRenderOptions::from_loaded_binary(&binary),
+            crate::seed_nir_render_options(&binary),
         )
         .expect("auto preview selection from pcode");
 
@@ -704,7 +704,7 @@ mod tests {
             "{}",
             0x401000,
             "sub_401000",
-            NirRenderOptions::from_loaded_binary(&binary),
+            crate::seed_nir_render_options(&binary),
             type_context,
         );
 

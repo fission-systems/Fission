@@ -1,10 +1,10 @@
 //! ActionPool: fixpoint rule sweep over HIR (Ghidra ActionPool analog).
 
-use super::super::ir::{HirExpr, HirFunction, HirLValue, HirStmt};
+use crate::ir::{HirExpr, HirFunction, HirLValue, HirStmt};
 use super::concept::GhidraActionConcept;
 use super::pass::{Pass, PassCtx, PassOutcome};
 
-pub(crate) trait Rule {
+pub trait Rule {
     fn name(&self) -> &'static str;
     fn apply_stmt(&self, _stmt: &mut HirStmt) -> bool {
         false
@@ -14,15 +14,15 @@ pub(crate) trait Rule {
     }
 }
 
-pub(crate) struct ActionPool {
-    pub(crate) name: &'static str,
-    pub(crate) concept: GhidraActionConcept,
-    pub(crate) max_rounds: usize,
-    pub(crate) rules: Vec<Box<dyn Rule>>,
+pub struct ActionPool {
+    pub name: &'static str,
+    pub concept: GhidraActionConcept,
+    pub max_rounds: usize,
+    pub rules: Vec<Box<dyn Rule>>,
 }
 
 impl ActionPool {
-    pub(crate) fn new(name: &'static str, concept: GhidraActionConcept) -> Self {
+    pub fn new(name: &'static str, concept: GhidraActionConcept) -> Self {
         Self {
             name,
             concept,
@@ -31,12 +31,12 @@ impl ActionPool {
         }
     }
 
-    pub(crate) fn rule(mut self, rule: Box<dyn Rule>) -> Self {
+    pub fn rule(mut self, rule: Box<dyn Rule>) -> Self {
         self.rules.push(rule);
         self
     }
 
-    pub(crate) fn max_rounds(mut self, max_rounds: usize) -> Self {
+    pub fn max_rounds(mut self, max_rounds: usize) -> Self {
         self.max_rounds = max_rounds;
         self
     }
@@ -67,7 +67,7 @@ impl Pass for ActionPool {
     }
 }
 
-pub(crate) fn apply_rules_to_stmts(stmts: &mut [HirStmt], rules: &[Box<dyn Rule>]) -> bool {
+pub fn apply_rules_to_stmts(stmts: &mut [HirStmt], rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
     for stmt in stmts {
         changed |= apply_rules_to_stmt(stmt, rules);

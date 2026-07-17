@@ -114,49 +114,48 @@ pub fn apply_cspec_for_pair(
     true
 }
 
-impl NirRenderOptions {
-    /// Integer parameter register offsets from `.cspec` (empty when not loaded).
-    pub(in crate::midend) fn int_param_offsets(&self) -> &[u64] {
-        self.cspec_param_offsets.as_deref().unwrap_or(&[])
-    }
+/// Integer parameter register offsets from `.cspec` (empty when not loaded).
+pub(crate) fn int_param_offsets(options: &NirRenderOptions) -> &[u64] {
+    options.cspec_param_offsets.as_deref().unwrap_or(&[])
+}
 
-    /// Ensure cspec fields are populated when missing.
-    pub(in crate::midend) fn ensure_cspec(&mut self, reg_map: &SlaRegisterMap) {
-        self.ensure_sla_register_map();
-        if self.cspec_param_offsets.is_some() {
-            return;
-        }
-        let map = self
-            .sla_register_map
-            .as_ref()
-            .map(|offset_map| sla_register_map_from_offset_map(offset_map))
-            .unwrap_or_else(|| reg_map.clone());
-        let _ = apply_cspec_for_options(self, &map);
+/// Ensure cspec fields are populated when missing.
+pub(crate) fn ensure_cspec(options: &mut NirRenderOptions, reg_map: &SlaRegisterMap) {
+    ensure_sla_register_map(options);
+    if options.cspec_param_offsets.is_some() {
+        return;
     }
+    let map = options
+        .sla_register_map
+        .as_ref()
+        .map(|offset_map| sla_register_map_from_offset_map(offset_map))
+        .unwrap_or_else(|| reg_map.clone());
+    let _ = apply_cspec_for_options(options, &map);
+}
 
-    /// Populate `sla_register_map` from the checked-in SLA register model when absent.
-    pub(in crate::midend) fn ensure_sla_register_map(&mut self) {
-        if self.sla_register_map.is_none() {
-            let _ = apply_register_model_for_options(self);
-        }
-    }
-
-    /// Inverted `(offset,size)→name` map as name→`(offset,size)` for cspec resolution.
-    pub(in crate::midend) fn sla_name_index(&self) -> Option<SlaRegisterMap> {
-        self.sla_register_map
-            .as_ref()
-            .map(sla_register_map_from_offset_map)
-    }
-
-    /// Cached SLA register model for the preview/default language pair.
-    pub(in crate::midend) fn register_model(
-        &self,
-    ) -> Option<std::sync::Arc<super::register_model::RegisterModel>> {
-        default_cspec_pair(self).and_then(|(lang, _)| register_model_for_language(&lang))
+/// Populate `sla_register_map` from the checked-in SLA register model when absent.
+pub(crate) fn ensure_sla_register_map(options: &mut NirRenderOptions) {
+    if options.sla_register_map.is_none() {
+        let _ = apply_register_model_for_options(options);
     }
 }
 
-pub(in crate::midend) fn sla_register_map_from_offset_map(
+/// Inverted `(offset,size)→name` map as name→`(offset,size)` for cspec resolution.
+pub(crate) fn sla_name_index(options: &NirRenderOptions) -> Option<SlaRegisterMap> {
+    options
+        .sla_register_map
+        .as_ref()
+        .map(sla_register_map_from_offset_map)
+}
+
+/// Cached SLA register model for the preview/default language pair.
+pub(crate) fn register_model(
+    options: &NirRenderOptions,
+) -> Option<std::sync::Arc<super::register_model::RegisterModel>> {
+    default_cspec_pair(options).and_then(|(lang, _)| register_model_for_language(&lang))
+}
+
+pub(crate) fn sla_register_map_from_offset_map(
     map: &HashMap<(u64, u32), String>,
 ) -> SlaRegisterMap {
     map.iter()

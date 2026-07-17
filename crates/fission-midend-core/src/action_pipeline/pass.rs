@@ -1,23 +1,23 @@
 //! Pass trait and execution context for the action pipeline.
 
-use super::super::ir::{DecompFacts, HirFunction, NirBuildStats};
+use crate::ir::{DecompFacts, HirFunction, NirBuildStats};
 use super::budget::hir_shape;
 use super::concept::{GhidraActionConcept, record_ghidra_action_stage};
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PassOutcome {
+pub enum PassOutcome {
     Changed,
     Unchanged,
 }
 
 impl PassOutcome {
-    pub(crate) fn changed(self) -> bool {
+    pub fn changed(self) -> bool {
         matches!(self, PassOutcome::Changed)
     }
 
-    pub(crate) fn from_bool(changed: bool) -> Self {
+    pub fn from_bool(changed: bool) -> Self {
         if changed {
             PassOutcome::Changed
         } else {
@@ -26,7 +26,7 @@ impl PassOutcome {
     }
 }
 
-pub(crate) struct PassCtx<'a> {
+pub struct PassCtx<'a> {
     pub func: &'a mut HirFunction,
     pub perf: bool,
     pub diag: bool,
@@ -35,24 +35,24 @@ pub(crate) struct PassCtx<'a> {
 }
 
 impl<'a> PassCtx<'a> {
-    pub(crate) fn record_stage(&mut self, concept: GhidraActionConcept) {
+    pub fn record_stage(&mut self, concept: GhidraActionConcept) {
         if let Some(stats) = self.stats.as_deref_mut() {
             record_ghidra_action_stage(stats, concept);
         }
     }
 }
 
-pub(crate) trait Pass {
+pub trait Pass {
     fn name(&self) -> &'static str;
     fn concept(&self) -> GhidraActionConcept;
     fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome;
 }
 
 /// Wraps an existing `fn(&mut HirFunction) -> bool` pass.
-pub(crate) struct FnPass {
-    pub(crate) name: &'static str,
-    pub(crate) concept: GhidraActionConcept,
-    pub(crate) f: fn(&mut HirFunction) -> bool,
+pub struct FnPass {
+    pub name: &'static str,
+    pub concept: GhidraActionConcept,
+    pub f: fn(&mut HirFunction) -> bool,
 }
 
 impl Pass for FnPass {
@@ -69,7 +69,7 @@ impl Pass for FnPass {
     }
 }
 
-pub(crate) fn fn_pass(
+pub fn fn_pass(
     name: &'static str,
     concept: GhidraActionConcept,
     f: fn(&mut HirFunction) -> bool,
@@ -78,7 +78,7 @@ pub(crate) fn fn_pass(
 }
 
 /// Runs a pass with telemetry, timing, and wave stats recording.
-pub(crate) fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_>, pass: &P) -> PassOutcome {
+pub fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_>, pass: &P) -> PassOutcome {
     let pass_name = pass.name();
     let _span = debug_span!(
         "normalize_pass",
@@ -94,7 +94,7 @@ pub(crate) fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_>, pass: &P)
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let changed = outcome.changed();
 
-    crate::midend::wave_stats::add_pass_metric(
+    crate::wave_stats::add_pass_metric(
         pass_name,
         elapsed_ms,
         changed,

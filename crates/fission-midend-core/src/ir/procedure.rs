@@ -524,9 +524,13 @@ impl IndirectControlClassification {
             || stats.dispatcher_shape_recovered_count > 0
     }
 
+    /// Classify from a boolean observation (e.g. raw p-code indirect control).
+    ///
+    /// P-code-aware helpers live in `fission-pcode` so midend-core stays free of
+    /// lifter IR dependencies.
     #[must_use]
-    pub fn from_pcode(pcode: &crate::pcode::PcodeFunction) -> Self {
-        Self::from_stats_or_observation(None, crate::pcode_has_indirect_control_flow(pcode))
+    pub fn from_indirect_observation(has_indirect_control: bool) -> Self {
+        Self::from_stats_or_observation(None, has_indirect_control)
     }
 
     #[must_use]

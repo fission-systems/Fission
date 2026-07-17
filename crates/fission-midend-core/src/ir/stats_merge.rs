@@ -4,7 +4,7 @@
 //! behavior by responsibility so builder/normalize/structuring refactors do not
 //! need to duplicate the public flat field list at call sites.
 
-use super::ir::{NirBuildStats, PassAggregate};
+use super::{NirBuildStats, PassAggregate};
 
 macro_rules! merge_additive_fields {
     ($target:expr, $other:expr, [$($field:ident),+ $(,)?]) => {
@@ -30,7 +30,7 @@ impl NirBuildStats {
         merge_pass_metrics(&mut self.pass_metrics, &other.pass_metrics);
     }
 
-    pub(crate) fn merge_guarded_tail_discovery_assign(&mut self, other: &Self) {
+    pub fn merge_guarded_tail_discovery_assign(&mut self, other: &Self) {
         merge_guarded_tail_discovery_stats(self, other);
     }
 

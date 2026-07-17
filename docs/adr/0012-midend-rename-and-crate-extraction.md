@@ -46,7 +46,7 @@ Removed intermediate aliases that no longer had callers:
 | B | `fission-midend-normalize` | Facade re-export of normalize surface | **Expanded** (`normalize_hir_function`, wave stats, API sigs) |
 | C | `fission-midend-structuring` | Facade re-export of structuring surface | **Expanded** (owner + shared IR types) |
 | D0 | Decouple reverse edges | `wave_stats` at midend root; all callers use `midend::wave_stats`; reverse `is_known_api_signature` via midend root | **Done** |
-| D | `fission-midend-core` + move | Shared substrate facade scaffolded; physical `ir`/`action_pipeline`/`wave_stats` move still future | **Scaffolded** |
+| D | `fission-midend-core` + move | **Physical move complete** for `ir/`, `action_pipeline/`, `wave_stats`, `labels`, and `NirBuildStats` merge helpers. `fission-pcode` re-exports them and depends on core (dependency inverted). | **In progress** (substrate done; normalize/structuring source still in pcode) |
 | E | Drop `fission_pcode::nir` alias | After workspace migration | **Done** |
 
 Facade crates **do not** move source yet. They establish stable dependency
@@ -76,9 +76,12 @@ before crates).
 1. ~~Migrate `fission-decompiler` / `fission-static` imports to `midend`.~~ **Done**
 2. ~~Remove `pub use midend as nir` when greps are clean.~~ **Done** (Phase E)
 3. ~~Scaffold `fission-midend-core` and route facade IR types through it.~~ **Done**
-4. **Physical midend-core move:** lift `ir/`, `action_pipeline/`, and
-   `wave_stats` out of `fission-pcode` into `fission-midend-core` (break
-   pcode→core cycle by inverting ownership; keep builder/vsa in pcode or
-   co-extract as needed).
-5. Promote normalize/structuring facades from re-export to owned source trees;
-   then have decompiler/static depend on facades for owner entrypoints.
+4. ~~Physical midend-core move for `ir/`, `action_pipeline/`, `wave_stats`, labels, stats merge.~~ **Done**
+   - P-code adapters: `seed_nir_render_options`, `nir_admission_facts_from_pcode`,
+     `indirect_control_classification_from_pcode` remain in `fission-pcode`.
+   - Cspec helpers that formerly were inherent methods on `NirRenderOptions` are free functions.
+5. **Normalize/structuring source move:** blocked on decoupling `support` /
+   `var_rename` / `vsa` (normalize) and `PreviewBuilder` method blocks
+   (structuring). Facades + decompiler/static deps on core/facades established.
+6. After owner source moves, drop deep re-exports from `fission-pcode` where
+   callers have migrated to facade crates.

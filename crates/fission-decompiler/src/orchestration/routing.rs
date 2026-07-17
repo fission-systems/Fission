@@ -6,7 +6,7 @@ use crate::taxonomy::classify_native_failure_kind;
 use crate::types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
 };
-use crate::{NirAdmissionFacts, NirRenderOptions, NirTypeContext, PcodeFunction, TargetProfile};
+use crate::{NirRenderOptions, NirTypeContext, PcodeFunction, TargetProfile};
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::time::Instant;
@@ -18,7 +18,7 @@ use std::time::Instant;
 /// `NirBuildStats`-based ownership decisions.
 pub fn auto_nir_admission_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
     let profile = TargetProfile::from_binary(binary, true);
-    profile.auto_admission_eligible(NirAdmissionFacts::from_pcode(pcode))
+    profile.auto_admission_eligible(crate::nir_admission_facts_from_pcode(pcode))
 }
 
 pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {

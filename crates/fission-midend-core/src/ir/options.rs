@@ -134,18 +134,20 @@ pub struct NirAdmissionFacts {
 }
 
 impl NirAdmissionFacts {
-    pub fn from_pcode(pcode: &PcodeFunction) -> Self {
+    /// Build admission facts from precomputed p-code shape metrics.
+    ///
+    /// Callers that have a `PcodeFunction` should use the pcode-side adapter
+    /// (`fission_pcode::midend::nir_admission_facts_from_pcode`) so this crate
+    /// stays free of a reverse dependency on the lifter IR.
+    pub fn from_counts(
+        block_count: usize,
+        op_count: usize,
+        max_multiequal_fanin: usize,
+    ) -> Self {
         Self {
-            block_count: pcode.blocks.len(),
-            op_count: pcode.blocks.iter().map(|block| block.ops.len()).sum(),
-            max_multiequal_fanin: pcode
-                .blocks
-                .iter()
-                .flat_map(|block| block.ops.iter())
-                .filter(|op| op.opcode == PcodeOpcode::MultiEqual)
-                .map(|op| op.inputs.len())
-                .max()
-                .unwrap_or(0),
+            block_count,
+            op_count,
+            max_multiequal_fanin,
         }
     }
 }
@@ -346,7 +348,7 @@ impl NirRenderOptions {
             CallingConvention::WindowsX64
         };
 
-        let mut options = Self {
+        let options = Self {
             pe_x64_only: true,
             is_64bit: binary.is_64bit,
             is_data_ref_origin: false,
@@ -377,7 +379,9 @@ impl NirRenderOptions {
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: std::collections::HashSet::new(),
         };
-        options.ensure_sla_register_map();
+        // SLA register map seeding lives in `fission-pcode` (cspec / register model)
+        // so this crate does not depend on SLEIGH language resources. Callers that
+        // need a populated map should use `fission_pcode::midend::seed_nir_render_options`.
         options
     }
 
@@ -405,7 +409,7 @@ impl NirRenderOptions {
         }
     }
 
-    pub(in crate::midend) fn is_mapped_global(&self, address: u64) -> bool {
+    pub fn is_mapped_global(&self, address: u64) -> bool {
         self.sections
             .iter()
             .any(|(start, end)| address >= *start && address < *end)
@@ -416,7 +420,7 @@ impl NirRenderOptions {
     /// starts at `image_base` and the read-only data section (.rodata) follows
     /// immediately after.  This heuristic returns the `.rodata` base when the
     /// jump table displacement has not been patched into instruction bytes.
-    pub(in crate::midend) fn first_rodata_section_base(&self) -> Option<u64> {
+    pub fn first_rodata_section_base(&self) -> Option<u64> {
         self.sections
             .iter()
             .filter(|(start, end)| {

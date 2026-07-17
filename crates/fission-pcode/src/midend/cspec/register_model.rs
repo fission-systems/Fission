@@ -274,7 +274,7 @@ impl RegisterNamer {
         Self {
             abi: options.calling_convention,
             sla_map: options.sla_register_map.clone(),
-            int_param_offsets: options.int_param_offsets().to_vec(),
+            int_param_offsets: super::apply::int_param_offsets(options).to_vec(),
             return_offset: options.cspec_return_offset,
             return_target: model
                 .as_ref()

@@ -43,7 +43,7 @@ pub struct FunctionFacts {
     pub type_facts: Vec<TypeFact>,
     pub dwarf_info: Option<DwarfFunctionInfo>,
     pub pdb_info: Option<PdbFunctionInfo>,
-    pub structuring_hints: Option<fission_pcode::midend::NirFunctionHints>,
+    pub structuring_hints: Option<fission_midend_core::NirFunctionHints>,
     pub calling_convention: Option<fission_core::CallingConvention>,
 }
 
@@ -85,7 +85,7 @@ pub struct FactStore {
     loader_type_facts: Arc<Vec<InferredTypeInfo>>,
     dwarf_functions: Arc<HashMap<u64, DwarfFunctionInfo>>,
     pdb_functions: Arc<HashMap<u64, PdbFunctionInfo>>,
-    structuring_hints: HashMap<u64, fission_pcode::midend::NirFunctionHints>,
+    structuring_hints: HashMap<u64, fission_midend_core::NirFunctionHints>,
     pub calling_conventions: HashMap<u64, fission_core::CallingConvention>,
 }
 
@@ -403,7 +403,7 @@ impl FactStore {
     pub fn record_structuring_hints(
         &mut self,
         address: u64,
-        hints: fission_pcode::midend::NirFunctionHints,
+        hints: fission_midend_core::NirFunctionHints,
     ) {
         self.structuring_hints
             .entry(address)
@@ -411,7 +411,7 @@ impl FactStore {
             .or_insert(hints);
     }
 
-    pub fn structuring_hints(&self, address: u64) -> Option<&fission_pcode::midend::NirFunctionHints> {
+    pub fn structuring_hints(&self, address: u64) -> Option<&fission_midend_core::NirFunctionHints> {
         self.structuring_hints.get(&address)
     }
 
@@ -446,8 +446,8 @@ impl FactStore {
 }
 
 fn merge_structuring_hints(
-    current: &mut fission_pcode::midend::NirFunctionHints,
-    incoming: &fission_pcode::midend::NirFunctionHints,
+    current: &mut fission_midend_core::NirFunctionHints,
+    incoming: &fission_midend_core::NirFunctionHints,
 ) {
     if current.param_names.len() < incoming.param_names.len() {
         current
@@ -770,7 +770,7 @@ mod tests {
         );
         store.record_structuring_hints(
             0x401000,
-            fission_pcode::midend::NirFunctionHints {
+            fission_midend_core::NirFunctionHints {
                 param_names: vec!["structural_0".into(), "structural_1".into()],
                 return_type_name: Some("uint32_t".into()),
                 ..Default::default()
@@ -778,7 +778,7 @@ mod tests {
         );
         store.record_structuring_hints(
             0x401000,
-            fission_pcode::midend::NirFunctionHints {
+            fission_midend_core::NirFunctionHints {
                 stack_local_names: HashMap::from([(-8, "recovered_local".into())]),
                 ..Default::default()
             },

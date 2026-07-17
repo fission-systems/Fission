@@ -11,15 +11,15 @@ use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
-use crate::pcode::{PcodeFunction, PcodeOpcode};
 use fission_core::CallingConvention;
 
 mod build_stats;
 mod decomp_facts;
 mod hir;
-pub(crate) mod inference;
+pub mod inference;
 mod options;
 mod procedure;
+mod stats_merge;
 
 pub use build_stats::*;
 pub use decomp_facts::*;
