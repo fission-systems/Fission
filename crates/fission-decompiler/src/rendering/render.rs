@@ -146,7 +146,7 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                 &options,
                 Some(binary),
                 Some(&type_context_cloned),
-                Some(&mut decomp_ctx as &mut dyn fission_pcode::nir::DecompFacts),
+                Some(&mut decomp_ctx as &mut dyn fission_pcode::midend::DecompFacts),
             )
         })) {
             Ok(Ok(code)) => {

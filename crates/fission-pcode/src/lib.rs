@@ -4,9 +4,8 @@
 //! with guides in `crates/fission-pcode/src/midend/AGENTS.md`. Dual-layer
 //! print/presentation owns [`crate::render`] (`src/render/AGENTS.md`, ADR 0011).
 //!
-//! **Re-export period (ADR 0012):** [`crate::nir`] remains an alias of
-//! [`crate::midend`] so existing `fission_pcode::nir::…` call sites keep working.
-//! Prefer `midend` in new code.
+//! Prefer [`crate::midend`] for post-lift owners (ADR 0012). The historical
+//! `nir` module path has been removed after call-site migration.
 
 // CI runs `cargo clippy ... -D warnings`; `-D warnings` cannot be selectively reversed via `-A clippy::*`
 // on the command line for all lint kinds, so suppress Clippy for this crate until policy is tightened again.
@@ -22,8 +21,6 @@ pub mod cfg;
 pub(crate) mod fast_hash;
 /// Post-lift midend (structured IR, normalize, structuring, orchestration).
 pub mod midend;
-/// Historical module path for the midend. Prefer [`midend`].
-pub use midend as nir;
 mod pcode;
 pub mod prelude;
 /// Dual-layer C presentation (NIR/HIR print surfaces). Owner: ADR 0008 / 0011.

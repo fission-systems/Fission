@@ -9,7 +9,8 @@ mod type_infer;
 mod use_type_infer;
 mod variadic_stack_region;
 
-pub(crate) use callsite_type_prop::{apply_callsite_type_prop_pass, is_known_api_signature};
+pub(crate) use callsite_type_prop::apply_callsite_type_prop_pass;
+pub use callsite_type_prop::is_known_api_signature;
 pub(crate) use constraint::apply_type_constraint_propagation;
 pub(crate) use entry_param_promotion::apply_entry_param_promotion_pass;
 pub(crate) use interproc_sig_prop::apply_interproc_callsite_arity_pass;

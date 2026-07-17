@@ -2,7 +2,7 @@
 //!
 //! Safe Rust boundary here; FFI to Ghidra-era surfaces lives in the separate `fission-ffi` crate.
 //!
-//! Optimizer hooks and IR shapes are consumed by [`crate::nir`] when building previews.
+//! Optimizer hooks and IR shapes are consumed by [`crate::midend`] when building previews.
 
 pub mod ir;
 pub use ir::*;

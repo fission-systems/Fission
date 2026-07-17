@@ -48,7 +48,7 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
     // (`vendor/`): `vendor/` is a reference-only corpus and must not be a production
     // dependency. `NirRenderOptions::from_loaded_binary` already seeds `sla_register_map`
     // from the same model via `ensure_sla_register_map()`; we keep that map when present.
-    let Some(model) = fission_pcode::nir::cspec::register_model_for_language(language_id) else {
+    let Some(model) = fission_pcode::midend::cspec::register_model_for_language(language_id) else {
         return;
     };
     let reg_map = model.to_sla_register_map();
@@ -59,14 +59,14 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
     let languages_root = fission_sleigh::compiler::sleigh_languages_root();
 
     // Step 3: Ghidra-style exact .cspec lookup via .ldefs index.
-    if let Some(resolved) = fission_pcode::nir::cspec::loader::load_cspec_for_pair(
+    if let Some(resolved) = fission_pcode::midend::cspec::loader::load_cspec_for_pair(
         &languages_root,
         language_id,
         compiler_spec_id,
         &reg_map,
     ) && let Some(proto) = resolved.default_proto.as_ref()
     {
-        fission_pcode::nir::cspec::apply::apply_resolved_proto_to_options(options, proto);
+        fission_pcode::midend::cspec::apply::apply_resolved_proto_to_options(options, proto);
     }
 
     // Step 4: Ghidra-style .pspec lookup via the same .ldefs index.
@@ -74,7 +74,7 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
     // `.pspec` is language-level (not compiler-variant-level), but the `.ldefs` index
     // stores `processorspec="..."` per language, so any compiler_spec_id that maps to
     // the same language_id yields the same pspec.  We use the first hit.
-    if let Some(pspec) = fission_pcode::nir::cspec::pspec::load_pspec_for_pair(
+    if let Some(pspec) = fission_pcode::midend::cspec::pspec::load_pspec_for_pair(
         &languages_root,
         language_id,
         compiler_spec_id,

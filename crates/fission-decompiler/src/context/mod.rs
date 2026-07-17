@@ -13,7 +13,7 @@
 use crate::facts::build_nir_type_context;
 use fission_analysis_db::ProgramSnapshot;
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::nir::{NirFunctionHints, NirTypeContext};
+use fission_pcode::midend::{NirFunctionHints, NirTypeContext};
 use fission_static::analysis::decomp::facts::FactStore;
 use std::sync::Arc;
 
@@ -74,7 +74,7 @@ impl<'bin> DecompContext<'bin> {
     }
 }
 
-impl<'bin> fission_pcode::nir::DecompFacts for DecompContext<'bin> {
+impl<'bin> fission_pcode::midend::DecompFacts for DecompContext<'bin> {
     fn record_discovered_hints(&mut self, addr: u64, hints: NirFunctionHints) {
         self.facts.record_structuring_hints(addr, hints);
         self.type_context = build_nir_type_context(self.binary, &self.facts, addr);

@@ -1,4 +1,4 @@
-//! Counters for normalize-only “quality wave” passes (merged into [`crate::midend::ir::NirBuildStats`]).
+//! Counters for midend quality-wave “quality wave” passes (merged into [`crate::midend::ir::NirBuildStats`]).
 use crate::midend::ir::NirBuildStats;
 use std::cell::RefCell;
 
@@ -6,220 +6,220 @@ thread_local! {
     static WAVE: RefCell<NirBuildStats> = RefCell::new(NirBuildStats::default());
 }
 
-pub(super) fn reset_normalize_wave_stats() {
+pub(crate) fn reset_normalize_wave_stats() {
     WAVE.with(|w| {
         *w.borrow_mut() = NirBuildStats::default();
     });
 }
 
-pub(super) fn take_normalize_wave_stats() -> NirBuildStats {
+pub(crate) fn take_normalize_wave_stats() -> NirBuildStats {
     WAVE.with(|w| std::mem::take(&mut *w.borrow_mut()))
 }
 
-pub(super) fn add_entry_param_promotions(n: usize) {
+pub(crate) fn add_entry_param_promotions(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().entry_param_promotion_spill_rename_count += n);
 }
 
-pub(super) fn add_variadic_stack_region_folds(n: usize) {
+pub(crate) fn add_variadic_stack_region_folds(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().variadic_stack_region_fold_count += n);
 }
 
-pub(super) fn add_abi_slot_recoveries(n: usize) {
+pub(crate) fn add_abi_slot_recoveries(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().abi_slot_recovered_count += n);
 }
 
-pub(super) fn add_home_slot_promotions(n: usize) {
+pub(crate) fn add_home_slot_promotions(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().home_slot_promoted_count += n);
 }
 
-pub(super) fn add_va_start_recoveries(n: usize) {
+pub(crate) fn add_va_start_recoveries(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().va_start_recovered_count += n);
 }
 
-pub(super) fn add_call_signature_refinements(n: usize) {
+pub(crate) fn add_call_signature_refinements(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().call_signature_refined_count += n);
 }
 
-pub(super) fn add_call_prototype_exact_api_arity_pruned(n: usize) {
+pub(crate) fn add_call_prototype_exact_api_arity_pruned(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().call_prototype_exact_api_arity_pruned_count += n);
 }
 
-pub(super) fn add_call_prototype_unknown_target_kept(n: usize) {
+pub(crate) fn add_call_prototype_unknown_target_kept(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().call_prototype_unknown_target_kept_count += n);
 }
 
-pub(super) fn add_call_prototype_wrapper_resolved(n: usize) {
+pub(crate) fn add_call_prototype_wrapper_resolved(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().call_prototype_wrapper_resolved_count += n);
 }
 
-pub(super) fn add_call_prototype_signature_missing(n: usize) {
+pub(crate) fn add_call_prototype_signature_missing(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().call_prototype_signature_missing_count += n);
 }
 
-pub(super) fn add_object_shape_recoveries(n: usize) {
+pub(crate) fn add_object_shape_recoveries(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().object_shape_recovered_count += n);
 }
 
-pub(super) fn add_object_root_recoveries(n: usize) {
+pub(crate) fn add_object_root_recoveries(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().object_root_recovered_count += n);
 }
 
-pub(super) fn add_typed_fact_evidences(n: usize) {
+pub(crate) fn add_typed_fact_evidences(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().typed_fact_evidence_count += n);
 }
 
-pub(super) fn add_typed_fact_conflicts(n: usize) {
+pub(crate) fn add_typed_fact_conflicts(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().typed_fact_conflict_count += n);
 }
 
-pub(super) fn add_object_root_fact_promotions(n: usize) {
+pub(crate) fn add_object_root_fact_promotions(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().object_root_fact_promotion_count += n);
 }
 
-pub(super) fn add_typed_object_shape_refinements(n: usize) {
+pub(crate) fn add_typed_object_shape_refinements(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().typed_object_shape_refined_count += n);
 }
 
-pub(super) fn add_surface_binding_promotions(n: usize) {
+pub(crate) fn add_surface_binding_promotions(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().surface_binding_promoted_count += n);
 }
 
-pub(super) fn add_surface_fact_promotions(n: usize) {
+pub(crate) fn add_surface_fact_promotions(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().surface_fact_promotion_count += n);
 }
 
-pub(super) fn add_prototype_summary_refinements(n: usize) {
+pub(crate) fn add_prototype_summary_refinements(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().prototype_summary_refined_count += n);
 }
 
-pub(super) fn add_prototype_summary_rounds(n: usize) {
+pub(crate) fn add_prototype_summary_rounds(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().prototype_summary_round_count += n);
 }
 
-pub(super) fn add_call_effect_summary_refinements(n: usize) {
+pub(crate) fn add_call_effect_summary_refinements(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().call_effect_summary_refined_count += n);
 }
 
-pub(super) fn add_wrapper_summary_folds(n: usize) {
+pub(crate) fn add_wrapper_summary_folds(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().wrapper_summary_fold_count += n);
 }
 
-pub(super) fn add_cleanup_budget_skips(n: usize) {
+pub(crate) fn add_cleanup_budget_skips(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_budget_skip_count += n);
 }
 
-pub(super) fn add_cleanup_family_binding_init(n: usize) {
+pub(crate) fn add_cleanup_family_binding_init(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_family_binding_init_count += n);
 }
 
-pub(super) fn add_cleanup_family_stmt_canonical(n: usize) {
+pub(crate) fn add_cleanup_family_stmt_canonical(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_family_stmt_canonical_count += n);
 }
 
-pub(super) fn add_cleanup_stmt_fold(n: usize) {
+pub(crate) fn add_cleanup_stmt_fold(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_stmt_fold_count += n);
 }
 
-pub(super) fn add_cleanup_boundary_label(n: usize) {
+pub(crate) fn add_cleanup_boundary_label(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_boundary_label_count += n);
 }
 
-pub(super) fn add_cleanup_loopish_rewrite(n: usize) {
+pub(crate) fn add_cleanup_loopish_rewrite(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_loopish_rewrite_count += n);
 }
 
-pub(super) fn add_cleanup_family_dead_binding(n: usize) {
+pub(crate) fn add_cleanup_family_dead_binding(n: usize) {
     if n == 0 {
         return;
     }
     WAVE.with(|w| w.borrow_mut().cleanup_family_dead_binding_count += n);
 }
 
-pub(super) fn add_interproc_constraint_rounds(n: usize) {
+pub(crate) fn add_interproc_constraint_rounds(n: usize) {
     if n == 0 {
         return;
     }

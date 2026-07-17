@@ -3,11 +3,16 @@
 //! # Extraction status (ADR 0012)
 //!
 //! Implementation still lives in [`fission_pcode::midend::structuring`]. This
-//! crate establishes the future extraction dependency name. Most structuring
-//! helpers remain `pub(crate)` inside `fission-pcode` until the code move;
-//! the public owner module is re-exported so the graph can stabilize early.
+//! crate establishes the future extraction dependency name. Expand re-exports
+//! here as structuring surfaces are stabilized for a physical code move.
 
 #![doc = "See docs/adr/0012-midend-rename-and-crate-extraction.md"]
 
-/// Owner module re-export (grows as structuring API is stabilized for extraction).
+/// Owner module re-export.
 pub use fission_pcode::midend::structuring as owner;
+
+/// Shared structured-IR types needed by structuring callers.
+pub use fission_pcode::midend::{HirFunction, HirStmt, NirBuildStats};
+
+/// Switch fallthrough sentinel used by structuring and print.
+pub use fission_pcode::midend::SWITCH_FALLTHROUGH_SENTINEL;

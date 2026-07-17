@@ -24,13 +24,12 @@ names should track the midend vocabulary.
 | `crates/fission-pcode/src/midend/` | Post-lift owners (builder, normalize, structuring, ir, orchestrate) |
 | `crates/fission-pcode/src/render/` | Dual-layer print / HIR presentation |
 | `fission_pcode::midend` | **Preferred** public path |
-| `fission_pcode::nir` | **Re-export alias** of `midend` during migration |
+| `fission_pcode::nir` | **Removed** — call sites use `midend` |
 
-Re-export period goals:
+Migration goals met for the alias path:
 
-- External crates (`fission-decompiler`, `fission-static`, …) keep compiling.
-- New code prefers `midend`.
-- Alias removal is a follow-up once call sites migrate (tracked in this ADR).
+- External crates (`fission-decompiler`, `fission-static`, bins) use `midend`.
+- Prefer `midend` / facade crates in new code.
 
 ### 2. Compat cleanup (completed with this decision)
 
@@ -43,11 +42,12 @@ Removed intermediate aliases that no longer had callers:
 
 | Phase | Crate | Contents | Status |
 |-------|--------|----------|--------|
-| A | *(in-tree)* | `midend` rename + public owner modules | **Now** |
-| B | `fission-midend-normalize` | Facade re-export of normalize surface | **Scaffolded** |
-| C | `fission-midend-structuring` | Facade re-export of structuring surface | **Scaffolded** |
-| D | Move implementation | Code leaves `fission-pcode` into facades | Future |
-| E | Drop `fission_pcode::nir` alias | After workspace migration | Future |
+| A | *(in-tree)* | `midend` rename + public owner modules | **Done** |
+| B | `fission-midend-normalize` | Facade re-export of normalize surface | **Expanded** (`normalize_hir_function`, wave stats, API sigs) |
+| C | `fission-midend-structuring` | Facade re-export of structuring surface | **Expanded** (owner + shared IR types) |
+| D0 | Decouple reverse edges | `wave_stats` at midend root; callers migrate off `normalize::wave_stats` | **In progress** |
+| D | Move implementation | Code leaves `fission-pcode` into facades (needs midend-core for action_pipeline/vsa) | Future |
+| E | Drop `fission_pcode::nir` alias | After workspace migration | **Done** |
 
 Facade crates **do not** move source yet. They establish stable dependency
 names so callers can switch before the heavy code move (ADR 0008: boundaries

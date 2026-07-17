@@ -187,7 +187,7 @@ pub(crate) fn win_type_name_to_nir(name: &str) -> Option<NirType> {
     Some(nir)
 }
 
-pub(crate) fn is_known_api_signature(name: &str) -> bool {
+pub fn is_known_api_signature(name: &str) -> bool {
     api_signature_via_import_aliases(name).is_some()
 }
 

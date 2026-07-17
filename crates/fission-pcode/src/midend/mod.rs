@@ -4,8 +4,7 @@
 //! Stage order: [`builder`] → [`normalize`] → [`structuring`] → [`crate::render`].
 //! Directory guide: `crates/fission-pcode/src/midend/AGENTS.md`.
 //!
-//! Historical crate path `fission_pcode::nir` is a re-export of this module
-//! during the ADR 0012 migration window.
+//! Prefer `fission_pcode::midend` as the public path (ADR 0012).
 
 // Bridge imports used by child owners via `super::…` (historical shared prelude).
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
@@ -33,6 +32,8 @@ mod support;
 mod telemetry;
 #[cfg(test)]
 mod tests;
+/// Shared quality-wave telemetry counters (used by normalize/structuring/vsa).
+pub(crate) mod wave_stats;
 /// Structured IR substrate (`Hir*`, options, `NirBuildStats`).
 pub mod ir;
 mod var_rename;
@@ -44,7 +45,7 @@ pub(crate) use self::abi::{
 };
 pub use self::abstract_location::{AbstractStackSlot, ParamSlotIndex};
 pub(crate) use self::action_pipeline::STRUCTURING_TIME_CEILING_SECS;
-pub(crate) use self::labels::SWITCH_FALLTHROUGH_SENTINEL;
+pub use self::labels::SWITCH_FALLTHROUGH_SENTINEL;
 
 pub(super) use self::support::*;
 pub use self::telemetry::{
@@ -67,7 +68,8 @@ pub use self::abi::infer_entry_register_param_arity;
 pub use self::cfg::structuring_cfg_edges;
 pub use self::cspec::RegisterNamer;
 pub use self::normalize::{
-    summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
+    is_known_api_signature, normalize_hir_function, summarize_direct_tail_wrapper_from_ops,
+    summarize_direct_tail_wrapper_from_pcode, take_normalize_wave_stats,
 };
 pub use crate::render::{
     LayeredPseudocode, PrintProfile, PseudocodeLayer, render_contracted_wrapper_summary,

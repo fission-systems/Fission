@@ -4,4 +4,4 @@
 
 /// Switch-case fallthrough edge marker. Structuring emits `Goto` to this label;
 /// the printer renders it as a fallthrough comment rather than a real jump.
-pub(crate) const SWITCH_FALLTHROUGH_SENTINEL: &str = "__fallthrough";
+pub const SWITCH_FALLTHROUGH_SENTINEL: &str = "__fallthrough";
