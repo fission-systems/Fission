@@ -1,6 +1,6 @@
 [package]
 name = "fission-static"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Static analysis services and decompilation-facing facts for Fission"

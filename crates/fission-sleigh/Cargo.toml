@@ -1,6 +1,6 @@
 [package]
 name = "fission-sleigh"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Fission Dev Team"]
 description = "Ghidra Sleigh compiler/runtime integration for Fission"
