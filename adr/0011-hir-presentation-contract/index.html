@@ -1204,8 +1204,10 @@ change and ADR 0006 applies.</p>
 <li><a href="../0007-ai-overfit-and-validation-firewall/">ADR 0007</a> — overfit firewall</li>
 <li><a href="../0008-nir-substrate-and-owner-boundaries/">ADR 0008</a> — substrate vs owners</li>
 <li>Repo policy: root <code>Agents.md</code> § NIR vs HIR</li>
-<li>Implementation: <code>crates/fission-pcode/src/render/</code> (<code>hir_presentation.rs</code>, <code>printer.rs</code>, …)</li>
-<li>Module boundary: presentation is crate-root <code>render</code>, not nested under <code>nir/</code> (Phase 1 of dual-layer ownership)</li>
+<li>Implementation: <code>crates/fission-pcode/src/render/</code>
+  (<code>presentation/</code>, <code>printer.rs</code>, <code>pipeline.rs</code>, <code>layer.rs</code>)</li>
+<li>Module boundary: presentation is crate-root <code>render</code>, not nested under <code>nir/</code></li>
+<li>Boundary scan: <code>scripts/check/owner_boundaries.sh</code></li>
 </ul>
 
 

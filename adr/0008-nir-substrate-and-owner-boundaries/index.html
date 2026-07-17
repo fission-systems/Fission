@@ -975,7 +975,7 @@
 
 <h1 id="adr-0008-nir-substrate-and-owner-boundaries">ADR 0008: NIR substrate and owner boundaries<a class="headerlink" href="#adr-0008-nir-substrate-and-owner-boundaries" title="Permanent link">&para;</a></h1>
 <p><strong>Status:</strong> Accepted
-<strong>Last verified:</strong> 2026-07-04</p>
+<strong>Last verified:</strong> 2026-07-17</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
 <p><code>fission-pcode</code> has grown from a p-code/NIR substrate into the place where most
 decompiler quality work lands: builder/materialize, normalize, type recovery,
@@ -1012,6 +1012,12 @@ facts.</p>
   expression semantics through normalize or builder helpers;</li>
 <li>render/printer consumes structured HIR only and must not perform semantic
   recovery.</li>
+</ul>
+<p><strong>Physical progress (in-crate, not yet multi-crate):</strong></p>
+<ul>
+<li>Dual-layer print lives at crate-root <code>src/render/</code> (not nested under <code>nir/</code>).</li>
+<li>HIR polish is <code>render/presentation/</code>; shared sentinels in <code>nir/labels.rs</code>.</li>
+<li>Smoke scan: <code>scripts/check/owner_boundaries.sh</code>.</li>
 </ul>
 <p>Existing cross-edges are migration debt, not precedent. They should be retired
 by moving shared facts into substrate modules such as CFG, def-use, type
