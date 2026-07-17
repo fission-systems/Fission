@@ -113,3 +113,5 @@ pub use regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,
 };
+
+// Phase D CI revalidation (sccache tag fix on main).
