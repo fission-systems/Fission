@@ -755,11 +755,73 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
 
     fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &HirStmt) -> Option<String> {
-        PreviewBuilder::suffix_call_uses_preview_unsafe_callee_impl(self, stmt)
+        let (target, _, _) = fission_midend_structuring::guarded_tail::pure_hir::suffix_call_expr(stmt)?;
+        let summary = self.call_effect_summary_for_target(target);
+        fission_midend_structuring::guarded_tail::suffix_window::preview_unsafe_callee_target(
+            stmt,
+            summary.as_ref(),
+        )
     }
 
     fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &HirStmt) {
-        PreviewBuilder::trace_suffix_unknown_call_provenance_impl(self, stmt_idx, stmt)
+        fission_midend_structuring::guarded_tail::suffix_window::trace_suffix_unknown_call_provenance(
+            self, stmt_idx, stmt,
+        )
+    }
+
+    fn call_effect_summary_for_target(
+        &self,
+        target: &str,
+    ) -> Option<fission_midend_core::ir::NirCallEffectSummary> {
+        self.type_context
+            .and_then(|ctx| ctx.call_effect_summaries.get(target))
+            .cloned()
+    }
+
+    fn suffix_call_provenance_facts(
+        &self,
+        target: &str,
+        target_addr: Option<u64>,
+    ) -> fission_midend_structuring::guarded_tail::suffix_window::SuffixCallProvenanceFacts {
+        use crate::midend::is_known_api_signature;
+        let import = is_known_api_signature(target);
+        let binary_function_present = target_addr.is_some_and(|addr| {
+            self.binary
+                .is_some_and(|binary| binary.functions.iter().any(|func| func.address == addr))
+        });
+        let target_ref = target_addr.and_then(|addr| {
+            self.type_context
+                .and_then(|ctx| ctx.call_target_refs.get(&addr))
+        });
+        let effect_summary = self.call_effect_summary_for_target(target);
+        fission_midend_structuring::guarded_tail::suffix_window::SuffixCallProvenanceFacts {
+            target_addr,
+            import,
+            binary_function_present,
+            target_ref_present: target_ref.is_some(),
+            target_ref_provenance: target_ref
+                .map(|r| format!("{:?}", r.provenance))
+                .unwrap_or_else(|| "None".to_string()),
+            effect_summary,
+        }
+    }
+
+    fn note_unsupported_terminator_emit(&mut self, block_addr: u64) {
+        PreviewBuilder::record_unsupported_inventory_event(
+            self,
+            "build_linear_multiblock_unsupported_terminator",
+            None,
+            None,
+            None,
+            Some(block_addr),
+            None,
+            false,
+            "hir_unsupported_emit",
+        );
+    }
+
+    fn switch_recovery_cfg_admitted(&self, idx: usize) -> bool {
+        PreviewBuilder::switch_recovery_cfg_admitted_impl(self, idx)
     }
 
     fn has_same_start_address_peer(&self, idx: usize) -> bool {

@@ -313,6 +313,21 @@ pub trait StructuringHost {
     fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &HirStmt) -> Option<String>;
     /// Residual: optional GT-TRACE provenance dump for unknown suffix calls.
     fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &HirStmt);
+    /// Residual: look up NIR call-effect summary by callee name.
+    fn call_effect_summary_for_target(
+        &self,
+        target: &str,
+    ) -> Option<fission_midend_core::ir::NirCallEffectSummary>;
+    /// Residual: binary / type-context facts for suffix call provenance traces.
+    fn suffix_call_provenance_facts(
+        &self,
+        target: &str,
+        target_addr: Option<u64>,
+    ) -> crate::guarded_tail::suffix_window::SuffixCallProvenanceFacts;
+    /// Residual: inventory note when linear multiblock emits unsupported terminator.
+    fn note_unsupported_terminator_emit(&mut self, block_addr: u64);
+    /// Residual: admit switch recovery from CFG shape at `idx`.
+    fn switch_recovery_cfg_admitted(&self, idx: usize) -> bool;
 
     /// True when another p-code block shares this virtual block's start address.
     fn has_same_start_address_peer(&self, idx: usize) -> bool;

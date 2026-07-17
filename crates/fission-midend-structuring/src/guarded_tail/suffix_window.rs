@@ -1,14 +1,128 @@
 //! Guarded-tail suffix-window free functions (ADR 0012).
 //!
-//! Pure helpers: [`super::pure_hir`]. Residual callee analysis stays on host.
+//! Pure helpers: [`super::pure_hir`]. Callee-analysis pure checks live here;
+//! host residual only supplies `NirCallEffectSummary` / binary provenance facts.
 
 use super::pure_hir::*;
 use super::types::*;
 use crate::cleanup::{has_non_ignorable_payload, is_ignorable_discovery_stmt};
-use crate::host::StructuringHost;
 use crate::guarded_tail::bodies::StructuringCounter;
-use fission_midend_core::ir::HirStmt;
+use crate::host::StructuringHost;
+use fission_midend_core::ir::{
+    CallEffectSummarySource, HirStmt, NirCallEffectSummary, parse_call_target_address,
+};
 use std::collections::{HashMap, HashSet};
+
+/// Pure: does this preview-callee summary make a call unsafe for suffix ownership?
+pub fn nir_call_summary_is_preview_unsafe(summary: &NirCallEffectSummary) -> bool {
+    summary.source == Some(CallEffectSummarySource::PreviewCalleeAnalysis)
+        && (summary.writes_memory == Some(true)
+            || summary.may_call_unknown == Some(true)
+            || summary.may_exit == Some(true))
+}
+
+/// Pure: if `summary` is a preview-unsafe callee for `stmt`'s call, return target name.
+pub fn preview_unsafe_callee_target(
+    stmt: &HirStmt,
+    summary: Option<&NirCallEffectSummary>,
+) -> Option<String> {
+    let (target, _args, _return_used) = suffix_call_expr(stmt)?;
+    let summary = summary?;
+    nir_call_summary_is_preview_unsafe(summary).then(|| target.to_string())
+}
+
+/// Facts the host gathers for optional GT-TRACE callee provenance dumps.
+#[derive(Debug, Clone, Default)]
+pub struct SuffixCallProvenanceFacts {
+    pub target_addr: Option<u64>,
+    pub import: bool,
+    pub binary_function_present: bool,
+    pub target_ref_present: bool,
+    pub target_ref_provenance: String,
+    pub effect_summary: Option<NirCallEffectSummary>,
+}
+
+/// Pure emit path for unknown-call provenance diagnostics (no host state).
+pub fn emit_suffix_unknown_call_provenance_trace(
+    stmt_idx: usize,
+    stmt: &HirStmt,
+    facts: &SuffixCallProvenanceFacts,
+) {
+    let Some((target, _args, return_used)) = suffix_call_expr(stmt) else {
+        return;
+    };
+    let internal = !facts.import && facts.target_addr.is_some();
+    let summary_available = facts.import
+        || call_target_is_known_pure_helper(target)
+        || call_target_is_memory_mutating(target)
+        || call_target_is_control_effect(target)
+        || facts.effect_summary.is_some();
+    let writes_memory = facts
+        .effect_summary
+        .as_ref()
+        .and_then(|summary| summary.writes_memory)
+        .map(|value| if value { "yes" } else { "no" })
+        .unwrap_or("unknown");
+    let may_call_unknown = facts
+        .effect_summary
+        .as_ref()
+        .and_then(|summary| summary.may_call_unknown)
+        .map(|value| if value { "yes" } else { "no" })
+        .unwrap_or("unknown");
+    let may_exit = facts
+        .effect_summary
+        .as_ref()
+        .and_then(|summary| summary.may_exit)
+        .map(|value| if value { "yes" } else { "no" })
+        .unwrap_or("unknown");
+    let effect_summary_source = facts
+        .effect_summary
+        .as_ref()
+        .and_then(|summary| summary.source)
+        .map(|source| format!("{source:?}"))
+        .unwrap_or_else(|| "None".to_string());
+
+    eprintln!(
+        "[GT-TRACE] suffix-unknown-call-provenance stmt_idx={} target={} target_addr={:?} internal={} import={} summary_available={}",
+        stmt_idx, target, facts.target_addr, internal, facts.import, summary_available
+    );
+    eprintln!(
+        "[GT-TRACE] suffix-unknown-call-summary target={} binary_function_present={} target_ref_present={} target_ref_provenance={} effect_summary_source={}",
+        target,
+        facts.binary_function_present,
+        facts.target_ref_present,
+        facts.target_ref_provenance,
+        effect_summary_source,
+    );
+    eprintln!(
+        "[GT-TRACE] suffix-unknown-call-effect target={} writes_memory={} writes_global=unknown may_call_unknown={} may_exit={} return_used={}",
+        target, writes_memory, may_call_unknown, may_exit, return_used
+    );
+}
+
+/// Host-facing free entry: look up summary via host residual and apply pure check.
+pub fn suffix_call_uses_preview_unsafe_callee(
+    host: &impl StructuringHost,
+    stmt: &HirStmt,
+) -> Option<String> {
+    let (target, _, _) = suffix_call_expr(stmt)?;
+    let summary = host.call_effect_summary_for_target(target);
+    preview_unsafe_callee_target(stmt, summary.as_ref())
+}
+
+/// Host-facing free entry: gather provenance facts via residual, then pure emit.
+pub fn trace_suffix_unknown_call_provenance(
+    host: &impl StructuringHost,
+    stmt_idx: usize,
+    stmt: &HirStmt,
+) {
+    let Some((target, _, _)) = suffix_call_expr(stmt) else {
+        return;
+    };
+    let target_addr = parse_call_target_address(target);
+    let facts = host.suffix_call_provenance_facts(target, target_addr);
+    emit_suffix_unknown_call_provenance_trace(stmt_idx, stmt, &facts);
+}
 
 pub fn classify_suffix_stmt_with_diag(
     host: &mut impl StructuringHost,

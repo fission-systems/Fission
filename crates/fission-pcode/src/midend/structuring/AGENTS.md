@@ -19,7 +19,7 @@ Free-function owners live in `fission-midend-structuring` and take
 | LinearExit / LoweredTerminator / budget / outcomes | `fission-midend-structuring::linear_types` | re-exported via support |
 | Region linear recovery | `fission-midend-structuring::linear_recovery` | free fns |
 | Linear body (`lower_linear_body*`, exits, cond tails) | `fission-midend-structuring::linear_body` | free fns; cache via host |
-| Multiblock linear fallback + p-code trivial ops | residual on `PreviewBuilder` | host-owned |
+| Multiblock linear fallback | `fission-midend-structuring::linear_multiblock` | free; p-code trivial-op opcode tables residual on host |
 | Guarded-tail pure HIR rewrites | `fission-midend-structuring::guarded_tail_pure` | free fns |
 | Guarded-tail types + promote entry | `fission-midend-structuring::guarded_tail` | free promote/discover |
 | Guarded-tail pure HIR (`pure_hir`) | `fission-midend-structuring::guarded_tail::pure_hir` | free pure helpers |
@@ -27,7 +27,7 @@ Free-function owners live in `fission-midend-structuring` and take
 | Driver admission / region scaffold pure helpers | `fission-midend-structuring::driver_pure` | free fns |
 | Collapse-rule dispatch (SESE tier-1) | `fission-midend-structuring::sese_driver` | free `apply_collapse_rule` |
 | SESE collapse loop + final scan | `fission-midend-structuring::sese_driver` | free `build_sese_region_body` / `reconstruct_sese_final_body` |
-| Guarded-tail suffix pure + with-diag | `fission-midend-structuring::guarded_tail::{pure_hir,suffix_window}` | free; residual callee analysis on host |
+| Guarded-tail suffix pure + with-diag + callee pure | `fission-midend-structuring::guarded_tail::{pure_hir,suffix_window}` | free; host residual only supplies call-effect / binary facts |
 
 Prefer new work as `fn try_lower_*(host: &mut impl StructuringHost, ...)`.
 

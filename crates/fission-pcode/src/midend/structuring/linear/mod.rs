@@ -1,5 +1,5 @@
-//! Linear body residual on PreviewBuilder: multiblock fallback + p-code trivial-op checks.
-//! Core `lower_linear_body*` lives in `fission-midend-structuring::linear_body`.
+//! Linear body thin wrappers + p-code trivial-op residual.
+//! Multiblock fallback / core linear body: `fission-midend-structuring`.
 
 use super::*;
 
@@ -182,45 +182,8 @@ impl<'a> PreviewBuilder<'a> {
         self.build_linear_multiblock_body_inner(true)
     }
 
-    fn switch_recovery_cfg_admitted(&self, start_idx: usize) -> bool {
-        let Some(start_successors) = self.successors.get(start_idx) else {
-            return false;
-        };
-        if start_successors.len() > 2 {
-            return true;
-        }
-        if start_successors.len() != 2 {
-            return false;
-        }
-
-        let mut cursor = start_idx;
-        let mut conditional_nodes = 0usize;
-        let mut visited = HashSet::new();
-        let max_steps = self
-            .successors
-            .len()
-            .min(SWITCH_CHAIN_PARSE_BUDGET_MAX)
-            .max(1);
-        for _ in 0..max_steps {
-            if !visited.insert(cursor) {
-                return false;
-            }
-            let Some(successors) = self.successors.get(cursor) else {
-                return false;
-            };
-            if successors.len() != 2 || successors.iter().any(|succ| *succ <= cursor) {
-                return false;
-            }
-            conditional_nodes += 1;
-            if conditional_nodes >= 2 {
-                return true;
-            }
-            let Some(next_cursor) = successors.iter().copied().min() else {
-                return false;
-            };
-            cursor = next_cursor;
-        }
-        false
+    pub(crate) fn switch_recovery_cfg_admitted_impl(&self, start_idx: usize) -> bool {
+        fission_midend_structuring::switch_recovery_cfg_admitted(self, start_idx)
     }
 
     pub(super) fn build_linear_multiblock_body(
@@ -505,252 +468,17 @@ impl<'a> PreviewBuilder<'a> {
         default_target: Option<u64>,
         min_val: i64,
         proof: Option<&DispatcherProofUnit>,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        let emit_ready = EmitReadyDecision::from_dispatcher_proof(proof);
-        let Some(proof) = proof else {
-            return Ok(None);
-        };
-        if !emit_ready.emit_ready {
-            return Ok(None);
-        }
-
-        let mut exits = Vec::new();
-        let mut indexed_cases = Vec::new();
-        let (recovered_cases, used_proof_payload) =
-            recovered_switch_case_values(targets, default_target, min_val, Some(proof));
-        if used_proof_payload {
-            self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
-        }
-        for (value, target) in recovered_cases {
-            if Some(target) == default_target {
-                continue;
-            }
-            let Some(case_idx) = self.find_block_index_by_address(target) else {
-                return Ok(None);
-            };
-            let case_idx = self.canonicalize_switch_target(case_idx);
-            exits.push(case_idx);
-            indexed_cases.push((value, case_idx));
-        }
-        if indexed_cases.len() < 2 {
-            return Ok(None);
-        }
-
-        let default_idx = if let Some(default_target) = default_target {
-            let Some(default_idx) = self.find_block_index_by_address(default_target) else {
-                return Ok(None);
-            };
-            let default_idx = self.canonicalize_switch_target(default_idx);
-            exits.push(default_idx);
-            Some(default_idx)
-        } else {
-            None
-        };
-
-        let Some(exit) = self.shared_exit_for_indices(&exits)? else {
-            return Ok(None);
-        };
-
-        let mut cases = Vec::new();
-        let mut max_skip = 0usize;
-        for (value, case_idx) in indexed_cases {
-            let Some((case_body, skip_to)) = self.lower_linear_body(case_idx, exit)? else {
-                return Ok(None);
-            };
-            max_skip = max_skip.max(skip_to);
-            cases.push(HirSwitchCase {
-                values: vec![value],
-                body: case_body,
-            });
-        }
-        super::switch::merge_equivalent_switch_cases(&mut cases);
-
-        let default = if let Some(default_idx) = default_idx {
-            let Some((default_body, default_skip)) = self.lower_linear_body(default_idx, exit)?
-            else {
-                return Ok(None);
-            };
-            max_skip = max_skip.max(default_skip);
-            default_body
-        } else {
-            Vec::new()
-        };
-
-        let skip_to = match exit {
-            LinearExit::Join(join_idx) => join_idx,
-            LinearExit::Return | LinearExit::End => max_skip,
-        };
-        Ok(Some((
-            HirStmt::Switch {
-                expr: expr.clone(),
-                cases,
-                default,
-            },
-            skip_to,
-        )))
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError>  {
+        fission_midend_structuring::lower_structured_switch_terminator(
+            self, expr, targets, default_target, min_val, proof,
+        )
     }
 
     fn build_linear_multiblock_body_inner(
         &mut self,
         try_switch_recovery: bool,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        let mut body = Vec::new();
-        let targeted = self.collect_jump_targets()?;
-        let mut emitted_labels = HashSet::new();
-        let mut idx = 0usize;
-        while idx < self.pcode.blocks.len() {
-            let block_key = self.block_target_key(idx);
-            let is_orphan_unreachable =
-                idx != 0 && self.predecessors[idx].is_empty() && !targeted.contains(&block_key);
-            if is_orphan_unreachable {
-                idx += 1;
-                continue;
-            }
-            if try_switch_recovery
-                && self.switch_recovery_cfg_admitted(idx)
-                && let Some((switch_stmt, skip_to)) = self.try_lower_switch(idx)?
-            {
-                if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                    body.push(HirStmt::Label(block_label(block_key)));
-                }
-                body.push(switch_stmt);
-                idx = skip_to;
-                continue;
-            }
-            let block = self.pcode_block(idx).clone();
-            let block_key = self.block_target_key(idx);
-            if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                body.push(HirStmt::Label(block_label(block_key)));
-            }
-            body.extend(self.lower_block_stmts(&block)?);
-            match self.lower_block_terminator(idx)? {
-                LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
-                LoweredTerminator::Goto(target) => {
-                    if let Some(target_idx) = self.find_block_index_by_address(target)
-                        && let Some(expr) =
-                            self.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                    {
-                        body.push(HirStmt::Return(Some(expr)));
-                    } else if self.next_block_address(idx) != Some(target) {
-                        body.push(HirStmt::Goto(block_label(target)));
-                    }
-                }
-                LoweredTerminator::Fallthrough(Some(target)) => {
-                    if let Some(target_idx) = self.find_block_index_by_address(target)
-                        && let Some(expr) =
-                            self.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                    {
-                        body.push(HirStmt::Return(Some(expr)));
-                    }
-                }
-                LoweredTerminator::Cond {
-                    cond,
-                    true_target,
-                    false_target,
-                } => {
-                    let then_body = if let Some(true_idx) =
-                        self.find_block_index_by_address(true_target)
-                        && let Some(expr) =
-                            self.lower_return_join_expr_for_predecessor(idx, true_idx)?
-                    {
-                        vec![HirStmt::Return(Some(expr))]
-                    } else {
-                        vec![HirStmt::Goto(block_label(true_target))]
-                    };
-                    let else_body = if let Some(false_target) = false_target {
-                        if let Some(false_idx) = self.find_block_index_by_address(false_target)
-                            && let Some(expr) =
-                                self.lower_return_join_expr_for_predecessor(idx, false_idx)?
-                        {
-                            vec![HirStmt::Return(Some(expr))]
-                        } else {
-                            vec![HirStmt::Goto(block_label(false_target))]
-                        }
-                    } else {
-                        Vec::new()
-                    };
-                    body.push(HirStmt::If {
-                        cond,
-                        then_body,
-                        else_body,
-                    });
-                }
-                LoweredTerminator::Fallthrough(None) => {}
-                LoweredTerminator::Unsupported {
-                    evidence,
-                    target_expr,
-                } => {
-                    self.record_unsupported_inventory_event(
-                        "build_linear_multiblock_unsupported_terminator",
-                        None,
-                        None,
-                        None,
-                        Some(block.start_address),
-                        None,
-                        false,
-                        "hir_unsupported_emit",
-                    );
-                    body.push(self.emit_unsupported_control_surface(evidence, target_expr));
-                }
-                LoweredTerminator::Switch {
-                    expr,
-                    targets,
-                    default_target,
-                    min_val,
-                    proof,
-                } => {
-                    if let Some((switch_stmt, skip_to)) = self.lower_structured_switch_terminator(
-                        &expr,
-                        &targets,
-                        default_target,
-                        min_val,
-                        proof.as_ref(),
-                    )? {
-                        body.push(switch_stmt);
-                        idx = skip_to;
-                        continue;
-                    }
-                    let cases = if let Some(proof) = proof.as_ref()
-                        && EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready
-                    {
-                        self.telemetry.dispatcher.proof_payload_direct_emit_count += 1;
-                        proof
-                            .recovered_cases
-                            .iter()
-                            .filter(|(_, target)| Some(*target) != default_target)
-                            .map(|(value, target)| crate::midend::ir::HirSwitchCase {
-                                values: vec![*value],
-                                body: vec![HirStmt::Goto(block_label(*target))],
-                            })
-                            .collect()
-                    } else {
-                        targets
-                            .into_iter()
-                            .filter(|target| Some(*target) != default_target)
-                            .enumerate()
-                            .map(|(i, t)| crate::midend::ir::HirSwitchCase {
-                                values: vec![min_val + i as i64],
-                                body: vec![HirStmt::Goto(block_label(t))],
-                            })
-                            .collect()
-                    };
-                    body.push(HirStmt::Switch {
-                        expr,
-                        cases,
-                        default: default_target
-                            .map(block_label)
-                            .map(HirStmt::Goto)
-                            .into_iter()
-                            .collect(),
-                    });
-                }
-            }
-            idx += 1;
-        }
-        let mut body = cleanup_redundant_labels(body, None);
-        self.promote_guarded_tail_regions_until_stable(&mut body);
-        self.discover_guarded_tail_candidates(&body);
-        Ok(finalize_structured_body(body))
+        fission_midend_structuring::build_linear_multiblock_body(self, try_switch_recovery)
     }
 
     fn is_linear_tail_terminator(&self, idx: usize, opcode: PcodeOpcode) -> bool {

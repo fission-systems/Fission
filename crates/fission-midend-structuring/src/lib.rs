@@ -29,6 +29,7 @@ pub mod host;
 pub mod irreducible;
 pub mod linear_body;
 pub mod linear_recovery;
+mod linear_multiblock;
 pub mod linear_types;
 pub mod loop_analysis;
 pub mod loops;
@@ -59,6 +60,7 @@ pub use linear_types::{
     LinearExit, LoweredTerminator, MAX_LINEAR_STRUCTURING_DEPTH, NormalizedConditionalTailArm,
     structuring_diag_enabled,
 };
+pub use linear_multiblock::{build_linear_multiblock_body, lower_structured_switch_terminator, switch_recovery_cfg_admitted};
 pub use linear_recovery::{
     SESE_REGION_PROOF_BUDGET_MS, build_linear_sese_child_fallback,
     region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
