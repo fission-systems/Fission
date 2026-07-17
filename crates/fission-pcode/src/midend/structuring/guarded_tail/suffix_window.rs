@@ -2155,7 +2155,7 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    pub(super) fn find_earliest_owned_join_label_with_diag(
+    pub(crate) fn find_earliest_owned_join_label_with_diag_impl(
         &mut self,
         body: &[HirStmt],
         anchor_idx: usize,

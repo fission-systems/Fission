@@ -21,11 +21,13 @@ Free-function owners live in `fission-midend-structuring` and take
 | Linear body (`lower_linear_body*`, exits, cond tails) | `fission-midend-structuring::linear_body` | free fns; cache via host |
 | Multiblock linear fallback + p-code trivial ops | residual on `PreviewBuilder` | host-owned |
 | Guarded-tail pure HIR rewrites | `fission-midend-structuring::guarded_tail_pure` | free fns |
-| Guarded-tail types + promote entry | `fission-midend-structuring::guarded_tail` | free promote/discover; deep exec via host hooks |
+| Guarded-tail types + promote entry | `fission-midend-structuring::guarded_tail` | free promote/discover |
+| Guarded-tail pure HIR (`pure_hir`) | `fission-midend-structuring::guarded_tail::pure_hir` | free pure helpers |
+| Guarded-tail canonicalize/execute bodies | `fission-midend-structuring::guarded_tail::bodies` | free fns + residual host hooks |
 | Driver admission / region scaffold pure helpers | `fission-midend-structuring::driver_pure` | free fns |
 | Collapse-rule dispatch (SESE tier-1) | `fission-midend-structuring::sese_driver` | free `apply_collapse_rule` |
-| Guarded-tail canonicalize/execute/suffix body | residual on `PreviewBuilder` (host hooks) | convert next |
-| Full `build_sese_region_body` overlay | residual on `PreviewBuilder` | convert next |
+| `build_sese_region_body` collapse overlay | residual on `PreviewBuilder` | uses free `apply_collapse_rule`; final graph scan residual |
+| Guarded-tail suffix-window residual | residual on `PreviewBuilder` | host hooks (`find_earliest_owned_join_*`) |
 
 Prefer new work as `fn try_lower_*(host: &mut impl StructuringHost, ...)`.
 

@@ -160,7 +160,6 @@ fn diamond_join_lowers_copy_through_join_read_as_select() {
 }
 
 #[test]
-#[ignore = "pre-existing failure"]
 fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def() {
     let mut options = test_options();
     options.calling_convention = CallingConvention::AArch64;
@@ -199,8 +198,11 @@ fn same_block_partial_register_write_with_zeroed_upper_replaces_stale_wide_def()
         ],
     )]);
 
-    let code = render_mlil_preview(&pcode, "partial_zero_extend", 0x1000, &options)
+    let _nir = render_mlil_preview(&pcode, "partial_zero_extend", 0x1000, &options)
         .expect("render partial zero-extend");
+    let code = crate::midend::orchestrate::take_last_layered_pseudocode()
+        .expect("layered pseudocode")
+        .hir;
 
     assert!(
         code.contains("return 3;"),
@@ -783,7 +785,11 @@ fn movzx_al_into_edx_after_int_add_preserves_low_byte_truncation() {
             || code.contains("(uchar)rax")
             || code.contains("rdx = (uchar)")
             || code.contains("& 0xff")
-            || code.contains("& 255"),
+            || code.contains("& 255")
+            // Truncation preserved as cast of the sum temp (AL low-byte zext to return).
+            || code.contains("return (uchar)uVar")
+            || code.contains("return (uchar)iVar")
+            || code.contains("return (uchar)xVar"),
         "expected low-byte truncation of 200+100=300 → 44 via EDX:\n{code}"
     );
     assert!(

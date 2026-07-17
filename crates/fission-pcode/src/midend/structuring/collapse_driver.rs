@@ -114,9 +114,9 @@ mod tests {
             vec![
                 "switch",
                 "for",
-                "dowhile",
+                "do-while",
                 "while",
-                "loop_control",
+                "infloop-break",
                 "infloop",
                 "conditional",
                 "sequence",

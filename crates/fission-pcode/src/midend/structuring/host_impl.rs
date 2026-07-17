@@ -494,7 +494,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
             fission_midend_structuring::guarded_tail::GuardedTailWitnessRejection,
         >,
     > {
-        PreviewBuilder::try_build_guarded_tail_trial(self, body, idx, referenced)
+        fission_midend_structuring::guarded_tail::try_build_guarded_tail_trial(
+            self, body, idx, referenced,
+        )
     }
     fn verify_guarded_tail_trial(
         &mut self,
@@ -502,7 +504,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         idx: usize,
         trial: &fission_midend_structuring::guarded_tail::GuardedTailTrial,
     ) -> fission_midend_structuring::guarded_tail::GuardedTailVerification {
-        PreviewBuilder::verify_guarded_tail_trial(self, body, idx, trial)
+        fission_midend_structuring::guarded_tail::verify_guarded_tail_trial(self, body, idx, trial)
     }
     fn build_guarded_tail_execution_plan(
         &mut self,
@@ -514,7 +516,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         fission_midend_structuring::guarded_tail::GuardedTailExecutionPlan,
         fission_midend_structuring::guarded_tail::GuardedTailExecutionRejection,
     > {
-        PreviewBuilder::build_guarded_tail_execution_plan(self, body, idx, trial, verification)
+        fission_midend_structuring::guarded_tail::build_guarded_tail_execution_plan(
+            self, body, idx, trial, verification,
+        )
     }
     fn execute_guarded_tail_plan(
         &mut self,
@@ -524,10 +528,14 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         plan: fission_midend_structuring::guarded_tail::GuardedTailExecutionPlan,
         cond: HirExpr,
     ) {
-        PreviewBuilder::execute_guarded_tail_plan(self, body, idx, trial, plan, cond)
+        fission_midend_structuring::guarded_tail::execute_guarded_tail_plan(
+            self, body, idx, trial, plan, cond,
+        )
     }
     fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]) {
-        PreviewBuilder::discover_guarded_tail_candidates_in_body(self, body)
+        fission_midend_structuring::guarded_tail::discover_guarded_tail_candidates_in_body(
+            self, body,
+        )
     }
     fn mark_promotion_shape_rejection(
         &mut self,
@@ -553,4 +561,223 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     ) {
         PreviewBuilder::mark_guarded_tail_canonicalization_failure(self, failure)
     }
+
+    fn mark_alias_nonlocal_external_before(&mut self) {
+        // Call inherent via distinct path (avoid trait UFCS recursion).
+        self.telemetry
+            .structuring
+            .canonicalization_failed_alias_has_nonlocal_ref_external_before_count += 1;
+    }
+    fn mark_alias_nonlocal_from_external_sites(
+        &mut self,
+        external_top_level_before: usize,
+        external_nested_before: usize,
+        external_refs_after: usize,
+    ) {
+        if external_nested_before > 0 {
+            self.telemetry
+                .structuring
+                .canonicalization_failed_alias_has_nonlocal_ref_nested_before_count += 1;
+        } else if external_refs_after > 0 {
+            self.telemetry
+                .structuring
+                .canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count += 1;
+        } else if external_top_level_before > 0 {
+            self.telemetry
+                .structuring
+                .canonicalization_failed_alias_has_nonlocal_ref_external_before_count += 1;
+        }
+    }
+    fn resolve_terminal_join_target(
+        &mut self,
+        body: &[HirStmt],
+        anchor_idx: usize,
+        target_label: &str,
+        referenced: &std::collections::HashMap<String, usize>,
+    ) -> Option<(String, usize)> {
+        // Inherent method has the same name; use an explicit free helper name.
+        gt_resolve_terminal_join_target(self, body, anchor_idx, target_label, referenced)
+    }
+    fn mark_noncanonical_layout_rejection(&mut self) {
+        self.telemetry
+            .structuring
+            .discovery_rejected_noncanonical_layout_count += 1;
+        self.telemetry.structuring.promotion_rejected_by_shape_count += 1;
+    }
+    fn record_guarded_tail_blockgraph_proof(
+        &mut self,
+        candidate_idx: usize,
+        witness: &fission_midend_structuring::guarded_tail::RegionShapeWitness,
+        legality_reason: fission_midend_structuring::regions::BlockGraphLegalityReason,
+    ) {
+        gt_record_guarded_tail_blockgraph_proof(self, candidate_idx, witness, legality_reason)
+    }
+    fn guarded_tail_function_address(&self) -> u64 {
+        self.pcode
+            .blocks
+            .first()
+            .map(|block| block.start_address)
+            .unwrap_or(0)
+    }
+    fn guarded_tail_trace_emit_snapshot(&self, prefix: &str, stmts: &[HirStmt], limit: usize) {
+        let take_n = stmts.len().min(limit.max(1));
+        for (idx, stmt) in stmts.iter().take(take_n).enumerate() {
+            eprintln!("{prefix} [{idx:02}] {stmt:?}");
+        }
+        if stmts.len() > take_n {
+            eprintln!(
+                "{prefix} ... (truncated {} stmts)",
+                stmts.len().saturating_sub(take_n)
+            );
+        }
+    }
+    fn bump_structuring_counter(
+        &mut self,
+        counter: fission_midend_structuring::guarded_tail::StructuringCounter,
+        amount: usize,
+    ) {
+        use fission_midend_structuring::guarded_tail::StructuringCounter as C;
+        let s = &mut self.telemetry.structuring;
+        match counter {
+            C::canonicalization_failed_alias_not_fallthrough_nested_after_label_count => {
+                s.canonicalization_failed_alias_not_fallthrough_nested_after_label_count += amount;
+            }
+            C::canonicalization_failed_alias_not_fallthrough_top_level_after_label_count => {
+                s.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
+                    amount;
+            }
+            C::canonicalized_guarded_tail_shape_count => {
+                s.canonicalized_guarded_tail_shape_count += amount;
+            }
+            C::canonicalized_interleaved_join_use_count => {
+                s.canonicalized_interleaved_join_use_count += amount;
+            }
+            C::canonicalized_local_nonfallthrough_alias_count => {
+                s.canonicalized_local_nonfallthrough_alias_count += amount;
+            }
+            C::discovery_seen_guarded_tail_like_shape_count => {
+                s.discovery_seen_guarded_tail_like_shape_count += amount;
+            }
+            C::guarded_tail_candidate_count => s.guarded_tail_candidate_count += amount,
+            C::guarded_tail_exported_binding_count => {
+                s.guarded_tail_exported_binding_count += amount;
+            }
+            C::guarded_tail_promoted_count => s.guarded_tail_promoted_count += amount,
+            C::guarded_tail_replacement_plan_candidate_count => {
+                s.guarded_tail_replacement_plan_candidate_count += amount;
+            }
+            C::guarded_tail_replacement_plan_completed_count => {
+                s.guarded_tail_replacement_plan_completed_count += amount;
+            }
+            C::guarded_tail_replacement_plan_merge_created_count => {
+                s.guarded_tail_replacement_plan_merge_created_count += amount;
+            }
+            C::guarded_tail_replacement_plan_rejected_missing_merge_count => {
+                s.guarded_tail_replacement_plan_rejected_missing_merge_count += amount;
+            }
+            C::guarded_tail_replacement_plan_rejected_unstable_read_count => {
+                s.guarded_tail_replacement_plan_rejected_unstable_read_count += amount;
+            }
+            C::guarded_tail_replacement_read_count => {
+                s.guarded_tail_replacement_read_count += amount;
+            }
+            C::guarded_tail_replacement_read_rejected_nondominated_count => {
+                s.guarded_tail_replacement_read_rejected_nondominated_count += amount;
+            }
+            C::guarded_tail_replacement_read_rejected_nonremovable_op_count => {
+                s.guarded_tail_replacement_read_rejected_nonremovable_op_count += amount;
+            }
+            C::guarded_tail_replacement_read_rewritten_count => {
+                s.guarded_tail_replacement_read_rewritten_count += amount;
+            }
+            C::promoted_region_count => s.promoted_region_count += amount,
+            C::promotion_candidate_count => s.promotion_candidate_count += amount,
+        }
+    }
+    fn alloc_temp_binding(
+        &mut self,
+        ty: fission_midend_core::ir::NirType,
+        origin: Option<fission_midend_core::ir::NirBindingOrigin>,
+    ) -> String {
+        use fission_midend_core::ir::NirType;
+        let prefix = match &ty {
+            NirType::Bool => "bVar",
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            } => "iVar",
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            } => "uVar",
+            _ => "xVar",
+        };
+        let name = format!("{prefix}{}", self.temp_next_id);
+        self.temp_next_id = self.temp_next_id.saturating_add(1);
+        self.temps.insert(
+            name.clone(),
+            fission_midend_core::ir::NirBinding {
+                name: name.clone(),
+                ty,
+                surface_type_name: None,
+                origin,
+                initializer: None,
+            },
+        );
+        name
+    }
+    fn find_earliest_owned_join_label_with_diag(
+        &mut self,
+        body: &[HirStmt],
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &std::collections::HashMap<String, usize>,
+        trace_enabled: bool,
+    ) -> Option<(String, usize)> {
+        gt_find_earliest_owned_join_label_with_diag(
+            self,
+            body,
+            anchor_idx,
+            terminal_label_idx,
+            referenced,
+            trace_enabled,
+        )
+    }
+}
+
+/// Free helpers that call inherent PreviewBuilder methods without trait UFCS recursion.
+fn gt_resolve_terminal_join_target(
+    builder: &mut PreviewBuilder<'_>,
+    body: &[HirStmt],
+    anchor_idx: usize,
+    target_label: &str,
+    referenced: &std::collections::HashMap<String, usize>,
+) -> Option<(String, usize)> {
+    builder.resolve_terminal_join_target_impl(body, anchor_idx, target_label, referenced)
+}
+
+fn gt_record_guarded_tail_blockgraph_proof(
+    builder: &mut PreviewBuilder<'_>,
+    candidate_idx: usize,
+    witness: &fission_midend_structuring::guarded_tail::RegionShapeWitness,
+    legality_reason: fission_midend_structuring::regions::BlockGraphLegalityReason,
+) {
+    builder.record_guarded_tail_blockgraph_proof_impl(candidate_idx, witness, legality_reason)
+}
+
+fn gt_find_earliest_owned_join_label_with_diag(
+    builder: &mut PreviewBuilder<'_>,
+    body: &[HirStmt],
+    anchor_idx: usize,
+    terminal_label_idx: usize,
+    referenced: &std::collections::HashMap<String, usize>,
+    trace_enabled: bool,
+) -> Option<(String, usize)> {
+    builder.find_earliest_owned_join_label_with_diag_impl(
+        body,
+        anchor_idx,
+        terminal_label_idx,
+        referenced,
+        trace_enabled,
+    )
 }

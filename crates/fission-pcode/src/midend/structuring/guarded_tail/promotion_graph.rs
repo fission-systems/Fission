@@ -8,15 +8,7 @@ impl<'a> PreviewBuilder<'a> {
         label: &str,
         candidate_cond: &HirExpr,
     ) -> usize {
-        body.iter()
-            .take(if_idx)
-            .filter(|stmt| {
-                Self::stmt_contains_goto_label(stmt, label) > 0
-                    && Self::stmt_is_single_branch_if_to_label(stmt, label).is_some_and(
-                        |entry_cond| Self::exprs_share_guard_family(candidate_cond, entry_cond),
-                    )
-            })
-            .count()
+        fission_midend_structuring::guarded_tail::pure_hir::internalized_guard_family_nested_before_refs_for_join_owner(body, if_idx, label, candidate_cond)
     }
 
     pub(super) fn surviving_label_refs_after_guarded_tail_promotion(
@@ -26,44 +18,21 @@ impl<'a> PreviewBuilder<'a> {
         label_idx: usize,
         label: &str,
     ) -> (usize, usize) {
-        let outside_refs: usize = body
-            .iter()
-            .enumerate()
-            .filter(|(idx, _)| *idx < if_idx || *idx > label_idx)
-            .map(|(_, stmt)| Self::stmt_contains_goto_label(stmt, label))
-            .sum();
-        let middle_refs: usize = middle
-            .iter()
-            .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
-            .sum();
-        (outside_refs, middle_refs)
+        fission_midend_structuring::guarded_tail::pure_hir::surviving_label_refs_after_guarded_tail_promotion(body, middle, if_idx, label_idx, label)
     }
 
     pub(super) fn trailing_middle_fallthrough_equivalent_refs(
         middle: &[HirStmt],
         label: &str,
     ) -> usize {
-        let mut trailing = 0usize;
-        for stmt in middle.iter().rev() {
-            if is_ignorable_discovery_stmt(stmt) {
-                continue;
-            }
-            match stmt {
-                HirStmt::Goto(target) if target == label => trailing += 1,
-                _ => break,
-            }
-        }
-        trailing
+        fission_midend_structuring::guarded_tail::pure_hir::trailing_middle_fallthrough_equivalent_refs(middle, label)
     }
 
     /// True when the middle segment is only join glue: empty blocks, labels, and `Goto(label)`.
     /// Such segments impose no semantic work beyond reaching the join label; all `Goto` refs are
     /// fallthrough-equivalent for promotion bookkeeping (matches Ghidra-style join chains).
     pub(super) fn middle_is_join_label_only_glue(middle: &[HirStmt], label: &str) -> bool {
-        middle.iter().all(|stmt| {
-            is_ignorable_discovery_stmt(stmt)
-                || matches!(stmt, HirStmt::Goto(target) if target == label)
-        })
+        fission_midend_structuring::guarded_tail::pure_hir::middle_is_join_label_only_glue(middle, label)
     }
 
     /// Subtract trailing duplicate `Goto(label)` hops, or zero when the whole middle is join glue.
@@ -72,12 +41,7 @@ impl<'a> PreviewBuilder<'a> {
         label: &str,
         middle_refs: usize,
     ) -> usize {
-        if Self::middle_is_join_label_only_glue(middle, label) {
-            return 0;
-        }
-        middle_refs.saturating_sub(Self::trailing_middle_fallthrough_equivalent_refs(
-            middle, label,
-        ))
+        fission_midend_structuring::guarded_tail::pure_hir::effective_middle_refs_for_promotion(middle, label, middle_refs)
     }
 
     pub(super) fn outside_refs_preserve_forward_owner(
@@ -86,22 +50,7 @@ impl<'a> PreviewBuilder<'a> {
         label_idx: usize,
         label: &str,
     ) -> bool {
-        let mut found = false;
-        for (idx, stmt) in body.iter().enumerate() {
-            if idx >= if_idx && idx <= label_idx {
-                continue;
-            }
-            let ref_count = Self::stmt_contains_goto_label(stmt, label);
-            if ref_count == 0 {
-                continue;
-            }
-            found = true;
-            match stmt {
-                HirStmt::Goto(target) if target == label && idx < label_idx => {}
-                _ => return false,
-            }
-        }
-        found
+        fission_midend_structuring::guarded_tail::pure_hir::outside_refs_preserve_forward_owner(body, if_idx, label_idx, label)
     }
 
     pub(super) fn outside_refs_are_elidable_next_flow(
@@ -110,22 +59,7 @@ impl<'a> PreviewBuilder<'a> {
         label_idx: usize,
         label: &str,
     ) -> bool {
-        let mut found = false;
-        for (idx, stmt) in body.iter().enumerate() {
-            if idx >= if_idx && idx <= label_idx {
-                continue;
-            }
-            let ref_count = Self::stmt_contains_goto_label(stmt, label);
-            if ref_count == 0 {
-                continue;
-            }
-            found = true;
-            match stmt {
-                HirStmt::Goto(target) if target == label && idx < if_idx => {}
-                _ => return false,
-            }
-        }
-        found
+        fission_midend_structuring::guarded_tail::pure_hir::outside_refs_are_elidable_next_flow(body, if_idx, label_idx, label)
     }
 
     pub(super) fn find_top_level_label_after(
@@ -133,9 +67,7 @@ impl<'a> PreviewBuilder<'a> {
         start_idx: usize,
         label: &str,
     ) -> Option<usize> {
-        (start_idx + 1..body.len()).find(
-            |pos| matches!(body.get(*pos), Some(HirStmt::Label(candidate)) if candidate == label),
-        )
+        fission_midend_structuring::guarded_tail::pure_hir::find_top_level_label_after(body, start_idx, label)
     }
 
     pub(super) fn is_nontrivial_internal_target_entry(&self, idx: usize) -> bool {

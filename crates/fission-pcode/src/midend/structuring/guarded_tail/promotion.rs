@@ -5,7 +5,7 @@ impl<'a> PreviewBuilder<'a> {
         std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
     }
 
-    pub(super) fn guarded_tail_function_address(&self) -> u64 {
+    pub(super) fn guarded_tail_function_address_impl(&self) -> u64 {
         self.pcode
             .blocks
             .first()
@@ -27,7 +27,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(target) = Self::guarded_tail_trace_target_addr() else {
             return false;
         };
-        self.guarded_tail_function_address() == target
+        self.guarded_tail_function_address_impl() == target
     }
 
     pub(in crate::midend) fn emit_ready_trace_enabled_for_current_fn(&self) -> bool {
@@ -38,7 +38,7 @@ impl<'a> PreviewBuilder<'a> {
         if self.emit_ready_trace_enabled_for_current_fn() {
             eprintln!(
                 "[EMIT-TRACE] row=0x{:x} {}",
-                self.guarded_tail_function_address(),
+                self.guarded_tail_function_address_impl(),
                 message
             );
         }
@@ -110,7 +110,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(crate) fn mark_noncanonical_layout_rejection(&mut self) {
+    pub(crate) fn mark_noncanonical_layout_rejection_impl(&mut self) {
         self.telemetry
             .structuring
             .discovery_rejected_noncanonical_layout_count += 1;
@@ -150,7 +150,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn record_guarded_tail_blockgraph_proof(
+    pub(crate) fn record_guarded_tail_blockgraph_proof_impl(
         &mut self,
         candidate_idx: usize,
         witness: &RegionShapeWitness,
@@ -227,11 +227,11 @@ impl<'a> PreviewBuilder<'a> {
         if self.guarded_tail_trace_enabled_for_current_fn() {
             eprintln!(
                 "[GT-TRACE] fn=0x{:x} canonicalization_failure={:?}",
-                self.guarded_tail_function_address(),
+                self.guarded_tail_function_address_impl(),
                 reason
             );
         }
-        self.mark_noncanonical_layout_rejection();
+        self.mark_noncanonical_layout_rejection_impl();
         match reason {
             GuardedTailCanonicalizationFailure::MultiplePayloadEntries => {
                 self.telemetry

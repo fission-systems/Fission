@@ -224,7 +224,8 @@ pub trait StructuringHost {
     fn guarded_tail_trace_enabled(&self) -> bool;
     fn log_try_lower_if_reject(&self, idx: usize, reason: &str);
 
-    // ── Guarded-tail residual hooks (deep canonicalize/execution still host) ─
+    // ── Guarded-tail residual hooks ─────────────────────────────────────────
+    /// Free-fn pipeline entry (implemented by calling midend free owners).
     fn try_build_guarded_tail_trial(
         &mut self,
         body: &[HirStmt],
@@ -260,6 +261,49 @@ pub trait StructuringHost {
         &mut self,
         failure: GuardedTailCanonicalizationFailure,
     );
+
+    // Residual PreviewBuilder-only GT helpers used by free-fn bodies.
+    fn mark_alias_nonlocal_external_before(&mut self);
+    fn mark_alias_nonlocal_from_external_sites(
+        &mut self,
+        external_top_level_before: usize,
+        external_nested_before: usize,
+        external_refs_after: usize,
+    );
+    fn resolve_terminal_join_target(
+        &mut self,
+        body: &[HirStmt],
+        anchor_idx: usize,
+        target_label: &str,
+        referenced: &HashMap<String, usize>,
+    ) -> Option<(String, usize)>;
+    fn mark_noncanonical_layout_rejection(&mut self);
+    fn record_guarded_tail_blockgraph_proof(
+        &mut self,
+        candidate_idx: usize,
+        witness: &crate::guarded_tail::types::RegionShapeWitness,
+        legality_reason: crate::regions::BlockGraphLegalityReason,
+    );
+    fn guarded_tail_function_address(&self) -> u64;
+    fn guarded_tail_trace_emit_snapshot(&self, prefix: &str, stmts: &[HirStmt], limit: usize);
+    fn bump_structuring_counter(
+        &mut self,
+        counter: crate::guarded_tail::bodies::StructuringCounter,
+        amount: usize,
+    );
+    fn alloc_temp_binding(
+        &mut self,
+        ty: fission_midend_core::ir::NirType,
+        origin: Option<fission_midend_core::ir::NirBindingOrigin>,
+    ) -> String;
+    fn find_earliest_owned_join_label_with_diag(
+        &mut self,
+        body: &[HirStmt],
+        anchor_idx: usize,
+        terminal_label_idx: usize,
+        referenced: &HashMap<String, usize>,
+        trace_enabled: bool,
+    ) -> Option<(String, usize)>;
 
     // ── Derived CFG helpers ────────────────────────────────────────────────
     fn analyze_cfg_scc(&self) -> SccAnalysis {

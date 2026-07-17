@@ -223,7 +223,7 @@ pub struct ConditionAssumption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum SuffixTailRejection {
+pub enum SuffixTailRejection {
     SuffixHasSideEffect { stmt_idx: usize },
     SuffixHasNonTerminalGoto { stmt_idx: usize, target: String },
     SuffixHasNestedOrNonlocalRef { stmt_idx: usize },
@@ -233,17 +233,17 @@ enum SuffixTailRejection {
     SuffixAliasRedirectUnresolved { stmt_idx: usize, label: String },
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SuffixExternalEntryBudget {
-    raw_refs: usize,
-    internal_top_level_refs: usize,
-    suffix_safe_refs: usize,
-    guard_family_internalized_refs: usize,
-    paired_nested_boundary_refs: usize,
-    effective_external_refs: usize,
-    allowed_external_refs: usize,
+pub struct SuffixExternalEntryBudget {
+    pub raw_refs: usize,
+    pub internal_top_level_refs: usize,
+    pub suffix_safe_refs: usize,
+    pub guard_family_internalized_refs: usize,
+    pub paired_nested_boundary_refs: usize,
+    pub effective_external_refs: usize,
+    pub allowed_external_refs: usize,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExternalEntryRefKind {
+pub enum ExternalEntryRefKind {
     TopLevelExternalGoto,
     NestedConditionalGoto,
     AliasRedirectDerived,
@@ -251,7 +251,7 @@ enum ExternalEntryRefKind {
     UnknownExternalEntry,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NestedSuffixShapeKind {
+pub enum NestedSuffixShapeKind {
     NestedSingleGotoThen,
     NestedSingleGotoElse,
     NestedBothBranches,
@@ -262,7 +262,7 @@ enum NestedSuffixShapeKind {
     NestedUnknown,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SuffixSideEffectShapeKind {
+pub enum SuffixSideEffectShapeKind {
     PureRegisterAssign,
     PureTempAssign,
     MemoryReadOnlyAssign,
@@ -273,7 +273,7 @@ enum SuffixSideEffectShapeKind {
     UnknownSideEffect,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SuffixCallEffectShapeKind {
+pub enum SuffixCallEffectShapeKind {
     VoidUnknownCall,
     ReturnValueIgnoredCall,
     ReturnValueAssignedLocal,
@@ -283,26 +283,33 @@ enum SuffixCallEffectShapeKind {
     UnknownCallEffect,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct NestedEntryBoundaryContext {
-    label_idx: Option<usize>,
-    label_in_current_suffix_window: bool,
-    raw_refs: usize,
-    internal_candidate_refs: usize,
-    suffix_safe_refs: usize,
-    external_pre_guard_internalization: usize,
-    external_entry_kind: Option<ExternalEntryRefKind>,
-    external_entry_ref_stmt_idx: Option<usize>,
+pub struct NestedEntryBoundaryContext {
+    pub label_idx: Option<usize>,
+    pub label_in_current_suffix_window: bool,
+    pub raw_refs: usize,
+    pub internal_candidate_refs: usize,
+    pub suffix_safe_refs: usize,
+    pub external_pre_guard_internalization: usize,
+    pub external_entry_kind: Option<ExternalEntryRefKind>,
+    pub external_entry_ref_stmt_idx: Option<usize>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct NestedBoundaryRefTrace {
-    stmt_idx: usize,
-    kind: ExternalEntryRefKind,
-    cond: Option<HirExpr>,
+pub struct NestedBoundaryRefTrace {
+    pub stmt_idx: usize,
+    pub kind: ExternalEntryRefKind,
+    pub cond: Option<HirExpr>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct NestedBoundaryPairTrace {
-    ref_count: usize,
-    same_guard_family: bool,
-    relation_reason: Option<&'static str>,
-    conds: Vec<HirExpr>,
+pub struct NestedBoundaryPairTrace {
+    pub ref_count: usize,
+    pub same_guard_family: bool,
+    pub relation_reason: Option<&'static str>,
+    pub conds: Vec<HirExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuardedTailRewriteResult {
+    pub stmts: Vec<HirStmt>,
+    pub unresolved_join_refs: usize,
+    pub exits_to_join: bool,
 }

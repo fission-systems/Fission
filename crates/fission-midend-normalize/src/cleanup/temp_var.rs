@@ -24,24 +24,31 @@ pub fn collapse_trivial_assign_returns(
                     rhs,
                 },
                 HirStmt::Return(Some(HirExpr::Var(ret_name))),
-            ) if name == ret_name
-                && (is_trivial_temp_name(name) || is_abi_return_register_name(name)) =>
-            {
-                // Temps always collapse; ABI return regs (eax/rax) only when the
-                // RHS is a pure value (const / cast-of-const). Path-sensitive
-                // cmov arms keep `eax = INT_MIN; return eax` because the assign
-                // is not adjacent to the return at this level.
-                // Live-register HW bindings are often TempPreserved; still fold
-                // pure adjacent `eax = C; return eax` for readability.
-                let abi_pure =
-                    is_abi_return_register_name(name) && is_pure_return_collapse_rhs(rhs);
-                if is_abi_return_register_name(name) && !is_pure_return_collapse_rhs(rhs) {
-                    None
-                } else if !abi_pure && should_block_trivial_return_collapse(name, preserved_temps) {
-                    blocked += 1;
-                    None
+            ) if name == ret_name => {
+                // Collapse candidates:
+                // - ABI return regs with pure RHS (`rax = param+5; return rax`)
+                // - trivial temps (subject to preservation)
+                // - any local with pure RHS, especially const (`w8 = 3; return w8`)
+                let pure_rhs = is_pure_return_collapse_rhs(rhs);
+                let is_temp = is_trivial_temp_name(name);
+                let is_abi = is_abi_return_register_name(name);
+                if is_abi {
+                    if pure_rhs {
+                        Some(rhs.clone())
+                    } else {
+                        None
+                    }
+                } else if is_temp || pure_rhs {
+                    if should_block_trivial_return_collapse(name, preserved_temps)
+                        && !matches!(rhs, HirExpr::Const(_, _))
+                    {
+                        blocked += 1;
+                        None
+                    } else {
+                        Some(rhs.clone())
+                    }
                 } else {
-                    Some(rhs.clone())
+                    None
                 }
             }
             _ => None,
@@ -56,6 +63,44 @@ pub fn collapse_trivial_assign_returns(
     if changed {
         retain_unmarked_stmts(stmts, &to_remove);
     }
+
+    // Recurse into nested structured regions so Block/if arms also fold.
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
+                if collapse_trivial_assign_returns(body, preserved_temps) {
+                    changed = true;
+                }
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if collapse_trivial_assign_returns(then_body, preserved_temps) {
+                    changed = true;
+                }
+                if collapse_trivial_assign_returns(else_body, preserved_temps) {
+                    changed = true;
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    if collapse_trivial_assign_returns(&mut case.body, preserved_temps) {
+                        changed = true;
+                    }
+                }
+                if collapse_trivial_assign_returns(default, preserved_temps) {
+                    changed = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
     wave_stats::add_preserved_temp_prune_blocked(blocked);
     changed
 }

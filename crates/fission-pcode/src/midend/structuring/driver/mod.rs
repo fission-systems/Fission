@@ -216,40 +216,10 @@ impl<'a> PreviewBuilder<'a> {
                             rule.name()
                         );
                     }
-                    let res = match rule {
-                        CollapseRule::Switch => self.try_lower_switch(idx),
-                        CollapseRule::ForLoop => self.try_lower_for(idx),
-                        CollapseRule::DoWhile => {
-                            let mut dw = self.try_lower_dowhile(idx)?;
-                            if dw.is_none() {
-                                dw = self.try_lower_multiblock_dowhile(idx)?;
-                            }
-                            Ok(dw)
-                        }
-                        CollapseRule::WhileDo => self.try_lower_while(idx),
-                        CollapseRule::InfLoopBreak => self.try_lower_infloop_with_break(idx),
-                        CollapseRule::InfLoop => {
-                            let mut inf = self.try_lower_infloop(idx);
-                            if inf.is_err() || matches!(inf, Ok(None)) {
-                                inf = self.try_lower_multiblock_infloop(idx);
-                            }
-                            inf
-                        }
-                        CollapseRule::Conditional => {
-                            let mut cond = self.try_lower_short_circuit_if(idx);
-                            if cond.is_err() || matches!(cond, Ok(None)) {
-                                cond = self.try_reduce_if_else_with_follow(idx, follow);
-                            }
-                            if cond.is_err() || matches!(cond, Ok(None)) {
-                                cond = self.try_lower_if_else(idx);
-                            }
-                            if cond.is_err() || matches!(cond, Ok(None)) {
-                                cond = self.try_lower_if(idx);
-                            }
-                            cond
-                        }
-                        _ => Ok(None),
-                    };
+                    // Graph overlay: free-function collapse-rule dispatch (ADR 0012).
+                    let res = fission_midend_structuring::sese_driver::apply_collapse_rule(
+                        self, rule, idx, follow,
+                    );
                     if let Some(started) = rule_started {
                         eprintln!(
                             "[DIAG] structuring rule finish: rule={} block={idx} elapsed_ms={:.3} outcome={}",

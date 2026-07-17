@@ -1662,6 +1662,29 @@ fn collapse_trivial_assign_returns_folds_eax_const_even_if_preserved() {
 }
 
 #[test]
+fn collapse_trivial_assign_returns_folds_rax_param_add() {
+    use fission_midend_core::ir::{HirBinaryOp, HirExpr, HirLValue, HirStmt, NirType};
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("rax".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("param_1".to_string())),
+                rhs: Box::new(HirExpr::Const(5, NirType::Int { bits: 32, signed: true })),
+                ty: NirType::Int { bits: 32, signed: true },
+            },
+        },
+        HirStmt::Return(Some(HirExpr::Var("rax".to_string()))),
+    ];
+    assert!(collapse_trivial_assign_returns(&mut stmts, &std::collections::HashSet::new()));
+    assert_eq!(stmts.len(), 1);
+    match &stmts[0] {
+        HirStmt::Return(Some(HirExpr::Binary { op: HirBinaryOp::Add, .. })) => {}
+        other => panic!("expected folded return add, got {other:?}"),
+    }
+}
+
+
 fn rescue_undeclared_bindings_declares_stack_local_names() {
     let mut func = HirFunction {
         name: "f".to_string(),
