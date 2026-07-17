@@ -28,12 +28,15 @@ This document is the policy source for how Fission promotes a git commit to a
 main push ──► L0 Fast Gate ──► L1 Heavy (async)
                     │
                     ▼
-     Actions → "Release Tag (CI green)"
+     Actions / gh workflow run "Release Tag (CI green)"
                     │
                     ├─ verify L0 success (push event, that SHA)
                     ├─ verify L1 success (that SHA; any event)
                     ├─ run L2 Release E2E on that SHA
-                    └─ annotated tag push ──► L3 CD Release
+                    ├─ annotated tag push
+                    └─ gh workflow run "CD Release" -f tag=vX.Y.Z  ──► L3 CD
+                       (GITHUB_TOKEN tag pushes do not re-fire on.push CD;
+                        workflow_dispatch is the reliable path)
 ```
 
 ## What Release E2E covers (and does not)
@@ -56,11 +59,21 @@ main push ──► L0 Fast Gate ──► L1 Heavy (async)
 
 1. Land changes on `main`; wait for **CI Fast Gate** and **CI Heavy Validation**
    green on that commit.
-2. Actions → **Release Tag (CI green)** → set `tag` (`v0.1.4`) and `ref` (`main` or SHA).
-3. Workflow verifies L0+L1, runs L2, pushes the tag.
+2. Actions → **Release Tag (CI green)** → set `tag` (`v0.1.4`) and `ref` (`main` or SHA),
+   or CLI:
+   `gh workflow run "Release Tag (CI green)" -f tag=v0.1.4 -f ref=main`
+3. Workflow verifies L0+L1, runs L2, pushes the annotated tag, then runs
+   `gh workflow run "CD Release" -f tag=v0.1.4` (same-repo `workflow_dispatch`
+   is allowed to chain with `GITHUB_TOKEN`; bare tag push from the token is not).
 4. **CD Release** builds Linux/macOS/Windows assets automatically.
 5. Edit GitHub Release notes; complete remaining checklist in
    [`docs/RELEASE.md`](RELEASE.md).
+
+Manual CD re-run for an existing tag:
+
+```bash
+gh workflow run "CD Release" -f tag=v0.1.4
+```
 
 Optional: run **Release E2E Gate** alone (dispatch) to pre-validate a SHA without tagging.
 

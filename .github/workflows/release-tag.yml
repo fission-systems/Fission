@@ -2,17 +2,19 @@
 #   L0 — CI Fast Gate (ci.yml) successful push run on that SHA
 #   L1 — CI Heavy Validation (ci-heavy.yml) successful run on that SHA
 #   L2 — Release E2E Gate (runs in this workflow on that SHA)
-# Pushing the tag triggers CD Release (.github/workflows/cd.yml).
+# Then create/push the annotated tag and **trigger CD Release via GitHub CLI**
+# (`gh workflow run`). GITHUB_TOKEN tag pushes do not re-fire `on: push` workflows.
 #
 # Policy: docs/CI_RELEASE_GATES.md
 # Use: Actions → "Release Tag (CI green)" → tag (e.g. v0.1.1) → optional ref (default main).
+# CLI: gh workflow run "Release Tag (CI green)" -f tag=v0.1.4 -f ref=main
 name: Release Tag (CI green)
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to create (e.g. v0.1.1 or 0.1.1). Triggers CD builds when pushed."
+        description: "Tag to create (e.g. v0.1.1 or 0.1.1). Triggers CD builds via gh workflow run."
         required: true
         type: string
       ref:
@@ -109,6 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -121,6 +124,7 @@ jobs:
         uses: ./.github/actions/setup-utils
 
       - name: Validate tag name
+        id: tag
         env:
           TAG: ${{ inputs.tag }}
         shell: bash
@@ -137,14 +141,16 @@ jobs:
             echo "error: use SemVer such as v0.1.1, 0.1.1, or optional -rc.1 suffix"
             exit 1
           fi
+          echo "tag=${t}" >> "$GITHUB_OUTPUT"
 
       - name: Create annotated tag and push
         shell: bash
         env:
           TARGET_SHA: ${{ needs.verify-gates.outputs.target_sha }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          t="$(echo -n "${{ inputs.tag }}" | xargs)"
+          t="${TAG}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin --tags --quiet || true
@@ -164,3 +170,17 @@ jobs:
           git tag -a "${t}" "${TARGET_SHA}" -m "Release ${t}"
           git push origin "refs/tags/${t}"
           echo "Tagged ${TARGET_SHA} as ${t} (L0+L1 verified, L2 E2E green)."
+
+      # GITHUB_TOKEN tag pushes do not re-fire on.push workflows. Kick CD via CLI.
+      - name: Trigger CD Release (GitHub CLI)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Dispatching CD Release for tag=${TAG}"
+          gh workflow run "CD Release" \
+            --repo "${{ github.repository }}" \
+            -f "tag=${TAG}"
+          echo "Queued. Track: gh run list --workflow 'CD Release' --limit 3"
