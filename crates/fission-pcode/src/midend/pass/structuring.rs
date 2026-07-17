@@ -5,8 +5,9 @@ use crate::midend::ir::{HirStmt, MlilPreviewError};
 use fission_midend_structuring::{
     StructuringAdmissionInput, StructuringAdmissionReason,
     apply_blockgraph_collapse_admission_gate, blockgraph_collapse_admission_enabled,
-    build_sese_region_body, collapse_loop_admission_enabled, decide_structuring_admission,
-    structure_cfg_via_sese, structuring_diag_enabled,
+    build_linear_multiblock_body, build_sese_region_body, collapse_loop_admission_enabled,
+    decide_structuring_admission, structure_cfg_via_sese, structuring_diag_enabled,
+    try_repair_orphan_gotos,
 };
 
 pub(crate) struct EarlyReturnPass;
@@ -342,7 +343,7 @@ impl NirPass for OrphanGotoRepairPass {
 
         if let Some(body) = ir.structured_body().map(|b| b.to_vec()) {
             if crate::midend::structuring::has_orphan_goto_labels(&body) {
-                if let Some(repaired) = ir.builder.try_repair_orphan_gotos(body.clone()) {
+                if let Some(repaired) = try_repair_orphan_gotos(ir.builder, body.clone()) {
                     if diag {
                         eprintln!(
                             "[DIAG] SESE orphan goto labels localized without flat goto fallback"
@@ -381,9 +382,8 @@ impl NirPass for OrphanGotoRepairPass {
                     .structuring
                     .structuring_orphan_goto_unrepairable_count += 1;
 
-                let fallback_result = ir
-                    .builder
-                    .build_proof_first_linear_multiblock_body()
+                // proof_first=true → try_switch_recovery on linear multiblock free-fn.
+                let fallback_result = build_linear_multiblock_body(ir.builder, true)
                     .map_err(|e| e.to_string())?;
 
                 let elapsed = ir
@@ -442,10 +442,8 @@ impl NirPass for OrphanGotoRepairPass {
                 }
             }
 
-            let fallback_result = ir
-                .builder
-                .build_proof_first_linear_multiblock_body()
-                .map_err(|e| e.to_string())?;
+            let fallback_result =
+                build_linear_multiblock_body(ir.builder, true).map_err(|e| e.to_string())?;
 
             let elapsed = ir
                 .builder

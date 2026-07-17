@@ -1,5 +1,11 @@
-//! Loop structuring — thin wrappers over free functions in
-//! `fission-midend-structuring::loops`.
+//! Loop structuring surface for pcode.
+//!
+//! Free-function owners live in `fission-midend-structuring::loops` and are
+//! dispatched via [`fission_midend_structuring::apply_collapse_rule`] (no
+//! PreviewBuilder inherent thin wraps — ADR 0012 Phase D).
+//!
+//! Residual: pure p-code opcode scan for for-loop head discardability (cannot
+//! move without a pcode dependency in midend-structuring).
 
 use super::*;
 
@@ -10,72 +16,8 @@ pub use fission_midend_structuring::{
 };
 
 impl<'a> PreviewBuilder<'a> {
-    pub(crate) fn get_loop_body(
-        &self,
-        head_idx: usize,
-    ) -> Option<&crate::midend::structuring::loop_analysis::LoopBody> {
-        self.loop_bodies.iter().find(|lb| lb.head == head_idx)
-    }
-
-    pub(super) fn try_lower_infloop_with_break(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        try_lower_infloop_with_break(self, idx)
-    }
-
-    pub(super) fn try_lower_infloop(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        try_lower_infloop(self, idx)
-    }
-
-    pub(super) fn try_lower_dowhile(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        try_lower_dowhile(self, idx)
-    }
-
-    pub(super) fn try_lower_while(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        try_lower_while(self, idx)
-    }
-
-    pub(super) fn try_lower_multiblock_dowhile(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        try_lower_multiblock_dowhile(self, idx)
-    }
-
-    pub(super) fn try_lower_for(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        try_lower_for(self, idx)
-    }
-
-    pub(super) fn try_lower_multiblock_infloop(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        try_lower_multiblock_infloop(self, idx)
-    }
-
-    pub(super) fn lower_loop_body_subgraph(
-        &mut self,
-        body_set: &HashSet<usize>,
-        start_idx: usize,
-        break_idx: Option<usize>,
-        head_idx: usize,
-    ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
-        lower_loop_body_subgraph(self, body_set, start_idx, break_idx, head_idx)
-    }
-
+    /// P-code residual: head block ops are pure (no store/call/control) except
+    /// a trailing CBranch terminator. Used by [`StructuringHost`] for-loop path.
     pub(crate) fn for_condition_head_has_only_discardable_pure_ops(
         block: &crate::pcode::PcodeBasicBlock,
     ) -> bool {

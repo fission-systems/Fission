@@ -1,16 +1,6 @@
-//! Orphan-goto repair thin wrappers over midend free owners (ADR 0012).
-
-use super::*;
-
-impl<'a> PreviewBuilder<'a> {
-    pub(super) fn find_block_index_by_label(&self, label: &str) -> Option<usize> {
-        fission_midend_structuring::find_block_index_by_label(self, label)
-    }
-
-    pub(crate) fn try_repair_orphan_gotos(&mut self, body: Vec<HirStmt>) -> Option<Vec<HirStmt>> {
-        fission_midend_structuring::try_repair_orphan_gotos(self, body)
-    }
-}
+//! Orphan-goto repair tests (production calls free-fn in `pass/structuring`).
+//!
+//! Owner: `fission_midend_structuring::try_repair_orphan_gotos` (ADR 0012).
 
 #[cfg(test)]
 mod tests {
@@ -18,6 +8,7 @@ mod tests {
     use crate::PcodeFunction;
     use crate::midend::PreviewBuilder;
     use crate::midend::ir::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
+    use fission_midend_structuring::try_repair_orphan_gotos;
 
     fn test_options() -> MlilPreviewOptions {
         MlilPreviewOptions {
@@ -57,7 +48,7 @@ mod tests {
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
         let body = vec![HirStmt::Goto("block_deadbeef".to_string())];
         assert!(orphan_goto_labels(&body).contains(&"block_deadbeef".to_string()));
-        assert!(builder.try_repair_orphan_gotos(body).is_none());
+        assert!(try_repair_orphan_gotos(&mut builder, body).is_none());
     }
 
     #[test]
@@ -70,9 +61,7 @@ mod tests {
             HirStmt::Return(None),
         ];
         assert!(!has_orphan_goto_labels(&body));
-        let repaired = builder
-            .try_repair_orphan_gotos(body.clone())
-            .expect("noop repair");
+        let repaired = try_repair_orphan_gotos(&mut builder, body.clone()).expect("noop repair");
         assert!(!has_orphan_goto_labels(&repaired));
     }
 }

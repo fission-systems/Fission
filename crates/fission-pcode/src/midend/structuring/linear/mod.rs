@@ -140,10 +140,6 @@ impl<'a> PreviewBuilder<'a> {
         canonicalize_region_target_for_exit_for_test(self, origin_idx, target_idx, exit)
     }
 
-    pub(super) fn is_trivial_structuring_stmt(stmt: &HirStmt) -> bool {
-        fission_midend_structuring::is_trivial_structuring_stmt(stmt)
-    }
-
     pub(super) fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
         if idx >= next_idx {
             return false;

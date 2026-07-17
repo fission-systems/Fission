@@ -13,9 +13,9 @@ Free-function owners live in `fission-midend-structuring` and take
 |------|-------------|-------|
 | CFG facts, cleanup, regions, graph, admission | `fission-midend-structuring` | pure / host-free where possible |
 | Collapse-loop edge virtualization | `fission-midend-structuring::collapse_loop` | host free fns |
-| Conditionals (`try_lower_if*`, short-circuit) | `fission-midend-structuring::conditionals` | host free fns; thin wrappers here |
-| Loops (`try_lower_while/for/…`, subgraph) | `fission-midend-structuring::loops` | host free fns; thin wrappers here |
-| Switch (`try_lower_switch`, compare-chain) | `fission-midend-structuring::switch` | host free fns; thin wrappers here |
+| Conditionals (`try_lower_if*`, short-circuit) | `fission-midend-structuring::conditionals` | free fns; pcode re-export only |
+| Loops (`try_lower_while/for/…`, subgraph) | `fission-midend-structuring::loops` | free fns; pcode re-export + p-code residual |
+| Switch (`try_lower_switch`, compare-chain) | `fission-midend-structuring::switch` | free fns; pcode re-export only |
 | LinearExit / LoweredTerminator / budget / outcomes | `fission-midend-structuring::linear_types` | re-exported via support |
 | Region linear recovery | `fission-midend-structuring::linear_recovery` | free fns |
 | Linear body (`lower_linear_body*`, exits, cond tails) | `fission-midend-structuring::linear_body` | free fns; cache via host |
