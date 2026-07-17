@@ -5,9 +5,11 @@ description: >
 
 inputs:
   version:
-    description: sccache release version (without v prefix)
+    # mozilla-actions/sccache-action expects a GitHub release tag (with v prefix).
+    # "0.10.0" downloads .../0.10.0/... which 404s; use "v0.10.0".
+    description: sccache GitHub release tag (e.g. v0.10.0)
     required: false
-    default: "0.10.0"
+    default: "v0.10.0"
 
 runs:
   using: composite
