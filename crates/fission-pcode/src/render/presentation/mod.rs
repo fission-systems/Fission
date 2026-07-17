@@ -29,6 +29,16 @@ pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
         changed |= recover_while_from_gotos(&mut func.body);
         // Structuring often emits `while (1) { if (!c) break; body }` → `while (c)`.
         changed |= fold_while_true_break_guard(&mut func.body);
+        // `if (c) { x = a; } else { x = b; }` → `x = c ? a : b` (pure values only).
+        changed |= fold_if_else_pure_same_var_assign(&mut func.body);
+        // `if (c) { return a; } else { return b; }` → `return c ? a : b` (pure values).
+        changed |= fold_if_else_pure_returns_to_select(&mut func.body);
+        // `if (c) { return a; } return b;` → `return c ? a : b` (pure values).
+        changed |= fold_if_return_fallthrough_return(&mut func.body);
+        // `x = seed; if (c) { x = a; }` → `x = c ? a : seed` (pure; empty else).
+        changed |= fold_seed_if_overwrite_assign(&mut func.body);
+        // Drop empty `else {}` arms after other folds.
+        changed |= strip_empty_else_arms(&mut func.body);
         // `x = c ? a : b; return ~c ? x : a` (null-check join) → `return x` / fold.
         changed |= fold_redundant_select_return_join(&mut func.body);
         changed |= prune_unreachable_after_total_return(&mut func.body);
@@ -1173,6 +1183,439 @@ fn peel_not(expr: &HirExpr) -> Option<HirExpr> {
             ..
         } if matches!(lhs.as_ref(), HirExpr::Const(0, _)) => Some(rhs.as_ref().clone()),
         _ => None,
+    }
+}
+
+/// `if (c) { x = a; } else { x = b; }` → `x = c ? a : b` when c/a/b are presentation-pure.
+fn fold_if_else_pure_same_var_assign(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= fold_if_else_pure_same_var_assign(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= fold_if_else_pure_same_var_assign(then_body);
+                changed |= fold_if_else_pure_same_var_assign(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= fold_if_else_pure_same_var_assign(&mut case.body);
+                }
+                changed |= fold_if_else_pure_same_var_assign(default);
+            }
+            _ => {}
+        }
+    }
+
+    for stmt in stmts.iter_mut() {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            continue;
+        };
+        if else_body.is_empty() || !expr_is_presentation_pure(cond) {
+            continue;
+        }
+        let Some((then_name, then_rhs)) = single_var_assign(then_body) else {
+            continue;
+        };
+        let Some((else_name, else_rhs)) = single_var_assign(else_body) else {
+            continue;
+        };
+        if then_name != else_name {
+            continue;
+        }
+        if !expr_is_presentation_pure(then_rhs) || !expr_is_presentation_pure(else_rhs) {
+            continue;
+        }
+        // Avoid self-referential select: `x = c ? x : e` would be wrong if x is live-in.
+        if expr_mentions_var(cond, then_name)
+            || expr_mentions_var(then_rhs, then_name)
+            || expr_mentions_var(else_rhs, then_name)
+        {
+            continue;
+        }
+        let ty = expr_result_type(then_rhs);
+        *stmt = HirStmt::Assign {
+            lhs: HirLValue::Var(then_name.to_string()),
+            rhs: HirExpr::Select {
+                cond: Box::new(cond.clone()),
+                then_expr: Box::new(then_rhs.clone()),
+                else_expr: Box::new(else_rhs.clone()),
+                ty,
+            },
+        };
+        changed = true;
+    }
+    changed
+}
+
+/// `if (c) { return a; } else { return b; }` → `return c ? a : b` (pure operands).
+fn fold_if_else_pure_returns_to_select(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= fold_if_else_pure_returns_to_select(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= fold_if_else_pure_returns_to_select(then_body);
+                changed |= fold_if_else_pure_returns_to_select(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= fold_if_else_pure_returns_to_select(&mut case.body);
+                }
+                changed |= fold_if_else_pure_returns_to_select(default);
+            }
+            _ => {}
+        }
+    }
+
+    for stmt in stmts.iter_mut() {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            continue;
+        };
+        if else_body.is_empty() || !expr_is_presentation_pure(cond) {
+            continue;
+        }
+        let Some(then_ret) = single_return_expr(then_body) else {
+            continue;
+        };
+        let Some(else_ret) = single_return_expr(else_body) else {
+            continue;
+        };
+        if !expr_is_presentation_pure(then_ret) || !expr_is_presentation_pure(else_ret) {
+            continue;
+        }
+        let ty = expr_result_type(then_ret);
+        *stmt = HirStmt::Return(Some(HirExpr::Select {
+            cond: Box::new(cond.clone()),
+            then_expr: Box::new(then_ret.clone()),
+            else_expr: Box::new(else_ret.clone()),
+            ty,
+        }));
+        changed = true;
+    }
+    changed
+}
+
+/// `if (c) { return a; } return b;` → `return c ? a : b` when operands are pure.
+fn fold_if_return_fallthrough_return(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= fold_if_return_fallthrough_return(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= fold_if_return_fallthrough_return(then_body);
+                changed |= fold_if_return_fallthrough_return(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= fold_if_return_fallthrough_return(&mut case.body);
+                }
+                changed |= fold_if_return_fallthrough_return(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0;
+    while i < stmts.len() {
+        let HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = &stmts[i]
+        else {
+            i += 1;
+            continue;
+        };
+        if !else_body.is_empty() && !body_is_effectively_empty(else_body) {
+            i += 1;
+            continue;
+        }
+        if !expr_is_presentation_pure(cond) {
+            i += 1;
+            continue;
+        }
+        let Some(then_ret) = single_return_expr(then_body) else {
+            i += 1;
+            continue;
+        };
+        if !expr_is_presentation_pure(then_ret) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < stmts.len() && matches!(&stmts[j], HirStmt::Label(_)) {
+            j += 1;
+        }
+        let Some(HirStmt::Return(Some(else_ret))) = stmts.get(j) else {
+            i += 1;
+            continue;
+        };
+        if !expr_is_presentation_pure(else_ret) {
+            i += 1;
+            continue;
+        }
+        let ty = expr_result_type(then_ret);
+        let select = HirExpr::Select {
+            cond: Box::new(cond.clone()),
+            then_expr: Box::new(then_ret.clone()),
+            else_expr: Box::new(else_ret.clone()),
+            ty,
+        };
+        // Drop labels between if and fallthrough return, then replace both.
+        stmts.drain(i..=j);
+        stmts.insert(i, HirStmt::Return(Some(select)));
+        changed = true;
+        // Stay at i to allow chained folds on the new return.
+        i += 1;
+    }
+    changed
+}
+
+/// `x = seed; if (c) { x = a; }` → `x = c ? a : seed` (presentation-pure, empty else).
+/// Cond/then may mention `x`; they are rewritten with `seed` substituted.
+fn fold_seed_if_overwrite_assign(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= fold_seed_if_overwrite_assign(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= fold_seed_if_overwrite_assign(then_body);
+                changed |= fold_seed_if_overwrite_assign(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= fold_seed_if_overwrite_assign(&mut case.body);
+                }
+                changed |= fold_seed_if_overwrite_assign(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0;
+    while i + 1 < stmts.len() {
+        let HirStmt::Assign {
+            lhs: HirLValue::Var(seed_name),
+            rhs: seed_rhs,
+        } = &stmts[i]
+        else {
+            i += 1;
+            continue;
+        };
+        if !expr_is_presentation_pure(seed_rhs) || expr_mentions_var(seed_rhs, seed_name) {
+            i += 1;
+            continue;
+        }
+        let seed_name = seed_name.clone();
+        let seed_rhs = seed_rhs.clone();
+
+        let mut j = i + 1;
+        while j < stmts.len() && matches!(&stmts[j], HirStmt::Label(_)) {
+            j += 1;
+        }
+        let Some(HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        }) = stmts.get(j)
+        else {
+            i += 1;
+            continue;
+        };
+        if !else_body.is_empty() && !body_is_effectively_empty(else_body) {
+            i += 1;
+            continue;
+        }
+        let Some((then_name, then_rhs)) = single_var_assign(then_body) else {
+            i += 1;
+            continue;
+        };
+        if then_name != seed_name {
+            i += 1;
+            continue;
+        }
+        if !expr_is_presentation_pure(cond) || !expr_is_presentation_pure(then_rhs) {
+            i += 1;
+            continue;
+        }
+
+        let mut cond = cond.clone();
+        let mut then_rhs = then_rhs.clone();
+        replace_var_in_expr(&mut cond, &seed_name, &seed_rhs);
+        replace_var_in_expr(&mut then_rhs, &seed_name, &seed_rhs);
+        // After substitution, reject residual self-reference (shouldn't happen for pure seeds).
+        if expr_mentions_var(&cond, &seed_name)
+            || expr_mentions_var(&then_rhs, &seed_name)
+            || expr_mentions_var(&seed_rhs, &seed_name)
+        {
+            i += 1;
+            continue;
+        }
+        if !expr_is_presentation_pure(&cond) || !expr_is_presentation_pure(&then_rhs) {
+            i += 1;
+            continue;
+        }
+
+        let ty = expr_result_type(&then_rhs);
+        let select = HirExpr::Select {
+            cond: Box::new(cond),
+            then_expr: Box::new(then_rhs),
+            else_expr: Box::new(seed_rhs),
+            ty,
+        };
+        stmts.drain(i..=j);
+        stmts.insert(
+            i,
+            HirStmt::Assign {
+                lhs: HirLValue::Var(seed_name),
+                rhs: select,
+            },
+        );
+        changed = true;
+        i += 1;
+    }
+    changed
+}
+
+/// Drop empty `else {}` arms (including nested).
+fn strip_empty_else_arms(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= strip_empty_else_arms(b);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= strip_empty_else_arms(then_body);
+                changed |= strip_empty_else_arms(else_body);
+                if !else_body.is_empty() && body_is_effectively_empty(else_body) {
+                    else_body.clear();
+                    changed = true;
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= strip_empty_else_arms(&mut case.body);
+                }
+                changed |= strip_empty_else_arms(default);
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn body_is_effectively_empty(stmts: &[HirStmt]) -> bool {
+    stmts.iter().all(|s| match s {
+        HirStmt::Block(inner) => body_is_effectively_empty(inner),
+        HirStmt::Label(_) => true,
+        _ => false,
+    })
+}
+
+fn is_presentation_noise_stmt(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Label(_) => true,
+        HirStmt::Block(b) if b.is_empty() => true,
+        _ => false,
+    }
+}
+
+fn single_var_assign(stmts: &[HirStmt]) -> Option<(&str, &HirExpr)> {
+    let meaningful: Vec<&HirStmt> = stmts
+        .iter()
+        .filter(|s| !is_presentation_noise_stmt(s))
+        .collect();
+    match meaningful.as_slice() {
+        [HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            rhs,
+        }] => Some((name.as_str(), rhs)),
+        [HirStmt::Block(inner)] => single_var_assign(inner),
+        _ => None,
+    }
+}
+
+fn single_return_expr(stmts: &[HirStmt]) -> Option<&HirExpr> {
+    let meaningful: Vec<&HirStmt> = stmts
+        .iter()
+        .filter(|s| !is_presentation_noise_stmt(s))
+        .collect();
+    match meaningful.as_slice() {
+        [HirStmt::Return(Some(expr))] => Some(expr),
+        [HirStmt::Block(inner)] => single_return_expr(inner),
+        _ => None,
+    }
+}
+
+fn expr_result_type(expr: &HirExpr) -> NirType {
+    match expr {
+        HirExpr::Const(_, ty)
+        | HirExpr::Unary { ty, .. }
+        | HirExpr::Binary { ty, .. }
+        | HirExpr::Select { ty, .. }
+        | HirExpr::Call { ty, .. }
+        | HirExpr::Load { ty, .. }
+        | HirExpr::Cast { ty, .. }
+        | HirExpr::FieldAccess { ty, .. }
+        | HirExpr::Index { elem_ty: ty, .. } => ty.clone(),
+        HirExpr::PtrOffset { .. } | HirExpr::AddressOfGlobal(_) => {
+            NirType::Ptr(Box::new(NirType::Unknown))
+        }
+        HirExpr::Var(_) | HirExpr::AggregateCopy { .. } => NirType::Unknown,
     }
 }
 
@@ -2591,9 +3034,15 @@ mod tests {
             "HIR should mention formals:\n{}",
             layered.hir
         );
+        // Pure diamond may stay as if/else or fold further into nested select/ternary.
         assert!(
-            layered.hir.contains("if"),
-            "HIR should be structured if/else:\n{}",
+            layered.hir.contains("if") || layered.hir.contains('?'),
+            "HIR should be structured if/else or pure select:\n{}",
+            layered.hir
+        );
+        assert!(
+            layered.hir.contains("return"),
+            "HIR should return a value:\n{}",
             layered.hir
         );
     }
@@ -3038,9 +3487,16 @@ mod tests {
             "HIR should fold aliases/temps:\n{}",
             layered.hir
         );
+        // Pure diamond may stay as if/else or fold further into nested select/ternary.
         assert!(
-            layered.hir.contains("param_1") && layered.hir.contains("if"),
-            "HIR should be structured on param_1:\n{}",
+            layered.hir.contains("param_1")
+                && (layered.hir.contains("if") || layered.hir.contains('?')),
+            "HIR should be structured if/else or pure select on param_1:\n{}",
+            layered.hir
+        );
+        assert!(
+            layered.hir.contains("return"),
+            "HIR should return a value:\n{}",
             layered.hir
         );
     }
@@ -3198,6 +3654,196 @@ mod tests {
         assert!(
             code.contains("return") && code.matches("once(").count() == 1,
             "single-use call may fold into return once:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_folds_if_else_pure_assign_to_select() {
+        let mut func = HirFunction {
+            name: "clamp_like".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: le("param_1", "0"),
+                    then_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Const(0, int_ty(32, true)),
+                    }],
+                    else_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Var("param_1".into()),
+                    }],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        // Prefer select form (and optional return collapse): no residual if/else.
+        assert!(
+            !code.contains("if (") && (code.contains('?') || code.contains("return")),
+            "expected pure if/else assign fold into select:\n{code}"
+        );
+        assert!(
+            code.contains("return")
+                && (code.contains("param_1") || code.contains('0')),
+            "must keep both branch values:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_folds_if_else_pure_returns_to_select() {
+        let mut func = HirFunction {
+            name: "minmax_ret".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::If {
+                cond: le("param_1", "0"),
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int_ty(32, true))))],
+                else_body: vec![HirStmt::Return(Some(HirExpr::Var("param_1".into())))],
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("if (") && code.contains('?') && code.contains("return"),
+            "expected if/else pure returns → ternary return:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_does_not_fold_effectful_if_else_assign() {
+        let mut func = HirFunction {
+            name: "side_effect_branch".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: le("param_1", "0"),
+                    then_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Call {
+                            target: "side".into(),
+                            args: vec![],
+                            ty: int_ty(32, true),
+                        },
+                    }],
+                    else_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Var("param_1".into()),
+                    }],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        // Must keep a single evaluation of `side()` — do not select-fold call arms.
+        assert_eq!(count_calls_in_stmts(&func.body), 1);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            code.contains("if (") || code.contains("side("),
+            "effectful branch must not become multi-eval select:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_strips_empty_else() {
+        // No prior seed for `y` so seed+overwrite does not fold this into select.
+        let mut func = HirFunction {
+            name: "maybe_set".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("y")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: le("param_1", "0"),
+                    then_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("y".into()),
+                        rhs: HirExpr::Const(0, int_ty(32, true)),
+                    }],
+                    else_body: vec![HirStmt::Block(vec![])],
+                },
+                HirStmt::Return(Some(HirExpr::Var("y".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("else"),
+            "empty else arm should be stripped:\n{code}"
+        );
+        assert!(
+            code.contains("if ("),
+            "residual if should remain after empty-else strip:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_folds_if_return_fallthrough_return() {
+        let mut func = HirFunction {
+            name: "early_ret".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: le("param_1", "0"),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int_ty(32, true))))],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("param_1".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("if (") && code.contains('?') && code.contains("return"),
+            "expected if-return + fallthrough return → ternary:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_folds_seed_if_overwrite_assign() {
+        let mut func = HirFunction {
+            name: "clamp0".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Var("param_1".into()),
+                },
+                HirStmt::If {
+                    cond: le("x", "0"),
+                    then_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Const(0, int_ty(32, true)),
+                    }],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("if (") && (code.contains('?') || code.contains("return")),
+            "expected seed + if overwrite → select:\n{code}"
+        );
+        assert!(
+            !code.contains("goto") && code.contains("param_1"),
+            "must keep formal and drop control noise:\n{code}"
         );
     }
 
