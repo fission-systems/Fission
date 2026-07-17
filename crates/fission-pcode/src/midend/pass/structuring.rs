@@ -1,22 +1,13 @@
 use crate::midend::pass::{AnalysisStore, InvariantBasis, NirFunc, NirPass, PassResult};
-use crate::midend::structuring::driver::{
-    StructuringAdmissionInput, StructuringAdmissionReason, blockgraph_collapse_admission_enabled,
-    decide_structuring_admission,
-};
 use crate::midend::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
-use crate::midend::structuring::structuring_diag_enabled;
 use crate::midend::ir::{HirStmt, MlilPreviewError};
-
-fn apply_blockgraph_collapse_admission_gate(
-    admission: StructuringAdmissionReason,
-    enabled: bool,
-) -> StructuringAdmissionReason {
-    if enabled && matches!(admission, StructuringAdmissionReason::IrreducibleBudget) {
-        StructuringAdmissionReason::GraphCollapse
-    } else {
-        admission
-    }
-}
+// ADR 0012: admission / SESE / collapse free-fns owned by midend-structuring.
+use fission_midend_structuring::{
+    StructuringAdmissionInput, StructuringAdmissionReason,
+    apply_blockgraph_collapse_admission_gate, blockgraph_collapse_admission_enabled,
+    build_sese_region_body, collapse_loop_admission_enabled, decide_structuring_admission,
+    structure_cfg_via_sese, structuring_diag_enabled,
+};
 
 pub(crate) struct EarlyReturnPass;
 
@@ -264,28 +255,23 @@ impl NirPass for SeseStructuringPass {
         }
 
         let total_blocks = ir.block_count();
-        let sese_result =
-            if crate::midend::structuring::collapse_loop::collapse_loop_admission_enabled() {
-                match crate::midend::structuring::collapse_loop::structure_cfg_via_collapse_loop(
-                    ir.builder,
-                    total_blocks,
-                ) {
-                    Ok(body) => Ok(body),
-                    Err(err) => {
-                        if diag {
-                            eprintln!(
-                                "[DIAG] collapse loop failed ({err:?}), falling back to SESE tree"
-                            );
-                        }
-                        crate::midend::structuring::sese::structure_cfg_via_sese(
-                            ir.builder,
-                            total_blocks,
-                        )
+        // Collapse-loop admission: whole-function SESE body at (0, N). SESE tree
+        // path is the free-fn structure_cfg_via_sese (no pcode thin wrap).
+        let sese_result = if collapse_loop_admission_enabled() {
+            match build_sese_region_body(ir.builder, 0, total_blocks, Default::default()) {
+                Ok(body) => Ok(body),
+                Err(err) => {
+                    if diag {
+                        eprintln!(
+                            "[DIAG] collapse loop failed ({err:?}), falling back to SESE tree"
+                        );
                     }
+                    structure_cfg_via_sese(ir.builder, total_blocks)
                 }
-            } else {
-                crate::midend::structuring::sese::structure_cfg_via_sese(ir.builder, total_blocks)
-            };
+            }
+        } else {
+            structure_cfg_via_sese(ir.builder, total_blocks)
+        };
 
         match sese_result {
             Ok(body) => {

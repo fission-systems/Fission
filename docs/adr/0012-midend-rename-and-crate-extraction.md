@@ -82,9 +82,12 @@ before crates).
    - Cspec helpers that formerly were inherent methods on `NirRenderOptions` are free functions.
 5. ~~Normalize source move to `fission-midend-normalize`.~~ **Done**
 6. ~~Pure structuring free-function modules to `fission-midend-structuring`.~~ **Done** (partial)
-7. **Remaining:** lift PreviewBuilder-bound structuring (collapse/guarded-tail/linear/conditionals/switch) to free functions + host trait.
-8. **Was:** Normalize/structuring source move: blocked on decoupling `support` /
-   `var_rename` / `vsa` (normalize) and `PreviewBuilder` method blocks
-   (structuring). Facades + decompiler/static deps on core/facades established.
-6. After owner source moves, drop deep re-exports from `fission-pcode` where
-   callers have migrated to facade crates.
+7. **Remaining:** lift PreviewBuilder-bound structuring residual (p-code opcode
+   tables, guarded-tail telemetry mark_*, binary/type_context adapters on
+   `host_impl`) further toward free functions + host trait.
+8. ~~Was: Normalize/structuring source move blocked…~~ **Unblocked** — owners live
+   in midend crates; pcode keeps host + thin wraps.
+9. **In progress (2026-07-17):** drop deep re-exports / dual CollapseRule maps;
+   orchestrate and `pass/structuring` call `fission_midend_*` free-fns directly
+   (SESE, build_sese_region_body, normalize_hir_function, admission gate).
+   Deleted pure thin `structuring/graph.rs` shim (re-export from owner crate).

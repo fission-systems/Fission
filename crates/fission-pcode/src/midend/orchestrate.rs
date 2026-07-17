@@ -1,18 +1,27 @@
 //! Preview/NIR orchestration: builder → normalize → structuring → render.
 //!
 //! Owns the top-level `render_mlil_preview*` / `render_nir*` entrypoints that
-//! wire owner layers together. Semantic logic stays in builder/normalize/
-//! structuring; print surfaces stay in [`crate::render`].
+//! wire owner layers together. **Semantic ownership (ADR 0012):**
+//! - builder / PreviewBuilder: `fission-pcode` (p-code → HIR materialize)
+//! - normalize: `fission-midend-normalize` (called directly below)
+//! - structuring: `fission-midend-structuring` free-fns + PreviewBuilder host
+//! - print: [`crate::render`] (NIR/HIR dual layer)
+//!
+//! This module must not re-implement owner logic; it only sequences stages.
 
 use super::{
     DecompFacts, GhidraActionConcept, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
     NirRenderOptions, NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewTypeContext,
-    apply_preview_type_hints, discover_guarded_tail_candidates_for_stats, normalize,
-    normalize_hir_function, record_ghidra_action_stage, record_ghidra_clean_room_pipeline_complete,
+    apply_preview_type_hints, discover_guarded_tail_candidates_for_stats,
+    record_ghidra_action_stage, record_ghidra_clean_room_pipeline_complete,
     recover_global_symbol_accesses, render_layered_pseudocode, structuring, telemetry,
 };
 use crate::pcode::PcodeFunction;
 use fission_loader::loader::LoadedBinary;
+// Owner crate (not pcode re-export path) — keeps orchestrate boundary explicit.
+use fission_midend_normalize::{
+    normalize_hir_function, pipeline as normalize_pipeline, take_normalize_wave_stats,
+};
 use std::time::Instant;
 
 pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
@@ -151,28 +160,28 @@ pub fn render_mlil_preview_with_binary_and_context(
     }
     debug_log("normalize_start");
     let normalize_start = Instant::now();
-    let context = normalize::pipeline::GlobalSymbolContext {
+    let context = normalize_pipeline::GlobalSymbolContext {
         names: options.global_names.clone(),
         sizes: options.global_sizes.clone(),
     };
-    normalize::pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
+    normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = Some(context);
     });
+    // Stage: midend-normalize (owner crate).
     normalize_hir_function(&mut hir);
-    // Run the explicit structuring Pass pipeline.  Today this is a thin shim
-    // (PostStructuringCleanupPass) that records the stage in PassTrace and
-    // provides the extension point for future per-CollapseRule Pass migration.
+    // Stage: post-structure cleanup pass shim (host residual still in pcode).
+    // Provides PassTrace extension point for future per-CollapseRule migration.
     structuring::passes::pipeline::run_structuring_pipeline(
         &mut hir,
         debug.diag,
         std::env::var_os("FISSION_PREVIEW_PERF").is_some(),
     );
-    normalize::pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
+    normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = None;
     });
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
-    build_stats.merge_assign(&normalize::take_normalize_wave_stats());
+    build_stats.merge_assign(&take_normalize_wave_stats());
     let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(&hir.body);
     build_stats.merge_guarded_tail_discovery_assign(&normalized_discovery_stats);
     build_stats.refresh_structuring_reason_families();

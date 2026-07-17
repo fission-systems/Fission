@@ -15,11 +15,15 @@ pub use fission_midend_structuring::irreducible;
 pub use fission_midend_structuring::loop_analysis;
 pub use fission_midend_structuring::regions;
 pub use fission_midend_structuring::StructuringHost;
+// Graph types: no local thin module — re-export owner crate directly (ADR 0012).
+pub use fission_midend_structuring::graph::{
+    StructureEdge, StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeId,
+    StructureNodeKind, capture_structuring_failure, surface_structure_graph,
+};
 pub(crate) mod collapse_driver;
 pub(crate) mod collapse_loop;
 mod conditionals;
 pub(crate) mod driver;
-mod graph;
 mod guarded_tail;
 pub(super) mod linear;
 mod loops;
@@ -27,7 +31,7 @@ pub(crate) mod passes;
 pub(crate) mod sese;
 mod switch;
 
-// --- re-exports consumed by nir::builder and other nir subsystems ---
+// --- re-exports consumed by builder and other midend subsystems ---
 pub(crate) use cfg_analysis::{
     CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
 };
@@ -38,9 +42,6 @@ pub(crate) use collapse_driver::CollapseDriver;
 pub(crate) use driver::{
     collapse::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule},
     discover_guarded_tail_candidates_for_stats, structuring_diag_enabled,
-};
-pub(crate) use graph::{capture_structuring_failure, 
-    StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeKind, surface_structure_graph,
 };
 pub(crate) use linear::{
     LinearBodyCachedOutcome, LinearBodyLoweringOutcome, LinearBodyRejectReason,

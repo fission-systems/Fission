@@ -10,11 +10,19 @@ pub use fission_midend_structuring::collapse_loop::{
 };
 
 /// Collapse the full function body without SESE region decomposition.
+///
+/// Thin host entry: delegates to midend-structuring free-fn
+/// [`fission_midend_structuring::build_sese_region_body`].
 pub(crate) fn structure_cfg_via_collapse_loop(
     builder: &mut PreviewBuilder,
     total_nodes: usize,
 ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-    builder.build_sese_region_body(0, total_nodes, HashMap::default())
+    fission_midend_structuring::build_sese_region_body(
+        builder,
+        0,
+        total_nodes,
+        HashMap::default(),
+    )
 }
 
 impl<'a> PreviewBuilder<'a> {

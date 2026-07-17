@@ -98,6 +98,10 @@ pub use loops::{
 };
 pub use sese_discovery::{SeseRegion, SeseRegionTree, build_sese_tree, compute_rpo_map, find_sese_regions, sese_structure_region, structure_cfg_via_sese};
 pub use orphan_repair::{find_block_index_by_label, try_repair_orphan_gotos};
+pub use collapse_loop::{
+    apply_virtual_goto_edge, collapse_loop_admission_enabled, is_virtual_goto_edge,
+    try_virtualize_one_bad_edge,
+};
 pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule, build_sese_region_body, reconstruct_sese_final_body};
 pub use switch::{
     SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch,

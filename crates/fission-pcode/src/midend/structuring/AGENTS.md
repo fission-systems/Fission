@@ -33,8 +33,14 @@ Free-function owners live in `fission-midend-structuring` and take
 | Orphan-goto repair | `fission-midend-structuring::orphan_repair` | free `try_repair_orphan_gotos` |
 | Guarded-tail suffix pure + with-diag + callee pure | `fission-midend-structuring::guarded_tail::{pure_hir,suffix_window}` | free; host residual supplies call-effect / binary facts |
 | Host data adapters | `host_impl.rs` | binary / type_context / inventory bridges only |
+| SESE / collapse entry | call `fission_midend_structuring::{structure_cfg_via_sese,build_sese_region_body}` | do not add new pcode thin wraps |
+| Graph types | `fission_midend_structuring::graph` | re-exported from `structuring/mod.rs` |
 
 Prefer new work as `fn try_lower_*(host: &mut impl StructuringHost, ...)`.
+
+Orchestration (`midend/orchestrate.rs`) calls **`fission_midend_normalize`**
+directly for normalize; do not reintroduce `crate::midend::normalize::*` for
+new stage wiring.
 
 ## Overview
 

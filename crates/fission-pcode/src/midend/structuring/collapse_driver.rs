@@ -27,19 +27,8 @@ impl CollapseDriver {
         idx: usize,
         follow: Option<usize>,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        // Map local CollapseRule to free-function owner dispatch.
-        let free_rule = match rule {
-            CollapseRule::Switch => fission_midend_structuring::CollapseRule::Switch,
-            CollapseRule::ForLoop => fission_midend_structuring::CollapseRule::ForLoop,
-            CollapseRule::DoWhile => fission_midend_structuring::CollapseRule::DoWhile,
-            CollapseRule::WhileDo => fission_midend_structuring::CollapseRule::WhileDo,
-            CollapseRule::InfLoopBreak => fission_midend_structuring::CollapseRule::InfLoopBreak,
-            CollapseRule::InfLoop => fission_midend_structuring::CollapseRule::InfLoop,
-            CollapseRule::Conditional => fission_midend_structuring::CollapseRule::Conditional,
-            CollapseRule::Sequence => fission_midend_structuring::CollapseRule::Sequence,
-            CollapseRule::Unstructured => fission_midend_structuring::CollapseRule::Unstructured,
-        };
-        fission_midend_structuring::apply_collapse_rule(builder, free_rule, idx, follow)
+        // CollapseRule is already the midend-structuring type (re-export).
+        fission_midend_structuring::apply_collapse_rule(builder, rule, idx, follow)
     }
 
     pub(crate) fn run(builder: &mut PreviewBuilder<'_>) -> Result<Vec<HirStmt>, MlilPreviewError> {
