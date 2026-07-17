@@ -277,5 +277,5 @@ Regression-prevention workflow:
 - `.github/workflows/release-tag.yml`
 
 ## NIR vs HIR Policy
-1. **NIR (Normalized Intermediate Representation)**: Must be 100% semantically identical to the source. Correctness and semantic parity are the absolute highest priorities.
-2. **HIR (High-level Intermediate Representation)**: Acts as human-readable pseudocode. It does NOT need to be 100% semantically identical, and can prioritize readability and C-friendly structures over strict, mechanical semantic equivalence.
+1. **NIR (Normalized Intermediate Representation)**: Must be 100% semantically identical to the source. Correctness and semantic parity are the absolute highest priorities. Primary semantic oracle / default benchmark `code`.
+2. **HIR (High-level Intermediate Representation)**: Acts as human-readable pseudocode. It does NOT need mechanical 1:1 NIR text form, and can prioritize readability and C-friendly structures — but only under the presentation contract: same evaluation count/order for effects, clone-only polish, no oracle swap. See [`docs/adr/0011-hir-presentation-contract.md`](docs/adr/0011-hir-presentation-contract.md) and `crates/fission-pcode/src/nir/render/AGENTS.md`.
