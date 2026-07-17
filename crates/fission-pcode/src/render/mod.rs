@@ -21,7 +21,10 @@ pub(crate) use crate::nir::{
     NirBinding, NirBindingOrigin, NirType, SWITCH_FALLTHROUGH_SENTINEL, expr_type,
 };
 
+mod globals;
 mod layer;
+mod layered;
+/// Facade re-exports for layered print + global recovery (see `pipeline.rs`).
 mod pipeline;
 mod presentation;
 mod printer;
