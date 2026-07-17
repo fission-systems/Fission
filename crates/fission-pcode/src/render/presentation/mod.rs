@@ -39,6 +39,10 @@ pub(crate) fn apply_hir_presentation(func: &mut HirFunction) {
         changed |= fold_seed_if_overwrite_assign(&mut func.body);
         // Drop empty `else {}` arms after other folds.
         changed |= strip_empty_else_arms(&mut func.body);
+        // `if (c) {} else { body }` → `if (!c) { body }`.
+        changed |= fold_empty_then_invert_else(&mut func.body);
+        // Prefer `x op k` over `k op x` in comparisons (and peel `!(x==0)` etc.).
+        changed |= canonicalize_presentation_conditions(func);
         // `x = c ? a : b; return ~c ? x : a` (null-check join) → `return x` / fold.
         changed |= fold_redundant_select_return_join(&mut func.body);
         changed |= prune_unreachable_after_total_return(&mut func.body);
@@ -1556,6 +1560,271 @@ fn strip_empty_else_arms(stmts: &mut Vec<HirStmt>) -> bool {
         }
     }
     changed
+}
+
+/// `if (c) {} else { body }` → `if (!c) { body }` (labels-only then counts as empty).
+fn fold_empty_then_invert_else(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. }
+            | HirStmt::For { body: b, .. } => {
+                changed |= fold_empty_then_invert_else(b);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                changed |= fold_empty_then_invert_else(then_body);
+                changed |= fold_empty_then_invert_else(else_body);
+                if body_is_effectively_empty(then_body)
+                    && !else_body.is_empty()
+                    && !body_is_effectively_empty(else_body)
+                {
+                    *cond = invert_cond(std::mem::replace(
+                        cond,
+                        HirExpr::Const(0, NirType::Bool),
+                    ));
+                    std::mem::swap(then_body, else_body);
+                    else_body.clear();
+                    changed = true;
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= fold_empty_then_invert_else(&mut case.body);
+                }
+                changed |= fold_empty_then_invert_else(default);
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+/// Normalize condition/comparison presentation forms in place.
+fn canonicalize_presentation_conditions(func: &mut HirFunction) -> bool {
+    let mut changed = false;
+    for stmt in &mut func.body {
+        changed |= canonicalize_conditions_in_stmt(stmt);
+    }
+    changed
+}
+
+fn canonicalize_conditions_in_stmt(stmt: &mut HirStmt) -> bool {
+    let mut changed = false;
+    match stmt {
+        HirStmt::Assign { rhs, .. } => {
+            changed |= canonicalize_conditions_in_expr(rhs);
+        }
+        HirStmt::Expr(e) | HirStmt::Return(Some(e)) | HirStmt::VaStart { va_list: e, .. } => {
+            changed |= canonicalize_conditions_in_expr(e);
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+        HirStmt::Block(body) => {
+            for s in body.iter_mut() {
+                changed |= canonicalize_conditions_in_stmt(s);
+            }
+        }
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            changed |= canonicalize_conditions_in_expr(cond);
+            for s in body.iter_mut() {
+                changed |= canonicalize_conditions_in_stmt(s);
+            }
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            changed |= canonicalize_conditions_in_expr(cond);
+            for s in then_body.iter_mut() {
+                changed |= canonicalize_conditions_in_stmt(s);
+            }
+            for s in else_body.iter_mut() {
+                changed |= canonicalize_conditions_in_stmt(s);
+            }
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(c) = cond {
+                changed |= canonicalize_conditions_in_expr(c);
+            }
+            if let Some(i) = init {
+                changed |= canonicalize_conditions_in_stmt(i);
+            }
+            if let Some(u) = update {
+                changed |= canonicalize_conditions_in_stmt(u);
+            }
+            for s in body.iter_mut() {
+                changed |= canonicalize_conditions_in_stmt(s);
+            }
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            changed |= canonicalize_conditions_in_expr(expr);
+            for case in cases {
+                for s in case.body.iter_mut() {
+                    changed |= canonicalize_conditions_in_stmt(s);
+                }
+            }
+            for s in default.iter_mut() {
+                changed |= canonicalize_conditions_in_stmt(s);
+            }
+        }
+    }
+    changed
+}
+
+fn canonicalize_conditions_in_expr(expr: &mut HirExpr) -> bool {
+    let mut changed = false;
+    match expr {
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            changed |= canonicalize_conditions_in_expr(expr);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            changed |= canonicalize_conditions_in_expr(lhs);
+            changed |= canonicalize_conditions_in_expr(rhs);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= canonicalize_conditions_in_expr(cond);
+            changed |= canonicalize_conditions_in_expr(then_expr);
+            changed |= canonicalize_conditions_in_expr(else_expr);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                changed |= canonicalize_conditions_in_expr(a);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => {
+            changed |= canonicalize_conditions_in_expr(ptr);
+        }
+        HirExpr::Index { base, index, .. } => {
+            changed |= canonicalize_conditions_in_expr(base);
+            changed |= canonicalize_conditions_in_expr(index);
+        }
+    }
+    // Post-order local rewrites so nested forms normalize first.
+    changed |= rewrite_presentation_condition_form(expr);
+    changed
+}
+
+fn rewrite_presentation_condition_form(expr: &mut HirExpr) -> bool {
+    // `!(x == 0)` → `x != 0`, `!(x != 0)` → `x == 0`.
+    // `!!e` only when the outer result is Bool (value `!!x` ≠ `x` for int x∉{0,1}).
+    if let HirExpr::Unary {
+        op: HirUnaryOp::Not,
+        expr: inner,
+        ty: outer_ty,
+    } = expr
+    {
+        if matches!(outer_ty, NirType::Bool) {
+            if let HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: inner2,
+                ..
+            } = inner.as_ref()
+            {
+                *expr = inner2.as_ref().clone();
+                return true;
+            }
+        }
+        if let HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs,
+            rhs,
+            ty,
+        } = inner.as_ref()
+        {
+            *expr = HirExpr::Binary {
+                op: HirBinaryOp::Ne,
+                lhs: lhs.clone(),
+                rhs: rhs.clone(),
+                ty: ty.clone(),
+            };
+            return true;
+        }
+        if let HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ty,
+        } = inner.as_ref()
+        {
+            *expr = HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: lhs.clone(),
+                rhs: rhs.clone(),
+                ty: ty.clone(),
+            };
+            return true;
+        }
+    }
+
+    // Const-left comparisons → var/expr-left with flipped op.
+    if let HirExpr::Binary {
+        op,
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    {
+        let lhs_is_const = matches!(lhs.as_ref(), HirExpr::Const(_, _));
+        let rhs_is_const = matches!(rhs.as_ref(), HirExpr::Const(_, _));
+        if lhs_is_const && !rhs_is_const {
+            if let Some(flipped) = flip_comparison_op(*op) {
+                let new_lhs = std::mem::replace(rhs.as_mut(), HirExpr::Const(0, NirType::Unknown));
+                let new_rhs = std::mem::replace(lhs.as_mut(), HirExpr::Const(0, NirType::Unknown));
+                *op = flipped;
+                *lhs.as_mut() = new_lhs;
+                *rhs.as_mut() = new_rhs;
+                let _ = ty;
+                return true;
+            }
+            if matches!(*op, HirBinaryOp::Eq | HirBinaryOp::Ne) {
+                std::mem::swap(lhs, rhs);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn flip_comparison_op(op: HirBinaryOp) -> Option<HirBinaryOp> {
+    Some(match op {
+        HirBinaryOp::Lt => HirBinaryOp::Gt,
+        HirBinaryOp::Le => HirBinaryOp::Ge,
+        HirBinaryOp::Gt => HirBinaryOp::Lt,
+        HirBinaryOp::Ge => HirBinaryOp::Le,
+        HirBinaryOp::SLt => HirBinaryOp::SGt,
+        HirBinaryOp::SLe => HirBinaryOp::SGe,
+        HirBinaryOp::SGt => HirBinaryOp::SLt,
+        HirBinaryOp::SGe => HirBinaryOp::SLe,
+        _ => return None,
+    })
 }
 
 fn body_is_effectively_empty(stmts: &[HirStmt]) -> bool {
@@ -3808,6 +4077,104 @@ mod tests {
         assert!(
             !code.contains("if (") && code.contains('?') && code.contains("return"),
             "expected if-return + fallthrough return → ternary:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_inverts_empty_then_else() {
+        let mut func = HirFunction {
+            name: "empty_then".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(1, int_ty(32, true)),
+                },
+                HirStmt::If {
+                    cond: le("param_1", "0"),
+                    then_body: vec![],
+                    else_body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Const(0, int_ty(32, true)),
+                    }],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        let else_count = code.matches("else").count();
+        assert_eq!(else_count, 0, "empty then should invert to single if:\n{code}");
+        assert!(
+            code.contains("if (") || code.contains('?'),
+            "must retain a branch form:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_canonicalizes_const_left_comparison() {
+        let mut func = HirFunction {
+            name: "cmp_left".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::SLe,
+                    lhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                    rhs: Box::new(HirExpr::Var("param_1".into())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(1, int_ty(32, true))))],
+                else_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int_ty(32, true))))],
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        // After const-left commute: `param_1 >= 0` (not `0 <= param_1`).
+        let const_left = code.contains("0 <=") || code.contains("0 < ") || code.contains("(0 <=");
+        assert!(
+            !const_left,
+            "const-left comparison should commute to var-left:\n{code}"
+        );
+        assert!(
+            code.contains("param_1") && (code.contains(">=") || code.contains('?')),
+            "expected var-left comparison or folded select:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_peels_not_eq_zero() {
+        let mut func = HirFunction {
+            name: "not_eq0".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Eq,
+                        lhs: Box::new(HirExpr::Var("param_1".into())),
+                        rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                        ty: NirType::Bool,
+                    }),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(1, int_ty(32, true))))],
+                else_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int_ty(32, true))))],
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("!(") && !code.contains("== 0"),
+            "!(x == 0) should peel toward != form:\n{code}"
         );
     }
 
