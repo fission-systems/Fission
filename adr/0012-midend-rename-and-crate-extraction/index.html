@@ -1117,14 +1117,14 @@ names should track the midend vocabulary.</p>
 <tr>
 <td>D0</td>
 <td>Decouple reverse edges</td>
-<td><code>wave_stats</code> at midend root; callers migrate off <code>normalize::wave_stats</code></td>
-<td><strong>In progress</strong></td>
+<td><code>wave_stats</code> at midend root; all callers use <code>midend::wave_stats</code>; reverse <code>is_known_api_signature</code> via midend root</td>
+<td><strong>Done</strong></td>
 </tr>
 <tr>
 <td>D</td>
-<td>Move implementation</td>
-<td>Code leaves <code>fission-pcode</code> into facades (needs midend-core for action_pipeline/vsa)</td>
-<td>Future</td>
+<td><code>fission-midend-core</code> + move</td>
+<td>Shared substrate facade scaffolded; physical <code>ir</code>/<code>action_pipeline</code>/<code>wave_stats</code> move still future</td>
+<td><strong>Scaffolded</strong></td>
 </tr>
 <tr>
 <td>E</td>
@@ -1156,9 +1156,15 @@ before crates).</p>
 </ul>
 <h2 id="follow-ups">Follow-ups<a class="headerlink" href="#follow-ups" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Migrate <code>fission-decompiler</code> / <code>fission-static</code> imports to <code>midend</code>.</li>
-<li>Promote facade crates from re-export to owned source trees.</li>
-<li>Remove <code>pub use midend as nir</code> when greps are clean.</li>
+<li>~~Migrate <code>fission-decompiler</code> / <code>fission-static</code> imports to <code>midend</code>.~~ <strong>Done</strong></li>
+<li>~~Remove <code>pub use midend as nir</code> when greps are clean.~~ <strong>Done</strong> (Phase E)</li>
+<li>~~Scaffold <code>fission-midend-core</code> and route facade IR types through it.~~ <strong>Done</strong></li>
+<li><strong>Physical midend-core move:</strong> lift <code>ir/</code>, <code>action_pipeline/</code>, and
+   <code>wave_stats</code> out of <code>fission-pcode</code> into <code>fission-midend-core</code> (break
+   pcode→core cycle by inverting ownership; keep builder/vsa in pcode or
+   co-extract as needed).</li>
+<li>Promote normalize/structuring facades from re-export to owned source trees;
+   then have decompiler/static depend on facades for owner entrypoints.</li>
 </ol>
 
 
