@@ -10,9 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/architecture/DECOMPILER_ACTIONS/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/v0.1.4/">
       
       
+        <link rel="prev" href="../../RELEASE/">
+      
+      
+        <link rel="next" href="../v0.1.3/">
       
       
         
@@ -23,7 +27,7 @@
     
     
       
-        <title>Fission Decompiler Action Pipeline Contracts - Fission</title>
+        <title>Fission 0.1.4 - Fission</title>
       
     
     
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#fission-decompiler-action-pipeline-contracts" class="md-skip">
+        <a href="#fission-v014" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Fission Decompiler Action Pipeline Contracts
+              Fission 0.1.4
             
           </span>
         </div>
@@ -288,7 +292,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../ARCHITECTURE/" class="md-tabs__link">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
         
   
   
@@ -382,11 +386,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../changelog/v0.1.4/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   
@@ -531,7 +537,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ARCHITECTURE/" class="md-nav__link">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
         
   
   
@@ -781,28 +787,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
-        
-          
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -820,7 +829,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
@@ -835,10 +844,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -854,6 +890,248 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#release-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hir-presentation-adr-0011" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HIR presentation (ADR 0011)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HIR presentation (ADR 0011)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new-extended-presentation-passes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New / extended presentation passes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structural-presentation-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structural presentation firewall
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation-hir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation (HIR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#midend-architecture-adr-0012" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Midend architecture (ADR 0012)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Midend architecture (ADR 0012)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#owner-crates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Owner crates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structuring-free-function-extraction-phase-d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structuring free-function extraction (Phase D)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dual-layer-print-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dual-layer print ownership
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-cd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI / CD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CI / CD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fast-gate-l0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fast Gate (L0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-gates-unchanged-policy-exercised-for-this-tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release gates (unchanged policy, exercised for this tag)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validation notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crate-unit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crate / unit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-benchmark-quality-loop-not-pages-promotion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        External benchmark (quality loop, not Pages promotion)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-and-tooling-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package and tooling versions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commit-range" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit range
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -866,7 +1144,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+      <a href="../v0.1.3/" class="md-nav__link">
         
   
   
@@ -894,7 +1172,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+      <a href="../v0.1.2/" class="md-nav__link">
         
   
   
@@ -949,10 +1227,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#stage-map" class="md-nav__link">
+  <a href="#release-summary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Stage Map
+        Release summary
       
     </span>
   </a>
@@ -960,10 +1238,188 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#substrate-boundary" class="md-nav__link">
+  <a href="#hir-presentation-adr-0011" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Substrate Boundary
+        HIR presentation (ADR 0011)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HIR presentation (ADR 0011)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new-extended-presentation-passes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New / extended presentation passes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structural-presentation-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structural presentation firewall
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation-hir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation (HIR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#midend-architecture-adr-0012" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Midend architecture (ADR 0012)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Midend architecture (ADR 0012)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#owner-crates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Owner crates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#structuring-free-function-extraction-phase-d" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structuring free-function extraction (Phase D)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dual-layer-print-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dual-layer print ownership
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-cd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI / CD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CI / CD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fast-gate-l0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fast Gate (L0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-gates-unchanged-policy-exercised-for-this-tag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release gates (unchanged policy, exercised for this tag)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation notes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validation notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#crate-unit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crate / unit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#external-benchmark-quality-loop-not-pages-promotion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        External benchmark (quality loop, not Pages promotion)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-and-tooling-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package and tooling versions
       
     </span>
   </a>
@@ -971,10 +1427,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#single-normalize-entry-point" class="md-nav__link">
+  <a href="#upgrade-notes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Single Normalize Entry Point
+        Upgrade notes
       
     </span>
   </a>
@@ -982,109 +1438,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#normalize-action-groups-ghidra-order" class="md-nav__link">
+  <a href="#commit-range" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Normalize Action Groups (Ghidra order)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#dead-code-owners-ghidra-aligned" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Dead-Code Owners (Ghidra-aligned)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bitmask-owners-ghidra-aligned" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Bitmask Owners (Ghidra-aligned)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#removed-narrow-idiom-passes-no-ghidra-analog" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Removed Narrow Idiom Passes (no Ghidra analog)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#const-fold-copy-join-conditional-move-owners" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Const-Fold / Copy-Join / Conditional-Move Owners
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#admission-gates" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Admission Gates
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#structuring-contracts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Structuring Contracts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stage-regression-gates" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stage Regression Gates
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#anti-patterns" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Anti-Patterns
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#validation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Validation
+        Commit range
       
     </span>
   </a>
@@ -1111,324 +1468,269 @@
   
 
 
-<h1 id="fission-decompiler-action-pipeline-contracts">Fission Decompiler Action Pipeline Contracts<a class="headerlink" href="#fission-decompiler-action-pipeline-contracts" title="Permanent link">&para;</a></h1>
-<p>This document defines the Ghidra-aligned decompiler stages, their Fission owners, and the
-forbidden cross-stage behaviors that the action pipeline framework enforces.</p>
-<p>Related code:</p>
-<ul>
-<li>Framework: <a href="../crates/fission-pcode/src/nir/action_pipeline/"><code>crates/fission-pcode/src/nir/action_pipeline/</code></a></li>
-<li>Normalize driver: <a href="../crates/fission-pcode/src/nir/normalize/pipeline/groups.rs"><code>crates/fission-pcode/src/nir/normalize/pipeline/groups.rs</code></a> (<code>run_normalize_pipeline</code>)</li>
-<li>Canonical pass sequence: <a href="../crates/fission-pcode/src/nir/normalize/pipeline/run.rs"><code>crates/fission-pcode/src/nir/normalize/pipeline/run.rs</code></a> (<code>run_canonical_normalize_passes</code>)</li>
-<li>ActionGroup registry (Ghidra order, migration target): <code>build_normalize_pipeline</code> in <code>groups.rs</code></li>
-<li>Structuring collapse: <a href="../crates/fission-pcode/src/nir/structuring/collapse_driver.rs"><code>crates/fission-pcode/src/nir/structuring/collapse_driver.rs</code></a></li>
-<li>Telemetry: <a href="../crates/fission-pcode/src/nir/ir/build_stats.rs"><code>crates/fission-pcode/src/nir/ir/build_stats.rs</code></a></li>
-</ul>
-<h2 id="stage-map">Stage Map<a class="headerlink" href="#stage-map" title="Permanent link">&para;</a></h2>
+<h1 id="fission-v014">Fission v0.1.4<a class="headerlink" href="#fission-v014" title="Permanent link">&para;</a></h1>
+<p>Fission 0.1.4 is a <strong>readability and architecture</strong> release. Compared with 0.1.3,
+it ships a contracted dual-layer HIR presentation surface (ADR 0011), extracts
+the post-lift midend into dedicated owner crates (ADR 0012 Phase D), and hardens
+CI Fast Gate so release assets stay reproducible under layered L0–L3 gates.</p>
+<p>This remains a pre-1.0 patch: the documented CLI is the primary interface.
+<strong>NIR remains the semantic oracle</strong>; HIR is a clone-only readability polish
+layer that must not retarget official rankings.</p>
+<p>Tagged commit: <code>8b5d7429</code><br />
+Release: https://github.com/sjkim1127/Fission/releases/tag/v0.1.4</p>
+<h2 id="release-summary">Release summary<a class="headerlink" href="#release-summary" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Ghidra concept</th>
-<th>Fission owner</th>
-<th>Primary input</th>
-<th>Primary output</th>
-<th>Key responsibilities</th>
-<th>Forbidden</th>
+<th>Area</th>
+<th>v0.1.3</th>
+<th>v0.1.4</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>FuncdataBuild</code></td>
-<td><code>nir::builder</code></td>
-<td>Raw p-code</td>
-<td>HIR skeleton, CFG layout</td>
-<td>Block graph init, basic lifting</td>
-<td>SSA heritage, type inference, structuring</td>
+<td>Pseudocode surfaces</td>
+<td>Dual print emerging; HIR polish ad hoc</td>
+<td>Dual-layer contract: NIR oracle + HIR presentation (ADR 0011)</td>
 </tr>
 <tr>
-<td><code>HeritageValueRecovery</code></td>
-<td><code>nir::builder::materialize</code> + heritage group</td>
-<td>HIR skeleton</td>
-<td>near-SSA HIR</td>
-<td>Stack/param/local recovery, copy-prop, join coalescing, iblock phi elimination</td>
-<td>Control-flow structuring, type inference beyond slot naming</td>
+<td>HIR control sugar</td>
+<td>Limited goto/alias polish</td>
+<td>Pure if/else → select, empty-then invert, const-left commute, <code>!(eq/ne)</code> peel</td>
 </tr>
 <tr>
-<td><code>Normalize</code></td>
-<td><code>nir::normalize::pipeline</code></td>
-<td>near-SSA HIR</td>
-<td>normalized HIR</td>
-<td>Dead code, CSE, SCCP, deindirect, memory recovery</td>
-<td>Final prototype fixate, pseudocode rendering</td>
+<td>HIR safety</td>
+<td>No runtime structural firewall</td>
+<td>Post-pass invariants + pre-polish restore; whole-function dead-elim</td>
 </tr>
 <tr>
-<td><code>PrototypeTypes</code></td>
-<td><code>nir::normalize::types</code></td>
-<td>normalized HIR</td>
-<td>typed HIR</td>
-<td>Type inference, callsite propagation, merge-type fixpoint</td>
-<td>CFG restructuring</td>
+<td>Midend layout</td>
+<td>Mostly under <code>fission-pcode</code> (<code>nir</code>/<code>midend</code>)</td>
+<td><code>fission-midend-core</code> / <code>normalize</code> / <code>structuring</code> own substrate + free-fns</td>
 </tr>
 <tr>
-<td><code>BlockGraphStructuring</code></td>
-<td><code>nir::structuring</code></td>
-<td>typed HIR + CFG facts</td>
-<td>structured HIR</td>
-<td>CollapseDriver rules, SESE regions, loop/if/switch recovery</td>
-<td>Expression semantic repair, printing</td>
+<td>Structuring API</td>
+<td>PreviewBuilder-heavy methods</td>
+<td><code>StructuringHost</code> + free-fn owners; pcode thin residual only</td>
 </tr>
 <tr>
-<td><code>PrintC</code></td>
-<td><code>nir::printer</code></td>
-<td>structured typed HIR</td>
-<td>pseudocode string</td>
-<td>Rendering only</td>
-<td>Any semantic recovery</td>
+<td>Orchestration</td>
+<td>Re-exports through pcode midend paths</td>
+<td><code>orchestrate</code> / <code>pass/structuring</code> call <code>fission_midend_*</code> free-fns directly</td>
+</tr>
+<tr>
+<td>Fast Gate CI</td>
+<td>Multi-OS PR cost, sccache tag issues</td>
+<td>Path-filter lanes, sccache <code>v0.10.0</code> tag, analysis-db on Linux tests</td>
+</tr>
+<tr>
+<td>Package version</td>
+<td><code>0.1.3</code></td>
+<td><code>0.1.4</code> (all workspace packages + lockfile)</td>
 </tr>
 </tbody>
 </table>
-<h2 id="substrate-boundary">Substrate Boundary<a class="headerlink" href="#substrate-boundary" title="Permanent link">&para;</a></h2>
-<p><code>fission-pcode</code> is physically one crate today, but quality work must follow the
-same dependency direction that a future split would require.</p>
+<h2 id="hir-presentation-adr-0011">HIR presentation (ADR 0011)<a class="headerlink" href="#hir-presentation-adr-0011" title="Permanent link">&para;</a></h2>
+<p>Owner: <code>crates/fission-pcode/src/render/presentation/</code><br />
+Contract: clone-only polish, same call/load evaluation count/order, no oracle swap.</p>
+<h3 id="new-extended-presentation-passes">New / extended presentation passes<a class="headerlink" href="#new-extended-presentation-passes" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Pure diamond folds</strong></li>
+<li><code>if (c) { x = a; } else { x = b; }</code> → <code>x = c ? a : b</code> (presentation-pure only)</li>
+<li><code>if (c) return a; else return b;</code> → <code>return c ? a : b</code></li>
+<li><code>if (c) return a; return b;</code> → ternary return</li>
+<li><code>x = seed; if (c) { x = a; }</code> → <code>x = c ? a : seed</code> (cond/then may substitute seed for <code>x</code>)</li>
+<li><strong>Empty-arm cleanup</strong></li>
+<li>Strip empty <code>else {}</code></li>
+<li><code>if (c) {} else { body }</code> → <code>if (!c) { body }</code></li>
+<li><strong>Condition canonicalize</strong></li>
+<li>Const-left comparisons → var-left with flipped op (<code>0 &lt; x</code> → <code>x &gt; 0</code>)</li>
+<li><code>!(x == 0)</code> / <code>!(x != 0)</code> peel; Bool-only double-not peel</li>
+<li><strong>Existing polish retained</strong>: param-home alias fold, self-update fold, goto shared return expand, if/while recovery from gotos, <code>while (1) { if (!c) break; }</code> → <code>while (c)</code>, single-use pure inline, cast peel, dead pure flag/temp drop</li>
+</ul>
+<h3 id="structural-presentation-firewall">Structural presentation firewall<a class="headerlink" href="#structural-presentation-firewall" title="Permanent link">&para;</a></h3>
+<p>After the fixed-point polish, <code>apply_hir_presentation</code> checks structural
+invariants against the pre-polish tree (<code>presentation/invariants.rs</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>use_without_def</code></td>
+<td>New non-param uses without any assign (over-DCE)</td>
+</tr>
+<tr>
+<td><code>call_count_increased</code></td>
+<td>Real call sites increased (multi-eval risk)</td>
+</tr>
+<tr>
+<td><code>load_count_increased</code></td>
+<td>Load sites increased</td>
+</tr>
+<tr>
+<td><code>empty_if_shell</code></td>
+<td>Empty if shells increased vs pre-polish</td>
+</tr>
+</tbody>
+</table>
+<p>On violation, presentation <strong>restores the pre-polish tree</strong> so broken HIR never
+ships. Dead pure-assign elimination uses <strong>whole-function</strong> use counts (nested
+subtree-local maps incorrectly dropped branch defs still live after the if).</p>
+<h3 id="validation-hir">Validation (HIR)<a class="headerlink" href="#validation-hir" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Focused nextest under <code>presentation</code> / <code>layered</code></li>
+<li><code>scripts/check/owner_boundaries.sh</code> (render must not import normalize/structuring)</li>
+<li>External fission-benchmark <strong>local</strong> docker loop for dual-layer readability proxies
+  (not official Pages ranking)</li>
+</ul>
+<h2 id="midend-architecture-adr-0012">Midend architecture (ADR 0012)<a class="headerlink" href="#midend-architecture-adr-0012" title="Permanent link">&para;</a></h2>
+<h3 id="owner-crates">Owner crates<a class="headerlink" href="#owner-crates" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Crate</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fission-midend-core</code></td>
+<td>Shared IR (<code>Hir*</code>), action pipeline, wave stats, labels, VSA</td>
+</tr>
+<tr>
+<td><code>fission-midend-normalize</code></td>
+<td>Full normalize pipeline (arith, idioms, memory, recovery, types)</td>
+</tr>
+<tr>
+<td><code>fission-midend-structuring</code></td>
+<td>CFG facts, SESE, collapse rules, loops/switch/conditionals free-fns, <code>StructuringHost</code></td>
+</tr>
+<tr>
+<td><code>fission-pcode</code></td>
+<td>p-code IR/optimizer, builder/orchestrate, PreviewBuilder host residual, dual-layer render, public re-exports</td>
+</tr>
+</tbody>
+</table>
+<h3 id="structuring-free-function-extraction-phase-d">Structuring free-function extraction (Phase D)<a class="headerlink" href="#structuring-free-function-extraction-phase-d" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Introduce <code>StructuringHost</code>; production host is <code>PreviewBuilder</code> (<code>host_impl.rs</code>).</li>
+<li>Free-fn owners for conditionals, loops, switch, linear body/recovery/multiblock,
+  guarded-tail promote/canonicalize/suffix pure, SESE discovery/driver, orphan
+  repair, collapse-rule dispatch.</li>
+<li><code>pass/structuring</code> and orchestrate call midend free-fns directly
+  (<code>structure_cfg_via_sese</code>, <code>build_sese_region_body</code>, <code>try_repair_orphan_gotos</code>,
+  <code>build_linear_multiblock_body</code>, <code>normalize_hir_function</code>).</li>
+<li>Remove dead PreviewBuilder inherent thin wraps (loops/conditionals/switch/orphan/
+  linear test path). Linear tests call free-fns.</li>
+<li>Residual intentionally left in pcode: p-code opcode tables, binary/type_context
+  inventory adapters, some guarded-tail telemetry mark hooks.</li>
+</ul>
+<h3 id="dual-layer-print-ownership">Dual-layer print ownership<a class="headerlink" href="#dual-layer-print-ownership" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Dual-layer printer lives at crate-root <code>render/</code> (not under midend normalize).</li>
+<li>ADR 0013: midend diagnostic <code>format_expr_key</code> is not the dual-layer print surface.</li>
+</ul>
+<h2 id="ci-cd">CI / CD<a class="headerlink" href="#ci-cd" title="Permanent link">&para;</a></h2>
+<h3 id="fast-gate-l0">Fast Gate (L0)<a class="headerlink" href="#fast-gate-l0" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Path-filter lanes: docs/scripts vs rust; reduce PR multi-OS cost; multi-OS retained on <code>main</code>.</li>
+<li>sccache via GHA backend; release tag pin fixed to <strong><code>v0.10.0</code></strong> (bare <code>0.10.0</code> 404’d).</li>
+<li>Linux tests include <code>fission-analysis-db</code> (typed metadata; ADR 0010).</li>
+<li>Clippy <code>-D warnings</code>: publish VSA <code>CircleRange</code> so public solve/range_of/eval_expr surfaces stay valid.</li>
+</ul>
+<h3 id="release-gates-unchanged-policy-exercised-for-this-tag">Release gates (unchanged policy, exercised for this tag)<a class="headerlink" href="#release-gates-unchanged-policy-exercised-for-this-tag" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
 <th>Layer</th>
-<th>May depend on</th>
-<th>Must not depend on</th>
+<th>Workflow</th>
+<th>v0.1.4 status on <code>8b5d7429</code></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Substrate (<code>types</code>, <code>cfg</code>, <code>support</code>, <code>action_pipeline</code>, telemetry, shared analysis facts)</td>
-<td>P-code primitives and other substrate modules</td>
-<td>builder, normalize, structuring, render policy</td>
+<td>L0</td>
+<td><code>ci.yml</code> Fast Gate</td>
+<td>success</td>
 </tr>
 <tr>
-<td>Builder/materialize</td>
-<td>substrate, cspec/calling-convention facts</td>
-<td>normalize policy, structuring promotion policy, render/printer</td>
+<td>L1</td>
+<td><code>ci-heavy.yml</code></td>
+<td>success</td>
 </tr>
 <tr>
-<td>Normalize/type recovery</td>
-<td>substrate, action pipeline, reusable analysis facts</td>
-<td>builder internals, structuring promotion policy, render/printer</td>
+<td>L2</td>
+<td><code>release-e2e.yml</code> (via Release Tag)</td>
+<td>success</td>
 </tr>
 <tr>
-<td>Structuring</td>
-<td>substrate CFG facts, typed HIR</td>
-<td>builder internals, normalize semantic repair, render/printer</td>
+<td>Tag</td>
+<td><code>release-tag.yml</code> → annotated <code>v0.1.4</code></td>
+<td>success</td>
 </tr>
 <tr>
-<td>Render/printer</td>
-<td>structured HIR and formatting options</td>
-<td>builder, normalize, structuring recovery, semantic analysis</td>
+<td>L3</td>
+<td><code>cd.yml</code> multi-platform assets</td>
+<td>success</td>
 </tr>
 </tbody>
 </table>
-<p>Existing cross-layer references are migration debt. Do not use them as precedent
-for new fixes. Move reusable facts downward into substrate modules before adding
-another owner-to-owner dependency.</p>
-<h2 id="single-normalize-entry-point">Single Normalize Entry Point<a class="headerlink" href="#single-normalize-entry-point" title="Permanent link">&para;</a></h2>
-<p><code>normalize_hir_function</code> always dispatches through <code>run_normalize_pipeline</code>, which runs the
-Ghidra-ordered ActionGroup registry via <code>build_normalize_pipeline().run()</code>.</p>
-<p>Each ActionGroup maps 1:1 to a stage function in
-<a href="../crates/fission-pcode/src/nir/normalize/pipeline/stages.rs"><code>stages.rs</code></a>. Stage functions
-contain the canonical pass sequence (conditional cleanups, admission gates, and fixpoints).
-<code>run_canonical_normalize_passes</code> is a thin sequential wrapper over the same stage functions for
-callers that bypass the ActionGroup driver.</p>
-<h2 id="normalize-action-groups-ghidra-order">Normalize Action Groups (Ghidra order)<a class="headerlink" href="#normalize-action-groups-ghidra-order" title="Permanent link">&para;</a></h2>
-<p>The ActionGroup registry in <code>groups.rs</code> declares these groups in order:</p>
-<ol>
-<li><strong>proto_recovery</strong> — early cleanup, flag recovery, prologue/epilogue</li>
-<li><strong>deadcode_dynamic</strong> — constants, SCCP, CSE, copy-prop, join coalescing, branch hoists</li>
-<li><strong>type_early</strong> — type signature fixpoint (bounded repeat)</li>
-<li><strong>stackstall</strong> — nzmask, subvar, cast/load/deindirect rule pool</li>
-<li><strong>heritage_value_recovery</strong> — memory slot surfacing, memory heritage, SSA cleanup</li>
-<li><strong>memory_recovery</strong> — pointer arithmetic, aggregates, float idioms (gated for large functions)</li>
-<li><strong>merge</strong> — merge-type fixpoint (bounded repeat)</li>
-<li><strong>block_structure_1</strong> — loop IV, break/continue, LICM</li>
-<li><strong>cleanup</strong> — jump resolver, rule pool, final type inference</li>
-</ol>
-<p>Each group records its <code>GhidraActionConcept</code> via <code>record_ghidra_action_stage</code>.</p>
-<h2 id="dead-code-owners-ghidra-aligned">Dead-Code Owners (Ghidra-aligned)<a class="headerlink" href="#dead-code-owners-ghidra-aligned" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Ghidra analog</th>
-<th>Fission owner</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ActionDeadCode</code> (SSA temps)</td>
-<td><code>normalize/analysis/defuse.rs</code> — <code>defuse_dead_assignment_pass</code></td>
-<td>Single-pass SSA dead temp removal</td>
-</tr>
-<tr>
-<td><code>ActionDeadCode</code> (fixpoint after SCCP)</td>
-<td><code>defuse_dead_assignment_fixpoint_pass</code></td>
-<td>Absorbs former <code>apply_wide_dead_assignment_pass</code></td>
-</tr>
-<tr>
-<td><code>ActionDeadCode</code> (consumed bits)</td>
-<td><code>normalize/global_opt/bit_consume.rs</code></td>
-<td>Bit-level consumed-mask dead code</td>
-</tr>
-<tr>
-<td>Memory-SSA dead stores</td>
-<td><code>normalize/global_opt/dead_store.rs</code></td>
-<td>Stack-slot store removal</td>
-</tr>
-</tbody>
-</table>
-<p>Do not reintroduce parallel dead-code layers (<code>prune_unused_*</code> as standalone pass owners,
-duplicate wide-defuse wrappers, or redundant temp-elimination passes outside defuse/cleanup).</p>
-<h2 id="bitmask-owners-ghidra-aligned">Bitmask Owners (Ghidra-aligned)<a class="headerlink" href="#bitmask-owners-ghidra-aligned" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Ghidra analog</th>
-<th>Fission owner</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>ActionNonzeroMask</code></td>
-<td><code>normalize/global_opt/nz_mask.rs</code></td>
-<td>Global non-zero mask propagation</td>
-</tr>
-<tr>
-<td><code>subflow.cc</code> (bit-width prune)</td>
-<td><code>normalize/idioms/subflow.rs</code></td>
-<td>Early + final subflow pruning only</td>
-</tr>
-<tr>
-<td>Consumed-bit dead code</td>
-<td><code>normalize/global_opt/bit_consume.rs</code></td>
-<td>Separate from nz_mask/subflow</td>
-</tr>
-</tbody>
-</table>
-<h2 id="removed-narrow-idiom-passes-no-ghidra-analog">Removed Narrow Idiom Passes (no Ghidra analog)<a class="headerlink" href="#removed-narrow-idiom-passes-no-ghidra-analog" title="Permanent link">&para;</a></h2>
-<p>These passes and their dedicated tests were deleted; do not reintroduce without a Ghidra
-Rule/Action reference:</p>
+<p>Note: tags created with the default <code>GITHUB_TOKEN</code> do not re-trigger CD; this
+release re-pushed the annotated tag with operator credentials so L3 ran.</p>
+<h2 id="validation-notes">Validation notes<a class="headerlink" href="#validation-notes" title="Permanent link">&para;</a></h2>
+<h3 id="crate-unit">Crate / unit<a class="headerlink" href="#crate-unit" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>security_cookie</code>, <code>xor_swap</code>, <code>string_copy</code>, <code>recurrence</code>, <code>call_artifact</code>, <code>bitstream</code></li>
-<li><code>likely_trash</code> (global_opt)</li>
+<li><code>cargo nextest run -p fission-pcode</code> (full suite green at merge)</li>
+<li><code>cargo check -p fission-decompiler</code> (orchestration surface stable)</li>
+<li>Owner boundary scan green</li>
 </ul>
-<p>Retained idiom owners: <code>prologue</code>, <code>subflow</code>, <code>split_flow</code>, <code>branch_hoist</code>.</p>
-<h2 id="const-fold-copy-join-conditional-move-owners">Const-Fold / Copy-Join / Conditional-Move Owners<a class="headerlink" href="#const-fold-copy-join-conditional-move-owners" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Concern</th>
-<th>Canonical owner</th>
-<th>Secondary</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Global constant propagation</td>
-<td><code>global_opt/sccp.rs</code> (<code>apply_sccp_pass</code>)</td>
-<td>—</td>
-</tr>
-<tr>
-<td>Local stmt-tree fold</td>
-<td><code>analysis/defuse.rs</code> (<code>constant_folding_pass</code>)</td>
-<td><code>rule_normalizer</code> <code>RuleFoldConstants</code></td>
-</tr>
-<tr>
-<td>Copy propagation</td>
-<td><code>recovery/copy_prop.rs</code></td>
-<td>absorbs inline-single-use via cleanup loop</td>
-</tr>
-<tr>
-<td>Join coalescing</td>
-<td><code>recovery/join_coalesce.rs</code></td>
-<td><code>gvn_join_hoist</code> at hoist boundary</td>
-</tr>
-<tr>
-<td>Conditional move</td>
-<td><code>arith/conditional_move.rs</code> (<code>apply_conditional_move_pass</code>)</td>
-<td><code>conditional_select_pass</code> in cleanup loop</td>
-</tr>
-</tbody>
-</table>
-<h2 id="admission-gates">Admission Gates<a class="headerlink" href="#admission-gates" title="Permanent link">&para;</a></h2>
-<p>Centralized in <a href="../crates/fission-pcode/src/nir/action_pipeline/gates.rs"><code>action_pipeline/gates.rs</code></a>:</p>
-<table>
-<thead>
-<tr>
-<th>Gate</th>
-<th>Threshold</th>
-<th>Used by</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Large function</td>
-<td>&gt;220 stmts or &gt;160 locals</td>
-<td><code>memory_recovery</code>, expensive memory passes</td>
-</tr>
-<tr>
-<td>Early cleanup budget</td>
-<td>&gt;2000 stmts or &gt;300 blocks</td>
-<td>jump resolver admission</td>
-</tr>
-<tr>
-<td>Jump resolver candidates</td>
-<td>≤16</td>
-<td>VSA jump resolver</td>
-</tr>
-<tr>
-<td>Type signature FP</td>
-<td>max 6 rounds</td>
-<td><code>type_early</code>, merge loop inner</td>
-</tr>
-<tr>
-<td>Merge-type loop</td>
-<td>max 4 rounds</td>
-<td><code>merge</code> group</td>
-</tr>
-<tr>
-<td>Rule pool</td>
-<td>max 15 rounds</td>
-<td><code>rule_normalization</code> ActionPool</td>
-</tr>
-</tbody>
-</table>
-<h2 id="structuring-contracts">Structuring Contracts<a class="headerlink" href="#structuring-contracts" title="Permanent link">&para;</a></h2>
+<h3 id="external-benchmark-quality-loop-not-pages-promotion">External benchmark (quality loop, not Pages promotion)<a class="headerlink" href="#external-benchmark-quality-loop-not-pages-promotion" title="Permanent link">&para;</a></h3>
+<p>Local fission-benchmark against <strong>local</strong> Fission builds measured HIR vs NIR
+readability proxies on smoke / core_c_pe slices (goto/homes/line reductions on
+HIR). Official Pages rankings remain <strong>release-baked</strong> only.</p>
+<p>Post-release: pin fission-benchmark CI/images to <strong><code>v0.1.4</code></strong> and run the
+<code>fission-release</code> repository_dispatch so official/smoke pipelines consume the
+new GitHub Release bake.</p>
+<h2 id="package-and-tooling-versions">Package and tooling versions<a class="headerlink" href="#package-and-tooling-versions" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>CollapseDriver</strong> (<code>structuring/collapse_driver.rs</code>) owns Ghidra-style collapse rule dispatch.</li>
-<li><strong>RegionProof</strong> requires explicit follow/postdom anchor when available (<code>structured_with_follow</code>).</li>
-<li><strong>CFG fallthrough</strong> uses dom-tree edge classification (<code>cfg_analysis/follow.rs</code>), not layout index arithmetic.</li>
+<li>Release tag: <code>v0.1.4</code></li>
+<li>All workspace crate versions: <code>0.1.4</code></li>
+<li><code>fission_cli --version</code> reports <code>0.1.4</code></li>
+<li>Assets (each CLI archive includes verified <code>utils/</code>):</li>
+<li><code>fission-linux-x64.tar.gz</code></li>
+<li><code>fission-macos-arm64.tar.gz</code></li>
+<li><code>fission-windows-x64.zip</code></li>
+<li><code>fission-utils.tar.gz</code> (+ inventory / sha256)</li>
+<li><code>fission_cli-x86_64-unknown-linux-gnu</code> (Linux CLI-only convenience for benchmark consumers)</li>
 </ul>
-<h2 id="stage-regression-gates">Stage Regression Gates<a class="headerlink" href="#stage-regression-gates" title="Permanent link">&para;</a></h2>
-<p><code>NirBuildStats</code> counters (<code>ghidra_action_*_count</code>) track which stages ran. The framework provides
-<code>stage_boundary_violation(expected, observed)</code> to detect passes registered under the wrong concept.</p>
-<p>Contract tests live in:</p>
+<h2 id="upgrade-notes">Upgrade notes<a class="headerlink" href="#upgrade-notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>nir/normalize/pipeline/heritage_contracts.rs</code></li>
-<li><code>nir/action_pipeline/concept.rs</code> (sequence stability)</li>
-<li><code>nir/structuring/collapse_driver.rs</code> (rule order)</li>
+<li><strong>No intentional CLI contract break</strong> relative to 0.1.3.</li>
+<li><strong>HIR text may change substantially</strong> (more ternaries, fewer empty else arms,
+  fewer param homes, fewer residual gotos). NIR remains the semantic oracle for
+  automation/benchmark case scores.</li>
+<li>Consumers of internal Rust APIs should prefer:</li>
+<li><code>fission_pcode::midend</code> (stable re-exports), or</li>
+<li><code>fission_midend_core</code> / <code>fission_midend_normalize</code> / <code>fission_midend_structuring</code>
+    for owner-specific work.</li>
+<li>Install operators should pin matching <code>fission-utils.tar.gz</code> from the same
+  SemVer tag when using the standalone resource bundle.</li>
+<li>fission-benchmark operators: set <code>FISSION_VERSION=v0.1.4</code> (release source only
+  for official/Pages).</li>
 </ul>
-<h2 id="anti-patterns">Anti-Patterns<a class="headerlink" href="#anti-patterns" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Do not add normalize passes that recover stack/param slots — use <strong>heritage_value_recovery</strong>.</li>
-<li>Do not add structuring reducers that patch expression semantics — fix at normalize owner.</li>
-<li>Do not reintroduce deleted narrow idiom passes without a Ghidra Rule/Action reference.</li>
-<li>Do not duplicate dead-code or bitmask transform layers across defuse, cleanup, and global_opt.</li>
-<li>Do not add sample-specific address/name guards — use CFG/dominance/def-use invariants.</li>
-<li>Do not add owner-to-owner dependencies when a shared analysis fact can be moved into substrate.</li>
-</ol>
-<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>nextest<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span>fission-pcode
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>check<span class="w"> </span>-p<span class="w"> </span>fission-pcode<span class="w"> </span>-p<span class="w"> </span>fission-decompiler<span class="w"> </span>-p<span class="w"> </span>fission-automation
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python3<span class="w"> </span>scripts/audit/nir_boundary_scan.py<span class="w"> </span>--root<span class="w"> </span>.<span class="w"> </span>--format<span class="w"> </span>markdown<span class="w"> </span>--output<span class="w"> </span>docs/audits/YYYY-MM-DD-nir-boundary-scan.md
-</span></code></pre></div>
-<p>For semantic changes, rerun source-semantic benchmark rows with stale caches disabled.</p>
+<h2 id="commit-range">Commit range<a class="headerlink" href="#commit-range" title="Permanent link">&para;</a></h2>
+<p><code>v0.1.3</code> … <code>v0.1.4</code> (<code>8b5d7429</code>), ~39 commits spanning HIR presentation,
+midend crate extraction, and CI gate hardening. Representative themes:</p>
+<ul>
+<li><code>feat(hir)</code> / <code>feat(pcode)</code> — HIR presentation passes</li>
+<li><code>refactor(midend)</code> / <code>refactor(structuring)</code> / <code>refactor(pcode)</code> — ADR 0012</li>
+<li><code>ci:</code> — Fast Gate lanes, sccache, analysis-db coverage</li>
+<li>ADRs 0011, 0012, 0013 documentation</li>
+</ul>
 
 
 
