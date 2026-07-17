@@ -14,6 +14,8 @@ categories = ["development-tools"]
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-midend-core = { path = "../fission-midend-core" }
+fission-midend-normalize = { path = "../fission-midend-normalize" }
+fission-midend-structuring = { path = "../fission-midend-structuring" }
 fission-signatures = { path = "../fission-signatures" }
 anyhow = "1.0"
 thiserror = "2.0"

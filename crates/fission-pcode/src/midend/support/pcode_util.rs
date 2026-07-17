@@ -140,17 +140,12 @@ pub(crate) fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
     )
 }
 
+
 pub(crate) fn next_temp_name(ty: &NirType, next_id: &mut u32) -> String {
     let prefix = match ty {
         NirType::Bool => "bVar",
-        NirType::Int {
-            bits: 32,
-            signed: true,
-        } => "iVar",
-        NirType::Int {
-            bits: 32,
-            signed: false,
-        } => "uVar",
+        NirType::Int { bits: 32, signed: true } => "iVar",
+        NirType::Int { bits: 32, signed: false } => "uVar",
         _ => "xVar",
     };
     let name = format!("{prefix}{}", *next_id);

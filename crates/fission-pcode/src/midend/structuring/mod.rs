@@ -7,18 +7,21 @@ pub(super) use super::support::*;
 use super::*;
 
 pub(crate) mod cfg_analysis;
-mod cleanup;
+
+// Pure free-function owners: fission-midend-structuring
+pub use fission_midend_structuring::cleanup;
+pub use fission_midend_structuring::irreducible;
+pub use fission_midend_structuring::loop_analysis;
+pub use fission_midend_structuring::regions;
 pub(crate) mod collapse_driver;
 pub(crate) mod collapse_loop;
 mod conditionals;
 pub(crate) mod driver;
 mod graph;
 mod guarded_tail;
-pub(super) mod irreducible;
-mod linear;
+pub(super) mod linear;
 mod loops;
 pub(crate) mod passes;
-mod regions;
 pub(crate) mod sese;
 mod switch;
 
@@ -50,5 +53,3 @@ pub(super) use driver::{
 };
 #[cfg(test)]
 pub(super) use linear::{LinearBodyLoweringOutcome, LinearBodyRejectReason};
-
-pub(crate) mod loop_analysis;

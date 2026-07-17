@@ -2,22 +2,12 @@
 
 use super::*;
 
-mod dom;
-mod edge;
-mod follow;
-mod goto_selector;
-mod postdom;
-mod scc;
-mod trace_dag;
-pub(crate) mod util;
 
-pub(crate) use dom::{DomTree, DominanceFrontier, ImmDomTree};
-pub(crate) use edge::{CfgAnalysis, EdgeClass};
-pub(crate) use follow::dom_based_fallthrough_successor;
-pub(crate) use goto_selector::select_bad_edge;
-pub(crate) use postdom::{ImmPostDomTree, PostDomTree};
-pub(crate) use scc::SccAnalysis;
-pub(crate) use trace_dag::{TraceDag, TraceDagError};
+pub use fission_midend_structuring::cfg_analysis::{
+    CfgAnalysis, DomTree, DominanceFrontier, EdgeClass, ImmDomTree, ImmPostDomTree, PostDomTree,
+    SccAnalysis, TraceDag, TraceDagError, dom_based_fallthrough_successor, select_bad_edge, util,
+};
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CfgFactCache {
@@ -87,9 +77,6 @@ impl<'a> PreviewBuilder<'a> {
         self.cfg_facts.scc().clone()
     }
 }
-
-#[cfg(test)]
-mod tests;
 
 impl<'a> crate::midend::builder::PreviewBuilder<'a> {
     pub(crate) fn compute_follow_blocks(&self) -> Vec<Option<usize>> {

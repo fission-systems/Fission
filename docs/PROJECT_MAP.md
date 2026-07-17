@@ -15,8 +15,8 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols, relocations, virtual types; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
 | [`crates/fission-pcode`](../crates/fission-pcode) | Canonical IR, NIR/HIR, structuring, CFG analysis, printer |
 | `crates/fission-midend-core` | Midend shared substrate (**owns** IR / action_pipeline / wave_stats / labels; ADR 0012) |
-| `crates/fission-midend-normalize` | Normalize owner facade (impl still in pcode until support/vsa extract; ADR 0012) |
-| `crates/fission-midend-structuring` | Structuring owner facade (impl still in pcode; PreviewBuilder coupling; ADR 0012) |
+| `crates/fission-midend-normalize` | Normalize owner (**owns** normalize pipeline source; ADR 0012) |
+| `crates/fission-midend-structuring` | Structuring free-function owners + pcode PreviewBuilder residual (ADR 0012) |
 | [`crates/fission-signatures`](../crates/fission-signatures) | Signature datasets / lookup |
 | [`crates/fission-static`](../crates/fission-static) | Static facts, orchestration helpers, analysis services (`analysis`, `utils`) |
 | [`crates/fission-dynamic`](../crates/fission-dynamic) | Dynamic analysis support |

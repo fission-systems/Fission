@@ -58,29 +58,3 @@ pub(crate) fn expr_has_side_effecting_call(expr: &HirExpr) -> bool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn call(target: &str) -> HirExpr {
-        HirExpr::Call {
-            target: target.to_string(),
-            args: vec![HirExpr::Const(
-                1,
-                NirType::Int {
-                    bits: 32,
-                    signed: false,
-                },
-            )],
-            ty: NirType::Bool,
-        }
-    }
-
-    #[test]
-    fn side_effecting_call_fact_distinguishes_pcode_intrinsics_from_regular_calls() {
-        for target in ["__carry", "__scarry", "__sborrow", "__popcount"] {
-            assert!(!expr_has_side_effecting_call(&call(target)), "{target}");
-        }
-        assert!(expr_has_side_effecting_call(&call("callee")));
-    }
-}

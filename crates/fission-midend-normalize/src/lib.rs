@@ -1,23 +1,73 @@
-//! Midend **normalize** owner facade.
+//! Midend **normalize** owner (ADR 0012).
 //!
-//! # Extraction status (ADR 0012)
-//!
-//! Shared substrate (`ir`, `action_pipeline`, `wave_stats`) now lives in
-//! [`fission_midend_core`]. Normalize **source** still lives under
-//! [`fission_pcode::midend::normalize`] until pure helpers (`support`/`vsa`/
-//! `var_rename`) finish decoupling from builder/p-code.
-//!
-//! Prefer this crate over deep `fission-pcode` paths for normalize entrypoints.
+//! HIR normalization passes: arith, idioms, memory, global opts, recovery, typing.
+//! Shared substrate comes from [`fission_midend_core`].
 
-#![doc = "See docs/adr/0012-midend-rename-and-crate-extraction.md"]
+#![allow(clippy::all)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_assignments)]
 
-pub use fission_pcode::midend::normalize::{
-    is_known_api_signature, normalize_hir_function, summarize_direct_tail_wrapper_from_ops,
-    summarize_direct_tail_wrapper_from_pcode, take_normalize_wave_stats,
-};
+/// Shared prelude for historical `use super::super::*` midend imports.
+pub mod prelude {
+    pub use fission_midend_core::action_pipeline::{
+        self, ActionGroup, ActionPool, Gate, GhidraActionConcept, Pass, PassBudget, PassCtx,
+        PassOutcome, Pipeline, Repeat, STRUCTURING_TIME_CEILING_SECS, count_hir_blocks,
+        count_hir_stmts, fn_pass, group, hir_shape, is_large_hir_function, run_pass_logged,
+    };
+    pub use fission_midend_core::ir::*;
+    pub use fission_midend_core::util::{
+        cleanup_redundant_labels, collect_referenced_labels, expr_has_side_effecting_call,
+        expr_type, fold_logical_chain, is_pure_intrinsic_call, negate_expr, next_temp_name,
+        print_expr, rename_vars_in_stmts, simplify_logical_expr, strip_casts,
+    };
+    pub use fission_midend_core::vsa::{
+        apply_jump_resolver_pass, jump_resolver_candidate_count,
+    };
+    pub use fission_midend_core::wave_stats;
+    pub use fission_midend_core::{
+        AbiState, CallingConvention, HirExpr, HirFunction, HirStmt, NirBuildStats, NirType,
+        SWITCH_FALLTHROUGH_SENTINEL,
+    };
+    pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+}
 
-/// Owner module re-export (grows as normalize API is stabilized for extraction).
-pub use fission_pcode::midend::normalize as owner;
+mod analysis;
+pub mod arith;
+mod cleanup;
+pub mod global_opt;
+pub mod idioms;
+pub mod memory;
+pub mod pipeline;
+pub mod recovery;
+mod rule_normalizer;
+mod subvar_flow;
+mod types;
 
-/// Shared structured-IR types (via midend-core substrate).
+pub use rule_normalizer::apply_rule_normalization;
+
+pub use types::is_known_api_signature;
+
+#[allow(dead_code)]
+pub fn normalize_function_body(body: &mut Vec<prelude::HirStmt>) {
+    pipeline::normalize_function_body(body);
+}
+
+/// Run the full normalize pipeline on a structured function.
+pub fn normalize_hir_function(func: &mut prelude::HirFunction) {
+    pipeline::normalize_hir_function(func);
+}
+
+/// Take and reset normalize-wave telemetry counters for the current thread.
+pub fn take_normalize_wave_stats() -> fission_midend_core::NirBuildStats {
+    fission_midend_core::wave_stats::take_normalize_wave_stats()
+}
+
+#[allow(dead_code)]
+pub fn normalize_stmt(stmt: &mut prelude::HirStmt) {
+    pipeline::normalize_stmt(stmt);
+}
+
+// Re-export shared types for facade callers.
 pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats};

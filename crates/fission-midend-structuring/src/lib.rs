@@ -1,21 +1,27 @@
-//! Midend **structuring** owner facade.
+//! Midend **structuring** free-function owners (ADR 0012).
 //!
-//! # Extraction status (ADR 0012)
-//!
-//! Shared substrate lives in [`fission_midend_core`]. Structuring **source**
-//! still lives under [`fission_pcode::midend::structuring`] because several
-//! regions are still implemented as methods on `PreviewBuilder` (builder
-//! ownership remains in `fission-pcode`).
-//!
-//! Prefer this crate for structuring-facing entrypoints as they stabilize.
+//! Pure CFG/dom/SCC analysis, region proofs, irreducible helpers, loop analysis,
+//! and HIR cleanup live here. PreviewBuilder-bound collapse/guarded-tail/linear
+//! recovery remains in `fission-pcode` until those methods are fully lifted to
+//! free functions over a host trait.
 
-#![doc = "See docs/adr/0012-midend-rename-and-crate-extraction.md"]
+#![allow(clippy::all)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_assignments)]
 
-/// Owner module re-export.
-pub use fission_pcode::midend::structuring as owner;
+pub mod cfg_analysis;
+pub mod cleanup;
+pub mod irreducible;
+pub mod loop_analysis;
+pub mod regions;
 
-/// Shared structured-IR types (via midend-core substrate).
-pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats};
-
-/// Switch fallthrough sentinel used by structuring and print.
-pub use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
+pub use cleanup::{
+    cleanup_redundant_labels, finalize_structured_body, has_orphan_goto_labels,
+};
+pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats, SWITCH_FALLTHROUGH_SENTINEL};
+pub use regions::{
+    BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
+    EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,
+};

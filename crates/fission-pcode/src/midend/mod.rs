@@ -20,8 +20,9 @@ mod abstract_location;
 mod builder;
 mod cfg;
 pub mod cspec;
-/// Normalize owner (future extraction: `fission-midend-normalize`, ADR 0012).
-pub mod normalize;
+/// Normalize owner (implementation in `fission-midend-normalize`, ADR 0012).
+pub use fission_midend_normalize as normalize;
+mod tail_wrapper;
 mod orchestrate;
 pub(crate) mod pass;
 mod piece;
@@ -58,7 +59,10 @@ pub use self::telemetry::{
     take_last_preview_hint_stats,
 };
 pub use ir::*;
-use self::{action_pipeline::*, builder::*, cfg::*, normalize::*, structuring::*};
+use self::{action_pipeline::*, builder::*, cfg::*, structuring::*};
+#[cfg(test)]
+use normalize::{normalize_function_body, normalize_stmt};
+
 
 // Presentation/print surface lives at crate root `render` (ADR 0011).
 // `pub(crate)` so tests and owners can keep using `crate::midend::print_*`.
@@ -72,9 +76,11 @@ pub use fission_core::CallingConvention;
 pub use self::abi::infer_entry_register_param_arity;
 pub use self::cfg::structuring_cfg_edges;
 pub use self::cspec::RegisterNamer;
-pub use self::normalize::{
-    is_known_api_signature, normalize_hir_function, summarize_direct_tail_wrapper_from_ops,
-    summarize_direct_tail_wrapper_from_pcode, take_normalize_wave_stats,
+pub use fission_midend_normalize::{
+    is_known_api_signature, normalize_hir_function, take_normalize_wave_stats,
+};
+pub use self::tail_wrapper::{
+    summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
 pub use crate::render::{
     LayeredPseudocode, PrintProfile, PseudocodeLayer, render_contracted_wrapper_summary,
