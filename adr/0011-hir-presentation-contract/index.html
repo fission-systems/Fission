@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/adr/0006-decompiler-quality-change-gate/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/adr/0011-hir-presentation-contract/">
       
       
       
@@ -23,7 +23,7 @@
     
     
       
-        <title>ADR 0006: Decompiler quality change gate - Fission</title>
+        <title>ADR 0011: HIR presentation contract - Fission</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#adr-0006-decompiler-quality-change-gate" class="md-skip">
+        <a href="#adr-0011-hir-presentation-contract" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              ADR 0006: Decompiler quality change gate
+              ADR 0011: HIR presentation contract
             
           </span>
         </div>
@@ -940,6 +940,78 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Decision">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-dual-layer-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Dual-layer ownership
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-meaning-preservation-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Meaning-preservation boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-overfit-firewall-shared-with-adr-0006-0007" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Overfit firewall (shared with ADR 0006 / 0007)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-pass-discipline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Pass discipline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-validation-matrix-lighter-than-adr-0006" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Validation matrix (lighter than ADR 0006)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -947,6 +1019,17 @@
     <span class="md-ellipsis">
       
         Consequences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
       
     </span>
   </a>
@@ -973,75 +1056,156 @@
   
 
 
-<h1 id="adr-0006-decompiler-quality-change-gate">ADR 0006: Decompiler quality change gate<a class="headerlink" href="#adr-0006-decompiler-quality-change-gate" title="Permanent link">&para;</a></h1>
-<p><strong>Status:</strong> Accepted
-<strong>Last verified:</strong> 2026-07-03</p>
+<h1 id="adr-0011-hir-presentation-contract">ADR 0011: HIR presentation contract<a class="headerlink" href="#adr-0011-hir-presentation-contract" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> Accepted<br />
+<strong>Last verified:</strong> 2026-07-17</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
-<p>Fission quality work often starts from a concrete benchmark row: a binary,
-function, address, and observed decompiler failure. That row is useful evidence,
-but it is also the easiest path to overfitting. A semantic fix that checks a
-function name, address, binary id, corpus row, or compiler artifact can improve a
-dashboard cell while weakening the decompiler architecture.</p>
-<p>The first guarded scope is the core semantic layer: builder, materialize,
-normalize, structuring, and type/data recovery. UI, printer-only, benchmark, and
-dashboard changes can report quality, but they do not count as semantic fixes.
-Readability-only HIR presentation is governed separately by
-<a href="../0011-hir-presentation-contract/">ADR 0011</a> (lighter gate; no oracle swap).</p>
+<p>Fission emits dual pseudocode surfaces from one structured tree:</p>
+<ul>
+<li><strong>NIR</strong> — semantic-faithful mechanical C (oracle / quality-loop primary)</li>
+<li><strong>HIR</strong> — human-readable presentation (dashboard readability, operator UX)</li>
+</ul>
+<p>Early HIR work lived only as ad-hoc polish in
+<code>crates/fission-pcode/src/nir/render/hir_presentation.rs</code>. That improved real
+O0 rows (<code>add_ints</code>, <code>count_bits</code>, <code>apply_binop</code>, …) but left no durable contract
+for:</p>
+<ul>
+<li>what transforms are allowed,</li>
+<li>what must never change (evaluation count, NIR tree, oracle ownership),</li>
+<li>how HIR changes are validated without reusing ADR 0006’s full semantic gate.</li>
+</ul>
+<p><a href="../0006-decompiler-quality-change-gate/">ADR 0006</a> remains the gate for
+builder / materialize / normalize / structuring / type-data <strong>semantic</strong> fixes.
+HIR presentation is readability sugar over an already-normalized tree; it needs
+a <strong>lighter, different</strong> contract—not a copy of the semantic gate.</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
-<p>Every semantic decompiler-quality change must pass a pre-implementation proposal
-gate before production code is added. Use
-<a href="../../templates/DECOMPILER_CHANGE_PROPOSAL/"><code>docs/templates/DECOMPILER_CHANGE_PROPOSAL.md</code></a>
-and record the chain:</p>
+<h3 id="1-dual-layer-ownership">1. Dual-layer ownership<a class="headerlink" href="#1-dual-layer-ownership" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Owner</th>
+<th>Mutates structured tree?</th>
+<th>Default semantic / oracle role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NIR print</td>
+<td><code>render</code> with <code>PrintProfile::Nir</code> on the <strong>unpolished</strong> tree</td>
+<td>No</td>
+<td>Primary <code>code</code> / benchmark semantic input</td>
+</tr>
+<tr>
+<td>HIR print</td>
+<td><code>apply_hir_presentation</code> clone + <code>PrintProfile::Hir</code></td>
+<td>Yes, <strong>clone only</strong></td>
+<td>Readability / dual-layer <code>code_hir</code></td>
+</tr>
+</tbody>
+</table>
+<p>Rules:</p>
 <ol>
-<li><strong>Row anchor:</strong> the binary, function, address, current output, semantic case
-   count, and failure category that motivated the work.</li>
-<li><strong>Owner proof:</strong> evidence that the bug belongs to SLEIGH/raw p-code,
-   builder/materialize, normalize, structuring, type/data recovery, printer, or
-   benchmark/automation.</li>
-<li><strong>Invariant proof:</strong> the generalized condition that should hold beyond the
-   motivating row.</li>
-<li><strong>Validation matrix:</strong> targeted invariant test, <code>cargo nextest run -p
-   fission-pcode</code>, focused benchmark row, and smoke/automation sample.</li>
+<li><code>render_layered_pseudocode</code> must clone before presentation; the caller’s
+   <code>HirFunction</code> and the NIR string must not observe presentation side effects.</li>
+<li>Do <strong>not</strong> add readability-only passes to normalize / structuring “because HIR
+   needs it.” Fix structure for real control-flow recovery at those owners; keep
+   sugar in <code>render/hir_presentation</code> and HIR printer knobs.</li>
+<li>Do <strong>not</strong> promote HIR text as the semantic oracle or primary ranking input.</li>
 </ol>
-<p>Production semantic code must not branch directly on:</p>
+<h3 id="2-meaning-preservation-boundary">2. Meaning-preservation boundary<a class="headerlink" href="#2-meaning-preservation-boundary" title="Permanent link">&para;</a></h3>
+<p>HIR transforms may change <strong>form</strong> only when observational behavior of the
+emitted C is intended to match the NIR form under normal evaluation:</p>
+<p><strong>Allowed (presentation-pure or single-eval preserving):</strong></p>
 <ul>
-<li>function names,</li>
-<li>addresses,</li>
-<li>binary ids or paths,</li>
-<li>corpus row ids,</li>
-<li>compiler artifacts that are only row-identifying labels.</li>
+<li>single-def pure var alias fold (<code>param_10 = param_1</code> homes),</li>
+<li>pure self-update fold (<code>x = a; x = x + b</code>),</li>
+<li><code>x = e; return x</code> → <code>return e</code> (including call/select; <strong>one</strong> evaluation),</li>
+<li>shared <code>goto L; L: return e</code> → direct return,</li>
+<li>limited if-goto / while-goto recovery and <code>while (1) { if (!c) break; … }</code> → <code>while (c)</code>,</li>
+<li>dead pure flag / pure-intrinsic temp elimination,</li>
+<li>identity / nested same-type cast peel; printer-only widen peel that does not
+  change wide-mul intent.</li>
 </ul>
-<p>Allowed production conditions are invariant-backed facts such as:</p>
+<p><strong>Forbidden:</strong></p>
 <ul>
-<li>ABI or ISA rules,</li>
-<li>p-code operation semantics,</li>
-<li>CFG, dominance, postdominance, and SCC facts,</li>
-<li>def-use and reaching-definition facts,</li>
-<li>type constraints,</li>
-<li>calling-convention facts,</li>
-<li>memory alias facts,</li>
-<li>documented binary-format semantics.</li>
+<li>reordering or duplicating loads/calls with observable effects,</li>
+<li>inlining a multi-use call/load so the call/load runs more than once,</li>
+<li>alias-folding multi-def or loop-carried names,</li>
+<li>dropping stack writes solely because a name is unread when alias is possible,</li>
+<li>peeling sign/width casts that change arithmetic meaning (e.g. required
+  <code>(longlong)a * (longlong)b</code> widening),</li>
+<li>function-name / address / binary / corpus-row special cases.</li>
 </ul>
-<p>Prefer <strong>ISA-agnostic statement of those facts</strong> even when the motivating sample
-is x86/x86-32: put encoding and register <em>maps</em> in cspec/CC/SLEIGH, and keep
-loop/join/cmov-class <em>policy</em> shared (<a href="../0009-isa-agnostic-semantic-rules/">ADR 0009</a>).</p>
-<p>The default implementation path is to extend the existing owner/pass. Add a new
-pass, helper, or metric only when the proposal shows that no existing owner
-already covers the invariant. A targeted test is required, but it is never enough
-to claim success by itself.</p>
-<p>This ADR intentionally does not add CI enforcement yet. The gate starts as ADR +
-checklist process, and automated enforcement can be added after the policy is
-stable.</p>
+<p>One-line contract:</p>
+<blockquote>
+<p>Evaluation count, order, and observable side effects stay the same; only
+presentation form may change.</p>
+</blockquote>
+<h3 id="3-overfit-firewall-shared-with-adr-0006-0007">3. Overfit firewall (shared with ADR 0006 / 0007)<a class="headerlink" href="#3-overfit-firewall-shared-with-adr-0006-0007" title="Permanent link">&para;</a></h3>
+<p>HIR presentation code must not branch on function names, addresses, binary ids,
+corpus rows, or compiler tuple labels. Conditions must be structural: def-use
+counts, purity, label/goto shape, truthiness equivalence (<code>!p</code> vs <code>p == 0</code>), etc.</p>
+<h3 id="4-pass-discipline">4. Pass discipline<a class="headerlink" href="#4-pass-discipline" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Presentation runs as a <strong>bounded fixed-point</strong> over a documented pass list in
+  <code>apply_hir_presentation</code>.</li>
+<li>Prefer extending an existing presentation helper over a new end-of-pipeline
+  special case.</li>
+<li>New HIR transform ⇒ synthetic invariant test <strong>and</strong> at least one real
+  <code>fission_cli decomp --layer both</code> check on a motivating PE row when the gap
+  was found from a binary.</li>
+</ul>
+<h3 id="5-validation-matrix-lighter-than-adr-0006">5. Validation matrix (lighter than ADR 0006)<a class="headerlink" href="#5-validation-matrix-lighter-than-adr-0006" title="Permanent link">&para;</a></h3>
+<p>For HIR-only production changes:</p>
+<ol>
+<li>Targeted test under <code>hir_presentation</code> / <code>render</code> (invariant, not row name).</li>
+<li><code>cargo nextest run -p fission-pcode</code> (or focused filter + full crate if
+   shared render types change).</li>
+<li>When motivated by a real binary: host CLI oneshot
+   <code>decomp --layer hir|both --no-warnings</code> on that address; paste <strong>actual</strong> NIR
+   and HIR in the PR—not an expected mockup alone.</li>
+<li>Confirm NIR string / <code>code_nir</code> still carries mechanical form the change did
+   not intend to alter.</li>
+</ol>
+<p>Full ADR 0006 proposal is <strong>not</strong> required for pure presentation edits. If a
+change must alter normalize/structuring to “make HIR nice,” it is a semantic
+change and ADR 0006 applies.</p>
+<h3 id="6-metrics">6. Metrics<a class="headerlink" href="#6-metrics" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Optional readability proxies may track HIR (<code>goto</code> count, <code>while (1)</code>, residual
+  homes/temps).</li>
+<li>Do <strong>not</strong> retarget semantic case scores or official rankings onto HIR text.</li>
+</ul>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<p><strong>Positive</strong></p>
 <ul>
-<li>Concrete benchmark rows remain the starting evidence, not the production
-  condition.</li>
-<li>Reviewers can reject semantic-fix claims that only change the dashboard,
-  benchmark harness, printer surface, or row-specific behavior.</li>
-<li>Reviews have a single place to check whether a change is generalized before
-  reading the implementation.</li>
-<li>Small quality fixes require a little more written proof, but the proof should
-  be short and reusable in PR descriptions and release notes.</li>
+<li>Clear split: NIR correctness vs HIR readability.</li>
+<li>Reviewers can reject HIR patches that risk double evaluation or oracle swap.</li>
+<li>Real-binary verification is part of the contract after dashboard/mockup
+  confusion.</li>
+</ul>
+<p><strong>Accepted costs</strong></p>
+<ul>
+<li>Some readability wins stay deferred until structural owners improve (e.g.
+  irreducible CFG).</li>
+<li>Dual maintenance of pass docs and tests.</li>
+</ul>
+<p><strong>Follow-up</strong></p>
+<ul>
+<li><code>crates/fission-pcode/src/nir/render/AGENTS.md</code> implements the operator
+  checklist.</li>
+<li>Regression tests enforce single-eval of calls and NIR isolation from
+  presentation.</li>
+</ul>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../0002-fission-pcode-canonical-semantics/">ADR 0002</a> — pcode owns semantics</li>
+<li><a href="../0006-decompiler-quality-change-gate/">ADR 0006</a> — semantic quality gate</li>
+<li><a href="../0007-ai-overfit-and-validation-firewall/">ADR 0007</a> — overfit firewall</li>
+<li><a href="../0008-nir-substrate-and-owner-boundaries/">ADR 0008</a> — substrate vs owners</li>
+<li>Repo policy: root <code>Agents.md</code> § NIR vs HIR</li>
+<li>Implementation: <code>crates/fission-pcode/src/nir/render/hir_presentation.rs</code></li>
 </ul>
 
 
