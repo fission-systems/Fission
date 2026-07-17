@@ -464,7 +464,12 @@ fn flatten_redundant_blocks(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-/// Substitute single-def pure `x = y` aliases (param home slots, renames).
+/// Substitute single-def pure `x = y` aliases when `y` is a **stable** name.
+///
+/// Only formals (and chains eventually rooted at formals) are eligible sources.
+/// Copying a mutable register surface (`rbx = rax` after a call) must not
+/// rewrite later uses of `rbx` after `rax` is reassigned — that turns
+/// `rax = f(); rbx = rax; rax = g(); rax += rbx` into `rax += rax`.
 fn propagate_pure_var_aliases(func: &mut HirFunction) -> bool {
     let formal: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
     let mut def_counts = HashMap::new();
@@ -520,8 +525,11 @@ fn collect_pure_var_copies(
                 rhs: HirExpr::Var(source),
             } if name != source
                 && !formal.contains(name.as_str())
+                && formal.contains(source.as_str())
                 && def_counts.get(name.as_str()).copied().unwrap_or(0) == 1 =>
             {
+                // Source must be a formal: non-formal sources (eax/rax/temps)
+                // may be redefined after the copy.
                 out.insert(name.clone(), source.clone());
             }
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
@@ -827,6 +835,13 @@ fn inline_single_use_in_stmts(
                 // redefinition of a dependency in between. For presentation we
                 // allow a short pure-assign gap only when the use is still 1.
                 if let Some(target) = find_single_use_target(stmts, i + 1, &name) {
+                    // `rbx = rax; …; rax = g(); rax += rbx` must not become
+                    // `rax += rax` — refuse inline if any free var of the RHS
+                    // is redefined before the use.
+                    if pure_expr_free_var_redefined_before(stmts, i + 1, target, &rhs) {
+                        i += 1;
+                        continue;
+                    }
                     replace_var_in_stmt(&mut stmts[target], &name, &rhs);
                     stmts.remove(i);
                     changed = true;
@@ -875,6 +890,71 @@ fn inline_single_use_in_stmts(
         }
     }
     changed
+}
+
+/// True if any free variable of a pure expression is assigned on `[start, end)`.
+fn pure_expr_free_var_redefined_before(
+    stmts: &[HirStmt],
+    start: usize,
+    end: usize,
+    expr: &HirExpr,
+) -> bool {
+    let mut free = HashSet::new();
+    collect_free_vars_in_expr(expr, &mut free);
+    if free.is_empty() {
+        return false;
+    }
+    for stmt in stmts.iter().take(end).skip(start) {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(n),
+            ..
+        } = stmt
+        {
+            if free.contains(n.as_str()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn collect_free_vars_in_expr(expr: &HirExpr, out: &mut HashSet<String>) {
+    match expr {
+        HirExpr::Var(n) => {
+            out.insert(n.clone());
+        }
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => {
+            collect_free_vars_in_expr(expr, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_free_vars_in_expr(lhs, out);
+            collect_free_vars_in_expr(rhs, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_free_vars_in_expr(cond, out);
+            collect_free_vars_in_expr(then_expr, out);
+            collect_free_vars_in_expr(else_expr, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                collect_free_vars_in_expr(a, out);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => collect_free_vars_in_expr(ptr, out),
+        HirExpr::Index { base, index, .. } => {
+            collect_free_vars_in_expr(base, out);
+            collect_free_vars_in_expr(index, out);
+        }
+    }
 }
 
 fn find_single_use_target(stmts: &[HirStmt], start: usize, name: &str) -> Option<usize> {
@@ -3375,6 +3455,60 @@ mod tests {
                 [HirStmt::Return(Some(HirExpr::Var(n)))] if n == "param_1"
             ),
             "must not drop the shift: {code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_keeps_saved_call_result_across_redef() {
+        // rax = f(); rbx = rax; rax = g(); rax += rbx  must not become rax += rax.
+        let mut func = HirFunction {
+            name: "dual_call".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("rax"), local("rbx")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rax".into()),
+                    rhs: HirExpr::Call {
+                        target: "f".into(),
+                        args: vec![HirExpr::Var("param_1".into())],
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rbx".into()),
+                    rhs: HirExpr::Var("rax".into()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rax".into()),
+                    rhs: HirExpr::Call {
+                        target: "g".into(),
+                        args: vec![HirExpr::Var("param_1".into())],
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("rax".into()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("rax".into())),
+                        rhs: Box::new(HirExpr::Var("rbx".into())),
+                        ty: int_ty(32, true),
+                    },
+                },
+                HirStmt::Return(Some(HirExpr::Var("rax".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("rax += rax") && !code.contains("rax = rax + rax"),
+            "must not fold saved call result into reassigned surface:\n{code}"
+        );
+        assert!(
+            code.contains("rbx") || code.contains("f("),
+            "first call result must remain distinguishable:\n{code}"
         );
     }
 

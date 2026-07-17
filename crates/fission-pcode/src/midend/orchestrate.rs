@@ -176,6 +176,9 @@ pub fn render_mlil_preview_with_binary_and_context(
         debug.diag,
         std::env::var_os("FISSION_PREVIEW_PERF").is_some(),
     );
+    // Structuring may wrap/rearrange after normalize; drop pure identity
+    // assigns that only become adjacent post-layout.
+    let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut hir.body);
     normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = None;
     });

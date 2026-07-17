@@ -522,6 +522,13 @@ fn eliminate_dead_temp_assigns_recursive(
 }
 
 pub fn eliminate_redundant_var_assigns(stmts: &mut Vec<HirStmt>) -> bool {
+    eliminate_redundant_var_assigns_recursive(stmts)
+}
+
+/// Drop pure `x = x` and adjacent duplicate assigns. Must recurse into nested
+/// Block/If/loop bodies — structured O0 functions wrap the real body in a
+/// single outer Block, so a top-level-only scan never sees the noise.
+fn eliminate_redundant_var_assigns_recursive(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     let mut to_remove = vec![false; stmts.len()];
 
@@ -565,6 +572,45 @@ pub fn eliminate_redundant_var_assigns(stmts: &mut Vec<HirStmt>) -> bool {
     if changed {
         retain_unmarked_stmts(stmts, &to_remove);
     }
+
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed |= eliminate_redundant_var_assigns_recursive(body);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(i) = init {
+                    if let HirStmt::Block(b) = &mut **i {
+                        changed |= eliminate_redundant_var_assigns_recursive(b);
+                    }
+                }
+                if let Some(u) = update {
+                    if let HirStmt::Block(b) = &mut **u {
+                        changed |= eliminate_redundant_var_assigns_recursive(b);
+                    }
+                }
+                changed |= eliminate_redundant_var_assigns_recursive(body);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= eliminate_redundant_var_assigns_recursive(then_body);
+                changed |= eliminate_redundant_var_assigns_recursive(else_body);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= eliminate_redundant_var_assigns_recursive(&mut case.body);
+                }
+                changed |= eliminate_redundant_var_assigns_recursive(default);
+            }
+            _ => {}
+        }
+    }
+
     changed
 }
 

@@ -690,7 +690,10 @@ impl<'a> PreviewBuilder<'a> {
                 },
             )?;
             if let Some(stmt) = maybe_stmt {
-                body.push(stmt);
+                // Skip pure `x = x` when multiple p-code ops share one binding.
+                if !crate::midend::is_identity_var_assign_stmt(&stmt) {
+                    body.push(stmt);
+                }
             }
             op_idx += 1;
         }

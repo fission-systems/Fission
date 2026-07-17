@@ -223,6 +223,42 @@ fn eliminate_redundant_var_assigns_removes_exact_self_assign() {
 }
 
 #[test]
+fn eliminate_redundant_var_assigns_recurses_into_nested_block() {
+    // Structured O0 bodies often wrap the real statements in a single Block;
+    // self-assigns inside that nest must still be removed (measured recursive
+    // dual-call / iterative loop noise: `uVar = uVar`).
+    let mut stmts = vec![HirStmt::Block(vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("uVar1".to_string()),
+            rhs: HirExpr::Var("param_1".to_string()),
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("uVar1".to_string()),
+            rhs: HirExpr::Var("uVar1".to_string()),
+        },
+        HirStmt::Return(Some(HirExpr::Var("uVar1".to_string()))),
+    ])];
+
+    assert!(eliminate_redundant_var_assigns(&mut stmts));
+    match &stmts[0] {
+        HirStmt::Block(body) => {
+            assert_eq!(body.len(), 2, "self-assign inside Block must be dropped: {body:?}");
+            assert!(
+                !body.iter().any(|s| matches!(
+                    s,
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var(a),
+                        rhs: HirExpr::Var(b),
+                    } if a == b
+                )),
+                "no pure identity assign should remain: {body:?}"
+            );
+        }
+        other => panic!("expected outer Block, got {other:?}"),
+    }
+}
+
+#[test]
 fn cast_elision_rewrites_self_widening_assignment_to_self_assign() {
     let mut func = HirFunction {
         name: "test_self_widening_cast".to_string(),

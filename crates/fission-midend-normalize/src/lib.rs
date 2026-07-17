@@ -49,6 +49,9 @@ pub use rule_normalizer::apply_rule_normalization;
 
 pub use types::is_known_api_signature;
 
+/// Pure `x = x` / adjacent-duplicate assign cleanup (nested Block/If safe).
+pub use cleanup::eliminate_redundant_var_assigns;
+
 #[allow(dead_code)]
 pub fn normalize_function_body(body: &mut Vec<prelude::HirStmt>) {
     pipeline::normalize_function_body(body);
