@@ -74,23 +74,32 @@ jobs:
                 | grep -oE '[0-9]+' | head -1)
           echo "✅ MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
 
-      - name: Enforce Targeted Tests for NIR Changes
+      - name: Owner boundary scan (ADR 0008 / 0011)
+        run: |
+          set -euo pipefail
+          chmod +x scripts/check/owner_boundaries.sh
+          ./scripts/check/owner_boundaries.sh
+
+      - name: Enforce Targeted Tests for NIR/Render Changes
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
           git fetch origin ${{ github.base_ref }} --depth=1
-          if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q "^crates/fission-pcode/src/nir/"; then
-            if git diff origin/${{ github.base_ref }}...HEAD --name-only | grep -q -e "^crates/fission-pcode/tests/" -e "^crates/fission-pcode/.*test"; then
+          CHANGED=$(git diff origin/${{ github.base_ref }}...HEAD --name-only)
+          if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/src/nir/" -e "^crates/fission-pcode/src/render/"; then
+            if echo "$CHANGED" | grep -q -e "^crates/fission-pcode/tests/" -e "^crates/fission-pcode/.*test"; then
               echo "✅ Targeted tests included."
-            elif git diff origin/${{ github.base_ref }}...HEAD crates/fission-pcode/src/nir/ | grep -q "+.*#\[test\]"; then
+            elif git diff origin/${{ github.base_ref }}...HEAD -- \
+                crates/fission-pcode/src/nir/ crates/fission-pcode/src/render/ \
+                | grep -q "+.*#\[test\]"; then
               echo "✅ Inline tests added."
             else
-              echo "❌ Targeted test missing for NIR changes."
-              echo "Any change to crates/fission-pcode/src/nir/ must include targeted tests."
+              echo "❌ Targeted test missing for NIR/render changes."
+              echo "Any change to crates/fission-pcode/src/nir/ or src/render/ must include targeted tests."
               exit 1
             fi
           else
-            echo "ℹ️ No NIR changes detected."
+            echo "ℹ️ No NIR/render changes detected."
           fi
 
       - name: Enforce Sleigh Exact Match Parity

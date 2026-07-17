@@ -39,6 +39,7 @@ nir/
 | Structuring rules | `structuring/` | Read child AGENT there first |
 | Output formatting | crate-root `src/render/` (`printer`, `presentation/`) | Dual-layer print; see [`render/AGENTS.md`](../render/AGENTS.md), [ADR 0011](../../../../docs/adr/0011-hir-presentation-contract.md) |
 | Shared label sentinels | `labels.rs` | Fallthrough and similar markers shared by structuring + render |
+| Preview orchestration | `orchestrate.rs` | `render_mlil_preview*` / `render_nir*` entrypoints only |
 | Synthetic regression tests | `tests/` | Prefer adding targeted NIR tests here |
 | Normalize pass layout | `normalize/AGENTS.md` | Directory map for `arith/`, `pipeline/`, etc. |
 
