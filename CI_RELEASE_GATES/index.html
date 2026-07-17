@@ -1029,7 +1029,7 @@
 
 
 <h1 id="ci-cd-release-gates-conservative">CI / CD release gates (conservative)<a class="headerlink" href="#ci-cd-release-gates-conservative" title="Permanent link">&para;</a></h1>
-<p><strong>Last updated:</strong> 2026-07-15</p>
+<p><strong>Last updated:</strong> 2026-07-17</p>
 <p>This document is the policy source for how Fission promotes a git commit to a
 <strong>SemVer tag</strong> and a <strong>GitHub Release</strong>. It aligns automation with
 <a href="../RELEASE/"><code>docs/RELEASE.md</code></a> and <a href="../VERSIONING/"><code>docs/VERSIONING.md</code></a>.</p>
@@ -1056,7 +1056,7 @@
 <td><strong>L0 Fast Gate</strong></td>
 <td><a href="../.github/workflows/ci.yml"><code>ci.yml</code></a></td>
 <td>PR + every <code>main</code> push</td>
-<td>Lint, security, core tests, CLI smoke, NIR regression gate, multi-OS</td>
+<td>Lint, security, core+midend tests, CLI smoke, NIR gate. <strong>PR = Linux-first</strong>; multi-OS on <code>main</code> push. Docs/wiki-only short-circuits</td>
 </tr>
 <tr>
 <td><strong>L1 Heavy</strong></td>
@@ -1124,12 +1124,20 @@
 <p>On <strong><code>push</code> to <code>main</code></strong>, Heavy runs the <strong>release-critical</strong> set only (so a green
 L1 is achievable and meaningful for decompiler releases):</p>
 <ul>
-<li>Linux: <code>fission-core</code>, <code>loader</code>, <code>pcode</code>, <code>decompiler</code>, <code>automation</code>, <code>cli</code>,
-  <code>analysis-db</code>, <code>signatures</code>, plus <code>fission-static</code></li>
-<li>Windows release tests (pcode/decompiler/automation)</li>
+<li>Linux (single nextest process): <code>fission-core</code>, midend crates, <code>loader</code>,
+  <code>pcode</code>, <code>static</code>, <code>decompiler</code>, <code>automation</code>, <code>cli</code>, <code>analysis-db</code>,
+  <code>signatures</code></li>
+<li>Windows release tests (midend-structuring/pcode/decompiler/automation)</li>
 <li>macOS release CLI build</li>
 <li>Automation NIR-check (<code>--no-update-latest</code>)</li>
 <li>MSRV</li>
+</ul>
+<p><strong>L0 performance notes (2026-07-17):</strong></p>
+<ul>
+<li>Path filter skips multi-minute jobs for pure <code>docs/</code> / <code>wiki/</code> / markdown.</li>
+<li>PR Fast Gate no longer runs macOS/Windows matrices (covered on <code>main</code> L0 + L1).</li>
+<li><code>reusable-run-tests</code> runs multi-package nextest in <strong>one</strong> cargo process and
+  skips webkit/GTK sysdeps unless GUI packages are required.</li>
 </ul>
 <p>On <strong>nightly schedule</strong> or <strong>workflow_dispatch</strong>, Heavy also runs:</p>
 <ul>
