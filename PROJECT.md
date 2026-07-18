@@ -49,15 +49,17 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   chains (99 call sites total across `stages.rs`/`run.rs`). `run.rs` also
   duplicated telemetry/budget helpers that already existed in
   `action_pipeline` (`run_pass_logged`, `body_exceeds_early_cleanup_budget`).
-- **Migration slice landed 2026-07-19:** added `CleanupPass` and
+- **Migration slices landed 2026-07-19:** added `CleanupPass` and
   `GatedFollowupPass` to `action_pipeline` (new file `cleanup_pass.rs`) —
   the two primitives needed to express the `if pass { cleanup }` idiom as
   ordinary `ActionGroup` passes instead of free-function control flow. Moved
-  the first chain (`constant_ptr_recovery` → `cleanup_constant_ptr`, the
-  first `if` in `run_stage_deadcode_dynamic`) out of `stages.rs` into
-  declarative passes registered directly in `groups.rs`'s `deadcode_dynamic`
-  group. Verified byte-identical NIR/HIR output before/after on 4 real
-  binaries + full crate test gate (1311 tests) + local docker corpus row.
+  the first two chains of `run_stage_deadcode_dynamic` out of `stages.rs`
+  into declarative passes registered directly in `groups.rs`'s
+  `deadcode_dynamic` group: `constant_ptr_recovery` → `cleanup_constant_ptr`,
+  then `conditional_const` → `cleanup_conditional_const`. Each slice
+  verified byte-identical NIR/HIR output before/after on real binaries +
+  full crate test gate (1311 tests); `deadcode_dynamic` now has 2 of 9
+  chains migrated, 7 remain in the free function.
 - **Remaining backlog** (one `run_stage_*` function per row; each is its own
   scoped migration slice with its own before/after parity check — do not
   attempt more than one per change):
@@ -65,7 +67,7 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   | Stage function | `run_pass_logged` call sites (approx) |
   |---|---|
   | `run_stage_proto_recovery` | ~5 |
-  | `run_stage_deadcode_dynamic` | ~8 remaining (1 of 9 chains migrated) |
+  | `run_stage_deadcode_dynamic` | ~7 remaining (2 of 9 chains migrated: `constant_ptr_recovery`, `conditional_const`) |
   | `run_stage_type_early` | small |
   | `run_stage_stackstall` | medium |
   | `run_stage_heritage_value_recovery` | medium |
