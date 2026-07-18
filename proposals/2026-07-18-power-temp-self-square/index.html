@@ -1020,6 +1020,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#follow-up-same-cycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Follow-up (same cycle)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1113,6 +1124,13 @@ and <code>t</code> has no other uses in the linear scope, replace with <code>a =
 </span></code></pre></div>
 gcd @ 0x1400017fd unchanged: signed <code>%</code>.
 nextest fission-midend-normalize: 262 passed.</p>
+<h2 id="follow-up-same-cycle">Follow-up (same cycle)<a class="headerlink" href="#follow-up-same-cycle" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Restore whole-function use counts for pure-copy inline (fixes
+  <code>normalize_preserves_loop_assigned_temp_used_after_loop</code> regression).</li>
+<li>Fold signed <code>(x == 0 || x &lt; 0)</code> → <code>x &lt;= 0</code> in <code>normalize_boolean_logic</code>.</li>
+<li>power after: <code>if (iVar36 &lt;= 0)</code> + <code>param_10 *= param_10</code>.</li>
+</ul>
 
 
 
