@@ -166,17 +166,35 @@ struct JsonStructDef {
 }
 
 /// Windows structures database
+///
+/// `structures` is `Arc`-wrapped so [`WindowsStructures::try_new`] can hand
+/// out cheap clones of a process-wide cache instead of re-reading and
+/// re-parsing the multi-megabyte `structures.json` corpus on every call —
+/// this constructor runs once per decompiled function on some call paths
+/// (normalize pointer-arithmetic recovery, NIR type-context assembly), so an
+/// uncached load dominates per-function wall time on binaries with many
+/// functions.
+#[derive(Clone)]
 pub struct WindowsStructures {
-    pub structures: HashMap<String, StructDef>,
+    pub structures: std::sync::Arc<HashMap<String, StructDef>>,
 }
+
+static STRUCTURES_CACHE: std::sync::OnceLock<Result<WindowsStructures, WinTypesError>> =
+    std::sync::OnceLock::new();
 
 impl WindowsStructures {
     pub fn new() -> Self {
         Self::try_new().unwrap_or_else(|e| panic!("{e}"))
     }
 
-    /// Load the Windows structure corpus without panicking.
+    /// Load the Windows structure corpus without panicking. Cached process-wide
+    /// after the first successful (or failed) load — cloning the cached result
+    /// only bumps an `Arc` refcount, it does not re-read or re-parse the JSON.
     pub fn try_new() -> Result<Self, WinTypesError> {
+        STRUCTURES_CACHE.get_or_init(Self::load).clone()
+    }
+
+    fn load() -> Result<Self, WinTypesError> {
         let json_str = try_read_typeinfo_json("structures.json")?;
         let items: Vec<JsonStructDef> = serde_json::from_str(&json_str).map_err(|e| {
             let path = try_win32_typeinfo_json_path("structures.json")
@@ -209,7 +227,9 @@ impl WindowsStructures {
             structures.insert(item.name, def);
         }
 
-        Ok(Self { structures })
+        Ok(Self {
+            structures: std::sync::Arc::new(structures),
+        })
     }
 
     /// Get structure by name
