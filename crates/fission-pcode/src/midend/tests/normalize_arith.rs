@@ -2608,3 +2608,260 @@ fn normalize_ignore_nan_simplifies_comparisons() {
         panic!("expected binary op, got {:?}", rhs3);
     }
 }
+
+// ── Relational branch implication (conditional_const range tracking) ─────────
+
+fn cond_const_test_func(body: Vec<HirStmt>) -> HirFunction {
+    let i32_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    HirFunction {
+        name: "test_range_cond".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![],
+        locals: vec![
+            NirBinding {
+                name: "x".to_string(),
+                ty: i32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "y".to_string(),
+                ty: i32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body,
+        is_64bit: false,
+        ..Default::default()
+    }
+}
+
+fn cmp_x(op: HirBinaryOp, val: i64) -> HirExpr {
+    let i32_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    HirExpr::Binary {
+        op,
+        lhs: Box::new(HirExpr::Var("x".to_string())),
+        rhs: Box::new(HirExpr::Const(val, i32_ty)),
+        ty: NirType::Bool,
+    }
+}
+
+fn assign_y(val: i64) -> HirStmt {
+    let i32_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    HirStmt::Assign {
+        lhs: HirLValue::Var("y".to_string()),
+        rhs: HirExpr::Const(val, i32_ty),
+    }
+}
+
+#[test]
+fn normalize_conditional_const_folds_implied_true_nested_cond() {
+    use crate::midend::normalize::global_opt::apply_conditional_const_pass;
+
+    // if (x > 0) { if (x >= 0) y=1 else y=2 }  →  inner cond decided true
+    let mut func = cond_const_test_func(vec![HirStmt::If {
+        cond: cmp_x(HirBinaryOp::SGt, 0),
+        then_body: vec![HirStmt::If {
+            cond: cmp_x(HirBinaryOp::SGe, 0),
+            then_body: vec![assign_y(1)],
+            else_body: vec![assign_y(2)],
+        }],
+        else_body: vec![],
+    }]);
+
+    assert!(apply_conditional_const_pass(&mut func));
+    let HirStmt::If { then_body, .. } = &func.body[0] else {
+        panic!("expected outer if");
+    };
+    let HirStmt::If { cond, .. } = &then_body[0] else {
+        panic!("expected inner if");
+    };
+    assert!(
+        matches!(cond, HirExpr::Const(1, _)),
+        "inner cond should fold to true, got {cond:?}"
+    );
+}
+
+#[test]
+fn normalize_conditional_const_folds_implied_false_nested_cond() {
+    use crate::midend::normalize::global_opt::apply_conditional_const_pass;
+
+    // if (x > 0) { if (x < 0) y=1 else y=2 }  →  inner cond decided false
+    let mut func = cond_const_test_func(vec![HirStmt::If {
+        cond: cmp_x(HirBinaryOp::SGt, 0),
+        then_body: vec![HirStmt::If {
+            cond: cmp_x(HirBinaryOp::SLt, 0),
+            then_body: vec![assign_y(1)],
+            else_body: vec![assign_y(2)],
+        }],
+        else_body: vec![],
+    }]);
+
+    assert!(apply_conditional_const_pass(&mut func));
+    let HirStmt::If { then_body, .. } = &func.body[0] else {
+        panic!("expected outer if");
+    };
+    let HirStmt::If { cond, .. } = &then_body[0] else {
+        panic!("expected inner if");
+    };
+    assert!(
+        matches!(cond, HirExpr::Const(0, _)),
+        "inner cond should fold to false, got {cond:?}"
+    );
+}
+
+#[test]
+fn normalize_conditional_const_keeps_undecidable_else_branch_cond() {
+    use crate::midend::normalize::global_opt::apply_conditional_const_pass;
+
+    // else of (x > 0) implies x <= 0; (x >= 0) still undecidable (x may be 0)
+    let mut func = cond_const_test_func(vec![HirStmt::If {
+        cond: cmp_x(HirBinaryOp::SGt, 0),
+        then_body: vec![],
+        else_body: vec![HirStmt::If {
+            cond: cmp_x(HirBinaryOp::SGe, 0),
+            then_body: vec![assign_y(1)],
+            else_body: vec![assign_y(2)],
+        }],
+    }]);
+
+    apply_conditional_const_pass(&mut func);
+    let HirStmt::If { else_body, .. } = &func.body[0] else {
+        panic!("expected outer if");
+    };
+    let HirStmt::If { cond, .. } = &else_body[0] else {
+        panic!("expected inner if");
+    };
+    assert!(
+        matches!(cond, HirExpr::Binary { .. }),
+        "undecidable cond must stay, got {cond:?}"
+    );
+}
+
+#[test]
+fn normalize_conditional_const_write_invalidates_range() {
+    use crate::midend::normalize::global_opt::apply_conditional_const_pass;
+
+    // if (x > 0) { x = call(); if (x >= 0) … }  →  no fold after the write
+    let i32_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let mut func = cond_const_test_func(vec![HirStmt::If {
+        cond: cmp_x(HirBinaryOp::SGt, 0),
+        then_body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".to_string()),
+                rhs: HirExpr::Call {
+                    target: "ext".to_string(),
+                    args: vec![],
+                    ty: i32_ty,
+                },
+            },
+            HirStmt::If {
+                cond: cmp_x(HirBinaryOp::SGe, 0),
+                then_body: vec![assign_y(1)],
+                else_body: vec![assign_y(2)],
+            },
+        ],
+        else_body: vec![],
+    }]);
+
+    apply_conditional_const_pass(&mut func);
+    let HirStmt::If { then_body, .. } = &func.body[0] else {
+        panic!("expected outer if");
+    };
+    let HirStmt::If { cond, .. } = &then_body[1] else {
+        panic!("expected inner if");
+    };
+    assert!(
+        matches!(cond, HirExpr::Binary { .. }),
+        "cond after clobbering write must stay, got {cond:?}"
+    );
+}
+
+#[test]
+fn normalize_conditional_const_label_in_dead_arm_blocks_fold() {
+    use crate::midend::normalize::global_opt::apply_conditional_const_pass;
+
+    // Dead else arm holds a jump target label → fold must be skipped.
+    let mut func = cond_const_test_func(vec![HirStmt::If {
+        cond: cmp_x(HirBinaryOp::SGt, 0),
+        then_body: vec![HirStmt::If {
+            cond: cmp_x(HirBinaryOp::SGe, 0),
+            then_body: vec![assign_y(1)],
+            else_body: vec![HirStmt::Label("join_1".to_string()), assign_y(2)],
+        }],
+        else_body: vec![],
+    }]);
+
+    apply_conditional_const_pass(&mut func);
+    let HirStmt::If { then_body, .. } = &func.body[0] else {
+        panic!("expected outer if");
+    };
+    let HirStmt::If { cond, .. } = &then_body[0] else {
+        panic!("expected inner if");
+    };
+    assert!(
+        matches!(cond, HirExpr::Binary { .. }),
+        "label-bearing dead arm must block the fold, got {cond:?}"
+    );
+}
+
+#[test]
+fn normalize_conditional_const_branch_write_invalidates_eq_env_after_join() {
+    use crate::midend::normalize::global_opt::apply_conditional_const_pass;
+
+    // if (x == 5) { if (y != 0) { x = 1; }  y = x; }  →  y must NOT become 5
+    let i32_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let mut func = cond_const_test_func(vec![HirStmt::If {
+        cond: cmp_x(HirBinaryOp::Eq, 5),
+        then_body: vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("y".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, i32_ty.clone())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".to_string()),
+                    rhs: HirExpr::Const(1, i32_ty),
+                }],
+                else_body: vec![],
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("y".to_string()),
+                rhs: HirExpr::Var("x".to_string()),
+            },
+        ],
+        else_body: vec![],
+    }]);
+
+    apply_conditional_const_pass(&mut func);
+    let HirStmt::If { then_body, .. } = &func.body[0] else {
+        panic!("expected outer if");
+    };
+    let HirStmt::Assign { rhs, .. } = &then_body[1] else {
+        panic!("expected join assign");
+    };
+    assert!(
+        matches!(rhs, HirExpr::Var(name) if name == "x"),
+        "stale eq binding must not survive a branch write, got {rhs:?}"
+    );
+}
