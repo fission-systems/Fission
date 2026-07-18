@@ -24,7 +24,6 @@ use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
     apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
     apply_post_assign_value_representative_pass, apply_redundant_load_elimination,
-    apply_sccp_pass,
 };
 use super::super::idioms::{
     apply_branch_prefix_hoist_pass, apply_split_flow_pass, apply_subflow_pruning,
@@ -178,37 +177,46 @@ pub(super) fn cleanup_after_entry_param_promotion(func: &mut HirFunction) {
     prune_unused_dead_local_bindings(func);
 }
 
-pub fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, perf: bool) {
-    // SCCP: global sparse constant propagation on structured HIR (lattice merge
-    // at joins).  Runs after local constant folding so folded seeds propagate.
-    let sccp_admission = sccp_admission_summary(&func.body);
-    if !sccp_admission.eligible {
+pub(super) fn sccp_is_admitted(func: &HirFunction) -> bool {
+    let admission = sccp_admission_summary(&func.body);
+    if !admission.eligible {
         wave_stats::add_sccp_skipped_by_admission(1);
     }
-    if sccp_admission.eligible && run_pass_logged(func, "sccp", perf, apply_sccp_pass) {
-        cleanup_func_stmt_list(func);
-        if run_pass_logged(func, "constant_folding_after_sccp", perf, |f| {
-            constant_folding_pass(&mut f.body)
-        }) {
-            run_cleanup_block(func, "cleanup_elim_8", perf, |f| {
-                cleanup_func_stmt_list(f);
+    admission.eligible
+}
 
-                eliminate_dead_local_clobber_assigns(f);
+/// Runs after `sccp` reports Changed. Previously a bare, unlogged,
+/// *unconditional* `cleanup_func_stmt_list(func)` call (no early-cleanup
+/// budget gate) — registered via `fn_pass`, not `cleanup_pass`, so this
+/// migration does not newly admission-gate a call that always ran before.
+/// The one new telemetry entry this slice adds (`cleanup_sccp`) replaces a
+/// call that had no metric name at all; NIR/HIR output is unaffected.
+pub(super) fn cleanup_after_sccp(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    hir_shape(func) != before
+}
 
-                prune_unused_temp_bindings(f);
+/// Cleanup block for the nested `constant_folding_after_sccp` chain.
+pub(super) fn cleanup_elim_8(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    eliminate_dead_local_clobber_assigns(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
 
-                prune_unused_dead_local_bindings(f);
-            });
-        }
-        run_pass_logged(
-            func,
-            "wide_dead_assignment",
-            perf,
-            apply_wide_dead_assignment_pass,
-        );
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
-    }
+/// Unconditional SCCP-chain tail: `wide_dead_assignment` plus the two bare
+/// prune calls that followed it, bundled under `wide_dead_assignment`'s
+/// existing telemetry name (its own Changed result is what the original
+/// `run_pass_logged` reported; the prune calls were never logged).
+pub(super) fn wide_dead_assignment_and_prune(func: &mut HirFunction) -> bool {
+    let changed = apply_wide_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    changed
+}
+
+pub fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, perf: bool) {
     // Local CSE: within each linear block, replace identical pure sub-expressions
     // with the variable that first computed them.  Runs right after constant
     // folding so that folded constants are included in the expression map.

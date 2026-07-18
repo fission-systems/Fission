@@ -91,3 +91,47 @@ impl Pass for GatedFollowupPass {
 pub fn gated_followup(cond: Box<dyn Pass>, then: Vec<Box<dyn Pass>>) -> Box<dyn Pass> {
     Box::new(GatedFollowupPass { cond, then })
 }
+
+/// Runs `inner` only when `admits(func)` holds; otherwise records the skip
+/// via `on_skip()` (if given) and reports `Unchanged` without touching
+/// `func` or logging `inner`. Mirrors the
+/// `let eligible = admission_summary(&func.body).eligible; if eligible { .. }`
+/// data-driven admission-gate idiom (e.g. SCCP eligibility) as a single
+/// composable `Pass`.
+pub struct AdmissionGatedPass {
+    pub admits: fn(&HirFunction) -> bool,
+    pub on_skip: Option<fn()>,
+    pub inner: Box<dyn Pass>,
+}
+
+impl Pass for AdmissionGatedPass {
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+
+    fn concept(&self) -> GhidraActionConcept {
+        self.inner.concept()
+    }
+
+    fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
+        if !(self.admits)(ctx.func) {
+            if let Some(on_skip) = self.on_skip {
+                on_skip();
+            }
+            return PassOutcome::Unchanged;
+        }
+        self.inner.run(ctx)
+    }
+}
+
+pub fn admission_gated(
+    admits: fn(&HirFunction) -> bool,
+    on_skip: Option<fn()>,
+    inner: Box<dyn Pass>,
+) -> Box<dyn Pass> {
+    Box::new(AdmissionGatedPass {
+        admits,
+        on_skip,
+        inner,
+    })
+}

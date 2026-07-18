@@ -3,16 +3,19 @@
 use fission_midend_core::wave_stats;
 use super::stages::{
     cleanup_after_conditional_const, cleanup_after_constant_ptr_recovery,
-    cleanup_after_entry_param_promotion, run_stage_block_structure_1, run_stage_cleanup,
-    run_stage_deadcode_dynamic, run_stage_heritage_value_recovery, run_stage_memory_recovery,
-    run_stage_merge, run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
+    cleanup_after_entry_param_promotion, cleanup_after_sccp, cleanup_elim_8,
+    run_stage_block_structure_1, run_stage_cleanup, run_stage_deadcode_dynamic,
+    run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,
+    run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early, sccp_is_admitted,
+    wide_dead_assignment_and_prune,
 };
-use super::super::global_opt::apply_conditional_const_pass;
+use super::super::analysis::defuse::constant_folding_pass;
+use super::super::global_opt::{apply_conditional_const_pass, apply_sccp_pass};
 use super::super::memory::apply_constant_ptr_recovery_pass;
 use super::super::types::apply_entry_param_promotion_pass;
 use fission_midend_core::action_pipeline::{
-    GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, cleanup_pass, fn_pass,
-    gated_followup, group,
+    GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
+    fn_pass, gated_followup, group,
 };
 use fission_midend_core::ir::HirFunction;
 use std::time::Instant;
@@ -103,6 +106,36 @@ pub fn build_normalize_pipeline() -> Pipeline {
                         concept,
                         cleanup_after_entry_param_promotion,
                     )],
+                ))
+                // SCCP: global sparse constant propagation on structured HIR
+                // (lattice merge at joins). Runs after local constant folding
+                // so folded seeds propagate. Admission-gated on
+                // sccp_admission_summary; the previously-unlogged
+                // `cleanup_func_stmt_list` after a Changed sccp run is now
+                // the one new telemetry entry this slice adds
+                // (`cleanup_sccp`) — NIR/HIR output is unaffected.
+                .pass(admission_gated(
+                    sccp_is_admitted,
+                    None,
+                    gated_followup(
+                        fn_pass("sccp", concept, apply_sccp_pass),
+                        vec![
+                            fn_pass("cleanup_sccp", concept, cleanup_after_sccp),
+                            gated_followup(
+                                fn_pass(
+                                    "constant_folding_after_sccp",
+                                    concept,
+                                    |f| constant_folding_pass(&mut f.body),
+                                ),
+                                vec![cleanup_pass("cleanup_elim_8", concept, cleanup_elim_8)],
+                            ),
+                            fn_pass(
+                                "wide_dead_assignment",
+                                concept,
+                                wide_dead_assignment_and_prune,
+                            ),
+                        ],
+                    ),
                 ))
                 .pass(stage_pass(
                     "deadcode_dynamic",
