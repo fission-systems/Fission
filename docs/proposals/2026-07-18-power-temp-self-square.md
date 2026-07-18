@@ -56,3 +56,11 @@ param_10 *= param_10;
 ```
 gcd @ 0x1400017fd unchanged: signed `%`.
 nextest fission-midend-normalize: 262 passed.
+
+
+## Follow-up (same cycle)
+
+- Restore whole-function use counts for pure-copy inline (fixes
+  `normalize_preserves_loop_assigned_temp_used_after_loop` regression).
+- Fold signed `(x == 0 || x < 0)` → `x <= 0` in `normalize_boolean_logic`.
+- power after: `if (iVar36 <= 0)` + `param_10 *= param_10`.

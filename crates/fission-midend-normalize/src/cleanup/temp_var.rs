@@ -102,55 +102,10 @@ pub fn collapse_trivial_assign_returns(
 }
 
 pub fn inline_single_use_temps(stmts: &mut Vec<HirStmt>, preserved_temps: &HashSet<&str>) -> bool {
-    // Rebuild use counts at each linear scope so nested while/for bodies do not
-    // depend on a mismatched outer map for multi-use predicates.
-    inline_single_use_temps_in_scope(stmts, preserved_temps)
-}
-
-fn inline_single_use_temps_in_scope(
-    stmts: &mut Vec<HirStmt>,
-    preserved_temps: &HashSet<&str>,
-) -> bool {
+    // Whole-function use counts: nested scopes must see post-loop uses so
+    // loop-carried temps (def in loop, use after) are not falsely single-use.
     let use_counts = DefUseMap::build(stmts).use_count;
-    let mut changed = inline_single_use_temps_linear_pass(stmts, preserved_temps, &use_counts);
-    for stmt in stmts.iter_mut() {
-        match stmt {
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                changed |= inline_single_use_temps_in_scope(body, preserved_temps);
-            }
-            HirStmt::For {
-                init, update, body, ..
-            } => {
-                if let Some(i) = init {
-                    if let HirStmt::Block(b) = &mut **i {
-                        changed |= inline_single_use_temps_in_scope(b, preserved_temps);
-                    }
-                }
-                if let Some(u) = update {
-                    if let HirStmt::Block(b) = &mut **u {
-                        changed |= inline_single_use_temps_in_scope(b, preserved_temps);
-                    }
-                }
-                changed |= inline_single_use_temps_in_scope(body, preserved_temps);
-            }
-            HirStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                changed |= inline_single_use_temps_in_scope(then_body, preserved_temps);
-                changed |= inline_single_use_temps_in_scope(else_body, preserved_temps);
-            }
-            HirStmt::Switch { cases, default, .. } => {
-                for case in cases {
-                    changed |= inline_single_use_temps_in_scope(&mut case.body, preserved_temps);
-                }
-                changed |= inline_single_use_temps_in_scope(default, preserved_temps);
-            }
-            _ => {}
-        }
-    }
-    changed
+    inline_single_use_temps_recursive(stmts, preserved_temps, &use_counts)
 }
 
 /// Collapse pure temp self-square chains:
@@ -279,8 +234,7 @@ fn match_temp_self_square_window(stmts: &[HirStmt], i: usize) -> Option<(String,
     Some((t1.clone(), a1.clone(), ty.clone()))
 }
 
-/// Linear scan only — nested structures are handled by `inline_single_use_temps_in_scope`.
-fn inline_single_use_temps_linear_pass(
+fn inline_single_use_temps_recursive(
     stmts: &mut Vec<HirStmt>,
     preserved_temps: &HashSet<&str>,
     use_counts: &HashMap<String, usize>,
@@ -339,6 +293,53 @@ fn inline_single_use_temps_linear_pass(
     if changed {
         retain_unmarked_stmts(stmts, &to_remove);
     }
+
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed |= inline_single_use_temps_recursive(body, preserved_temps, use_counts);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(i) = init {
+                    if let HirStmt::Block(b) = &mut **i {
+                        changed |=
+                            inline_single_use_temps_recursive(b, preserved_temps, use_counts);
+                    }
+                }
+                if let Some(u) = update {
+                    if let HirStmt::Block(b) = &mut **u {
+                        changed |=
+                            inline_single_use_temps_recursive(b, preserved_temps, use_counts);
+                    }
+                }
+                changed |= inline_single_use_temps_recursive(body, preserved_temps, use_counts);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |=
+                    inline_single_use_temps_recursive(then_body, preserved_temps, use_counts);
+                changed |=
+                    inline_single_use_temps_recursive(else_body, preserved_temps, use_counts);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= inline_single_use_temps_recursive(
+                        &mut case.body,
+                        preserved_temps,
+                        use_counts,
+                    );
+                }
+                changed |= inline_single_use_temps_recursive(default, preserved_temps, use_counts);
+            }
+            _ => {}
+        }
+    }
+
     changed
 }
 

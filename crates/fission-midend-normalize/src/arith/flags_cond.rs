@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use super::util::*;
+use crate::prelude::*;
 
 pub fn canonicalize_flag_intrinsics(expr: &HirExpr) -> Option<HirExpr> {
     canonicalize_flag_intrinsic_call(expr)
@@ -8,6 +8,127 @@ pub fn canonicalize_flag_intrinsics(expr: &HirExpr) -> Option<HirExpr> {
 }
 
 pub fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
+    fold_signed_zero_or_negative(expr)
+        .or_else(|| fold_signed_zero_or_positive(expr))
+        .or_else(|| normalize_boolean_logic_core(expr))
+}
+
+/// `(x == 0 || x < 0)` / either order → `x <= 0` (signed compares only).
+/// Measured on power-class loops that test `exp > 0` as `!(exp == 0 || exp < 0)`.
+fn fold_signed_zero_or_negative(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::LogicalOr | HirBinaryOp::Or,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let x = match (
+        is_eq_zero_of(lhs.as_ref()),
+        is_signed_lt_zero_of(lhs.as_ref()),
+        is_eq_zero_of(rhs.as_ref()),
+        is_signed_lt_zero_of(rhs.as_ref()),
+    ) {
+        (Some(x), None, None, Some(y)) if x == y => x,
+        (None, Some(x), Some(y), None) if x == y => x,
+        _ => return None,
+    };
+    let ty = expr_type(&x);
+    // Original arm used SLt so signed order is intended.
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::SLe,
+        lhs: Box::new(x),
+        rhs: Box::new(HirExpr::Const(0, ty)),
+        ty: NirType::Bool,
+    })
+}
+
+/// `(x == 0 || x > 0)` with signed SGt → `x >= 0` (SGe).
+fn fold_signed_zero_or_positive(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::LogicalOr | HirBinaryOp::Or,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let x = match (
+        is_eq_zero_of(lhs.as_ref()),
+        is_signed_gt_zero_of(lhs.as_ref()),
+        is_eq_zero_of(rhs.as_ref()),
+        is_signed_gt_zero_of(rhs.as_ref()),
+    ) {
+        (Some(x), None, None, Some(y)) if x == y => x,
+        (None, Some(x), Some(y), None) if x == y => x,
+        _ => return None,
+    };
+    let ty = expr_type(&x);
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::SGe,
+        lhs: Box::new(x),
+        rhs: Box::new(HirExpr::Const(0, ty)),
+        ty: NirType::Bool,
+    })
+}
+
+fn is_eq_zero_of(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if is_zero_const(rhs.as_ref()) {
+        Some((**lhs).clone())
+    } else if is_zero_const(lhs.as_ref()) {
+        Some((**rhs).clone())
+    } else {
+        None
+    }
+}
+
+fn is_signed_lt_zero_of(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::SLt,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if is_zero_const(rhs.as_ref()) {
+        Some((**lhs).clone())
+    } else {
+        None
+    }
+}
+
+fn is_signed_gt_zero_of(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::SGt,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if is_zero_const(rhs.as_ref()) {
+        Some((**lhs).clone())
+    } else {
+        None
+    }
+}
+
+fn normalize_boolean_logic_core(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Binary {
             op: HirBinaryOp::Eq,

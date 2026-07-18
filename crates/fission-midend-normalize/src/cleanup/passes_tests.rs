@@ -842,6 +842,45 @@ fn inline_single_use_temps_keeps_same_linear_segment_inline() {
     assert!(!expr_contains_var(rhs, "xVar0"));
 }
 
+#[test]
+fn fold_signed_eq_zero_or_slt_zero_to_sle() {
+    use crate::arith::normalize_boolean_logic;
+    let signed = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let x = HirExpr::Var("param_18".into());
+    let expr = HirExpr::Binary {
+        op: HirBinaryOp::LogicalOr,
+        lhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(x.clone()),
+            rhs: Box::new(HirExpr::Const(0, signed.clone())),
+            ty: NirType::Bool,
+        }),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(x.clone()),
+            rhs: Box::new(HirExpr::Const(0, signed.clone())),
+            ty: NirType::Bool,
+        }),
+        ty: NirType::Bool,
+    };
+    let out = normalize_boolean_logic(&expr).expect("fold");
+    match out {
+        HirExpr::Binary {
+            op: HirBinaryOp::SLe,
+            lhs,
+            rhs,
+            ..
+        } => {
+            assert!(matches!(lhs.as_ref(), HirExpr::Var(n) if n == "param_18"));
+            assert!(matches!(rhs.as_ref(), HirExpr::Const(0, _)));
+        }
+        other => panic!("expected SLe, got {other:?}"),
+    }
+}
+
 /// power-class: pure copy into predicate with two uses of the temp.
 #[test]
 fn inline_pure_copy_into_multi_use_predicate() {
