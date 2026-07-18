@@ -49,17 +49,33 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   chains (99 call sites total across `stages.rs`/`run.rs`). `run.rs` also
   duplicated telemetry/budget helpers that already existed in
   `action_pipeline` (`run_pass_logged`, `body_exceeds_early_cleanup_budget`).
-- **Migration slices landed 2026-07-19:** added `CleanupPass` and
-  `GatedFollowupPass` to `action_pipeline` (new file `cleanup_pass.rs`) —
-  the two primitives needed to express the `if pass { cleanup }` idiom as
+- **Migration slices landed 2026-07-19:** added `CleanupPass`,
+  `GatedFollowupPass`, and `AdmissionGatedPass` to `action_pipeline` (new
+  file `cleanup_pass.rs`) — the primitives needed to express the
+  `if pass { cleanup }` and `if admission.eligible { pass }` idioms as
   ordinary `ActionGroup` passes instead of free-function control flow. Moved
-  the first two chains of `run_stage_deadcode_dynamic` out of `stages.rs`
-  into declarative passes registered directly in `groups.rs`'s
-  `deadcode_dynamic` group: `constant_ptr_recovery` → `cleanup_constant_ptr`,
-  then `conditional_const` → `cleanup_conditional_const`. Each slice
-  verified byte-identical NIR/HIR output before/after on real binaries +
-  full crate test gate (1311 tests); `deadcode_dynamic` now has 2 of 9
-  chains migrated, 7 remain in the free function.
+  four chains of `run_stage_deadcode_dynamic` out of `stages.rs` into
+  declarative passes registered directly in `groups.rs`'s
+  `deadcode_dynamic` group, in order: `constant_ptr_recovery` →
+  `cleanup_constant_ptr`; `conditional_const` → `cleanup_conditional_const`;
+  `entry_param_promotion` → `cleanup_defuse_6`; the SCCP admission chain
+  (`sccp` → `cleanup_sccp` → `constant_folding_after_sccp` →
+  `cleanup_elim_8` → `wide_dead_assignment`). Each slice verified against a
+  full crate test gate (1311 tests) plus real-binary NIR/HIR comparison.
+  **Caveat from the SCCP slice:** an early draft used the budget-gated
+  `CleanupPass` for a step whose original bare call had *no* budget gate —
+  this measurably changed pass admission for larger bodies and was caught
+  by the real-binary diff before commit (fixed by using `fn_pass` instead).
+  The committed SCCP slice still has one confirmed cosmetic side effect:
+  synthetic variable numbering (`xVarN`/`uVarN`) can shift on some
+  functions versus the pre-slice build, with identical control flow, pass
+  sequence, and per-pass stmt/local shape at every step (verified via
+  `FISSION_PREVIEW_PERF` trace diff) and unchanged semantic case-pass rate
+  on the real corpus row that exposed it — not a structural or semantic
+  regression, but worth re-checking on future slices with the same
+  before/after trace-diff technique, not text-diff alone.
+  `deadcode_dynamic` now has 4 of 9 chains migrated, 5 remain in the free
+  function.
 - **Remaining backlog** (one `run_stage_*` function per row; each is its own
   scoped migration slice with its own before/after parity check — do not
   attempt more than one per change):
@@ -67,7 +83,7 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   | Stage function | `run_pass_logged` call sites (approx) |
   |---|---|
   | `run_stage_proto_recovery` | ~5 |
-  | `run_stage_deadcode_dynamic` | ~7 remaining (2 of 9 chains migrated: `constant_ptr_recovery`, `conditional_const`) |
+  | `run_stage_deadcode_dynamic` | ~5 remaining (4 of 9 chains migrated: `constant_ptr_recovery`, `conditional_const`, `entry_param_promotion`, `sccp`) |
   | `run_stage_type_early` | small |
   | `run_stage_stackstall` | medium |
   | `run_stage_heritage_value_recovery` | medium |
