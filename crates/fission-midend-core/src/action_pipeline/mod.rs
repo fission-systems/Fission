@@ -4,6 +4,7 @@
 //! admission gates, and telemetry hooks aligned with [`GhidraActionConcept`].
 
 mod budget;
+mod cleanup_pass;
 mod concept;
 mod gates;
 mod group;
@@ -11,6 +12,7 @@ mod pass;
 mod pipeline;
 mod pool;
 
+pub use cleanup_pass::{CleanupPass, GatedFollowupPass, cleanup_pass, gated_followup};
 pub use budget::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT,
     LARGE_FUNCTION_LOCAL_THRESHOLD, LARGE_FUNCTION_STMT_THRESHOLD, PassBudget,

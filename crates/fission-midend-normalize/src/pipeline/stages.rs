@@ -32,10 +32,9 @@ use super::super::idioms::{
     remove_entry_stack_scaffold_stores,
 };
 use super::super::memory::{
-    apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass,
-    apply_constant_ptr_recovery_pass, apply_memory_heritage, apply_memory_slot_surfacing,
-    apply_memory_slot_surfacing_cheap, apply_ptr_arith_recovery_pass, apply_split_datatype_pass,
-    apply_union_resolve_pass, apply_zero_index_deref_pass,
+    apply_aggregate_alias_access_rewrite_pass, apply_aggregate_fields_pass, apply_memory_heritage,
+    apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, apply_ptr_arith_recovery_pass,
+    apply_split_datatype_pass, apply_union_resolve_pass, apply_zero_index_deref_pass,
 };
 use super::super::recovery::{
     apply_break_continue_pass, apply_dead_flag_cleanup_pass, apply_flag_recovery_pass,
@@ -151,19 +150,19 @@ pub fn run_stage_proto_recovery(func: &mut HirFunction, diag: bool, perf: bool) 
     }
 }
 
+/// Runs the `constant_ptr_recovery` → `cleanup_constant_ptr` chain that used
+/// to open [`run_stage_deadcode_dynamic`]. Migrated to declarative
+/// `ActionGroup` passes registered directly in `groups.rs`
+/// (`GatedFollowupPass` + `CleanupPass`); kept here only as the shared
+/// cleanup block body so both the pass registration and any direct callers
+/// see one definition.
+pub(super) fn cleanup_after_constant_ptr_recovery(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
+
 pub fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, perf: bool) {
-    if run_pass_logged(
-        func,
-        "constant_ptr_recovery",
-        perf,
-        apply_constant_ptr_recovery_pass,
-    ) {
-        run_cleanup_block(func, "cleanup_constant_ptr", perf, |f| {
-            cleanup_func_stmt_list(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
     if run_pass_logged(
         func,
         "conditional_const",

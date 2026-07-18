@@ -2,12 +2,14 @@
 
 use fission_midend_core::wave_stats;
 use super::stages::{
-    run_stage_block_structure_1, run_stage_cleanup, run_stage_deadcode_dynamic,
-    run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,
-    run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
+    cleanup_after_constant_ptr_recovery, run_stage_block_structure_1, run_stage_cleanup,
+    run_stage_deadcode_dynamic, run_stage_heritage_value_recovery, run_stage_memory_recovery,
+    run_stage_merge, run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
 };
+use super::super::memory::apply_constant_ptr_recovery_pass;
 use fission_midend_core::action_pipeline::{
-    GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, group,
+    GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, cleanup_pass, fn_pass,
+    gated_followup, group,
 };
 use fission_midend_core::ir::HirFunction;
 use std::time::Instant;
@@ -57,11 +59,30 @@ pub fn build_normalize_pipeline() -> Pipeline {
             concept,
             run_stage_proto_recovery,
         )))
-        .group(group("deadcode_dynamic", concept).pass(stage_pass(
-            "deadcode_dynamic",
-            concept,
-            run_stage_deadcode_dynamic,
-        )))
+        .group(
+            group("deadcode_dynamic", concept)
+                // Migrated off the imperative `if run_pass_logged(..) { .. }`
+                // idiom onto declarative ActionGroup passes (PROJECT.md M3,
+                // first slice). `apply_constant_ptr_recovery_pass` reports
+                // Changed; the budget-gated cleanup block only then runs.
+                .pass(gated_followup(
+                    fn_pass(
+                        "constant_ptr_recovery",
+                        concept,
+                        apply_constant_ptr_recovery_pass,
+                    ),
+                    vec![cleanup_pass(
+                        "cleanup_constant_ptr",
+                        concept,
+                        cleanup_after_constant_ptr_recovery,
+                    )],
+                ))
+                .pass(stage_pass(
+                    "deadcode_dynamic",
+                    concept,
+                    run_stage_deadcode_dynamic,
+                )),
+        )
         .group(group("type_early", proto).pass(stage_pass(
             "type_early",
             proto,
