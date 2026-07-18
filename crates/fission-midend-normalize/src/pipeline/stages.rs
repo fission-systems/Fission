@@ -21,10 +21,10 @@ use super::super::cleanup::{
     simplify_empty_and_constant_ifs_recursive, single_pred_label_inline,
 };
 use super::super::global_opt::{
-    apply_bit_consume_dead_code_pass, apply_conditional_const_pass, apply_cse_pass,
-    apply_dead_store_elimination, apply_gvn_join_hoist_pass, apply_licm_pass,
-    apply_nz_mask_simplification_pass, apply_post_assign_value_representative_pass,
-    apply_redundant_load_elimination, apply_sccp_pass,
+    apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
+    apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
+    apply_post_assign_value_representative_pass, apply_redundant_load_elimination,
+    apply_sccp_pass,
 };
 use super::super::idioms::{
     apply_branch_prefix_hoist_pass, apply_split_flow_pass, apply_subflow_pruning,
@@ -162,21 +162,17 @@ pub(super) fn cleanup_after_constant_ptr_recovery(func: &mut HirFunction) {
     prune_unused_dead_local_bindings(func);
 }
 
+/// Cleanup block for the `conditional_const` chain, same migration pattern
+/// as [`cleanup_after_constant_ptr_recovery`].
+pub(super) fn cleanup_after_conditional_const(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    constant_folding_pass(&mut func.body);
+    eliminate_dead_local_clobber_assigns(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
+
 pub fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, perf: bool) {
-    if run_pass_logged(
-        func,
-        "conditional_const",
-        perf,
-        apply_conditional_const_pass,
-    ) {
-        run_cleanup_block(func, "cleanup_conditional_const", perf, |f| {
-            cleanup_func_stmt_list(f);
-            constant_folding_pass(&mut f.body);
-            eliminate_dead_local_clobber_assigns(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
     if run_pass_logged(
         func,
         "entry_param_promotion",

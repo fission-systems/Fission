@@ -2,10 +2,12 @@
 
 use fission_midend_core::wave_stats;
 use super::stages::{
-    cleanup_after_constant_ptr_recovery, run_stage_block_structure_1, run_stage_cleanup,
-    run_stage_deadcode_dynamic, run_stage_heritage_value_recovery, run_stage_memory_recovery,
-    run_stage_merge, run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
+    cleanup_after_conditional_const, cleanup_after_constant_ptr_recovery,
+    run_stage_block_structure_1, run_stage_cleanup, run_stage_deadcode_dynamic,
+    run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,
+    run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
 };
+use super::super::global_opt::apply_conditional_const_pass;
 use super::super::memory::apply_constant_ptr_recovery_pass;
 use fission_midend_core::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, cleanup_pass, fn_pass,
@@ -75,6 +77,18 @@ pub fn build_normalize_pipeline() -> Pipeline {
                         "cleanup_constant_ptr",
                         concept,
                         cleanup_after_constant_ptr_recovery,
+                    )],
+                ))
+                .pass(gated_followup(
+                    fn_pass(
+                        "conditional_const",
+                        concept,
+                        apply_conditional_const_pass,
+                    ),
+                    vec![cleanup_pass(
+                        "cleanup_conditional_const",
+                        concept,
+                        cleanup_after_conditional_const,
                     )],
                 ))
                 .pass(stage_pass(
