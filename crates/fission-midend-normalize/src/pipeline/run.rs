@@ -24,10 +24,11 @@ use super::super::cleanup::{
 };
 use super::super::cleanup::{
     apply_switch_norm_pass, canonicalize_minmax_conditional_returns, cast_elision_pass,
-    cleanup_redundant_boundary_labels, collapse_common_exit_guard_chain,
-    collapse_redundant_conditional_returns, collapse_temp_self_square_assigns,
-    collapse_trivial_assign_returns, collapse_trivial_pointer_alias_bindings,
-    conditional_select_pass, elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
+    cleanup_redundant_boundary_labels, collapse_adjacent_pure_copy_into_if,
+    collapse_common_exit_guard_chain, collapse_redundant_conditional_returns,
+    collapse_temp_self_square_assigns, collapse_trivial_assign_returns,
+    collapse_trivial_pointer_alias_bindings, conditional_select_pass,
+    elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
     eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
     fuse_single_predecessor_boundaries, inline_loop_condition_trailing_temps,
     inline_single_use_temps, normalize_dowhile_decrement_condition,
@@ -1630,6 +1631,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if collapse_temp_self_square_assigns(stmts) {
             changed = true;
             last_changed_pass = Some("collapse_temp_self_square_assigns");
+        }
+        if collapse_adjacent_pure_copy_into_if(stmts) {
+            changed = true;
+            last_changed_pass = Some("collapse_adjacent_pure_copy_into_if");
         }
         if prune_unreachable_after_terminal(stmts) {
             changed = true;

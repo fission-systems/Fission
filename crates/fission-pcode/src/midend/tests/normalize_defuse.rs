@@ -362,6 +362,59 @@ fn defuse_preserves_used_temp_assignment() {
     );
 }
 
+/// power-class: pure copy before `if (t <= 0)` inside while must inline.
+#[test]
+fn normalize_inlines_pure_copy_before_sle_zero_in_while() {
+    let mut func = HirFunction {
+        name: "test_power_pure_copy_exit".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![param_binding("param_18", 32)],
+        locals: vec![temp_binding("iVar36", 32)],
+        return_type: int(32),
+        surface_return_type_name: None,
+        body: vec![
+            HirStmt::While {
+                cond: HirExpr::Const(1, int(32)),
+                body: vec![
+                    assign("iVar36", varexpr("param_18")),
+                    HirStmt::If {
+                        cond: HirExpr::Binary {
+                            op: HirBinaryOp::SLe,
+                            lhs: Box::new(varexpr("iVar36")),
+                            rhs: Box::new(const_expr(0, 32)),
+                            ty: NirType::Bool,
+                        },
+                        then_body: vec![HirStmt::Break],
+                        else_body: vec![],
+                    },
+                    assign(
+                        "param_18",
+                        HirExpr::Binary {
+                            op: HirBinaryOp::Shr,
+                            lhs: Box::new(varexpr("param_18")),
+                            rhs: Box::new(const_expr(1, 32)),
+                            ty: sint(32),
+                        },
+                    ),
+                ],
+            },
+            return_expr(varexpr("param_18")),
+        ],
+        ..Default::default()
+    };
+    // Mark param as signed-like local for type of SLe const if needed.
+    normalize_hir_function(&mut func);
+    let code = print_hir_function(&func);
+    assert!(
+        !code.contains("iVar36 ="),
+        "pure copy into if (t <= 0) must inline; got:\n{code}"
+    );
+    assert!(
+        code.contains("param_18") && (code.contains("<= 0") || code.contains("<=0")),
+        "exit test should use param_18; got:\n{code}"
+    );
+}
+
 #[test]
 fn normalize_preserves_loop_assigned_temp_used_after_loop() {
     let mut func = HirFunction {

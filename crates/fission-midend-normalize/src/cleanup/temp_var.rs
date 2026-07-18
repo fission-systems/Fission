@@ -108,6 +108,107 @@ pub fn inline_single_use_temps(stmts: &mut Vec<HirStmt>, preserved_temps: &HashS
     inline_single_use_temps_recursive(stmts, preserved_temps, &use_counts)
 }
 
+/// Adjacent pure copy into the next if: `t = a; if (… t …)` → `if (… a …)`
+/// when `t` is a trivial temp, `a` is pure, and every use of `t` is on that if
+/// (whole-function and sequential budgets match).
+///
+/// Measured on power exit tests after folding `t == 0 || t < 0` → `t <= 0`.
+pub fn collapse_adjacent_pure_copy_into_if(stmts: &mut Vec<HirStmt>) -> bool {
+    let use_counts = DefUseMap::build(stmts).use_count;
+    collapse_adjacent_pure_copy_into_if_with_counts(stmts, &use_counts)
+}
+
+fn collapse_adjacent_pure_copy_into_if_with_counts(
+    stmts: &mut Vec<HirStmt>,
+    use_counts: &HashMap<String, usize>,
+) -> bool {
+    let mut changed = collapse_adjacent_pure_copy_into_if_linear(stmts, use_counts);
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(body, use_counts);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(i) = init {
+                    if let HirStmt::Block(b) = &mut **i {
+                        changed |= collapse_adjacent_pure_copy_into_if_with_counts(b, use_counts);
+                    }
+                }
+                if let Some(u) = update {
+                    if let HirStmt::Block(b) = &mut **u {
+                        changed |= collapse_adjacent_pure_copy_into_if_with_counts(b, use_counts);
+                    }
+                }
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(body, use_counts);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(then_body, use_counts);
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(else_body, use_counts);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |=
+                        collapse_adjacent_pure_copy_into_if_with_counts(&mut case.body, use_counts);
+                }
+                changed |= collapse_adjacent_pure_copy_into_if_with_counts(default, use_counts);
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn collapse_adjacent_pure_copy_into_if_linear(
+    stmts: &mut Vec<HirStmt>,
+    use_counts: &HashMap<String, usize>,
+) -> bool {
+    if stmts.len() < 2 {
+        return false;
+    }
+    let mut changed = false;
+    let mut i = 0usize;
+    while i + 1 < stmts.len() {
+        let (t_name, rhs) = match &stmts[i] {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(t),
+                rhs,
+            } if is_trivial_temp_name(t) && expr_is_pure_copy_rhs(rhs) => (t.clone(), rhs.clone()),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        let HirStmt::If { .. } = &stmts[i + 1] else {
+            i += 1;
+            continue;
+        };
+        let if_uses = count_var_uses_in_stmt(&stmts[i + 1], &t_name);
+        if if_uses == 0 {
+            i += 1;
+            continue;
+        }
+        let sequential = count_uses_until_redef(stmts, i, &t_name);
+        let total = use_counts.get(t_name.as_str()).copied().unwrap_or(0);
+        // All uses of t are on this if (no post-loop / multi-def residual uses).
+        if sequential != if_uses || total != sequential {
+            i += 1;
+            continue;
+        }
+        // Free vars of rhs must not be redefined between def and if (adjacent: none).
+        replace_var_in_stmt(&mut stmts[i + 1], &t_name, &rhs);
+        stmts.remove(i);
+        changed = true;
+        // Do not advance i — new stmt at i may also match.
+    }
+    changed
+}
+
 /// Collapse pure temp self-square chains:
 /// `t = a; t = t * t; a = t`  →  `a = a * a`
 /// when `t` is a trivial temp and has no other live uses in between.
@@ -267,7 +368,22 @@ fn inline_single_use_temps_recursive(
         };
         let target_uses = count_var_uses_in_stmt(&stmts[target_idx], &name);
         let total_uses = use_counts.get(name.as_str()).copied().unwrap_or(0);
-        if total_uses != target_uses {
+        // Pure Var/Const/Cast-of-Var copies: allow when all whole-function uses
+        // are covered by the sequential live range up to the forward target.
+        // This inlines `t = a; if (t <= 0)` inside loops without treating
+        // multi-def or post-loop uses as single-use (loop-carried / CDQ-safe).
+        let pure_copy = expr_is_pure_copy_rhs(&rhs);
+        let sequential_uses = if pure_copy {
+            count_uses_until_redef(stmts, idx, &name)
+        } else {
+            0
+        };
+        let use_budget_ok = if pure_copy && sequential_uses > 0 {
+            sequential_uses == target_uses && total_uses == sequential_uses
+        } else {
+            total_uses == target_uses
+        };
+        if !use_budget_ok {
             idx += 1;
             continue;
         }
@@ -341,6 +457,27 @@ fn inline_single_use_temps_recursive(
     }
 
     changed
+}
+
+fn count_uses_until_redef(stmts: &[HirStmt], def_idx: usize, name: &str) -> usize {
+    let mut total = 0usize;
+    for stmt in stmts.iter().skip(def_idx + 1) {
+        if stmt_redefines_temp(stmt, name) {
+            break;
+        }
+        total = total.saturating_add(count_var_uses_in_stmt(stmt, name));
+    }
+    total
+}
+
+fn expr_is_pure_copy_rhs(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+        HirExpr::Cast { expr, .. } => {
+            matches!(expr.as_ref(), HirExpr::Var(_) | HirExpr::Const(_, _))
+        }
+        _ => false,
+    }
 }
 
 fn find_inline_forward_target(
