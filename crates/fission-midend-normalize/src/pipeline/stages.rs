@@ -42,10 +42,7 @@ use super::super::recovery::{
     copy_propagation_pass, join_coalescing_pass,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
-use super::super::types::{
-    apply_entry_param_promotion_pass, apply_interproc_callsite_arity_pass,
-    apply_variadic_stack_region_pass,
-};
+use super::super::types::{apply_interproc_callsite_arity_pass, apply_variadic_stack_region_pass};
 use super::run::{
     apply_type_signature_fixed_point, body_contains_popcount_call, body_has_loopish_shapes,
     cleanup_func_stmt_list, contains_call_stmts, hir_shape, is_large_hir_function,
@@ -172,23 +169,16 @@ pub(super) fn cleanup_after_conditional_const(func: &mut HirFunction) {
     prune_unused_dead_local_bindings(func);
 }
 
+/// Cleanup block for the `entry_param_promotion` chain, same migration
+/// pattern as [`cleanup_after_constant_ptr_recovery`].
+pub(super) fn cleanup_after_entry_param_promotion(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
+
 pub fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, perf: bool) {
-    if run_pass_logged(
-        func,
-        "entry_param_promotion",
-        perf,
-        apply_entry_param_promotion_pass,
-    ) {
-        run_cleanup_block(func, "cleanup_defuse_6", perf, |f| {
-            cleanup_func_stmt_list(f);
-
-            defuse_dead_assignment_pass(f);
-
-            prune_unused_temp_bindings(f);
-
-            prune_unused_dead_local_bindings(f);
-        });
-    }
     // SCCP: global sparse constant propagation on structured HIR (lattice merge
     // at joins).  Runs after local constant folding so folded seeds propagate.
     let sccp_admission = sccp_admission_summary(&func.body);
