@@ -32,7 +32,8 @@ pub use loops_conds::{
     recover_guarded_loop_tail_accumulator_returns,
 };
 pub use temp_var::{
-    coerce_ptr_typed_bitop_vars, collapse_trivial_assign_returns, elide_unused_popcount_assigns,
+    coerce_ptr_typed_bitop_vars, collapse_temp_self_square_assigns,
+    collapse_trivial_assign_returns, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
     eliminate_redundant_var_assigns, hoist_param_alias_copies_before_first_use,
     inline_single_use_temps, prune_unused_dead_local_bindings, prune_unused_temp_bindings,

@@ -25,9 +25,9 @@ use super::super::cleanup::{
 use super::super::cleanup::{
     apply_switch_norm_pass, canonicalize_minmax_conditional_returns, cast_elision_pass,
     cleanup_redundant_boundary_labels, collapse_common_exit_guard_chain,
-    collapse_redundant_conditional_returns, collapse_trivial_assign_returns,
-    collapse_trivial_pointer_alias_bindings, conditional_select_pass,
-    elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
+    collapse_redundant_conditional_returns, collapse_temp_self_square_assigns,
+    collapse_trivial_assign_returns, collapse_trivial_pointer_alias_bindings,
+    conditional_select_pass, elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
     eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
     fuse_single_predecessor_boundaries, inline_loop_condition_trailing_temps,
     inline_single_use_temps, normalize_dowhile_decrement_condition,
@@ -63,13 +63,13 @@ use super::super::types::{
     apply_interproc_callsite_arity_pass, apply_type_constraint_propagation,
     apply_type_inference_pass, apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
-use fission_midend_core::wave_stats;
 use crate::prelude::*;
 use fission_midend_core::action_pipeline::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT, PassBudget,
     TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS,
 };
 use fission_midend_core::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
+use fission_midend_core::wave_stats;
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
@@ -680,7 +680,7 @@ fn expr_contains_const(expr: &HirExpr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn empty_func() -> HirFunction {
         HirFunction {
@@ -1010,8 +1010,7 @@ pub fn run_cleanup_family_passes(
                 &format!("cleanup_boundary_label_{stage}"),
                 perf,
                 |f| {
-                    let global_refs =
-                        crate::cleanup::utils::collect_referenced_labels(&f.body);
+                    let global_refs = crate::cleanup::utils::collect_referenced_labels(&f.body);
                     cleanup_boundary_labels_recursive(&mut f.body, &global_refs)
                 },
             );
@@ -1051,12 +1050,7 @@ pub fn run_cleanup_family_passes(
     changed
 }
 
-pub fn run_pass_logged<F>(
-    func: &mut HirFunction,
-    pass_name: &str,
-    perf: bool,
-    pass_fn: F,
-) -> bool
+pub fn run_pass_logged<F>(func: &mut HirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
 where
     F: FnOnce(&mut HirFunction) -> bool,
 {
@@ -1632,6 +1626,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if depth == 0 && inline_single_use_temps(stmts, preserved_temps) {
             changed = true;
             last_changed_pass = Some("inline_single_use_temps");
+        }
+        if collapse_temp_self_square_assigns(stmts) {
+            changed = true;
+            last_changed_pass = Some("collapse_temp_self_square_assigns");
         }
         if prune_unreachable_after_terminal(stmts) {
             changed = true;

@@ -242,7 +242,11 @@ fn eliminate_redundant_var_assigns_recurses_into_nested_block() {
     assert!(eliminate_redundant_var_assigns(&mut stmts));
     match &stmts[0] {
         HirStmt::Block(body) => {
-            assert_eq!(body.len(), 2, "self-assign inside Block must be dropped: {body:?}");
+            assert_eq!(
+                body.len(),
+                2,
+                "self-assign inside Block must be dropped: {body:?}"
+            );
             assert!(
                 !body.iter().any(|s| matches!(
                     s,
@@ -836,6 +840,109 @@ fn inline_single_use_temps_keeps_same_linear_segment_inline() {
         panic!("expected assignment");
     };
     assert!(!expr_contains_var(rhs, "xVar0"));
+}
+
+/// power-class: pure copy into predicate with two uses of the temp.
+#[test]
+fn inline_pure_copy_into_multi_use_predicate() {
+    let signed = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("iVar36".to_string()),
+            rhs: HirExpr::Var("param_18".to_string()),
+        },
+        HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::LogicalOr,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Var("iVar36".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, signed.clone())),
+                    ty: NirType::Bool,
+                }),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::SLt,
+                    lhs: Box::new(HirExpr::Var("iVar36".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, signed.clone())),
+                    ty: NirType::Bool,
+                }),
+                ty: NirType::Bool,
+            },
+            then_body: vec![HirStmt::Break],
+            else_body: vec![],
+        },
+    ];
+    assert!(
+        inline_single_use_temps(&mut stmts, &HashSet::new()),
+        "pure copy into multi-use predicate should inline: {stmts:?}"
+    );
+    assert_eq!(stmts.len(), 1, "temp assign removed: {stmts:?}");
+    match &stmts[0] {
+        HirStmt::If { cond, .. } => {
+            assert!(
+                !expr_contains_var(cond, "iVar36"),
+                "iVar36 should be substituted: {cond:?}"
+            );
+            assert!(
+                expr_contains_var(cond, "param_18"),
+                "param_18 should appear: {cond:?}"
+            );
+        }
+        other => panic!("expected If, got {other:?}"),
+    }
+}
+
+/// power-class: t = a; t = t * t; a = t  →  a = a * a
+#[test]
+fn collapse_temp_self_square_into_inplace() {
+    let ty = NirType::Int {
+        bits: 64,
+        signed: true,
+    };
+    let mut stmts = vec![
+        HirStmt::Assign {
+            lhs: HirLValue::Var("xVar23".to_string()),
+            rhs: HirExpr::Var("param_10".to_string()),
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("xVar23".to_string()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(HirExpr::Var("xVar23".to_string())),
+                rhs: Box::new(HirExpr::Var("xVar23".to_string())),
+                ty: ty.clone(),
+            },
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("param_10".to_string()),
+            rhs: HirExpr::Var("xVar23".to_string()),
+        },
+    ];
+    assert!(
+        collapse_temp_self_square_assigns(&mut stmts),
+        "expected square collapse: {stmts:?}"
+    );
+    assert_eq!(stmts.len(), 1, "{stmts:?}");
+    match &stmts[0] {
+        HirStmt::Assign {
+            lhs: HirLValue::Var(dst),
+            rhs:
+                HirExpr::Binary {
+                    op: HirBinaryOp::Mul,
+                    lhs,
+                    rhs,
+                    ..
+                },
+        } => {
+            assert_eq!(dst, "param_10");
+            assert!(matches!(lhs.as_ref(), HirExpr::Var(n) if n == "param_10"));
+            assert!(matches!(rhs.as_ref(), HirExpr::Var(n) if n == "param_10"));
+        }
+        other => panic!("expected param_10 = param_10 * param_10, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1498,10 +1605,7 @@ fn diagnostic_print_expr_renders_callind_opaque_call_shape() {
     };
 
     let rendered = format_expr_key(&expr);
-    assert_eq!(
-        rendered,
-        "__fission_callind_opaque(fn_ptr, arg1, arg2)"
-    );
+    assert_eq!(rendered, "__fission_callind_opaque(fn_ptr, arg1, arg2)");
 }
 
 #[test]
@@ -1706,20 +1810,34 @@ fn collapse_trivial_assign_returns_folds_rax_param_add() {
             rhs: HirExpr::Binary {
                 op: HirBinaryOp::Add,
                 lhs: Box::new(HirExpr::Var("param_1".to_string())),
-                rhs: Box::new(HirExpr::Const(5, NirType::Int { bits: 32, signed: true })),
-                ty: NirType::Int { bits: 32, signed: true },
+                rhs: Box::new(HirExpr::Const(
+                    5,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
             },
         },
         HirStmt::Return(Some(HirExpr::Var("rax".to_string()))),
     ];
-    assert!(collapse_trivial_assign_returns(&mut stmts, &std::collections::HashSet::new()));
+    assert!(collapse_trivial_assign_returns(
+        &mut stmts,
+        &std::collections::HashSet::new()
+    ));
     assert_eq!(stmts.len(), 1);
     match &stmts[0] {
-        HirStmt::Return(Some(HirExpr::Binary { op: HirBinaryOp::Add, .. })) => {}
+        HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            ..
+        })) => {}
         other => panic!("expected folded return add, got {other:?}"),
     }
 }
-
 
 fn rescue_undeclared_bindings_declares_stack_local_names() {
     let mut func = HirFunction {
