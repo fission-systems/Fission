@@ -503,6 +503,55 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   `golden_corpus_check.py`, 6-function regression, `state_machine_score`
   20/20, release/quick-release byte-identical, plus the 10-run `--all`
   code-content determinism check above).
+- **Perf sweep round 8, 2026-07-20 — negative-ish result, recorded for
+  the methodology lesson** (user asked to pursue round 7's flagged-but-
+  unfixed `thread_start` finding: `--all` spawns one large-stack OS
+  thread per function via `render_one_function_on_large_stack`, even
+  though `run_worker_fanout_fanin`'s persistent worker threads already
+  carry `stack_size_bytes` of stack themselves):
+  1. Fixed (commit `2d6f0d09`): inside `run_worker_fanout_fanin`'s
+     worker loop specifically (not the sequential/single-function path
+     in `mod.rs`, which runs on the process's default-stack main thread
+     and genuinely needs the spawn for stack headroom), skip the
+     watchdog-thread spawn when no `--timeout-ms` is configured (the
+     CLI default) and call `render_one_function_inner` directly.
+     Behavior-preserving: with no timeout, a hang blocks the worker
+     either way, spawned-and-joined or not — confirmed by re-reading
+     `render_one_function_on_large_stack`'s existing untimed branch,
+     which already just does a blocking `handle.join()` with no timeout
+     wrapper, so there was no actual hang-protection being removed.
+  2. **Measured impact: none, within noise.** A controlled A/B with
+     `FISSION_RUST_DECOMP_WORKERS=1` (isolating exactly the
+     spawn-per-task cost against `advanced_patterns_gcc_O2.exe`'s 73
+     functions, everything else held constant) showed no measurable
+     `user`-CPU or wall-clock difference before vs after — contradicting
+     round 7's `sample`-based estimate of ~9.3% self-time. Likely
+     explanation: macOS thread creation with a lazily-committed
+     (not eagerly zeroed) 32MB stack is apparently cheap in actual CPU
+     terms; `sample`'s 1ms-interval wall-clock sampling can still
+     attribute real leaf-sample weight to a brief per-thread scheduling
+     window (thread exists, hasn't reached user code yet) without that
+     time corresponding to sustained CPU work — so many short-lived
+     threads passing through that window inflates the self-time
+     percentage without inflating measured `user`/`real` time.
+  3. **Kept the change anyway**: it removes genuinely dead work (an
+     unconditional spawn+join that buys nothing when untimed) with zero
+     measured downside and zero correctness risk, but the expected win
+     did not materialize on this benchmark/platform.
+  4. **Methodology lesson for future rounds**: a `sample`-derived
+     self-time percentage is a hypothesis, not a measurement — always
+     close the loop with a controlled before/after timing comparison
+     (ideally isolating the one variable, as the `WORKERS=1` A/B did
+     here) before trusting the profile's implied win. Rounds 5–7's
+     fixes all had this confirmation step and their measured wins
+     matched expectations; round 8 is the first case this session where
+     the confirmation step caught a profile-based hypothesis that
+     didn't hold up, which is exactly why the step exists.
+  Validated: same checklist as round 7 (workspace check, 1962/1969
+  nextest with the same 7 pre-existing unrelated failures,
+  `golden_corpus_check.py`, 6-function regression, 10-run `--all`
+  code-content determinism, `state_machine_score` 20/20,
+  release/quick-release byte-identical).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
