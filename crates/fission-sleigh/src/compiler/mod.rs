@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context, Result};
 use policy::{canonical_processor_name, is_executable_candidate_entry, language_aliases_for};
@@ -488,7 +489,24 @@ pub fn discover_entry_specs_for_arch(arch: &str) -> Result<Vec<EntrySpec>> {
     Ok(entries)
 }
 
+static ENTRY_SPECS_CACHE: OnceLock<Vec<EntrySpec>> = OnceLock::new();
+
+/// Discovers every architecture's entry specs (manifest read + JSON parse,
+/// or a full spec-tree directory walk as fallback). The manifest and spec
+/// tree are static for the process's lifetime, but this is called on the
+/// per-pcode-decode hot path (`RuntimeSleighFrontend::exact_entry_for_id`),
+/// so cache the successful result once instead of re-reading and
+/// re-parsing on every call. Errors are not cached -- exceptional and
+/// expected to be rare, not hot-loop territory.
 pub fn discover_all_entry_specs() -> Result<Vec<EntrySpec>> {
+    if let Some(cached) = ENTRY_SPECS_CACHE.get() {
+        return Ok(cached.clone());
+    }
+    let entries = discover_all_entry_specs_uncached()?;
+    Ok(ENTRY_SPECS_CACHE.get_or_init(|| entries).clone())
+}
+
+fn discover_all_entry_specs_uncached() -> Result<Vec<EntrySpec>> {
     if let Some(entries) = discover_all_entry_specs_from_manifest()? {
         return Ok(entries);
     }
