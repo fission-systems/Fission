@@ -101,9 +101,13 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(crate) fn sese_region_proof_budget_exceeded(&self) -> bool {
-        self.structuring_start.is_some_and(|start| {
-            start.elapsed().as_secs_f64() * 1000.0 > SESE_REGION_PROOF_BUDGET_MS
-        })
+        let calls = self.sese_region_proof_calls.get() + 1;
+        self.sese_region_proof_calls.set(calls);
+        calls > SESE_REGION_PROOF_BUDGET_CALLS
+    }
+
+    pub(crate) fn reset_sese_region_proof_budget(&mut self) {
+        self.sese_region_proof_calls.set(0);
     }
 
     pub(crate) fn build_sese_region_body(

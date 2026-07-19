@@ -90,6 +90,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn set_structuring_start(&mut self, t: Option<std::time::Instant>) {
         self.structuring_start = t;
     }
+    fn reset_sese_region_proof_budget(&mut self) {
+        PreviewBuilder::reset_sese_region_proof_budget(self)
+    }
     fn block_target_key(&self, idx: usize) -> u64 {
         PreviewBuilder::block_target_key(self, idx)
     }

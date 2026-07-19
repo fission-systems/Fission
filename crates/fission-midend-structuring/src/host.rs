@@ -62,6 +62,10 @@ pub trait StructuringHost {
     fn current_function_name(&self) -> Option<&str>;
     fn structuring_start(&self) -> Option<std::time::Instant>;
     fn set_structuring_start(&mut self, t: Option<std::time::Instant>);
+    /// Resets the deterministic call-count budget consumed by
+    /// `sese_region_proof_budget_exceeded()`. Call once per structuring
+    /// attempt, alongside `set_structuring_start`.
+    fn reset_sese_region_proof_budget(&mut self);
 
     // ── Address / block identity ───────────────────────────────────────────
     fn block_target_key(&self, idx: usize) -> u64;

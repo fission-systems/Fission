@@ -73,7 +73,7 @@ pub use linear_types::{
 };
 pub use linear_multiblock::{build_linear_multiblock_body, lower_structured_switch_terminator, switch_recovery_cfg_admitted};
 pub use linear_recovery::{
-    SESE_REGION_PROOF_BUDGET_MS, build_linear_sese_child_fallback,
+    SESE_REGION_PROOF_BUDGET_CALLS, build_linear_sese_child_fallback,
     region_linearized_exit_candidates_algorithmic, try_recover_region_linearized_body,
 };
 pub use guarded_tail::{

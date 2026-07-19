@@ -13,8 +13,15 @@ use crate::linear_types::{
 use fission_midend_core::ir::{HirStmt, MlilPreviewError};
 use crate::HashSet;
 
-/// Soft SESE region proof budget (ms), kept aligned with pcode builder_types.
-pub const SESE_REGION_PROOF_BUDGET_MS: f64 = 500.0;
+/// Soft SESE region proof budget, in `sese_region_proof_budget_exceeded()`
+/// calls since the structuring attempt began. Deliberately a call count, not
+/// a wall-clock duration: this budget gates how many candidate-region proof
+/// attempts a single function's structuring may make before falling back,
+/// and a wall-clock version made that fallback point -- and therefore the
+/// decompiled output -- depend on machine speed / load (see PROJECT.md).
+/// Calibrated generously above what any corpus function needs; only meant
+/// to bound genuinely pathological (e.g. exponential node-splitting) cases.
+pub const SESE_REGION_PROOF_BUDGET_CALLS: u64 = 20_000;
 
 fn push_unique_region_exit(candidates: &mut Vec<LinearExit>, candidate: LinearExit) {
     if !candidates.contains(&candidate) {
@@ -169,8 +176,8 @@ pub fn build_linear_sese_child_fallback(
     if host.sese_region_proof_budget_exceeded() {
         if structuring_diag_enabled() {
             eprintln!(
-                "[DIAG] build_linear_sese_child_fallback: skipping payload lowering after {}ms proof ceiling",
-                SESE_REGION_PROOF_BUDGET_MS as usize
+                "[DIAG] build_linear_sese_child_fallback: skipping payload lowering after {} proof-attempt ceiling",
+                SESE_REGION_PROOF_BUDGET_CALLS
             );
         }
         return Err(MlilPreviewError::UnsupportedCfgRegionShape);

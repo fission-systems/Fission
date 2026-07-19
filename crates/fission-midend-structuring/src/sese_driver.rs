@@ -12,7 +12,7 @@ use crate::driver_pure::{region_kind_for_stmt, region_selector_or_condition};
 use crate::graph::{StructureNode, capture_structuring_failure};
 use crate::guarded_tail::promote_guarded_tail_regions_until_stable;
 use crate::host::StructuringHost;
-use crate::linear_recovery::{SESE_REGION_PROOF_BUDGET_MS, try_recover_region_linearized_body};
+use crate::linear_recovery::{SESE_REGION_PROOF_BUDGET_CALLS, try_recover_region_linearized_body};
 use crate::linear_types::structuring_diag_enabled;
 use crate::loops::{
     try_lower_dowhile, try_lower_for, try_lower_infloop, try_lower_infloop_with_break,
@@ -188,8 +188,8 @@ pub fn build_sese_region_body(
     if host.sese_region_proof_budget_exceeded() {
         if diag {
             eprintln!(
-                "[DIAG] build_sese_region_body: aborting structuring entry due to {}ms proof ceiling",
-                SESE_REGION_PROOF_BUDGET_MS as usize
+                "[DIAG] build_sese_region_body: aborting structuring entry due to {} proof-attempt ceiling",
+                SESE_REGION_PROOF_BUDGET_CALLS
             );
         }
         return Err(MlilPreviewError::UnsupportedCfgRegionShape);
@@ -214,8 +214,8 @@ pub fn build_sese_region_body(
         if host.sese_region_proof_budget_exceeded() {
             if diag {
                 eprintln!(
-                    "[DIAG] build_sese_region_body: aborting collapse loop due to {}ms proof ceiling",
-                    SESE_REGION_PROOF_BUDGET_MS as usize
+                    "[DIAG] build_sese_region_body: aborting collapse loop due to {} proof-attempt ceiling",
+                    SESE_REGION_PROOF_BUDGET_CALLS
                 );
             }
             return Err(MlilPreviewError::UnsupportedCfgRegionShape);

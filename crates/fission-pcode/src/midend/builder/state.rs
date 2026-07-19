@@ -82,4 +82,10 @@ pub(crate) struct PreviewBuilder<'a> {
     /// the hot varnode-lowering path (per-op, potentially per candidate
     /// region-proof attempt during structuring).
     pub(crate) register_namer_cache: std::cell::OnceCell<crate::midend::cspec::RegisterNamer>,
+    /// Deterministic proxy for `SESE_REGION_PROOF_BUDGET_MS`: counts
+    /// `sese_region_proof_budget_exceeded()` calls since the last
+    /// `reset_sese_region_proof_budget()` instead of measuring wall-clock
+    /// elapsed time, so region-proof completion (and thus decompiled
+    /// output) no longer depends on machine speed / load. See PROJECT.md.
+    pub(crate) sese_region_proof_calls: std::cell::Cell<u64>,
 }

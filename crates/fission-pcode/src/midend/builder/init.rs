@@ -158,6 +158,7 @@ impl<'a> PreviewBuilder<'a> {
             lower_varnode_cache: Default::default(),
             structured_body: None,
             register_namer_cache: std::cell::OnceCell::new(),
+            sese_region_proof_calls: std::cell::Cell::new(0),
         };
         b
     }
