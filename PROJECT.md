@@ -204,27 +204,79 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   a fixed internal ceiling. Real fix would be wiring a shared deadline/
   cancellation token through those existing checkpoints — tracked as
   further follow-up, out of scope for this pass.
-- **Pre-existing aarch64-specific nondeterminism found 2026-07-19, NOT
-  fixed** (found while validating the `discover_all_entry_specs()`
-  caching perf fix, commit `57a1ce3e`): `control_flow_gcc-aarch64_O0`'s
-  `__dcigettext` (`0x401dd0`) produces 3+ distinct outputs across 5
-  repeat runs. Confirmed via `git stash` that this reproduces on the
-  pre-fix binary too — genuinely pre-existing, not introduced or masked
-  by the manifest-caching change. Root cause not yet found;
-  `CompiledRuntimeRegistry`'s frontend-selection path
-  (`executable_sibling_entry_ids_for_load_spec`,
-  `new_candidate_frontends_for_load_spec`) was inspected and looks
-  clean (plain `Vec`/`BTreeSet` iteration, no `HashMap`/`HashSet`), so
-  the source is somewhere else — possibly aarch64-specific pcode
-  lifting/decoding, or a hash-iteration site in `fission-sleigh` that
-  the earlier `FxBuildHasher` sweep never covered (that sweep was
-  scoped to `fission-pcode::midend` + `fission-midend-structuring`
-  only). Only reproduced on this one aarch64 function so far; x86/x64
-  targets (the `golden_corpus_check.py` default corpus, all 6
-  hand-curated functions) are unaffected. Tracked as a separate,
-  unstarted investigation — same severity class as the hash-iteration
-  and wall-clock-budget fixes above, but a different root cause and not
-  yet diagnosed.
+- **Pre-existing ELF-format nondeterminism found 2026-07-19, STILL NOT
+  FIXED despite substantial investigation** (found while validating the
+  `discover_all_entry_specs()` caching perf fix, commit `57a1ce3e`).
+  Read this whole entry before spending more time on it — several
+  plausible-looking leads are already ruled out with hard evidence.
+
+  **Repro**: `control_flow_gcc-elf_x64_O0`'s `main` (`0x401269`, x86-64
+  ELF) and `control_flow_gcc-aarch64_O0`'s `__dcigettext` (`0x401dd0`)
+  both flip between two (x64) or more (aarch64) distinct outputs across
+  repeated runs, roughly 50/50 for the x64 case. **PE binaries are
+  unaffected** — the entire `golden_corpus_check.py` default corpus (160
+  functions) and all 6 hand-curated functions are PE and stay clean.
+  Confirmed via `git stash` this predates every fix in this session,
+  including the `discover_all_entry_specs()` caching commit.
+
+  **Symptom, precisely**: diffing a "good" vs "bad" run of the x64 repro
+  shows the *only* difference is a temp variable's number (e.g. `xVar5`
+  vs `xVar15`) — same structure, same values, same everything else. It
+  is the same logical value, just a different survivor name.
+
+  **Ruled out, with evidence** (do not re-investigate these without new
+  information):
+  1. `rayon::join` race between the concurrent Go/Apple/DWARF/Rust/C++
+     analyzers in `fission-loader/src/loader/mod.rs` — replaced all four
+     `rayon::join` calls with sequential execution as a diagnostic
+     (`sequential_join_diag`, since reverted); flakiness rate was
+     unchanged. Not a race.
+  2. DWARF cyclic type-reference resolution order
+     (`fission-loader/src/loader/dwarf/types.rs::collect_type_names`) —
+     genuinely unstable (fixed in commit `30dd7a01`, sorting
+     `all_types.keys()` before the memoized recursive walk), but fixing
+     it did not change the repro's flakiness rate at all.
+  3. C++ RTTI analyzer (`fission-loader/src/loader/analyzers/cpp.rs`)
+     iterating `binary.iat_symbols`/`global_symbols` (`HashMap<u64,
+     String>`) unsorted — real latent bug for binaries *with* C++ RTTI
+     symbols, but the repro binary is pure C with zero `__ZTI`/`__ZTV`
+     symbols, so `analyze_classes()`/`discover_vtable_functions()`
+     return empty deterministically regardless of iteration order. Not
+     the cause for this repro (not fixed, since it doesn't apply here).
+  4. `fission-sleigh`'s frontend-selection path
+     (`CompiledRuntimeRegistry::executable_sibling_entry_ids_for_load_spec`,
+     `RuntimeSleighFrontend::new_candidate_frontends_for_load_spec`) —
+     inspected, uses only `Vec`/`BTreeSet` iteration. Clean.
+
+  **The one genuinely useful finding**: added `FISSION_TEMP_TRACE=1`
+  (env-gated, `fission-pcode/src/midend/builder/mod.rs`, memory-buffered
+  like the original session-opening heisenbug trace to avoid perturbing
+  timing) to log every `next_unused_temp_binding_name` allocation.
+  Captured matched "good" and "bad" runs of the x64 repro: **the
+  allocation sequence is byte-identical** (same count, same `before_id
+  -> name` pairs, same order) between the two. This proves the
+  divergence is NOT in temp-name allocation — it's in a *later* pass
+  that decides which of several already-allocated, logically-equivalent
+  names survives (copy propagation / variable merge / join coalescing
+  family — `fission-midend-normalize/src/recovery/{phi_recovery,
+  variable_merge}.rs`). Those specific passes were code-read and *look*
+  content-driven off deterministic HIR-body walks (point lookups into
+  `copy_map`/`const_map`, not iteration over them) — but this crate had
+  never been swept for `HashMap`/`HashSet` at all until this session
+  (commit `6fadc75e`, see above), and applying that full sweep did
+  **not** change the repro's flakiness rate either. So either the
+  specific site is still content-driven-safe as read, or the actual
+  culprit is somewhere not yet identified within that pass family, or
+  outside it entirely.
+
+  **Where to pick this up**: extend `FISSION_TEMP_TRACE`-style buffered
+  tracing to the copy-propagation/variable-merge/coalescing passes
+  specifically (e.g. dump `copy_map`'s sorted contents, or a hash of the
+  HIR body, after each pass in `run_normalize_pipeline`) and bisect
+  which pass's *output* first differs between a captured good/bad pair
+  — the allocation trace proves the input to normalize is identical, so
+  the divergence must appear somewhere in that pipeline's own passes.
+  Not yet attempted due to session length.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
