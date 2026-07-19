@@ -196,11 +196,35 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   context`) only to land on a parameter literally named `_timeout_ms`
   in `rendering/render.rs` — explicitly unused. There is currently no
   cooperative-cancellation checkpoint anywhere in the structuring/
-  rendering pipeline that consults the user's requested timeout; the
-  `IfLoweringBudget`/`loops.rs` wall-clock checks noted above are fixed
-  constants (10ms/5000ms) unrelated to `--timeout-ms`. Real fix would be
-  wiring a shared deadline/cancellation token through those existing
-  checkpoints — tracked as further follow-up, out of scope for this pass.
+  rendering pipeline that consults the user's requested timeout; at the
+  time this was written the `IfLoweringBudget`/`loops.rs` checks were
+  still fixed wall-clock constants (10ms/5000ms) unrelated to
+  `--timeout-ms` — since converted to `STRUCTURING_TOTAL_WORK_BUDGET`
+  (see above), but still not wired to the user's requested budget, just
+  a fixed internal ceiling. Real fix would be wiring a shared deadline/
+  cancellation token through those existing checkpoints — tracked as
+  further follow-up, out of scope for this pass.
+- **Pre-existing aarch64-specific nondeterminism found 2026-07-19, NOT
+  fixed** (found while validating the `discover_all_entry_specs()`
+  caching perf fix, commit `57a1ce3e`): `control_flow_gcc-aarch64_O0`'s
+  `__dcigettext` (`0x401dd0`) produces 3+ distinct outputs across 5
+  repeat runs. Confirmed via `git stash` that this reproduces on the
+  pre-fix binary too — genuinely pre-existing, not introduced or masked
+  by the manifest-caching change. Root cause not yet found;
+  `CompiledRuntimeRegistry`'s frontend-selection path
+  (`executable_sibling_entry_ids_for_load_spec`,
+  `new_candidate_frontends_for_load_spec`) was inspected and looks
+  clean (plain `Vec`/`BTreeSet` iteration, no `HashMap`/`HashSet`), so
+  the source is somewhere else — possibly aarch64-specific pcode
+  lifting/decoding, or a hash-iteration site in `fission-sleigh` that
+  the earlier `FxBuildHasher` sweep never covered (that sweep was
+  scoped to `fission-pcode::midend` + `fission-midend-structuring`
+  only). Only reproduced on this one aarch64 function so far; x86/x64
+  targets (the `golden_corpus_check.py` default corpus, all 6
+  hand-curated functions) are unaffected. Tracked as a separate,
+  unstarted investigation — same severity class as the hash-iteration
+  and wall-clock-budget fixes above, but a different root cause and not
+  yet diagnosed.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
