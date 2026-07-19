@@ -122,7 +122,7 @@ where
             }
             .into());
         }
-        if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+        if crate::runtime::diagnostics::sleigh_build_debug_enabled() {
             eprintln!(
                 "[template-emit] mnemonic={} template_source={:?} op_count={}",
                 state.mnemonic,

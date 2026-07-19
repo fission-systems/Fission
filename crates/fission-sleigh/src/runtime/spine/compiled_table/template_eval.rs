@@ -745,7 +745,7 @@ impl<'c> CompiledTableEmitter<'c> {
             // already decoded display operand.
             CompiledOpTplOpcode::Build => {
                 let idx = build_operand_index_from_op(op)?;
-                if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+                if crate::runtime::diagnostics::sleigh_build_debug_enabled() {
                     let handle = state.handles.get(idx);
                     let has_sub = handle
                         .as_ref()
@@ -927,7 +927,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     "BUILD operand {operand_index} is not backed by a SpecDerived subconstructor"
                 );
             }
-            if std::env::var("FISSION_BUILD_DEBUG").is_ok() {
+            if crate::runtime::diagnostics::sleigh_build_debug_enabled() {
                 eprintln!(
                     "[emit_build_operand] operand={operand_index} mnemonic={} child_ops_count={}",
                     child.mnemonic,
