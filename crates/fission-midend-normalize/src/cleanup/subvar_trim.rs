@@ -1,15 +1,15 @@
 use crate::prelude::*;
 use crate::analysis::defuse::DefUseMap;
 use fission_midend_core::expr_type;
-use std::collections::HashMap;
+use crate::HashMap;
 
 pub fn apply_subvar_trim_pass(func: &mut HirFunction) -> bool {
-    let mut assignments = HashMap::new();
+    let mut assignments = HashMap::default();
     find_all_assignments(&func.body, &mut assignments);
 
     let defuse = DefUseMap::build(&func.body);
 
-    let mut local_types = HashMap::new();
+    let mut local_types = HashMap::default();
     for local in &func.locals {
         local_types.insert(local.name.clone(), local.ty.clone());
     }

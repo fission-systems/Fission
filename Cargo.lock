@@ -2518,6 +2518,7 @@ dependencies = [
  "fission-signatures",
  "indexmap 2.14.0",
  "once_cell",
+ "rustc-hash 2.1.2",
  "serde_json",
  "tracing",
 ]

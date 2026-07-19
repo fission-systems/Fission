@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use super::utils::expr_has_side_effects;
 use super::utils::stmt_assigns_var;
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Simplifies a series of conditionally executed statements (Ghidra's ActionConditionalExe equivalent).
 /// Merges sequential sibling Ifs with identical conditions, and uses path-sensitive propagation
@@ -51,7 +51,7 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
             {
                 if cond1 == cond2 && else1.is_empty() && else2.is_empty() {
                     // Check if any variable in cond1 is modified inside then1
-                    let mut cond_vars = HashSet::new();
+                    let mut cond_vars = HashSet::default();
                     get_variables_in_expr(cond1, &mut cond_vars);
                     let modifies_cond_var = cond_vars
                         .iter()
@@ -189,7 +189,7 @@ fn fold_conditions(
                     changed |= fold_conditions(body, true_conds, false_conds);
                 }
                 HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                    let mut assigned_in_body = HashSet::new();
+                    let mut assigned_in_body = HashSet::default();
                     for s in body.iter() {
                         get_assigned_vars_in_stmt(s, &mut assigned_in_body);
                     }
@@ -203,7 +203,7 @@ fn fold_conditions(
                 HirStmt::For {
                     init, update, body, ..
                 } => {
-                    let mut assigned = HashSet::new();
+                    let mut assigned = HashSet::default();
                     if let Some(i) = init {
                         get_assigned_vars_in_stmt(i, &mut assigned);
                     }
@@ -236,7 +236,7 @@ fn fold_conditions(
         }
 
         // Invalidate any proven conditions referencing variables assigned by the statement at index
-        let mut assigned_vars = HashSet::new();
+        let mut assigned_vars = HashSet::default();
         get_assigned_vars_in_stmt(&stmts[idx], &mut assigned_vars);
         for var in assigned_vars {
             invalidate_variable(&var, true_conds, false_conds);
@@ -342,12 +342,12 @@ fn invalidate_variable(
     false_conds: &mut Vec<HirExpr>,
 ) {
     true_conds.retain(|cond| {
-        let mut vars = HashSet::new();
+        let mut vars = HashSet::default();
         get_variables_in_expr(cond, &mut vars);
         !vars.contains(var_name)
     });
     false_conds.retain(|cond| {
-        let mut vars = HashSet::new();
+        let mut vars = HashSet::default();
         get_variables_in_expr(cond, &mut vars);
         !vars.contains(var_name)
     });

@@ -4,7 +4,7 @@ use crate::prelude::*;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use super::typed_facts::collect_typed_fact_inventory;
 use fission_midend_core::wave_stats::add_surface_binding_promotions;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct MemorySlotKey {
@@ -70,7 +70,7 @@ pub fn apply_memory_slot_surfacing_cheap(func: &mut HirFunction) -> bool {
 }
 
 fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: bool) -> bool {
-    let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::new();
+    let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::default();
     collect_memory_slot_candidates(func, &mut candidates);
     let alias_defs = collect_single_var_aliases(&func.body);
     let mut ordered_candidates = candidates.values().collect::<Vec<_>>();
@@ -89,9 +89,9 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
         })
     });
     let inventory = collect_typed_fact_inventory(func, false);
-    let mut family_counts = HashMap::<MemorySlotFamilyKey, usize>::new();
-    let mut family_lanes = HashMap::<MemorySlotFamilyKey, HashSet<i64>>::new();
-    let mut family_base_offsets = HashMap::<MemorySlotFamilyKey, i64>::new();
+    let mut family_counts = HashMap::<MemorySlotFamilyKey, usize>::default();
+    let mut family_lanes = HashMap::<MemorySlotFamilyKey, HashSet<i64>>::default();
+    let mut family_base_offsets = HashMap::<MemorySlotFamilyKey, i64>::default();
     for candidate in &ordered_candidates {
         let family_key = memory_slot_family_key(&candidate.key);
         *family_counts.entry(family_key.clone()).or_insert(0) += candidate.count;
@@ -104,7 +104,7 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
             .and_modify(|offset| *offset = (*offset).min(candidate.key.offset))
             .or_insert(candidate.key.offset);
     }
-    let mut aliases = HashMap::<MemorySlotKey, MemorySlotAlias>::new();
+    let mut aliases = HashMap::<MemorySlotKey, MemorySlotAlias>::default();
     let mut used_names = func
         .params
         .iter()
@@ -187,8 +187,8 @@ fn slot_surface_type_name(
 }
 
 fn collect_single_var_aliases(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
-    let mut counts = HashMap::<String, usize>::new();
-    let mut defs = HashMap::<String, HirExpr>::new();
+    let mut counts = HashMap::<String, usize>::default();
+    let mut defs = HashMap::<String, HirExpr>::default();
 
     fn visit_stmt(
         stmt: &HirStmt,

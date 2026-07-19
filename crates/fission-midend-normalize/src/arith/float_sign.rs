@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use fission_midend_core::expr_type;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Normalizes floating-point sign bit manipulation patterns (equivalent to Ghidra's RuleFloatSign):
 /// - `x & 0x7fffffff` -> `fabsf(x)`
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 /// - `y & 0x7fffffffffffffff` -> `fabs(y)`
 /// - `y ^ 0x8000000000000000` -> `-y`
 pub fn apply_float_sign_pass(func: &mut HirFunction) -> bool {
-    let mut var_types = HashMap::new();
+    let mut var_types = HashMap::default();
     for binding in &func.params {
         var_types.insert(binding.name.clone(), binding.ty.clone());
     }

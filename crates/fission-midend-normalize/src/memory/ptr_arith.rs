@@ -48,7 +48,7 @@
 /// Reference: Ghidra `RulePtrArith` (ruleaction.cc:6496),
 ///            RetDec `DerefToArrayIndexOptimizer`.
 use crate::prelude::*;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Build a map from variable name → NirType for all locals and params.
 fn build_binding_type_map(func: &HirFunction) -> HashMap<String, NirType> {
@@ -1262,7 +1262,7 @@ fn collect_pointer_assignment_types_stmt(
 }
 
 fn propagate_pointer_assignment_types(func: &mut HirFunction) -> bool {
-    let mut inferred = HashMap::new();
+    let mut inferred = HashMap::default();
     collect_pointer_assignment_types(&func.body, &mut inferred);
     if inferred.is_empty() {
         return false;

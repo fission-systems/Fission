@@ -1,10 +1,10 @@
 use crate::prelude::*;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Optimizes redundant bit-widths, casts, and bitmasks in HIR expressions.
 /// Drawn from Ghidra's `subflow.cc` active bit analysis and bitstream pruning.
 pub fn apply_subflow_pruning(func: &mut HirFunction) -> bool {
-    let mut type_map = HashMap::new();
+    let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_redundant_bitmask_pruning() {
-        let mut type_map = HashMap::new();
+        let mut type_map = HashMap::default();
         type_map.insert("x".to_string(), u8_ty());
 
         // x & 0xff where x is u8
@@ -411,14 +411,14 @@ mod tests {
             ty: u8_ty(),
         };
 
-        let nz_masks = HashMap::new();
+        let nz_masks = HashMap::default();
         assert!(optimize_expr(&mut expr, &type_map, &nz_masks));
         assert_eq!(expr, HirExpr::Var("x".to_string()));
     }
 
     #[test]
     fn test_redundant_double_cast() {
-        let mut type_map = HashMap::new();
+        let mut type_map = HashMap::default();
         type_map.insert("x".to_string(), u8_ty());
 
         // (u64)(u32)x where x is u8
@@ -430,7 +430,7 @@ mod tests {
             }),
         };
 
-        let nz_masks = HashMap::new();
+        let nz_masks = HashMap::default();
         assert!(optimize_expr(&mut expr, &type_map, &nz_masks));
         assert_eq!(
             expr,

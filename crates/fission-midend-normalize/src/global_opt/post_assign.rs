@@ -18,7 +18,7 @@ use super::super::analysis::expr_key::{PureExprMap, invalidate_pure_map, pure_ex
 use crate::prelude::*;
 
 pub fn apply_post_assign_value_representative_pass(func: &mut HirFunction) -> bool {
-    let mut reps = PureExprMap::new();
+    let mut reps = PureExprMap::default();
     stabilize_stmts(&mut func.body, &mut reps)
 }
 

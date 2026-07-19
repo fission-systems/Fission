@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Details of a wide variable being replaced with a narrower one.
 #[derive(Debug, Clone)]
@@ -1021,16 +1021,16 @@ fn rewrite_stmts(stmts: &mut [HirStmt], varmap: &HashMap<String, ReplaceVar>) {
 /// Pipeline entry point for the Global Subvariable Flow Analyzer normalization pass.
 pub fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
     let mut assigns = Vec::new();
-    let mut multi_defined = HashSet::new();
+    let mut multi_defined = HashSet::default();
     collect_assignments(&func.body, &mut assigns, &mut multi_defined);
 
-    let mut type_map = HashMap::new();
+    let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }
 
     let nz_masks = crate::global_opt::compute_nz_masks(func);
-    let mut candidate_set = HashSet::new();
+    let mut candidate_set = HashSet::default();
 
     for assign in &assigns {
         if multi_defined.contains(&assign.lhs) {
@@ -1088,7 +1088,7 @@ pub fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
         return false;
     }
 
-    let mut def_map = HashMap::new();
+    let mut def_map = HashMap::default();
     for assign in assigns {
         if !multi_defined.contains(&assign.lhs) {
             def_map.insert(assign.lhs, assign.rhs);
@@ -1101,8 +1101,8 @@ pub fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
             def_map: def_map.clone(),
             type_map: type_map.clone(),
             multi_defined: multi_defined.clone(),
-            varmap: HashMap::new(),
-            pull_points: HashSet::new(),
+            varmap: HashMap::default(),
+            pull_points: HashSet::default(),
             worklist: vec![(var_name.clone(), mask)],
             pull_count: 0,
         };

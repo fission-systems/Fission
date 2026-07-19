@@ -1,5 +1,5 @@
 use crate::prelude::*; // For accessing normalizer helpers
-use std::collections::HashMap;
+use crate::HashMap;
 
 pub fn apply_double_precision_reconstruction_pass(func: &mut HirFunction) -> bool {
     let mut changed = false;
@@ -10,7 +10,7 @@ pub fn apply_double_precision_reconstruction_pass(func: &mut HirFunction) -> boo
     }
 
     // Phase 2: Build definition map of single-assignment variables
-    let mut defs = HashMap::new();
+    let mut defs = HashMap::default();
     collect_single_defs(&func.body, &mut defs);
 
     // Phase 3: Recursively rewrite Or-Shift reconstruction expressions
@@ -22,7 +22,7 @@ pub fn apply_double_precision_reconstruction_pass(func: &mut HirFunction) -> boo
 }
 
 fn collect_single_defs(stmts: &[HirStmt], defs: &mut HashMap<String, HirExpr>) {
-    let mut def_counts = HashMap::new();
+    let mut def_counts = HashMap::default();
     count_defs_recursive(stmts, &mut def_counts);
     collect_defs_recursive(stmts, &def_counts, defs);
 }

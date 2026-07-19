@@ -552,8 +552,16 @@ pub fn cleanup_redundant_boundary_labels(
     stmts: &mut Vec<HirStmt>,
     global_refs: Option<&HashSet<String>>,
 ) -> bool {
+    // `cleanup_redundant_labels` lives in fission-midend-core and takes
+    // std's RandomState-hashed HashSet -- a third crate boundary this
+    // pipeline's FxBuildHasher alias doesn't reach. Converting only at
+    // this narrow call site (rather than propagating std::collections::
+    // HashSet through global_refs/active_refs everywhere) keeps the rest
+    // of this crate's own label bookkeeping on the deterministic hasher.
+    let std_refs: Option<std::collections::HashSet<String>> =
+        global_refs.map(|refs| refs.iter().cloned().collect());
     let original = stmts.clone();
-    let cleaned = cleanup_redundant_labels(std::mem::take(stmts), global_refs);
+    let cleaned = cleanup_redundant_labels(std::mem::take(stmts), std_refs.as_ref());
     let changed = cleaned != original;
     *stmts = cleaned;
     changed

@@ -13,13 +13,13 @@
 //! (or forked empty) so we do not assume memory state merges across joins.
 use crate::prelude::*;
 use super::mem_ssa::{AliasKey, alias_key_for_pointer_expr, nir_byte_size};
-use std::collections::HashMap;
+use crate::HashMap;
 
 type LoadCache = HashMap<AliasKey, String>;
 
 /// Apply RLE to the function.  Returns `true` if any `Load` was replaced.
 pub fn apply_redundant_load_elimination(func: &mut HirFunction) -> bool {
-    let mut cache = LoadCache::new();
+    let mut cache = LoadCache::default();
     rle_stmts(&mut func.body, &mut cache)
 }
 
@@ -84,8 +84,8 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
             else_body,
         } => {
             rewrite_loads_in_expr(cond, cache, &mut changed);
-            let mut tc = LoadCache::new();
-            let mut ec = LoadCache::new();
+            let mut tc = LoadCache::default();
+            let mut ec = LoadCache::default();
             if rle_stmts(then_body, &mut tc) {
                 changed = true;
             }
@@ -96,7 +96,7 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
         }
         HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
             rewrite_loads_in_expr(cond, cache, &mut changed);
-            let mut inner = LoadCache::new();
+            let mut inner = LoadCache::default();
             if rle_stmts(body, &mut inner) {
                 changed = true;
             }
@@ -116,7 +116,7 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
             if let Some(e) = cond {
                 rewrite_loads_in_expr(e, cache, &mut changed);
             }
-            let mut inner = LoadCache::new();
+            let mut inner = LoadCache::default();
             if rle_stmts(body, &mut inner) {
                 changed = true;
             }
@@ -134,12 +134,12 @@ fn rle_stmt(stmt: &mut HirStmt, cache: &mut LoadCache) -> bool {
         } => {
             rewrite_loads_in_expr(expr, cache, &mut changed);
             for case in cases.iter_mut() {
-                let mut c = LoadCache::new();
+                let mut c = LoadCache::default();
                 if rle_stmts(&mut case.body, &mut c) {
                     changed = true;
                 }
             }
-            let mut d = LoadCache::new();
+            let mut d = LoadCache::default();
             if rle_stmts(default, &mut d) {
                 changed = true;
             }

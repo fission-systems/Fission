@@ -6,7 +6,7 @@ use super::super::analysis::preservation::{
 use super::utils::*;
 use crate::prelude::*;
 use fission_midend_core::wave_stats;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 pub fn collapse_trivial_assign_returns(
     stmts: &mut Vec<HirStmt>,
@@ -1306,7 +1306,7 @@ pub fn rescue_undeclared_bindings(func: &mut HirFunction) -> bool {
         .collect();
 
     // Collect every variable name that appears anywhere in the body.
-    let mut body_names: HashSet<String> = HashSet::new();
+    let mut body_names: HashSet<String> = HashSet::default();
     collect_all_body_names_stmts(&func.body, &mut body_names);
 
     // Find undeclared names and try to infer their type from the first
@@ -1780,7 +1780,7 @@ fn rhs_is_integer_bitop(expr: &HirExpr) -> bool {
 /// a pointer-typed slot, and then bit-masked (e.g. `ptr_diff &= 4`).
 pub fn coerce_ptr_typed_bitop_vars(func: &mut HirFunction) -> bool {
     // Collect all LHS names that receive a bitwise-integer RHS.
-    let mut bitop_lhs: HashSet<String> = HashSet::new();
+    let mut bitop_lhs: HashSet<String> = HashSet::default();
     collect_bitop_lhs_vars_stmts(&func.body, &mut bitop_lhs);
     if bitop_lhs.is_empty() {
         return false;

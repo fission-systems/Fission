@@ -28,7 +28,7 @@ use super::super::analysis::defuse::DefinitionDependencyMap;
 /// after `apply_type_inference_pass` so that the def-driven types it computed
 /// can serve as additional seeds for backward propagation.
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// A type constraint derived from the context in which a variable is used.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -692,7 +692,7 @@ fn propagate_logical_shift_constraints_through_aliases(
     stmts: &[HirStmt],
     constraints: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
-    let mut aliases = HashMap::new();
+    let mut aliases = HashMap::default();
     collect_copy_alias_sources(stmts, &mut aliases);
     if aliases.is_empty() {
         return;
@@ -706,7 +706,7 @@ fn propagate_logical_shift_constraints_through_aliases(
             }
         }
     }
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     while let Some((name, bits)) = work.pop() {
         if !seen.insert((name.clone(), bits)) {
             continue;
@@ -1385,7 +1385,7 @@ fn nir_type_bits(ty: &NirType) -> Option<u32> {
 }
 
 fn collect_known_binding_types(func: &HirFunction) -> HashMap<String, NirType> {
-    let mut known = HashMap::new();
+    let mut known = HashMap::default();
     for binding in func.locals.iter().chain(func.params.iter()) {
         if binding.ty != NirType::Unknown {
             known.insert(binding.name.clone(), binding.ty.clone());
@@ -1769,9 +1769,9 @@ fn count_store_value_uses_stmts(stmts: &[HirStmt], out: &mut HashMap<String, usi
 }
 
 fn promote_store_value_only_unsigned_params(func: &mut HirFunction) -> bool {
-    let mut all_uses = HashMap::new();
+    let mut all_uses = HashMap::default();
     count_var_uses_stmts(&func.body, &mut all_uses);
-    let mut store_value_uses = HashMap::new();
+    let mut store_value_uses = HashMap::default();
     count_store_value_uses_stmts(&func.body, &mut store_value_uses);
 
     let mut changed = false;
@@ -1903,9 +1903,9 @@ fn narrow_integer_params_from_wrapping_return_uses(func: &mut HirFunction) -> bo
         return false;
     }
 
-    let mut all_uses = HashMap::new();
+    let mut all_uses = HashMap::default();
     count_var_uses_stmts(&func.body, &mut all_uses);
-    let mut constrained_uses = HashMap::new();
+    let mut constrained_uses = HashMap::default();
     collect_wrapping_narrow_return_vars_stmts(&func.body, return_bits, &mut constrained_uses);
 
     let mut changed = false;
@@ -2057,7 +2057,7 @@ fn restore_scalar_only_pointer_locals(
     func: &mut HirFunction,
     constraints: &HashMap<String, Vec<UseConstraint>>,
 ) -> bool {
-    let mut roles = HashMap::<String, BindingUseRole>::new();
+    let mut roles = HashMap::<String, BindingUseRole>::default();
     collect_binding_use_roles(&func.body, &mut roles);
     let pointer_compare_peers = super::type_infer::pointer_compare_peer_promotions(func);
     let transitive_address_locals = super::type_infer::transitive_address_pointer_locals(func);
@@ -2127,8 +2127,8 @@ pub fn apply_use_driven_type_infer_pass(func: &mut HirFunction) -> bool {
     let dependencies = DefinitionDependencyMap::build(&func.body);
     // Iterate to convergence (alias chains may require multiple rounds).
     for _ in 0..4 {
-        let mut constraints: HashMap<String, Vec<UseConstraint>> = HashMap::new();
-        let mut roles = HashMap::<String, BindingUseRole>::new();
+        let mut constraints: HashMap<String, Vec<UseConstraint>> = HashMap::default();
+        let mut roles = HashMap::<String, BindingUseRole>::default();
         let known_binding_types = collect_known_binding_types(func);
         let pointer_roots = func
             .params

@@ -67,7 +67,7 @@
 /// preheader proof, while still removing the outer label/goto recurrence.
 use crate::prelude::*;
 use fission_midend_core::expr_type;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 // ── Part B — Break/Continue recovery ─────────────────────────────────────────
 
@@ -251,12 +251,12 @@ fn apply_break_continue_in_stmts(
     let n = stmts.len();
     for loop_idx in 0..n {
         // Determine labels that appear after this loop (exit targets).
-        let mut after_labels = HashSet::new();
+        let mut after_labels = HashSet::default();
         for stmt in stmts.iter().skip(loop_idx + 1) {
             collect_labels_stmt(stmt, &mut after_labels);
         }
         // Head labels: labels immediately before the loop.
-        let mut head_labels = HashSet::new();
+        let mut head_labels = HashSet::default();
         if loop_idx > 0 {
             collect_labels_stmt(&stmts[loop_idx - 1], &mut head_labels);
         }
@@ -368,7 +368,7 @@ fn tail_goto_condition(stmt: &HirStmt, label: &str) -> Option<HirExpr> {
 }
 
 fn collect_loop_body_labels(stmts: &[HirStmt]) -> HashSet<String> {
-    let mut labels = HashSet::new();
+    let mut labels = HashSet::default();
     collect_labels(stmts, &mut labels);
     labels
 }
@@ -429,7 +429,7 @@ fn has_unscoped_break_stmt(stmt: &HirStmt) -> bool {
 
 fn body_gotos_are_loop_local(body: &[HirStmt]) -> bool {
     let labels = collect_loop_body_labels(body);
-    let mut gotos = HashSet::new();
+    let mut gotos = HashSet::default();
     collect_goto_targets_in_stmts(body, &mut gotos);
     gotos.iter().all(|target| labels.contains(target))
 }
@@ -462,7 +462,7 @@ fn try_tail_label_loop_to_for(
 
         // Side-entry check: Reject loop recovery if there are jumps from outside into the body.
         let body_labels = collect_loop_body_labels(body_slice);
-        let mut internal_goto_counts = HashMap::new();
+        let mut internal_goto_counts = HashMap::default();
         count_goto_targets(body_slice, &mut internal_goto_counts);
         for label_in_body in &body_labels {
             let global_gotos = goto_counts.get(label_in_body).copied().unwrap_or(0);
@@ -1129,7 +1129,7 @@ fn expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
 /// Check that an expression only contains constants or variables NOT in
 /// `loop_variant` — i.e., the expression is loop-invariant.
 fn is_loop_invariant(expr: &HirExpr, loop_variant: &HashSet<String>) -> bool {
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     expr_vars(expr, &mut vars);
     vars.is_disjoint(loop_variant)
 }
@@ -1298,7 +1298,7 @@ fn is_zero(expr: &HirExpr) -> bool {
 /// Collect the set of variables modified inside the loop body (excluding
 /// variables modified only in nested loops, which are their own scope).
 fn loop_variant_vars(body: &[HirStmt]) -> HashSet<String> {
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     for stmt in body {
         loop_variant_stmt(stmt, &mut vars);
     }
@@ -1463,7 +1463,7 @@ fn single_goto_target(stmts: &[HirStmt]) -> Option<&str> {
 }
 
 fn labels_after(stmts: &[HirStmt], idx: usize) -> HashSet<String> {
-    let mut labels = HashSet::new();
+    let mut labels = HashSet::default();
     for stmt in stmts.iter().skip(idx + 1) {
         collect_labels_stmt(stmt, &mut labels);
     }
@@ -1744,7 +1744,7 @@ fn collect_names_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
 }
 
 fn fresh_index_name(locals: &[NirBinding], stmts: &[HirStmt]) -> String {
-    let mut used = HashSet::new();
+    let mut used = HashSet::default();
     for local in locals {
         used.insert(local.name.clone());
     }
@@ -2048,7 +2048,7 @@ fn test_iterate_form(body: &[HirStmt], update_idx: usize, loop_var: &str) -> boo
         return false;
     }
 
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     test_iterate_form_expr(body, rhs, loop_var, &mut visited, 0)
 }
 
@@ -2063,7 +2063,7 @@ fn test_iterate_form_expr(
         return false;
     }
 
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     expr_vars(expr, &mut vars);
 
     if vars.contains(loop_var) {
@@ -2093,11 +2093,11 @@ fn find_loop_variable_dataflow(
     cond: &HirExpr,
     loop_variant: &HashSet<String>,
 ) -> Option<(String, usize)> {
-    let mut cond_vars = HashSet::new();
+    let mut cond_vars = HashSet::default();
     expr_vars(cond, &mut cond_vars);
 
     for start_var in cond_vars {
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         if let Some(res) = path_walk_var(
             stmts,
             loop_idx,
@@ -2146,7 +2146,7 @@ fn path_walk_var(
 
     // Otherwise, walk the definitions of curr_var to find its inputs.
     if let Some(def_expr) = find_unique_definition_in_body(body, curr_var) {
-        let mut next_vars = HashSet::new();
+        let mut next_vars = HashSet::default();
         expr_vars(def_expr, &mut next_vars);
         for next_var in next_vars {
             if let Some(res) = path_walk_var(
@@ -2624,7 +2624,7 @@ fn apply_scev_upgrade_in_stmts(
 /// Apply IV-to-For upgrade (SCEV-lite) across the entire function body.
 /// Returns `true` if any transformation was made.
 pub fn apply_iv_recovery_pass(func: &mut HirFunction) -> bool {
-    let mut goto_counts: HashMap<String, usize> = HashMap::new();
+    let mut goto_counts: HashMap<String, usize> = HashMap::default();
     count_goto_targets(&func.body, &mut goto_counts);
     let mut active_guards = Vec::new();
     apply_tail_label_loop_recovery_in_stmts(&mut func.body, &goto_counts)
@@ -2634,7 +2634,7 @@ pub fn apply_iv_recovery_pass(func: &mut HirFunction) -> bool {
 /// Apply break/continue recovery across the entire function body.
 /// Returns `true` if any transformation was made.
 pub fn apply_break_continue_pass(func: &mut HirFunction) -> bool {
-    let mut goto_counts: HashMap<String, usize> = HashMap::new();
+    let mut goto_counts: HashMap<String, usize> = HashMap::default();
     count_goto_targets(&func.body, &mut goto_counts);
     apply_break_continue_in_stmts(&mut func.body, &goto_counts)
 }

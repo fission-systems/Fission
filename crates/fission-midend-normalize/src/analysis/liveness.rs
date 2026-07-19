@@ -2,7 +2,7 @@
 
 use crate::analysis::defuse::collect_expr_vars;
 use fission_midend_core::ir::{HirExpr, HirLValue, HirStmt};
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Transfer summary for `live_in = uses_before_definition U (live_out - must_definitions)`.
 ///
@@ -20,12 +20,12 @@ impl LivenessTransfer {
     pub fn for_stmt(stmt: &HirStmt) -> Self {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
-                let mut uses = HashSet::new();
+                let mut uses = HashSet::default();
                 collect_lvalue_reads(lhs, &mut uses);
                 collect_expr_vars(rhs, &mut uses);
                 let must_definitions = match lhs {
-                    HirLValue::Var(name) => HashSet::from([name.clone()]),
-                    _ => HashSet::new(),
+                    HirLValue::Var(name) => [name.clone()].into_iter().collect::<HashSet<_>>(),
+                    _ => HashSet::default(),
                 };
                 Self {
                     uses_before_definition: uses,
@@ -34,7 +34,7 @@ impl LivenessTransfer {
                 }
             }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-                let mut uses = HashSet::new();
+                let mut uses = HashSet::default();
                 collect_expr_vars(expr, &mut uses);
                 Self {
                     uses_before_definition: uses,
@@ -43,7 +43,7 @@ impl LivenessTransfer {
                 }
             }
             HirStmt::VaStart { va_list, .. } => {
-                let mut uses = HashSet::new();
+                let mut uses = HashSet::default();
                 collect_expr_vars(va_list, &mut uses);
                 Self {
                     uses_before_definition: uses,
@@ -61,7 +61,7 @@ impl LivenessTransfer {
                 then_body,
                 else_body,
             } => {
-                let mut uses = HashSet::new();
+                let mut uses = HashSet::default();
                 collect_expr_vars(cond, &mut uses);
                 let then_transfer = Self::for_stmts(then_body);
                 let else_transfer = Self::for_stmts(else_body);
@@ -79,23 +79,23 @@ impl LivenessTransfer {
                 }
             }
             HirStmt::While { cond, body } => {
-                let mut uses = HashSet::new();
+                let mut uses = HashSet::default();
                 collect_expr_vars(cond, &mut uses);
                 let body_transfer = Self::for_stmts(body);
                 uses.extend(body_transfer.uses_before_definition);
                 Self {
                     uses_before_definition: uses,
-                    must_definitions: HashSet::new(),
+                    must_definitions: HashSet::default(),
                     may_diverge: body_transfer.may_diverge,
                 }
             }
             HirStmt::DoWhile { body, cond } => {
                 let body_transfer = Self::for_stmts(body);
-                let mut cond_uses = HashSet::new();
+                let mut cond_uses = HashSet::default();
                 collect_expr_vars(cond, &mut cond_uses);
                 body_transfer.then(Self {
                     uses_before_definition: cond_uses,
-                    must_definitions: HashSet::new(),
+                    must_definitions: HashSet::default(),
                     may_diverge: false,
                 })
             }
@@ -106,7 +106,7 @@ impl LivenessTransfer {
                 body,
             } => {
                 let init_transfer = init.as_deref().map(Self::for_stmt).unwrap_or_default();
-                let mut loop_uses = HashSet::new();
+                let mut loop_uses = HashSet::default();
                 if let Some(cond) = cond {
                     collect_expr_vars(cond, &mut loop_uses);
                 }
@@ -117,7 +117,7 @@ impl LivenessTransfer {
                 }
                 init_transfer.then(Self {
                     uses_before_definition: loop_uses,
-                    must_definitions: HashSet::new(),
+                    must_definitions: HashSet::default(),
                     may_diverge: body_transfer.may_diverge,
                 })
             }
@@ -126,7 +126,7 @@ impl LivenessTransfer {
                 cases,
                 default,
             } => {
-                let mut uses = HashSet::new();
+                let mut uses = HashSet::default();
                 collect_expr_vars(expr, &mut uses);
                 let mut arms: Vec<Self> = cases
                     .iter()
@@ -173,7 +173,7 @@ impl LivenessTransfer {
             );
         }
         let must_definitions = if self.may_diverge || next.may_diverge {
-            HashSet::new()
+            HashSet::default()
         } else {
             self.must_definitions
                 .union(&next.must_definitions)

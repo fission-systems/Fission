@@ -5,7 +5,7 @@
 //! `pure_expr_key` (same contract as the original CSE-only `expr_key`).
 
 use crate::prelude::*;
-use std::collections::HashMap;
+use crate::HashMap;
 
 pub type PureExprMap = HashMap<PureExprKey, String>;
 pub type PureExprKey = String;

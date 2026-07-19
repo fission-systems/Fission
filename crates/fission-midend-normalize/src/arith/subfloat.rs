@@ -1,13 +1,13 @@
 use crate::prelude::*;
 use fission_midend_core::expr_type;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Identifies redundant floating-point widening and narrowing cast chains,
 /// narrowing intermediate double-precision calculations to single-precision float
 /// operations (Ghidra's SubfloatFlow/RuleSubfloatConvert equivalent).
 pub fn apply_subfloat_flow_pass(func: &mut HirFunction) -> bool {
     // 1. Build type map of variables from parameters and locals
-    let mut var_types = HashMap::new();
+    let mut var_types = HashMap::default();
     for binding in &func.params {
         var_types.insert(binding.name.clone(), binding.ty.clone());
     }

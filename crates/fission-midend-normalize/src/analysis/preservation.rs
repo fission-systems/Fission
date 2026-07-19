@@ -5,7 +5,7 @@
 //! different policy checks.
 
 use fission_midend_core::{NirBinding, NirBindingOrigin};
-use std::collections::HashSet;
+use crate::HashSet;
 
 pub fn preserved_materialization_names(bindings: &[NirBinding]) -> HashSet<&str> {
     bindings
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn skip_copyprop_for_any_preserved_name() {
-        let preserved = HashSet::from(["uVar0"]);
+        let preserved = ["uVar0"].into_iter().collect::<HashSet<_>>();
         assert!(should_skip_copyprop_for_preserved_name("uVar0", &preserved));
         assert!(!should_skip_copyprop_for_preserved_name(
             "uVar1", &preserved

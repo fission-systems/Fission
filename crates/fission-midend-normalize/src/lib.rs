@@ -9,8 +9,23 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
+/// Fixed-seed hasher, crate-wide. Many normalize passes (copy propagation,
+/// variable merge/coalescing, constant propagation) build a `HashMap`/
+/// `HashSet` of candidate variable names during a single deterministic walk
+/// over the HIR body, then consume it via point lookups -- safe regardless
+/// of iteration order. But a few build one and then *iterate* it to pick a
+/// representative among several equally-valid candidates (e.g. which of
+/// two copy-related temps survives), and std's per-process-random
+/// `RandomState` made that choice -- and therefore decompiled output --
+/// depend on which order the hasher happened to lay out that run. See
+/// PROJECT.md's determinism notes (this crate was not covered by the
+/// original fission-pcode::midend + fission-midend-structuring sweep).
+pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHasher>;
+
 /// Shared prelude for historical `use super::super::*` midend imports.
 pub mod prelude {
+    pub(crate) use crate::{HashMap, HashSet};
     pub use fission_midend_core::action_pipeline::{
         self, ActionGroup, ActionPool, Gate, GhidraActionConcept, Pass, PassBudget, PassCtx,
         PassOutcome, Pipeline, Repeat, STRUCTURING_TIME_CEILING_SECS, count_hir_blocks,
@@ -30,7 +45,7 @@ pub mod prelude {
         AbiState, CallingConvention, HirExpr, HirFunction, HirStmt, NirBuildStats, NirType,
         SWITCH_FALLTHROUGH_SENTINEL,
     };
-    pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+    pub use std::collections::{BTreeMap, BTreeSet};
 }
 
 mod analysis;

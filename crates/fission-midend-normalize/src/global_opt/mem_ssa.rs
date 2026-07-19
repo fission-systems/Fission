@@ -37,7 +37,7 @@
 /// - LLVM `BasicAliasAnalysis.cpp`: stack-slot no-alias rule
 use super::super::memory::{PartitionKey, partition_key_for_pointer_expr};
 use crate::prelude::*;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Identifies a memory location for alias analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -129,9 +129,9 @@ impl Builder {
             defs: Vec::new(),
             uses: Vec::new(),
             phis: Vec::new(),
-            reaching: HashMap::new(),
+            reaching: HashMap::default(),
             next_id: 0,
-            escaped: std::collections::HashSet::new(),
+            escaped: std::collections::HashSet::default(),
         }
     }
 

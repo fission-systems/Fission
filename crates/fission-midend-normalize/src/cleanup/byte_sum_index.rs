@@ -6,18 +6,18 @@
 //! unbounded sum. This pass restores the bit-vector operation as `w = v & 0xff`.
 
 use crate::prelude::*;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Apply byte-sum index truncation recovery. Returns true if any rewrite ran.
 pub fn apply_byte_sum_index_trunc(func: &mut HirFunction) -> bool {
-    let mut type_map: HashMap<String, NirType> = HashMap::new();
+    let mut type_map: HashMap<String, NirType> = HashMap::default();
     for b in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(b.name.clone(), b.ty.clone());
     }
-    let mut last_def: HashMap<String, HirExpr> = HashMap::new();
-    let mut byte_ranged: HashMap<String, bool> = HashMap::new();
+    let mut last_def: HashMap<String, HirExpr> = HashMap::default();
+    let mut byte_ranged: HashMap<String, bool> = HashMap::default();
     // Names whose *last* def was a sum of two byte-ranged values (frozen at assign time).
-    let mut byte_sum_names: HashMap<String, bool> = HashMap::new();
+    let mut byte_sum_names: HashMap<String, bool> = HashMap::default();
     let mut changed = false;
     rewrite_stmts(
         &mut func.body,

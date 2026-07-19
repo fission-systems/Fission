@@ -38,7 +38,7 @@ use fission_midend_core::wave_stats::{
     add_object_root_recoveries, add_object_shape_recoveries, add_surface_binding_promotions,
     add_typed_object_shape_refinements,
 };
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 fn can_upgrade_binding_to_aggregate(binding: &NirBinding) -> bool {
     matches!(
@@ -276,7 +276,7 @@ fn assigned_var_names(stmts: &[HirStmt]) -> HashSet<String> {
         }
     }
 
-    let mut out = HashSet::new();
+    let mut out = HashSet::default();
     visit(stmts, &mut out);
     out
 }

@@ -97,6 +97,20 @@ pub(super) fn collect_local_surface_hints(
     );
 }
 
+// TEMP DIAGNOSTIC: memory-buffered trace of temp-name allocation, gated by
+// FISSION_TEMP_TRACE. Dumped once per build_hir call (not per-call
+// eprintln, which perturbs timing enough to mask the bug it's meant to
+// find). Used to locate where an ELF-format-specific temp-counter drift
+// starts between a "good" and "bad" process run.
+thread_local! {
+    static TEMP_NAME_TRACE: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+}
+
+fn temp_name_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_TEMP_TRACE").is_some())
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn binding_name_exists(&self, name: &str) -> bool {
         self.temps.contains_key(name)
@@ -106,8 +120,14 @@ impl<'a> PreviewBuilder<'a> {
 
     fn next_unused_temp_binding_name(&mut self, ty: &NirType) -> String {
         loop {
+            let before_id = self.temp_next_id;
             let candidate = next_temp_name(ty, &mut self.temp_next_id);
             if !self.binding_name_exists(&candidate) {
+                if temp_name_trace_enabled() {
+                    TEMP_NAME_TRACE.with(|t| {
+                        t.borrow_mut().push(format!("{before_id}->{candidate}"))
+                    });
+                }
                 return candidate;
             }
         }
@@ -347,6 +367,18 @@ impl<'a> PreviewBuilder<'a> {
             .unwrap_or(NirType::Unknown);
 
         self.trace_materialize_owner_repartition_summary();
+
+        if temp_name_trace_enabled() {
+            TEMP_NAME_TRACE.with(|t| {
+                let mut trace = t.borrow_mut();
+                eprintln!(
+                    "[TEMP_TRACE] fn={name} addr=0x{address:x} count={} seq={}",
+                    trace.len(),
+                    trace.join(",")
+                );
+                trace.clear();
+            });
+        }
 
         let callee_summaries = self
             .type_context

@@ -16,7 +16,7 @@ use crate::analysis::expr_key::pure_expr_key;
 use crate::pipeline::normalize_expr;
 use fission_midend_core::wave_stats;
 use fission_midend_core::{expr_type, next_temp_name};
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 const WIDE_DEAD_ASSIGNMENT_RERUN_STMT_LIMIT: usize = 220;
 const WIDE_DEAD_ASSIGNMENT_RERUN_LOCAL_LIMIT: usize = 160;
@@ -36,7 +36,7 @@ pub struct DefUseMap {
 impl DefUseMap {
     pub fn build(stmts: &[HirStmt]) -> Self {
         let mut map = Self {
-            use_count: HashMap::new(),
+            use_count: HashMap::default(),
         };
         for stmt in stmts {
             map.count_stmt(stmt);
@@ -198,7 +198,7 @@ struct RootReachabilityProof<'a> {
 
 impl<'a> RootReachabilityProof<'a> {
     fn build(dependencies: &'a HashMap<String, HashSet<String>>, roots: &HashSet<String>) -> Self {
-        let mut reverse_dependencies: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut reverse_dependencies: HashMap<String, HashSet<String>> = HashMap::default();
         for (dependent, sources) in dependencies {
             for source in sources {
                 reverse_dependencies
@@ -229,10 +229,10 @@ impl<'a> RootReachabilityProof<'a> {
 
     fn nodes_reaching_from(&self, name: &str) -> HashSet<String> {
         if !self.can_reach_roots.contains(name) {
-            return HashSet::new();
+            return HashSet::default();
         }
 
-        let mut reached = HashSet::new();
+        let mut reached = HashSet::default();
         let mut worklist = vec![name.to_string()];
         while let Some(candidate) = worklist.pop() {
             if !self.can_reach_roots.contains(&candidate) || !reached.insert(candidate.clone()) {
@@ -249,16 +249,16 @@ impl<'a> RootReachabilityProof<'a> {
 impl DefinitionDependencyMap {
     pub fn build(stmts: &[HirStmt]) -> Self {
         let mut map = Self {
-            dependencies: HashMap::new(),
-            address_dependencies: HashMap::new(),
+            dependencies: HashMap::default(),
+            address_dependencies: HashMap::default(),
         };
         map.collect_stmts(stmts);
         map
     }
 
     pub fn roots_reaching(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
-        let mut reached = HashSet::new();
-        let mut visited = HashSet::new();
+        let mut reached = HashSet::default();
+        let mut visited = HashSet::default();
         self.collect_roots(name, roots, &mut visited, &mut reached);
         reached
     }
@@ -287,7 +287,7 @@ impl DefinitionDependencyMap {
         stmts: &[HirStmt],
         pointer_roots: &HashSet<String>,
     ) -> HashMap<String, NirType> {
-        let mut contributors = HashMap::new();
+        let mut contributors = HashMap::default();
         collect_address_contributors_stmts(self, stmts, pointer_roots, &mut contributors);
         contributors
     }
@@ -621,7 +621,7 @@ fn record_address_contributors(
     pointer_roots: &HashSet<String>,
     out: &mut HashMap<String, NirType>,
 ) {
-    let mut address_names = HashSet::new();
+    let mut address_names = HashSet::default();
     collect_address_provenance_vars(address, &mut address_names);
     for name in address_names {
         for contributor in dependencies.address_nodes_reaching_roots(&name, pointer_roots) {
@@ -1409,11 +1409,11 @@ mod tests {
             },
         ];
         let dependencies = DefinitionDependencyMap::build(&body);
-        let roots = HashSet::from(["base_param".to_string(), "limit_param".to_string()]);
+        let roots = ["base_param".to_string(), "limit_param".to_string()].into_iter().collect::<HashSet<_>>();
 
         assert_eq!(
             dependencies.roots_reaching("cursor", &roots),
-            HashSet::from(["base_param".to_string()])
+            ["base_param".to_string()].into_iter().collect::<HashSet<_>>()
         );
         let contributors = dependencies.address_contributors(&body, &roots);
         assert!(contributors.contains_key("cursor"));
@@ -1455,15 +1455,15 @@ mod tests {
             },
         ];
         let dependencies = DefinitionDependencyMap::build(&body);
-        let roots = HashSet::from(["buffer_param".to_string()]);
+        let roots = ["buffer_param".to_string()].into_iter().collect::<HashSet<_>>();
 
         assert_eq!(
             dependencies.nodes_reaching_roots("cursor", &roots),
-            HashSet::from([
+            [
                 "buffer_param".to_string(),
                 "cursor".to_string(),
                 "cursor_word".to_string(),
-            ])
+            ].into_iter().collect::<HashSet<_>>()
         );
     }
 
@@ -1508,7 +1508,7 @@ mod tests {
             },
         ];
         let dependencies = DefinitionDependencyMap::build(&body);
-        let roots = HashSet::from(["base_param".to_string()]);
+        let roots = ["base_param".to_string()].into_iter().collect::<HashSet<_>>();
         let contributors = dependencies.address_contributors(&body, &roots);
 
         assert!(contributors.contains_key("base_param"));
@@ -1722,7 +1722,7 @@ fn stabilize_expr_with_temp(
 }
 
 fn best_repeated_pure_expr(expr: &HirExpr) -> Option<HirExpr> {
-    let mut counts: HashMap<String, (usize, usize, HirExpr)> = HashMap::new();
+    let mut counts: HashMap<String, (usize, usize, HirExpr)> = HashMap::default();
     collect_repeated_pure_exprs(expr, &mut counts);
     let mut candidates = counts
         .into_values()

@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use fission_midend_core::expr_type;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 struct SimpleAssign {
     lhs: String,
@@ -894,7 +894,7 @@ fn split_scalar_role_phases(
 }
 
 pub fn apply_split_flow_pass(func: &mut HirFunction) -> bool {
-    let mut type_map = HashMap::new();
+    let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }
@@ -902,7 +902,7 @@ pub fn apply_split_flow_pass(func: &mut HirFunction) -> bool {
     let mut assigns = Vec::new();
     collect_assignments(&func.body, &mut assigns);
 
-    let mut var_assigns: HashMap<String, Vec<HirExpr>> = HashMap::new();
+    let mut var_assigns: HashMap<String, Vec<HirExpr>> = HashMap::default();
     for assign in assigns {
         var_assigns.entry(assign.lhs).or_default().push(assign.rhs);
     }

@@ -1,7 +1,7 @@
 use super::super::global_opt::{AliasKey, MemDef, MemPhi, MemUse, build_mem_ssa, nir_byte_size};
 use crate::prelude::*;
 use super::partition_key_for_pointer_expr;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Incremental Memory Heritage Solver pass.
 ///
@@ -13,7 +13,7 @@ pub fn apply_memory_heritage(func: &mut HirFunction) -> bool {
     let mem_ssa = build_mem_ssa(func);
 
     // Identify candidate AliasKeys that are promotable stack slots (non-escaping)
-    let mut promotable_keys = HashSet::new();
+    let mut promotable_keys = HashSet::default();
     for def in &mem_ssa.defs {
         if !def.may_escape {
             if let AliasKey::Partition(partition) = &def.key {
@@ -29,8 +29,8 @@ pub fn apply_memory_heritage(func: &mut HirFunction) -> bool {
     }
 
     // Allocate versioned variable names for each def/phi ID of promotable keys
-    let mut var_names = HashMap::new(); // maps (AliasKey, id) -> variable name String
-    let mut var_types = HashMap::new();
+    let mut var_names = HashMap::default(); // maps (AliasKey, id) -> variable name String
+    let mut var_types = HashMap::default();
 
     for def in &mem_ssa.defs {
         if promotable_keys.contains(&def.key) {
@@ -435,7 +435,7 @@ impl<'a> Rewriter<'a> {
                 }
 
                 // Group merge_phis by key and process
-                let mut phis_by_key: HashMap<AliasKey, Vec<MemPhi>> = HashMap::new();
+                let mut phis_by_key: HashMap<AliasKey, Vec<MemPhi>> = HashMap::default();
                 for phi in merge_phis {
                     phis_by_key.entry(phi.key.clone()).or_default().push(phi);
                 }

@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use fission_midend_core::expr_type;
-use std::collections::HashMap;
+use crate::HashMap;
 
 pub fn type_mask(ty: &NirType) -> u64 {
     match ty {
@@ -229,12 +229,12 @@ fn collect_assignments_in_stmt(
 }
 
 pub fn compute_nz_masks(func: &HirFunction) -> HashMap<String, u64> {
-    let mut type_map = HashMap::new();
+    let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }
 
-    let mut var_masks = HashMap::new();
+    let mut var_masks = HashMap::default();
     for param in &func.params {
         var_masks.insert(param.name.clone(), type_mask(&param.ty));
     }
@@ -414,7 +414,7 @@ fn simplify_stmts(
 
 pub fn apply_nz_mask_simplification_pass(func: &mut HirFunction) -> bool {
     let nz_masks = compute_nz_masks(func);
-    let mut type_map = HashMap::new();
+    let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }

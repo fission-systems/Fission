@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Scans the structured HIR and propagates constant values within branch scopes
 /// where they are constrained by conditions (e.g., `if (x == 5) { ... }`).
@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 /// the cleanup family (`simplify_empty_and_constant_ifs`) then removes the dead
 /// arm. This is what erases re-tests left behind by duplicated join tails.
 pub fn apply_conditional_const_pass(func: &mut HirFunction) -> bool {
-    let mut binding_types = HashMap::new();
+    let mut binding_types = HashMap::default();
     for local in &func.locals {
         binding_types.insert(local.name.clone(), local.ty.clone());
     }
@@ -18,8 +18,8 @@ pub fn apply_conditional_const_pass(func: &mut HirFunction) -> bool {
         binding_types.insert(param.name.clone(), param.ty.clone());
     }
 
-    let mut env = HashMap::new();
-    let mut ranges = RangeEnv::new();
+    let mut env = HashMap::default();
+    let mut ranges = RangeEnv::default();
     visit_stmts(&mut func.body, &mut env, &mut ranges, &binding_types)
 }
 
@@ -435,7 +435,7 @@ fn visit_stmt(
 
             let mut loop_env = env.clone();
             let mut loop_ranges = ranges.clone();
-            let mut written = HashSet::new();
+            let mut written = HashSet::default();
             collect_written_vars(body, &mut written);
             for v in &written {
                 loop_env.remove(v);
@@ -456,7 +456,7 @@ fn visit_stmt(
         } => {
             let mut loop_env = env.clone();
             let mut loop_ranges = ranges.clone();
-            let mut written = HashSet::new();
+            let mut written = HashSet::default();
             if let Some(i) = init {
                 collect_written_vars(std::slice::from_ref(i.as_ref()), &mut written);
             }
@@ -520,7 +520,7 @@ fn visit_stmt(
 
             // Post-if state: facts about variables written in either arm no
             // longer hold on the joined path.
-            let mut written = HashSet::new();
+            let mut written = HashSet::default();
             collect_written_vars(then_body, &mut written);
             collect_written_vars(else_body, &mut written);
             for v in &written {
@@ -557,7 +557,7 @@ fn visit_stmt(
                 changed |= visit_stmts(&mut case.body, &mut case_env, &mut case_ranges, binding_types);
             }
             changed |= visit_stmts(default, env, ranges, binding_types);
-            let mut written = HashSet::new();
+            let mut written = HashSet::default();
             for case in cases.iter() {
                 collect_written_vars(&case.body, &mut written);
             }

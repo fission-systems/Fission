@@ -349,16 +349,22 @@ pub fn contains_call_stmts(stmts: &[HirStmt]) -> bool {
 }
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use crate::HashMap;
 
 thread_local! {
     pub static GLOBAL_SYMBOL_CONTEXT: RefCell<Option<GlobalSymbolContext>> = RefCell::new(None);
 }
 
+// Cross-crate DTO populated from fission-pcode's `NirRenderOptions::
+// global_names`/`global_sizes`, both std-hashed -- kept std-based here to
+// match the producer rather than propagating this crate's FxBuildHasher
+// alias across that boundary. Only ever consumed via point `.get(&addr)`
+// lookups (memory::constant_ptr::find_global_symbol), never iterated, so
+// this isn't part of the determinism surface anyway.
 #[derive(Clone)]
 pub struct GlobalSymbolContext {
-    pub names: HashMap<u64, String>,
-    pub sizes: HashMap<u64, u64>,
+    pub names: std::collections::HashMap<u64, String>,
+    pub sizes: std::collections::HashMap<u64, u64>,
 }
 
 pub fn normalize_hir_function(func: &mut HirFunction) {
@@ -1434,7 +1440,7 @@ struct CleanupStmtOptions {
 }
 
 fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
-    let preserved_temps = HashSet::new();
+    let preserved_temps = HashSet::default();
     let global_refs = if depth == 0 {
         Some(crate::cleanup::utils::collect_referenced_labels(stmts))
     } else {
@@ -1459,7 +1465,7 @@ fn cleanup_stmt_list_with_options(
     depth: usize,
     options: CleanupStmtOptions,
 ) {
-    let preserved_temps = HashSet::new();
+    let preserved_temps = HashSet::default();
     let global_refs = if depth == 0 {
         Some(crate::cleanup::utils::collect_referenced_labels(stmts))
     } else {

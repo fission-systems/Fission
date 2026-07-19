@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Algebraic Type Constraint Propagator pass.
 ///
@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 /// (using a fixed-point solver) forward and backward along the dataflow graph.
 pub fn apply_type_constraint_propagation(func: &mut HirFunction) -> bool {
     // 1. Initialize constraints for each local and parameter variable
-    let mut var_types = HashMap::new();
+    let mut var_types = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         if binding.ty != NirType::Unknown {
             var_types.insert(binding.name.clone(), binding.ty.clone());
@@ -16,7 +16,7 @@ pub fn apply_type_constraint_propagation(func: &mut HirFunction) -> bool {
 
     // 2. Scan the body to collect constraints from memory/pointer accesses
     // and assignments (dataflow edges)
-    let mut field_accesses = HashMap::<String, HashMap<u32, NirType>>::new();
+    let mut field_accesses = HashMap::<String, HashMap<u32, NirType>>::default();
     let mut assignments = Vec::new(); // Pairs of (lhs_var, rhs_expr)
 
     collect_constraints(&func.body, &mut field_accesses, &mut assignments);
@@ -332,7 +332,7 @@ fn unify_types(t1: &NirType, t2: &NirType) -> Option<NirType> {
                 fields: f2,
             },
         ) => {
-            let mut merged_fields = HashMap::new();
+            let mut merged_fields = HashMap::default();
             for field in f1 {
                 merged_fields.insert(field.offset, field.clone());
             }

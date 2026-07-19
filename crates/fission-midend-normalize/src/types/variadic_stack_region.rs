@@ -9,7 +9,8 @@
 
 use fission_midend_core::ir::{HirExpr, HirFunction, HirStmt, NirBindingOrigin};
 use fission_core::CallingConvention;
-use std::collections::{BTreeSet, HashMap};
+use crate::HashMap;
+use std::collections::BTreeSet;
 
 use fission_midend_core::wave_stats::{
     add_abi_slot_recoveries, add_home_slot_promotions, add_va_start_recoveries,

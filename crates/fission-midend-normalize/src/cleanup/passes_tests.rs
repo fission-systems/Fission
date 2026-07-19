@@ -2,7 +2,7 @@ use super::utils::*;
 use super::*;
 // prelude via parent
 use fission_midend_core::*;
-use std::collections::HashSet;
+use crate::HashSet;
 
 fn int(bits: u32) -> NirType {
     NirType::Int {
@@ -79,7 +79,7 @@ fn collapse_trivial_assign_returns_skips_preserved_temp() {
 
     assert!(!collapse_trivial_assign_returns(
         &mut stmts,
-        &HashSet::from(["uVar0"]),
+        &["uVar0"].into_iter().collect::<HashSet<_>>(),
     ));
     assert!(matches!(stmts[0], HirStmt::Assign { .. }));
     assert!(matches!(stmts[1], HirStmt::Return(Some(HirExpr::Var(_)))));
@@ -618,7 +618,7 @@ fn eliminate_dead_temp_assigns_removes_dead_preserved_temp() {
 
     assert!(eliminate_dead_temp_assigns(
         &mut stmts,
-        &HashSet::from(["uVar0"]),
+        &["uVar0"].into_iter().collect::<HashSet<_>>(),
     ));
     assert!(stmts.is_empty());
 }
@@ -637,7 +637,7 @@ fn eliminate_dead_temp_assigns_removes_unused_reg_flag_artifact() {
         HirStmt::Return(Some(HirExpr::Var("rsp".to_string()))),
     ];
 
-    assert!(eliminate_dead_temp_assigns(&mut stmts, &HashSet::new()));
+    assert!(eliminate_dead_temp_assigns(&mut stmts, &HashSet::default()));
     assert_eq!(
         stmts,
         vec![HirStmt::Return(Some(HirExpr::Var("rsp".to_string())))]
@@ -662,7 +662,7 @@ fn eliminate_dead_temp_assigns_keeps_used_reg_flag_artifact() {
         },
     ];
 
-    assert!(!eliminate_dead_temp_assigns(&mut stmts, &HashSet::new()));
+    assert!(!eliminate_dead_temp_assigns(&mut stmts, &HashSet::default()));
     assert_eq!(stmts.len(), 2);
     assert!(matches!(
         &stmts[0],
@@ -806,7 +806,7 @@ fn inline_single_use_temps_does_not_cross_label_boundary() {
         },
     ];
 
-    assert!(!inline_single_use_temps(&mut stmts, &HashSet::new()));
+    assert!(!inline_single_use_temps(&mut stmts, &HashSet::default()));
     assert!(matches!(
         &stmts[2],
         HirStmt::If {
@@ -834,7 +834,7 @@ fn inline_single_use_temps_keeps_same_linear_segment_inline() {
         },
     ];
 
-    assert!(inline_single_use_temps(&mut stmts, &HashSet::new()));
+    assert!(inline_single_use_temps(&mut stmts, &HashSet::default()));
     assert_eq!(stmts.len(), 1);
     let HirStmt::Assign { rhs, .. } = &stmts[0] else {
         panic!("expected assignment");
@@ -915,7 +915,7 @@ fn inline_pure_copy_into_multi_use_predicate() {
         },
     ];
     assert!(
-        inline_single_use_temps(&mut stmts, &HashSet::new()),
+        inline_single_use_temps(&mut stmts, &HashSet::default()),
         "pure copy into multi-use predicate should inline: {stmts:?}"
     );
     assert_eq!(stmts.len(), 1, "temp assign removed: {stmts:?}");
@@ -1011,7 +1011,7 @@ fn inline_single_use_temps_preserves_rhs_across_dependency_redefinition() {
         },
     ];
 
-    assert!(!inline_single_use_temps(&mut stmts, &HashSet::new()));
+    assert!(!inline_single_use_temps(&mut stmts, &HashSet::default()));
     assert_eq!(stmts.len(), 3);
     let HirStmt::Assign { rhs, .. } = &stmts[2] else {
         panic!("expected address assignment");
@@ -1040,7 +1040,7 @@ fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
         },
     ];
 
-    assert!(inline_single_use_temps(&mut stmts, &HashSet::new()));
+    assert!(inline_single_use_temps(&mut stmts, &HashSet::default()));
     assert_eq!(stmts.len(), 1);
     let HirStmt::If { cond, .. } = &stmts[0] else {
         panic!("expected if");
@@ -1142,7 +1142,7 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
         },
     ];
 
-    assert!(!inline_single_use_temps(&mut stmts, &HashSet::new()));
+    assert!(!inline_single_use_temps(&mut stmts, &HashSet::default()));
     assert_eq!(stmts.len(), 2);
 }
 
@@ -1204,11 +1204,11 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
     use crate::pipeline::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext};
     use std::collections::HashMap;
 
-    let mut names = HashMap::new();
+    let mut names = HashMap::default();
     names.insert(0x140003000, "g_data".to_string());
     names.insert(0x140004000, "g_exact".to_string());
 
-    let mut sizes = HashMap::new();
+    let mut sizes = HashMap::default();
     sizes.insert(0x140003000, 100);
     sizes.insert(0x140004000, 10);
 
@@ -1812,7 +1812,7 @@ fn collapse_trivial_assign_returns_folds_eax_const() {
         },
         HirStmt::Return(Some(HirExpr::Var("eax".to_string()))),
     ];
-    assert!(collapse_trivial_assign_returns(&mut stmts, &HashSet::new()));
+    assert!(collapse_trivial_assign_returns(&mut stmts, &HashSet::default()));
     assert_eq!(stmts.len(), 1);
     assert!(matches!(
         &stmts[0],
@@ -1831,7 +1831,7 @@ fn collapse_trivial_assign_returns_folds_eax_const_even_if_preserved() {
     ];
     assert!(collapse_trivial_assign_returns(
         &mut stmts,
-        &HashSet::from(["eax"]),
+        &["eax"].into_iter().collect::<HashSet<_>>(),
     ));
     assert_eq!(stmts.len(), 1);
     assert!(matches!(
@@ -1866,7 +1866,7 @@ fn collapse_trivial_assign_returns_folds_rax_param_add() {
     ];
     assert!(collapse_trivial_assign_returns(
         &mut stmts,
-        &std::collections::HashSet::new()
+        &std::collections::HashSet::default()
     ));
     assert_eq!(stmts.len(), 1);
     match &stmts[0] {

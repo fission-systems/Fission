@@ -36,7 +36,7 @@ use crate::prelude::*;
 use crate::analysis::defuse::DefUseMap;
 use crate::analysis::liveness::LivenessTransfer;
 use crate::cleanup::expr_has_side_effects;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// x86 EFLAGS variable names produced by `arch::x86::unique_x86_register_name`.
 const FLAG_NAMES: &[&str] = &["cf", "pf", "af", "zf", "sf", "of"];
@@ -94,7 +94,7 @@ fn count_flag_defs(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) {
 /// Collect definitions for flags that have exactly ONE assignment in the body.
 fn collect_single_defs(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
     // First pass: count assignments per flag.
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut counts: HashMap<String, usize> = HashMap::default();
     count_flag_defs(stmts, &mut counts);
 
     // Only retain singly-defined flags (conservative correctness).
@@ -105,11 +105,11 @@ fn collect_single_defs(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
         .collect();
 
     if single.is_empty() {
-        return HashMap::new();
+        return HashMap::default();
     }
 
     // Second pass: collect the actual definition expressions.
-    let mut defs: HashMap<String, HirExpr> = HashMap::new();
+    let mut defs: HashMap<String, HirExpr> = HashMap::default();
     collect_defs_for(stmts, &single, &mut defs);
     defs
 }
@@ -610,7 +610,7 @@ fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
         })
         .collect();
 
-    let mut label_blocks = HashMap::new();
+    let mut label_blocks = HashMap::default();
     for (block_index, block) in blocks.iter().enumerate() {
         for stmt in &stmts[block.start..block.end] {
             if let HirStmt::Label(label) = stmt {
@@ -622,7 +622,7 @@ fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
     for block_index in 0..blocks.len() {
         let start = blocks[block_index].start;
         let end = blocks[block_index].end;
-        let mut targets = HashSet::new();
+        let mut targets = HashSet::default();
         for stmt in &stmts[start..end] {
             collect_goto_targets(stmt, &mut targets);
         }
@@ -686,15 +686,15 @@ fn transfer_flag_block(
 fn dead_flag_definition_sites(stmts: &[HirStmt]) -> HashSet<usize> {
     let blocks = build_flag_cfg(stmts);
     if blocks.is_empty() {
-        return HashSet::new();
+        return HashSet::default();
     }
 
     let stmt_uses: Vec<HashSet<String>> = stmts.iter().map(flag_uses).collect();
-    let mut live_in = vec![HashSet::new(); blocks.len()];
+    let mut live_in = vec![HashSet::default(); blocks.len()];
     loop {
         let mut changed = false;
         for block_index in (0..blocks.len()).rev() {
-            let mut live_out = HashSet::new();
+            let mut live_out = HashSet::default();
             for successor in &blocks[block_index].successors {
                 live_out.extend(live_in[*successor].iter().cloned());
             }
@@ -709,9 +709,9 @@ fn dead_flag_definition_sites(stmts: &[HirStmt]) -> HashSet<usize> {
         }
     }
 
-    let mut dead = HashSet::new();
+    let mut dead = HashSet::default();
     for block in &blocks {
-        let mut live = HashSet::new();
+        let mut live = HashSet::default();
         for successor in &block.successors {
             live.extend(live_in[*successor].iter().cloned());
         }
@@ -795,7 +795,7 @@ fn remove_dead_flag_assigns(func: &mut HirFunction) {
     }
 
     let uses = DefUseMap::build(&func.body);
-    let mut assigned = HashMap::new();
+    let mut assigned = HashMap::default();
     count_flag_defs(&func.body, &mut assigned);
     func.locals.retain(|binding| {
         !is_flag_var(&binding.name)
@@ -814,7 +814,7 @@ fn remove_dead_flag_assigns(func: &mut HirFunction) {
 /// compare was already high-level while CF/OF/SF/ZF/PF stores remain).
 pub fn apply_flag_recovery_pass(func: &mut HirFunction) -> bool {
     let mut changed = false;
-    let mut reaching_defs = HashMap::new();
+    let mut reaching_defs = HashMap::default();
     recover_in_stmts_with_reaching_defs(&mut func.body, &mut reaching_defs, &mut changed);
 
     let defs = collect_single_defs(&func.body);

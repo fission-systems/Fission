@@ -1,9 +1,9 @@
 use crate::prelude::*;
 use fission_midend_core::expr_type;
-use std::collections::HashMap;
+use crate::HashMap;
 
 pub fn apply_conditional_move_pass(func: &mut HirFunction) -> bool {
-    let mut type_map = HashMap::new();
+    let mut type_map = HashMap::default();
     for param in &func.params {
         type_map.insert(param.name.clone(), param.ty.clone());
     }

@@ -37,7 +37,7 @@
 /// - LLVM `lib/Transforms/Scalar/LICM.cpp` (concept)
 /// - Aho, Lam, Sethi, Ullman "Compilers" §9.5 (code motion)
 use crate::prelude::*;
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Apply LICM to all loops in `func`.  Returns `true` if any statement was
 /// hoisted.
@@ -142,7 +142,7 @@ fn extract_invariants_from_loop(loop_stmt: &mut HirStmt) -> Vec<HirStmt> {
     };
 
     // 1. Collect all variable names defined anywhere in the loop body.
-    let mut loop_defs: HashSet<String> = HashSet::new();
+    let mut loop_defs: HashSet<String> = HashSet::default();
     collect_all_defs(body, &mut loop_defs);
 
     // 2. Identify invariant top-level assignments.

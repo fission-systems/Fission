@@ -9,7 +9,8 @@ use fission_midend_core::ir::{
 };
 use fission_midend_core::rename_vars_in_stmts;
 use fission_midend_core::{AbiState, CallingConvention};
-use std::collections::{BTreeSet, HashSet};
+use crate::HashSet;
+use std::collections::BTreeSet;
 
 use fission_midend_core::wave_stats::add_entry_param_promotions;
 
@@ -354,7 +355,7 @@ fn hardware_names_for_slot(func: &HirFunction, slot: usize) -> Vec<String> {
     if let Some(hw) = abi.param_hw_name(slot) {
         names.insert(hw);
     }
-    let mut body_vars = HashSet::new();
+    let mut body_vars = HashSet::default();
     for stmt in &func.body {
         collect_var_names_in_stmt(stmt, &mut body_vars);
     }
@@ -502,7 +503,7 @@ pub fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
     let mut prefix = Vec::new();
     collect_entry_linear_prefix(&func.body, &mut prefix);
 
-    let mut seen_lhs = HashSet::new();
+    let mut seen_lhs = HashSet::default();
     let mut spill_to_slot: Vec<(String, usize, NirType)> = Vec::new();
 
     for stmt in &prefix {
@@ -536,7 +537,7 @@ pub fn apply_entry_param_promotion_pass(func: &mut HirFunction) -> bool {
     }
 
     // One local name per slot (first wins); drop conflicting mappings.
-    let mut used_slots = HashSet::new();
+    let mut used_slots = HashSet::default();
     spill_to_slot.retain(|(_, slot, _)| {
         if used_slots.contains(slot) {
             return false;

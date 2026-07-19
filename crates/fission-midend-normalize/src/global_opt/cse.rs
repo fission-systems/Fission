@@ -37,11 +37,11 @@
 /// - Cooper & Torczon "Engineering a Compiler" §8.4
 use super::super::analysis::expr_key::{PureExprMap, invalidate_pure_map, pure_expr_key};
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Apply CSE to the function body.  Returns `true` if any substitution was made.
 pub fn apply_cse_pass(func: &mut HirFunction) -> bool {
-    let mut map: PureExprMap = HashMap::new();
+    let mut map: PureExprMap = HashMap::default();
     let non_value_representatives = collect_non_value_representatives(func);
     cse_stmts(&mut func.body, &mut map, &non_value_representatives)
 }
@@ -142,7 +142,7 @@ fn cse_stmt(
         }
         HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             // Loop body: fresh map (loop may execute 0 or many times).
-            let mut loop_map = HashMap::new();
+            let mut loop_map = HashMap::default();
             let changed = cse_stmts(body, &mut loop_map, non_value_representatives);
             // Any representative known before the loop may be clobbered by
             // a loop-carried assignment. Clearing is conservative, but it
@@ -160,12 +160,12 @@ fn cse_stmt(
                     changed = true;
                 }
             }
-            let mut loop_map = HashMap::new();
+            let mut loop_map = HashMap::default();
             if cse_stmts(body, &mut loop_map, non_value_representatives) {
                 changed = true;
             }
             if let Some(s) = update {
-                let mut u_map = HashMap::new();
+                let mut u_map = HashMap::default();
                 if cse_stmt(s, &mut u_map, non_value_representatives) {
                     changed = true;
                 }

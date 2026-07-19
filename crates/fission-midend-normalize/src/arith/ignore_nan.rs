@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Simplifies floating-point comparison expressions by ignoring redundant NaN checks (RuleIgnoreNan).
 /// - `!__isnan(x) && (x < y)` -> `x < y`
@@ -180,7 +180,7 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
             let mut operands = Vec::new();
             collect_and_operands(expr, &mut operands);
 
-            let mut to_remove = HashSet::new();
+            let mut to_remove = HashSet::default();
             for (idx, operand) in operands.iter().enumerate() {
                 if let Some(var_name) = get_negated_isnan_var(operand) {
                     // Check if any OTHER operand contains a comparison involving var_name
@@ -207,7 +207,7 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
             let mut operands = Vec::new();
             collect_or_operands(expr, &mut operands);
 
-            let mut to_remove = HashSet::new();
+            let mut to_remove = HashSet::default();
             for (idx, operand) in operands.iter().enumerate() {
                 if let Some(var_name) = get_isnan_var(operand) {
                     // Check if any OTHER operand contains a comparison involving var_name

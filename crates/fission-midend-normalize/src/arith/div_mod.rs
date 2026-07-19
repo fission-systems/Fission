@@ -22,7 +22,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     // Live CDQ temps: name → (wide expr, free vars of wide).
     let mut live: std::collections::HashMap<String, (HirExpr, std::collections::HashSet<String>)> =
-        std::collections::HashMap::new();
+        std::collections::HashMap::default();
 
     for i in 0..stmts.len() {
         // Nested structures first (independent scopes).
@@ -126,7 +126,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
         // use a pure just bound on this line).
         if let HirLValue::Var(name) = lhs {
             if extract_cdq_low_from_wide_dividend(rhs).is_some() {
-                let mut frees = std::collections::HashSet::new();
+                let mut frees = std::collections::HashSet::default();
                 collect_free_var_names(rhs, &mut frees);
                 live.insert(name.clone(), (rhs.clone(), frees));
             } else {

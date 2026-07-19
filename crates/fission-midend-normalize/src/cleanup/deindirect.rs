@@ -30,7 +30,7 @@
 //!   ```
 
 use crate::prelude::*;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Traverse and statically resolve indirect calls in a function.
 ///
@@ -40,7 +40,7 @@ pub fn apply_deindirect_pass(func: &mut HirFunction) -> bool {
 
     // 1. Gather all local variable initializers representing constants or global symbol addresses.
     // This allows resolving variables whose values are established at local definition sites.
-    let mut const_initializers = HashMap::<String, HirExpr>::new();
+    let mut const_initializers = HashMap::<String, HirExpr>::default();
     for local in &func.locals {
         if let Some(initializer) = &local.initializer {
             match initializer {
@@ -65,7 +65,7 @@ pub fn apply_deindirect_pass(func: &mut HirFunction) -> bool {
     }
 
     // 2. Build address-to-symbol mapping from the callee summaries in the function context.
-    let mut addr_to_symbol = HashMap::<u64, String>::new();
+    let mut addr_to_symbol = HashMap::<u64, String>::default();
     for (symbol, summary) in &func.callee_summaries {
         if let Some(addr) = summary.target.address {
             addr_to_symbol.insert(addr, symbol.clone());

@@ -34,7 +34,7 @@
 ///
 /// Irreducible cases (any condition fails) are left unchanged.
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Callee-saved register names that can appear after register naming. This
 /// covers x86-64, AArch64, and ARM32 preserved GPR sets. Frame/link registers
@@ -469,7 +469,7 @@ fn remove_nested(stmt: &mut HirStmt, pairs: &HashMap<String, String>, changed: &
 pub fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bool {
     // ── Step 1: Discover prologue saves in the first few top-level statements.
     let max_prologue_scan = 16usize;
-    let mut candidate_pairs: HashMap<String, String> = HashMap::new(); // ptr_var → reg
+    let mut candidate_pairs: HashMap<String, String> = HashMap::default(); // ptr_var → reg
 
     for stmt in func.body.iter().take(max_prologue_scan) {
         if let Some((ptr, reg)) = match_prologue_save(stmt) {
@@ -493,10 +493,10 @@ pub fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bool {
     //   b. The ptr variable appears exactly ONCE as an rvalue in the body
     //      (the epilogue restore's Load expression).  Any additional use means
     //      the spill slot is aliased or used for something else.
-    let mut confirmed: HashMap<String, String> = HashMap::new();
+    let mut confirmed: HashMap<String, String> = HashMap::default();
 
     // Collect all epilogue restores anywhere in the body.
-    let mut restores: HashMap<String, String> = HashMap::new(); // ptr_var → reg
+    let mut restores: HashMap<String, String> = HashMap::default(); // ptr_var → reg
     collect_restores(&func.body, &mut restores);
 
     for (ptr, reg) in &candidate_pairs {
@@ -804,7 +804,7 @@ fn remove_orphaned_slot_epilogue_restores(func: &mut HirFunction) -> bool {
 /// later replaces every use of `rbx` with the original parameter, leaving the
 /// initial assignment dead and the register name undeclared in the output.
 pub fn remove_dead_callee_saved_param_loads(func: &mut HirFunction) -> bool {
-    let mut candidates: HashSet<String> = HashSet::new();
+    let mut candidates: HashSet<String> = HashSet::default();
     collect_callee_assign_targets_no_slot_rhs(&func.body, &mut candidates);
 
     for b in &func.locals {

@@ -1,6 +1,6 @@
 use fission_midend_core::ir::{HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBinding, NirType};
 use fission_midend_core::is_pure_intrinsic_call;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 pub(super) fn is_trivial_temp_name(name: &str) -> bool {
     name == "result"
@@ -535,7 +535,7 @@ pub(super) fn var_is_assigned_in_stmt(stmt: &HirStmt, name: &str) -> bool {
 }
 
 pub fn collect_referenced_labels(stmts: &[HirStmt]) -> HashSet<String> {
-    let mut referenced = HashSet::new();
+    let mut referenced = HashSet::default();
     for stmt in stmts {
         collect_stmt_referenced_labels(stmt, &mut referenced);
     }
@@ -543,7 +543,7 @@ pub fn collect_referenced_labels(stmts: &[HirStmt]) -> HashSet<String> {
 }
 
 pub(super) fn collect_referenced_label_counts(stmts: &[HirStmt]) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
+    let mut counts = HashMap::default();
     for stmt in stmts {
         collect_stmt_referenced_label_counts(stmt, &mut counts);
     }

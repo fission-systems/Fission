@@ -29,7 +29,7 @@ use super::super::analysis::preservation::{
 use super::super::cleanup::{prune_unused_dead_local_bindings, prune_unused_temp_bindings};
 use fission_midend_core::wave_stats;
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 // ── Copy Propagation ─────────────────────────────────────────────────────────
 
@@ -53,11 +53,11 @@ pub fn copy_propagation_pass(func: &mut HirFunction) -> bool {
 
     if !temp_names.is_empty() {
         let def_count = count_definitions_in_stmts(&func.body, &temp_names);
-        let mut copy_map: HashMap<String, String> = HashMap::new();
+        let mut copy_map: HashMap<String, String> = HashMap::default();
         collect_copies(&func.body, &temp_names, &def_count, &mut copy_map);
 
         if !copy_map.is_empty() {
-            let mut predicate_vars = HashSet::new();
+            let mut predicate_vars = HashSet::default();
             collect_predicate_vars_in_stmts(&func.body, &mut predicate_vars);
             copy_map.retain(|name, _| !predicate_vars.contains(name.as_str()));
             let preserved_skip_count = copy_map
@@ -105,7 +105,7 @@ pub fn copy_propagation_pass(func: &mut HirFunction) -> bool {
 
     if !eligible_vars.is_empty() {
         let def_count = count_definitions_in_stmts(&func.body, &eligible_vars);
-        let mut const_map = HashMap::new();
+        let mut const_map = HashMap::default();
         collect_constants(&func.body, &eligible_vars, &def_count, &mut const_map);
 
         if !const_map.is_empty() {
@@ -258,7 +258,7 @@ fn count_definitions_in_stmts<'a>(
     stmts: &'a [HirStmt],
     temp_names: &HashSet<&str>,
 ) -> HashMap<&'a str, usize> {
-    let mut counts: HashMap<&'a str, usize> = HashMap::new();
+    let mut counts: HashMap<&'a str, usize> = HashMap::default();
     for stmt in stmts {
         count_defs_stmt(stmt, temp_names, &mut counts);
     }
@@ -734,7 +734,7 @@ pub fn join_coalescing_pass(func: &mut HirFunction) -> bool {
     }
 
     let map = DefUseMap::build(&func.body);
-    let mut rename_map: HashMap<String, String> = HashMap::new();
+    let mut rename_map: HashMap<String, String> = HashMap::default();
     collect_join_renames(&func.body, &temp_names, &map, &mut rename_map);
 
     if rename_map.is_empty() {
@@ -834,7 +834,7 @@ fn collect_join_renames(
 /// Return (name, type_repr) pairs for the LAST assignment to each pure temp
 /// within a flat statement list.
 fn last_assigns(stmts: &[HirStmt], temp_names: &HashSet<String>) -> Vec<(String, String)> {
-    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut seen: HashMap<String, String> = HashMap::default();
     for stmt in stmts {
         if let HirStmt::Assign {
             lhs: HirLValue::Var(name),
@@ -1392,8 +1392,8 @@ fn substitute_constants_expr(
 // ── Loop-carried/Preheader Preservation Helpers ──────────────────────────────
 
 fn collect_loop_preservation_vars(stmts: &[HirStmt]) -> HashSet<String> {
-    let mut defined_outside: HashSet<String> = HashSet::new();
-    let mut used_inside: HashSet<String> = HashSet::new();
+    let mut defined_outside: HashSet<String> = HashSet::default();
+    let mut used_inside: HashSet<String> = HashSet::default();
     collect_defs_outside_loops(stmts, &mut defined_outside);
     collect_uses_inside_loops(stmts, &mut used_inside);
     defined_outside
@@ -1481,7 +1481,7 @@ fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
             }
         }
     }
-    let mut local: HashSet<&str> = HashSet::new();
+    let mut local: HashSet<&str> = HashSet::default();
     inner(stmts, &mut local);
     out.extend(local.into_iter().map(str::to_owned));
 }

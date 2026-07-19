@@ -48,7 +48,7 @@ use fission_midend_core::wave_stats::{
 use crate::prelude::*;
 use fission_midend_core::rename_vars_in_stmts;
 use fission_signatures::{ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup};
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
 /// unconstrained types (void, variadic, …).
@@ -533,8 +533,8 @@ fn is_known_variadic_runtime_symbol(target: &str) -> bool {
 pub fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     // Build a lookup map from binding name to index in func.locals / func.params.
     let mut changed = false;
-    let mut rename_candidates = HashMap::<String, String>::new();
-    let mut rename_conflicts = HashSet::<String>::new();
+    let mut rename_candidates = HashMap::<String, String>::default();
+    let mut rename_conflicts = HashSet::<String>::default();
     let mut wrapper_resolved_count = 0usize;
     let mut signature_missing_count = 0usize;
     let mut unknown_target_kept_count = 0usize;

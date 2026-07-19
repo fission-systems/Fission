@@ -1,9 +1,9 @@
 use crate::prelude::*; // For accessing normalizer structures
 use fission_midend_core::rename_vars_in_stmts;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String, String)> {
-    let mut copies = std::collections::HashSet::new();
+    let mut copies = std::collections::HashSet::default();
     // Only *unconditional* var copies establish merge identity. A copy inside
     // `if`/`while`/switch (e.g. x86 cmov `if (cond) acc = src`) is a
     // path-sensitive override: merging `acc` with `src` collapses distinct
@@ -75,13 +75,13 @@ fn collect_copy_merge_barrier_vars(
 }
 
 fn collect_read_vars(stmts: &[HirStmt]) -> HashSet<String> {
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     collect_read_vars_in_stmts(stmts, &mut vars);
     vars
 }
 
 fn collect_cooccurring_var_pairs(stmts: &[HirStmt]) -> HashSet<(String, String)> {
-    let mut pairs = HashSet::new();
+    let mut pairs = HashSet::default();
     collect_cooccurring_var_pairs_in_stmts(stmts, &mut pairs);
     pairs
 }
@@ -167,7 +167,7 @@ fn collect_cooccurring_var_pairs_in_lvalue(
 }
 
 fn collect_cooccurring_var_pairs_in_expr(expr: &HirExpr, pairs: &mut HashSet<(String, String)>) {
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     collect_vars_in_expr(expr, &mut vars);
     let mut vars = vars.into_iter().collect::<Vec<_>>();
     vars.sort();
@@ -526,7 +526,7 @@ fn transitive_copy_aliases(
                 || is_eligible_for_speculative_merge_by_name(b))
     });
 
-    let mut parent: HashMap<String, String> = HashMap::new();
+    let mut parent: HashMap<String, String> = HashMap::default();
     for (a, b) in eligible_copies {
         let ra = root(&parent, a);
         let rb = root(&parent, b);
@@ -541,7 +541,7 @@ fn transitive_copy_aliases(
         parent.insert(drop, keep);
     }
 
-    let mut nodes = HashSet::<String>::new();
+    let mut nodes = HashSet::<String>::default();
     for (a, b) in direct_copies {
         if local_names.contains(a) {
             nodes.insert(a.clone());
@@ -550,7 +550,7 @@ fn transitive_copy_aliases(
             nodes.insert(b.clone());
         }
     }
-    let mut aliases = HashMap::<String, String>::new();
+    let mut aliases = HashMap::<String, String>::default();
     for node in nodes {
         let canonical = root(&parent, &node);
         if canonical != node {
@@ -805,8 +805,8 @@ pub fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     // Step 2: Speculatively merge variables with disjoint live ranges and compatible types
     let mut live_ranges = LiveRangeCollector {
         stmt_counter: 0,
-        ranges: HashMap::new(),
-        labels: HashMap::new(),
+        ranges: HashMap::default(),
+        labels: HashMap::default(),
         backedges: Vec::new(),
         control_intervals: Vec::new(),
     };
@@ -823,7 +823,7 @@ pub fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     let mut current_locals = func.locals.clone();
     let mut merge_members = current_locals
         .iter()
-        .map(|binding| HashSet::from([binding.name.clone()]))
+        .map(|binding| [binding.name.clone()].into_iter().collect::<HashSet<_>>())
         .collect::<Vec<_>>();
 
     for i in 0..current_locals.len() {

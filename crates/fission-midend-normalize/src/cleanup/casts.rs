@@ -1,9 +1,9 @@
 use crate::prelude::*;
 use super::utils::*;
-use std::collections::HashMap;
+use crate::HashMap;
 
 pub fn strip_redundant_assign_casts(func: &mut HirFunction) -> bool {
-    let mut type_map: HashMap<String, NirType> = HashMap::new();
+    let mut type_map: HashMap<String, NirType> = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }
@@ -142,7 +142,7 @@ fn strip_redundant_casts_in_expr(expr: &mut HirExpr, type_map: &HashMap<String, 
 }
 
 pub fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) -> bool {
-    let mut aliases = HashMap::<String, HirExpr>::new();
+    let mut aliases = HashMap::<String, HirExpr>::default();
     for binding in &func.locals {
         if !matches!(binding.ty, NirType::Ptr(_)) {
             continue;

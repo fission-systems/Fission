@@ -10,18 +10,18 @@ use super::super::analysis::defuse::{eval_hir_expr_with_const_env, fold_expr_hir
 use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::is_large_hir_function;
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 type ConstEnv = HashMap<String, (i64, NirType)>;
 
 pub fn apply_sccp_pass(func: &mut HirFunction) -> bool {
     let max_rounds = if is_large_hir_function(func) { 2 } else { 8 };
     let goto_targets = collect_goto_targets(&func.body);
-    let mut all_xvars = HashSet::new();
+    let mut all_xvars = HashSet::default();
     collect_xvars_in_stmts(&func.body, &mut all_xvars);
     let mut any = false;
     for _ in 0..max_rounds {
-        let mut env = ConstEnv::new();
+        let mut env = ConstEnv::default();
         if !sccp_transform_stmts(&mut func.body, &mut env, &goto_targets, &all_xvars) {
             break;
         }
@@ -31,7 +31,7 @@ pub fn apply_sccp_pass(func: &mut HirFunction) -> bool {
 }
 
 fn collect_goto_targets(stmts: &[HirStmt]) -> HashSet<String> {
-    let mut targets = HashSet::new();
+    let mut targets = HashSet::default();
     for stmt in stmts {
         collect_goto_targets_stmt(stmt, &mut targets);
     }
@@ -89,7 +89,7 @@ fn collect_goto_targets_stmt(stmt: &HirStmt, targets: &mut HashSet<String>) {
 
 fn merge_env(a: &ConstEnv, b: &ConstEnv) -> ConstEnv {
     let keys: HashSet<_> = a.keys().chain(b.keys()).cloned().collect();
-    let mut out = ConstEnv::new();
+    let mut out = ConstEnv::default();
     for k in keys {
         match (a.get(&k), b.get(&k)) {
             (Some(ca), Some(cb)) if ca == cb => {
@@ -147,7 +147,7 @@ fn lvalue_has_side_effects(lhs: &HirLValue) -> bool {
 }
 
 fn loop_variant_vars(body: &[HirStmt], all_xvars: &HashSet<String>) -> HashSet<String> {
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     for stmt in body {
         loop_variant_stmt(stmt, &mut vars);
     }

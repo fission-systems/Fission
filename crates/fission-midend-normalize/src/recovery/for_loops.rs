@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use std::collections::HashSet;
+use crate::HashSet;
 
 pub fn apply_for_loop_folding(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
@@ -80,7 +80,7 @@ fn try_collapse_while_to_for_algorithmic(
         _ => return None,
     };
 
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     collect_cond_vars(&cond, &mut vars);
     if vars.is_empty() {
         return None;

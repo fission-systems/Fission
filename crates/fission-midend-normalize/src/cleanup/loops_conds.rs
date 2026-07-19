@@ -1,7 +1,7 @@
 use super::super::analysis::defuse::DefUseMap;
 use crate::prelude::*;
 use super::utils::*;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 pub fn collapse_loop_exit_alias_returns(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
@@ -224,7 +224,7 @@ fn accumulator_update_stmt(stmt: &HirStmt, temp: &str) -> Option<String> {
 }
 
 fn vars_in_expr(expr: &HirExpr) -> HashSet<String> {
-    let mut vars = HashSet::new();
+    let mut vars = HashSet::default();
     collect_vars_in_expr(expr, &mut vars);
     vars
 }

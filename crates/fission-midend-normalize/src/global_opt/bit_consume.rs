@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use fission_midend_core::expr_type;
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Bit-level consumed-mask backward propagation pass.
 ///
@@ -36,12 +36,12 @@ use std::collections::HashMap;
 /// Loop-carried variables are also treated conservatively.
 pub fn apply_bit_consume_dead_code_pass(func: &mut HirFunction) -> bool {
     // --- Phase 1: collect definitions and multi-def variables ---
-    let mut def_map: HashMap<String, HirExpr> = HashMap::new();
-    let mut multi_def: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut def_map: HashMap<String, HirExpr> = HashMap::default();
+    let mut multi_def: std::collections::HashSet<String> = std::collections::HashSet::default();
     collect_definitions(&func.body, &mut def_map, &mut multi_def);
 
     // --- Phase 2: build initial consumed seeds from all use sites ---
-    let mut consumed: HashMap<String, u64> = HashMap::new();
+    let mut consumed: HashMap<String, u64> = HashMap::default();
     collect_consumed_seeds(&func.body, &mut consumed, &def_map, &multi_def);
 
     // --- Phase 3: backward propagation worklist ---
