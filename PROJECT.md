@@ -125,11 +125,29 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   the day — different hardware, machine load, or any future perf change can
   silently shift output. This is the same category of concern as the
   hash-iteration determinism fix above, just triggered by wall-clock timing
-  instead of hash seeding. **Not yet fixed** — the fix direction is to
-  replace the wall-clock budget with a deterministic proxy (e.g. candidate-
-  proof-attempt count or total ops visited) so budget exhaustion no longer
-  depends on machine speed. Tracked as follow-up work, deliberately not
-  bundled into the RegisterNamer perf commit.
+  instead of hash seeding.
+- **SESE_REGION_PROOF_BUDGET_MS fixed 2026-07-19** (commit `7460ffea`):
+  replaced with `SESE_REGION_PROOF_BUDGET_CALLS: u64 = 20_000`, a count of
+  `sese_region_proof_budget_exceeded()` calls since the structuring attempt
+  began (`PreviewBuilder::sese_region_proof_calls: Cell<u64>`, reset
+  alongside `structuring_start` in `CollapseDriver::run`). Trait method
+  signature unchanged (`fn sese_region_proof_budget_exceeded(&self) ->
+  bool`), only its implementation — no call-site changes needed at any of
+  the existing check points in `sese_driver.rs`/`linear_recovery.rs`. Added
+  one new trait method, `reset_sese_region_proof_budget()`. Validated:
+  1312/1312 tests, `golden_corpus_check.py` clean on both `release` and
+  `quick-release` builds (160 functions), `state_machine_score` 20/20
+  uniform, release/quick-release byte-identical. One corpus function
+  (`rc4_init`) changed output (all 10 candidate regions now complete
+  instead of an early wall-clock bailout, recovering a `do/while` where a
+  bare `for(;;)` fallback rendered before) — golden snapshot updated.
+  **Deliberately NOT touched in this pass** (separate wall-clock mechanisms
+  sharing the same `structuring_start` `Instant` field, out of scope):
+  `IfLoweringBudget`'s 10ms-per-instance / 5000ms-total checks
+  (`linear_types.rs`) and the inline 5000ms checks in `loops.rs`
+  (`try_lower_while`, `try_lower_multiblock_dowhile`,
+  `lower_loop_body_subgraph`). Same category of machine-speed-dependence;
+  tracked as further follow-up if it turns out to matter in practice.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
