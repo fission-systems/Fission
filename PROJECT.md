@@ -74,20 +74,44 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   on the real corpus row that exposed it — not a structural or semantic
   regression, but worth re-checking on future slices with the same
   before/after trace-diff technique, not text-diff alone.
-  `deadcode_dynamic` now has 4 of 9 chains migrated, 5 remain in the free
-  function.
+  **`deadcode_dynamic` fully migrated 2026-07-19** (commit `3be5a75a`): all
+  9 original chains (`constant_ptr_recovery`, `conditional_const`,
+  `entry_param_promotion`, `sccp`, `cse`, `defuse_dead_assignment`,
+  `copy_propagation`, `remove_dead_callee_param_loads`,
+  `join_coalescing`, `branch_prefix_hoist`, `gvn_join_hoist` — note some
+  chains bundle more than one original `if` block) are now declarative
+  `ActionGroup` passes in `groups.rs`. `run_stage_deadcode_dynamic` and its
+  `stage_pass` registration are deleted — `deadcode_dynamic` is the first
+  fully-migrated stage, proving the pattern scales past a single chain.
+  Also deleted `run_canonical_normalize_passes` (`pipeline/run.rs`): a
+  second, parallel legacy driver with zero real callers (grep-verified)
+  that called the old stage functions directly, bypassing the ActionGroup
+  pipeline — migrating `deadcode_dynamic` would have silently emptied it
+  further, so it was removed instead of patched.
+- **Determinism fix landed 2026-07-19** (commits `d57b57e2`, `d1c2c33a`,
+  `d7da0216`): unrelated to the migration itself, but found via the same
+  before/after real-binary diff discipline this migration established.
+  `region_external_exit_nodes` and `current_explicit_merge_binding_expr`
+  each had an unsorted `HashSet`/`HashMap` iteration feeding a `.first()`/
+  `.find_map()` pick — fixed individually, then the whole
+  `fission-pcode::midend` + `fission-midend-structuring` boundary was
+  swapped from std's per-process-random `RandomState` to a fixed-seed
+  hasher (`rustc_hash::FxBuildHasher`) to close the class generally. See
+  commit `d7da0216` for the full diagnostic writeup (deterministic-hasher
+  experiment, ruled-out hypotheses, residual quality caveat for
+  `state_machine_score`).
 - **Remaining backlog** (one `run_stage_*` function per row; each is its own
   scoped migration slice with its own before/after parity check — do not
   attempt more than one per change):
 
-  | Stage function | `run_pass_logged` call sites (approx) |
+  | Stage function | Status |
   |---|---|
-  | `run_stage_proto_recovery` | ~5 |
-  | `run_stage_deadcode_dynamic` | ~5 remaining (4 of 9 chains migrated: `constant_ptr_recovery`, `conditional_const`, `entry_param_promotion`, `sccp`) |
-  | `run_stage_type_early` | small |
-  | `run_stage_stackstall` | medium |
-  | `run_stage_heritage_value_recovery` | medium |
-  | `run_stage_memory_recovery` | large |
+  | `run_stage_deadcode_dynamic` | **DONE** — fully migrated, function deleted |
+  | `run_stage_proto_recovery` | not started (~5 call sites) |
+  | `run_stage_type_early` | not started (small) |
+  | `run_stage_stackstall` | not started (medium) |
+  | `run_stage_heritage_value_recovery` | not started (medium) |
+  | `run_stage_memory_recovery` | not started (large) |
   | `run_stage_merge` | small |
   | `run_stage_block_structure_1` | small |
   | `run_stage_cleanup` | large (round-limited fixed point, needs `Repeat::UntilStable` review, not just `GatedFollowupPass`) |
