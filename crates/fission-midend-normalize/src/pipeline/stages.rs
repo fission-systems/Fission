@@ -21,8 +21,8 @@ use super::super::cleanup::{
     simplify_empty_and_constant_ifs_recursive, single_pred_label_inline,
 };
 use super::super::global_opt::{
-    apply_bit_consume_dead_code_pass, apply_cse_pass, apply_dead_store_elimination,
-    apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
+    apply_bit_consume_dead_code_pass, apply_dead_store_elimination, apply_gvn_join_hoist_pass,
+    apply_licm_pass, apply_nz_mask_simplification_pass,
     apply_post_assign_value_representative_pass, apply_redundant_load_elimination,
 };
 use super::super::idioms::{
@@ -216,33 +216,17 @@ pub(super) fn wide_dead_assignment_and_prune(func: &mut HirFunction) -> bool {
     changed
 }
 
+/// Tail of the `cse` chain: `defuse_dead_assignment_after_cse` (already
+/// individually logged in the original) plus the two bare, unlogged prune
+/// calls that followed it, bundled under the same telemetry name.
+pub(super) fn defuse_after_cse_and_prune(func: &mut HirFunction) -> bool {
+    let changed = defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    changed
+}
+
 pub fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, perf: bool) {
-    // Local CSE: within each linear block, replace identical pure sub-expressions
-    // with the variable that first computed them.  Runs right after constant
-    // folding so that folded constants are included in the expression map.
-    if run_pass_logged(func, "cse", perf, apply_cse_pass) {
-        if run_pass_logged(
-            func,
-            "copy_propagation_after_cse",
-            perf,
-            copy_propagation_pass,
-        ) {
-            run_pass_logged(
-                func,
-                "defuse_dead_assignment_after_cse_copy",
-                perf,
-                defuse_dead_assignment_pass,
-            );
-        }
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_cse",
-            perf,
-            defuse_dead_assignment_pass,
-        );
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
-    }
     // Function-level def-use dead assignment: removes dead writes to ANY
     // variable (not just trivially-named temps) across the whole body tree.
     run_pass_logged(

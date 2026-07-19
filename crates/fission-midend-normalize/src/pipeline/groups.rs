@@ -4,14 +4,15 @@ use fission_midend_core::wave_stats;
 use super::stages::{
     cleanup_after_conditional_const, cleanup_after_constant_ptr_recovery,
     cleanup_after_entry_param_promotion, cleanup_after_sccp, cleanup_elim_8,
-    run_stage_block_structure_1, run_stage_cleanup, run_stage_deadcode_dynamic,
-    run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,
-    run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early, sccp_is_admitted,
-    wide_dead_assignment_and_prune,
+    defuse_after_cse_and_prune, run_stage_block_structure_1, run_stage_cleanup,
+    run_stage_deadcode_dynamic, run_stage_heritage_value_recovery, run_stage_memory_recovery,
+    run_stage_merge, run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
+    sccp_is_admitted, wide_dead_assignment_and_prune,
 };
-use super::super::analysis::defuse::constant_folding_pass;
-use super::super::global_opt::{apply_conditional_const_pass, apply_sccp_pass};
+use super::super::analysis::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
+use super::super::global_opt::{apply_conditional_const_pass, apply_cse_pass, apply_sccp_pass};
 use super::super::memory::apply_constant_ptr_recovery_pass;
+use super::super::recovery::copy_propagation_pass;
 use super::super::types::apply_entry_param_promotion_pass;
 use fission_midend_core::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
@@ -136,6 +137,32 @@ pub fn build_normalize_pipeline() -> Pipeline {
                             ),
                         ],
                     ),
+                ))
+                // Local CSE: within each linear block, replace identical
+                // pure sub-expressions with the variable that first computed
+                // them. Runs right after constant folding so folded
+                // constants are included in the expression map.
+                .pass(gated_followup(
+                    fn_pass("cse", concept, apply_cse_pass),
+                    vec![
+                        gated_followup(
+                            fn_pass(
+                                "copy_propagation_after_cse",
+                                concept,
+                                copy_propagation_pass,
+                            ),
+                            vec![fn_pass(
+                                "defuse_dead_assignment_after_cse_copy",
+                                concept,
+                                defuse_dead_assignment_pass,
+                            )],
+                        ),
+                        fn_pass(
+                            "defuse_dead_assignment_after_cse",
+                            concept,
+                            defuse_after_cse_and_prune,
+                        ),
+                    ],
                 ))
                 .pass(stage_pass(
                     "deadcode_dynamic",
