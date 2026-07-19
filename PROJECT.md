@@ -100,6 +100,24 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   commit `d7da0216` for the full diagnostic writeup (deterministic-hasher
   experiment, ruled-out hypotheses, residual quality caveat for
   `state_machine_score`).
+- **Two recurring migration pitfalls, worth checking on every future slice:**
+  1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
+     vs `fn_pass` (ungated, matches original bare/unconditional calls) are
+     easy to swap by accident since both take a `fn(&mut HirFunction)`-shaped
+     callback — but picking the wrong one silently removes or adds the
+     `EARLY_CLEANUP_BLOCK_STMT_LIMIT`/`BLOCK_LIMIT` admission gate. Caught
+     once already (commit `a793dbb5` fixed a `4110b2ac` regression) only
+     because the original code was re-read line-by-line, not because the
+     real-binary regression set caught it (none of those 6 functions are
+     anywhere near the 2000-stmt budget threshold). Always check whether the
+     source chain used `run_cleanup_block` (→ `cleanup_pass`) or a bare call
+     (→ `fn_pass`) before registering.
+  2. Any chain whose body calls something that itself takes `diag`/`perf`
+     (`apply_type_signature_fixed_point`, `run_cleanup_family_passes`) can't
+     go through `fn_pass`/`GatedFollowupPass` — those primitives don't carry
+     `diag`/`perf` to a callee. Keep those as a named `stage_pass` step
+     (`run_stage_proto_recovery_head`, `run_stage_cast_elision` are the two
+     precedents) rather than dropping the diag/perf forwarding silently.
 - **Remaining backlog** (one `run_stage_*` function per row; each is its own
   scoped migration slice with its own before/after parity check — do not
   attempt more than one per change):
@@ -108,8 +126,8 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   |---|---|
   | `run_stage_deadcode_dynamic` | **DONE** — fully migrated, function deleted |
   | `run_stage_proto_recovery` | **5 of 6 chains done** (commit `4110b2ac`) — `run_cleanup_family_passes` head kept as `stage_pass` (`run_stage_proto_recovery_head`; needs diag/perf-through-callee, separate slice) |
-  | `run_stage_type_early` | not started (small) |
-  | `run_stage_stackstall` | not started (medium) |
+  | `run_stage_type_early` | **as-migrated-as-it-gets** — single call to `apply_type_signature_fixed_point(func, diag, perf)`, a complex sub-algorithm that itself needs diag/perf; no chains to decompose without extending `Pass` to carry diag/perf (bigger, separate proposal) |
+  | `run_stage_stackstall` | **11 of 12 chains done** (commit `a793dbb5`) — `cast_elision` kept as `stage_pass` (`run_stage_cast_elision`; same diag/perf-through-callee reason as proto_recovery's head) |
   | `run_stage_heritage_value_recovery` | not started (medium) |
   | `run_stage_memory_recovery` | not started (large) |
   | `run_stage_merge` | small |
