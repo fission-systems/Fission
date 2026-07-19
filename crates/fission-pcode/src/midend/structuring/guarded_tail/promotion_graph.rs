@@ -124,7 +124,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn region_external_exit_nodes(&self, region: &HashSet<usize>) -> Vec<usize> {
-        region
+        let mut exits: Vec<usize> = region
             .iter()
             .copied()
             .filter(|idx| {
@@ -132,7 +132,15 @@ impl<'a> PreviewBuilder<'a> {
                     .iter()
                     .any(|succ| !region.contains(succ))
             })
-            .collect()
+            .collect();
+        // `region` is a HashSet: its iteration order is randomized per-process.
+        // Callers (e.g. guarded-tail promotion gating) pick `.first()` off this
+        // list, so an unsorted result makes structuring/materialize order —
+        // and therefore synthetic temp naming — nondeterministic across runs
+        // on binaries with more than one valid exit node. Sort for a stable,
+        // reproducible choice.
+        exits.sort_unstable();
+        exits
     }
 
     pub(super) fn ensure_graph_invariant_promotion_region(
@@ -222,5 +230,51 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         self.ensure_graph_invariant_promotion_region(start_idx, &internal, &region)
+    }
+}
+
+#[cfg(test)]
+mod region_exit_determinism_tests {
+    use super::*;
+    use crate::midend::ir::MlilPreviewOptions;
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction};
+
+    fn make_builder_with_successors(successors: Vec<Vec<usize>>) -> PreviewBuilder<'static> {
+        let blocks = successors
+            .iter()
+            .enumerate()
+            .map(|(i, succs)| PcodeBasicBlock {
+                index: i as u32,
+                start_address: 0x1000 + (i as u64) * 0x10,
+                successors: succs.iter().map(|&s| s as u32).collect(),
+                ops: Vec::new(),
+            })
+            .collect();
+        let pcode = Box::leak(Box::new(PcodeFunction { blocks }));
+        let options = Box::leak(Box::new(MlilPreviewOptions {
+            is_64bit: true,
+            pointer_size: 8,
+            ..Default::default()
+        }));
+        let mut builder = PreviewBuilder::new(pcode, options, None);
+        builder.successors = successors;
+        builder
+    }
+
+    /// A region with multiple external exit nodes (blocks 1 and 2 both branch
+    /// outside the {0,1,2} region to block 3) must always report exits in the
+    /// same order regardless of the region HashSet's internal iteration
+    /// order — `.first()` on this list is a real gating decision, not just
+    /// display order.
+    #[test]
+    fn region_external_exit_nodes_is_sorted_regardless_of_hashset_iteration_order() {
+        let builder = make_builder_with_successors(vec![vec![1, 2], vec![3], vec![3], vec![]]);
+        let region: std::collections::HashSet<usize> = [0, 1, 2].into_iter().collect();
+        let exits = builder.region_external_exit_nodes(&region);
+        assert_eq!(
+            exits,
+            vec![1, 2],
+            "exit nodes must be returned in ascending, deterministic order"
+        );
     }
 }
