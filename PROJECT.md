@@ -141,13 +141,37 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   (`rc4_init`) changed output (all 10 candidate regions now complete
   instead of an early wall-clock bailout, recovering a `do/while` where a
   bare `for(;;)` fallback rendered before) — golden snapshot updated.
-  **Deliberately NOT touched in this pass** (separate wall-clock mechanisms
-  sharing the same `structuring_start` `Instant` field, out of scope):
-  `IfLoweringBudget`'s 10ms-per-instance / 5000ms-total checks
-  (`linear_types.rs`) and the inline 5000ms checks in `loops.rs`
-  (`try_lower_while`, `try_lower_multiblock_dowhile`,
-  `lower_loop_body_subgraph`). Same category of machine-speed-dependence;
-  tracked as further follow-up if it turns out to matter in practice.
+  At the time, deliberately left `IfLoweringBudget`'s 10ms-per-instance /
+  5000ms-total checks (`linear_types.rs`) and the inline 5000ms checks in
+  `loops.rs` (`try_lower_while`, `try_lower_multiblock_dowhile`,
+  `lower_loop_body_subgraph`) untouched as a "same category, lower
+  priority" follow-up — see below, this stopped being theoretical within
+  the same day.
+- **IfLoweringBudget / loops.rs wall-clock checks fixed 2026-07-19**
+  (commit `6dad16cc`): the follow-up above turned out to matter in
+  practice almost immediately — `golden_corpus_check.py`'s determinism
+  sub-check caught `bounded_tlv_sum` producing 2 distinct outputs across
+  5 repeat runs, intermittently (stable across 40 back-to-back runs in
+  isolation, but flipped once right after a heavy 160-function corpus
+  sweep — a load-dependent heisenbug, not a hash-iteration one).
+  Replaced with `STRUCTURING_TOTAL_WORK_BUDGET: u64 = 200_000`, a count
+  of checkpoint calls since `CollapseDriver::run` began, shared via
+  `Rc<Cell<u64>>` (`StructuringHost::structuring_total_work_counter()`
+  — plain `Cell<u64>` doesn't work here since `IfLoweringBudget::
+  checkpoint()` has no `&host` reference and needs its own live handle
+  onto the same counter `loops.rs`'s direct checks touch). The per-
+  instance 10ms wall-clock check is removed outright, not replaced —
+  it was already OR'd with a deterministic `subcalls >
+  CONDITION_RECOVERY_SUBCALL_LIMIT` check, but the OR meant whichever
+  fired first (timing-dependent or deterministic) decided the actual
+  trip point; now `subcalls` alone decides it. Validated: 1357/1357
+  tests, 3x back-to-back `golden_corpus_check.py` runs (160 functions +
+  8-repeat determinism checks each) all clean on release and
+  quick-release, 40/40 uniform on `bounded_tlv_sum` specifically, 6-
+  function hand-curated set untouched, release/quick-release byte-
+  identical. All three `structuring_start`-adjacent wall-clock budgets
+  flagged during the RegisterNamer perf investigation are now
+  deterministic.
 - **`--all` batch decompile ignored `--timeout-ms` entirely, fixed
   2026-07-19** (commit `0808b8a3`): found while sweeping the corpus for
   perf outliers — `decomp --all --limit 40 --timeout-ms 3000` on
