@@ -204,79 +204,77 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   a fixed internal ceiling. Real fix would be wiring a shared deadline/
   cancellation token through those existing checkpoints — tracked as
   further follow-up, out of scope for this pass.
-- **Pre-existing ELF-format nondeterminism found 2026-07-19, STILL NOT
-  FIXED despite substantial investigation** (found while validating the
-  `discover_all_entry_specs()` caching perf fix, commit `57a1ce3e`).
-  Read this whole entry before spending more time on it — several
-  plausible-looking leads are already ruled out with hard evidence.
+- **ELF-format nondeterminism found and FIXED 2026-07-19** (found while
+  validating the `discover_all_entry_specs()` caching perf fix, commit
+  `57a1ce3e`; root-caused and fixed in commit `80c3c550`).
 
-  **Repro**: `control_flow_gcc-elf_x64_O0`'s `main` (`0x401269`, x86-64
-  ELF) and `control_flow_gcc-aarch64_O0`'s `__dcigettext` (`0x401dd0`)
-  both flip between two (x64) or more (aarch64) distinct outputs across
-  repeated runs, roughly 50/50 for the x64 case. **PE binaries are
-  unaffected** — the entire `golden_corpus_check.py` default corpus (160
-  functions) and all 6 hand-curated functions are PE and stay clean.
-  Confirmed via `git stash` this predates every fix in this session,
-  including the `discover_all_entry_specs()` caching commit.
+  **Repro**: `control_flow_gcc-elf_x64_O0`'s `main` (`0x401269`) and
+  `control_flow_gcc-aarch64_O0`'s `__dcigettext` (`0x401dd0`) flipped
+  between distinct outputs across repeated runs (~50/50 for x64, 3+
+  variants for aarch64). PE binaries were unaffected — this was never
+  about x86 vs aarch64, it was ELF vs PE, and even that turned out to
+  be a corpus-sampling artifact (see root cause).
 
-  **Symptom, precisely**: diffing a "good" vs "bad" run of the x64 repro
-  shows the *only* difference is a temp variable's number (e.g. `xVar5`
-  vs `xVar15`) — same structure, same values, same everything else. It
-  is the same logical value, just a different survivor name.
+  **Root cause**: `fission-midend-normalize/src/recovery/
+  variable_merge.rs::collect_direct_copies` returned
+  `std::collections::HashSet<(String, String)>` — fully-qualified,
+  bypassing this crate's `FxBuildHasher` type alias entirely. The
+  earlier crate sweep (commit `6fadc75e`) only converted `use
+  std::collections::HashMap;`-style *imports*; it never caught explicit
+  `std::collections::HashSet`/`HashMap` qualification, which turned out
+  to be scattered across 13 files. `transitive_copy_aliases()` iterates
+  that set to drive a union-find merge (`for (a, b) in eligible_copies`),
+  and `name_priority()` returns the same tier (`1`) for *every*
+  uVar/iVar/xVar/bVar/temp-prefixed name with no secondary tiebreak —
+  so for two same-tier temps that get merged, which one survives as the
+  displayed name depended on the order those pairs were encountered,
+  which depended on std's per-process-random `RandomState` iteration
+  order. Nothing about this is ELF-specific; it just happened that none
+  of the 160 PE golden-corpus functions triggered a same-tier merge tie,
+  while these two ELF test functions did.
 
-  **Ruled out, with evidence** (do not re-investigate these without new
-  information):
-  1. `rayon::join` race between the concurrent Go/Apple/DWARF/Rust/C++
-     analyzers in `fission-loader/src/loader/mod.rs` — replaced all four
-     `rayon::join` calls with sequential execution as a diagnostic
-     (`sequential_join_diag`, since reverted); flakiness rate was
-     unchanged. Not a race.
-  2. DWARF cyclic type-reference resolution order
-     (`fission-loader/src/loader/dwarf/types.rs::collect_type_names`) —
-     genuinely unstable (fixed in commit `30dd7a01`, sorting
-     `all_types.keys()` before the memoized recursive walk), but fixing
-     it did not change the repro's flakiness rate at all.
-  3. C++ RTTI analyzer (`fission-loader/src/loader/analyzers/cpp.rs`)
-     iterating `binary.iat_symbols`/`global_symbols` (`HashMap<u64,
-     String>`) unsorted — real latent bug for binaries *with* C++ RTTI
-     symbols, but the repro binary is pure C with zero `__ZTI`/`__ZTV`
-     symbols, so `analyze_classes()`/`discover_vtable_functions()`
-     return empty deterministically regardless of iteration order. Not
-     the cause for this repro (not fixed, since it doesn't apply here).
-  4. `fission-sleigh`'s frontend-selection path
-     (`CompiledRuntimeRegistry::executable_sibling_entry_ids_for_load_spec`,
-     `RuntimeSleighFrontend::new_candidate_frontends_for_load_spec`) —
-     inspected, uses only `Vec`/`BTreeSet` iteration. Clean.
+  **How it was found**: a new `FISSION_NORM_TRACE=1` diagnostic (env-
+  gated, hooks both `action_pipeline::run_pass_logged` and the legacy
+  free-function driver's `run_pass_logged` in
+  `fission-midend-normalize::pipeline::run`) hashes `(body, locals,
+  params, return_type)` after every normalize pass and logs `pass=...
+  hash=...`. Bisecting a matched good/bad trace pair showed the hash
+  sequence identical for the first 66 passes, diverging exactly at the
+  first `variable_merge` call — pointing straight at the file. (Dead
+  end worth recording: the first version of this hash covered the
+  *whole* `HirFunction` including `callee_observed_max_arity`/
+  `callee_summaries`, which produced a different hash on literally every
+  run regardless of final output equality — some field in that tree has
+  independently-unstable `Debug` output. Narrowing the hash to just the
+  fields that actually determine rendered text fixed the false-positive
+  noise and made the real signal visible.) A separate `FISSION_TEMP_TRACE=1`
+  diagnostic (`fission-pcode/src/midend/builder/mod.rs`, logs every
+  `next_unused_temp_binding_name` call) had already proven temp-name
+  *allocation* itself was byte-identical between good/bad runs, which is
+  what motivated looking downstream at consumption/coalescing instead of
+  allocation. Both trace tools are left in the codebase, env-gated, in
+  case this class of bug resurfaces elsewhere.
 
-  **The one genuinely useful finding**: added `FISSION_TEMP_TRACE=1`
-  (env-gated, `fission-pcode/src/midend/builder/mod.rs`, memory-buffered
-  like the original session-opening heisenbug trace to avoid perturbing
-  timing) to log every `next_unused_temp_binding_name` allocation.
-  Captured matched "good" and "bad" runs of the x64 repro: **the
-  allocation sequence is byte-identical** (same count, same `before_id
-  -> name` pairs, same order) between the two. This proves the
-  divergence is NOT in temp-name allocation — it's in a *later* pass
-  that decides which of several already-allocated, logically-equivalent
-  names survives (copy propagation / variable merge / join coalescing
-  family — `fission-midend-normalize/src/recovery/{phi_recovery,
-  variable_merge}.rs`). Those specific passes were code-read and *look*
-  content-driven off deterministic HIR-body walks (point lookups into
-  `copy_map`/`const_map`, not iteration over them) — but this crate had
-  never been swept for `HashMap`/`HashSet` at all until this session
-  (commit `6fadc75e`, see above), and applying that full sweep did
-  **not** change the repro's flakiness rate either. So either the
-  specific site is still content-driven-safe as read, or the actual
-  culprit is somewhere not yet identified within that pass family, or
-  outside it entirely.
+  **Ruled out along the way, with evidence** (real dead ends, not the
+  cause): a `rayon::join` race between the concurrent Go/Apple/DWARF/
+  Rust/C++ analyzers in `fission-loader/src/loader/mod.rs` (forced
+  sequential execution as a diagnostic; flakiness unchanged, not a
+  race); DWARF cyclic type-reference resolution order in
+  `fission-loader/src/loader/dwarf/types.rs::collect_type_names` (fixed
+  anyway in commit `30dd7a01` since it's a real latent bug, but fixing
+  it alone didn't change this repro's flakiness); the C++ RTTI analyzer
+  iterating `binary.iat_symbols`/`global_symbols` unsorted (real bug for
+  binaries *with* C++ RTTI symbols, but the repro binaries are pure C
+  with none, so that path returns empty deterministically regardless);
+  `fission-sleigh`'s frontend-selection path (clean `Vec`/`BTreeSet`
+  iteration only).
 
-  **Where to pick this up**: extend `FISSION_TEMP_TRACE`-style buffered
-  tracing to the copy-propagation/variable-merge/coalescing passes
-  specifically (e.g. dump `copy_map`'s sorted contents, or a hash of the
-  HIR body, after each pass in `run_normalize_pipeline`) and bisect
-  which pass's *output* first differs between a captured good/bad pair
-  — the allocation trace proves the input to normalize is identical, so
-  the divergence must appear somewhere in that pipeline's own passes.
-  Not yet attempted due to session length.
+  **Validated**: 1742/1742 tests, `golden_corpus_check.py` clean (160
+  functions + 10-repeat determinism), 6-function hand-curated set
+  untouched, `state_machine_score` 20/20 uniform, release/quick-release
+  byte-identical. The actual repros: `control_flow_gcc-elf_x64_O0`'s
+  `main` 30/30 uniform (was ~50/50), `control_flow_gcc-aarch64_O0`'s
+  `__dcigettext` 30/30 uniform (was 3+ distinct outputs across 5 runs).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
