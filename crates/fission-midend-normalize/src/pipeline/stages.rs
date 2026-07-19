@@ -55,7 +55,16 @@ use fission_midend_core::wave_stats;
 use std::time::Instant;
 use tracing::debug_span;
 
-pub fn run_stage_proto_recovery(func: &mut HirFunction, diag: bool, perf: bool) {
+/// Head of `proto_recovery`: the `run_cleanup_family_passes` mini-orchestrator
+/// (dynamic per-stage telemetry names, nested budget checks, body-shape
+/// gating). Kept as one `stage_pass` step rather than forced through
+/// `fn_pass`/`GatedFollowupPass` -- those primitives don't carry `diag`/`perf`
+/// through to a callee, and this function's *own* internal `run_pass_logged`
+/// calls need them. The remaining proto_recovery chains (flag_recovery
+/// onward) are declarative `ActionGroup` passes registered after this one in
+/// `groups.rs`, so decomposing this head further is a separate, focused slice
+/// rather than blocking the rest of the stage.
+pub fn run_stage_proto_recovery_head(func: &mut HirFunction, _diag: bool, perf: bool) {
     let _hir_normalize = debug_span!("hir_normalize", fn_name = %func.name).entered();
     run_cleanup_family_passes(
         func,
@@ -67,83 +76,64 @@ pub fn run_stage_proto_recovery(func: &mut HirFunction, diag: bool, perf: bool) 
             round_limit: 12,
         },
     );
-    // Flag recovery: substitute raw x86 EFLAGS variable references in branch
-    // conditions with high-level comparison expressions (sf!=of → a<b signed,
-    // !zf → a!=b, etc.).  Runs early so that subsequent dead-assignment passes
-    // can eliminate now-dead flag-variable assignments.
-    if run_pass_logged(func, "flag_recovery", perf, apply_flag_recovery_pass) {
-        run_cleanup_block(func, "cleanup_defuse_4", perf, |f| {
-            cleanup_func_stmt_list(f);
+}
 
-            defuse_dead_assignment_pass(f);
+pub(super) fn cleanup_after_flag_recovery(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    hir_shape(func) != before
+}
 
-            prune_unused_temp_bindings(f);
-
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    // Parity / popcount dead elimination: remove __popcount-based assignments
-    // whose result is not consumed anywhere (e.g., dead parity flag variables
-    // remaining after flag recovery or simple unused parity computations).
-    // Fast prefilter: skip entirely when the body has no __popcount calls,
-    // avoiding an expensive full-body DefUseMap build + 8-round scan.
-    if body_contains_popcount_call(&func.body) {
-        if run_pass_logged(
-            func,
-            "elide_unused_popcount",
-            perf,
-            elide_unused_popcount_assigns,
-        ) {
-            prune_unused_temp_bindings(func);
-            prune_unused_dead_local_bindings(func);
-        }
-    } else {
+/// Admission gate for the `elide_unused_popcount` chain: skips (with
+/// `wave_stats::add_cleanup_budget_skips` telemetry) when the body has no
+/// `__popcount` calls at all, avoiding an expensive full-body DefUseMap
+/// build + 8-round scan for the common case.
+pub(super) fn body_contains_popcount_call_admitted(func: &HirFunction) -> bool {
+    let admitted = body_contains_popcount_call(&func.body);
+    if !admitted {
         wave_stats::add_cleanup_budget_skips(1);
     }
-    // Prologue/epilogue elimination: remove callee-saved register save/restore
-    // pairs (`*spill = r15` / `r15 = *spill`) from the function body.
-    if run_pass_logged(
-        func,
-        "remove_entry_stack_scaffold_stores",
-        perf,
-        remove_entry_stack_scaffold_stores,
-    ) {
-        run_cleanup_block(func, "cleanup_defuse_entry_stack_scaffold", perf, |f| {
-            cleanup_func_stmt_list(f);
-            defuse_dead_assignment_pass(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    if run_pass_logged(
-        func,
-        "remove_callee_save_prologue_epilogue",
-        perf,
-        remove_callee_save_prologue_epilogue,
-    ) {
-        run_cleanup_block(func, "cleanup_defuse_5", perf, |f| {
-            cleanup_func_stmt_list(f);
+    admitted
+}
 
-            defuse_dead_assignment_pass(f);
+pub(super) fn prune_after_elide_popcount(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    hir_shape(func) != before
+}
 
-            prune_unused_temp_bindings(f);
+pub(super) fn cleanup_after_entry_stack_scaffold(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    hir_shape(func) != before
+}
 
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    // Run constant folding after the initial cleanup so that folded constants
-    // unlock further simplifications in subsequent passes.
-    if run_pass_logged(func, "constant_folding", perf, |f| {
-        constant_folding_pass(&mut f.body)
-    }) {
-        run_cleanup_block(func, "cleanup_elim_7", perf, |f| {
-            cleanup_func_stmt_list(f);
+pub(super) fn cleanup_after_callee_save_prologue_epilogue(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    hir_shape(func) != before
+}
 
-            eliminate_dead_local_clobber_assigns(f);
+pub(super) fn constant_folding_body_pass(func: &mut HirFunction) -> bool {
+    constant_folding_pass(&mut func.body)
+}
 
-            prune_unused_temp_bindings(f);
-        });
-    }
+pub(super) fn cleanup_after_constant_folding_init(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    eliminate_dead_local_clobber_assigns(func);
+    prune_unused_temp_bindings(func);
+    hir_shape(func) != before
 }
 
 /// Runs the `constant_ptr_recovery` → `cleanup_constant_ptr` chain that used

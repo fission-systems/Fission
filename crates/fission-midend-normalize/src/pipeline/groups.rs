@@ -2,21 +2,28 @@
 
 use fission_midend_core::wave_stats;
 use super::stages::{
-    cleanup_after_branch_prefix_hoist, cleanup_after_conditional_const,
-    cleanup_after_constant_ptr_recovery, cleanup_after_entry_param_promotion,
-    cleanup_after_gvn_join_hoist, cleanup_after_sccp, cleanup_elim_8, defuse_after_branch_hoist_and_prune,
-    defuse_after_cse_and_prune, defuse_after_gvn_and_prune, run_stage_block_structure_1,
-    run_stage_cleanup, run_stage_heritage_value_recovery, run_stage_memory_recovery,
-    run_stage_merge, run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
-    sccp_is_admitted, wide_dead_assignment_and_prune,
+    body_contains_popcount_call_admitted, cleanup_after_branch_prefix_hoist,
+    cleanup_after_callee_save_prologue_epilogue, cleanup_after_conditional_const,
+    cleanup_after_constant_folding_init, cleanup_after_constant_ptr_recovery,
+    cleanup_after_entry_param_promotion, cleanup_after_entry_stack_scaffold,
+    cleanup_after_flag_recovery, cleanup_after_gvn_join_hoist, cleanup_after_sccp,
+    cleanup_elim_8, constant_folding_body_pass, defuse_after_branch_hoist_and_prune,
+    defuse_after_cse_and_prune, defuse_after_gvn_and_prune, prune_after_elide_popcount,
+    run_stage_block_structure_1, run_stage_cleanup, run_stage_heritage_value_recovery,
+    run_stage_memory_recovery, run_stage_merge, run_stage_proto_recovery_head,
+    run_stage_stackstall, run_stage_type_early, sccp_is_admitted, wide_dead_assignment_and_prune,
 };
 use super::super::analysis::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
+use super::super::cleanup::elide_unused_popcount_assigns;
 use super::super::global_opt::{
     apply_conditional_const_pass, apply_cse_pass, apply_gvn_join_hoist_pass, apply_sccp_pass,
 };
-use super::super::idioms::{apply_branch_prefix_hoist_pass, remove_dead_callee_saved_param_loads};
+use super::super::idioms::{
+    apply_branch_prefix_hoist_pass, remove_callee_save_prologue_epilogue,
+    remove_dead_callee_saved_param_loads, remove_entry_stack_scaffold_stores,
+};
 use super::super::memory::apply_constant_ptr_recovery_pass;
-use super::super::recovery::{copy_propagation_pass, join_coalescing_pass};
+use super::super::recovery::{apply_flag_recovery_pass, copy_propagation_pass, join_coalescing_pass};
 use super::super::types::apply_entry_param_promotion_pass;
 use fission_midend_core::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
@@ -65,11 +72,87 @@ pub fn build_normalize_pipeline() -> Pipeline {
     let block = GhidraActionConcept::BlockGraphStructuring;
 
     Pipeline::new("normalize")
-        .group(group("proto_recovery", concept).pass(stage_pass(
-            "proto_recovery",
-            concept,
-            run_stage_proto_recovery,
-        )))
+        .group(
+            group("proto_recovery", concept)
+                // `run_cleanup_family_passes` mini-orchestrator: dynamic
+                // per-stage telemetry names + nested budget checks, kept as
+                // one stage_pass step (needs diag/perf forwarding that
+                // fn_pass doesn't carry). See stages.rs doc comment.
+                .pass(stage_pass(
+                    "proto_recovery",
+                    concept,
+                    run_stage_proto_recovery_head,
+                ))
+                // Flag recovery: substitute raw x86 EFLAGS variable
+                // references in branch conditions with high-level
+                // comparison expressions. Runs early so subsequent
+                // dead-assignment passes can eliminate now-dead flag
+                // variable assignments.
+                .pass(gated_followup(
+                    fn_pass("flag_recovery", concept, apply_flag_recovery_pass),
+                    vec![fn_pass(
+                        "cleanup_defuse_4",
+                        concept,
+                        cleanup_after_flag_recovery,
+                    )],
+                ))
+                // Parity/popcount dead elimination: remove __popcount-based
+                // assignments whose result is unconsumed. Admission-gated on
+                // body_contains_popcount_call to skip the expensive
+                // full-body DefUseMap scan for the common no-popcount case.
+                .pass(admission_gated(
+                    body_contains_popcount_call_admitted,
+                    None,
+                    gated_followup(
+                        fn_pass(
+                            "elide_unused_popcount",
+                            concept,
+                            elide_unused_popcount_assigns,
+                        ),
+                        vec![fn_pass(
+                            "prune_after_elide_popcount",
+                            concept,
+                            prune_after_elide_popcount,
+                        )],
+                    ),
+                ))
+                // Prologue/epilogue elimination: remove callee-saved
+                // register save/restore pairs from the function body.
+                .pass(gated_followup(
+                    fn_pass(
+                        "remove_entry_stack_scaffold_stores",
+                        concept,
+                        remove_entry_stack_scaffold_stores,
+                    ),
+                    vec![fn_pass(
+                        "cleanup_defuse_entry_stack_scaffold",
+                        concept,
+                        cleanup_after_entry_stack_scaffold,
+                    )],
+                ))
+                .pass(gated_followup(
+                    fn_pass(
+                        "remove_callee_save_prologue_epilogue",
+                        concept,
+                        remove_callee_save_prologue_epilogue,
+                    ),
+                    vec![fn_pass(
+                        "cleanup_defuse_5",
+                        concept,
+                        cleanup_after_callee_save_prologue_epilogue,
+                    )],
+                ))
+                // Constant folding after the initial cleanup so folded
+                // constants unlock further simplification in later passes.
+                .pass(gated_followup(
+                    fn_pass("constant_folding", concept, constant_folding_body_pass),
+                    vec![fn_pass(
+                        "cleanup_elim_7",
+                        concept,
+                        cleanup_after_constant_folding_init,
+                    )],
+                )),
+        )
         .group(
             group("deadcode_dynamic", concept)
                 // Migrated off the imperative `if run_pass_logged(..) { .. }`
