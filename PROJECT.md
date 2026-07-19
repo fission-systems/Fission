@@ -608,6 +608,62 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   byte-identical, `state_machine_score` 20/20 uniform,
   release/quick-release byte-identical, `bounded_tlv_sum`/
   `accumulate_pairs` output unchanged from round 7's baseline.
+- **Perf sweep round 10, 2026-07-20** (revisited `_nl_load_domain`,
+  round 4's flagged-but-unresolved outlier — the largest function in
+  the dev corpus, 5332 bytes, `control_flow_gcc-aarch64_O2 @
+  0x402600` — per explicit user direction to go back to it now that 5
+  rounds of fixes have landed on shared code paths since):
+  1. **Cumulative effect check first**: before any new fix, `_nl_load_
+     domain` was already down to ~4.5s from round 4's 8.0s, purely
+     from rounds 5–9's fixes landing on code this function happens to
+     exercise (RegisterModel/RegisterNamer, RootReachabilityProof,
+     getenv caching). Worth noting for future "revisit an old outlier"
+     work: check the cumulative baseline before assuming nothing
+     changed.
+  2. Fresh `sample` profile showed `live_call_result_binding_from_
+     predecessors_for_return_register` (a recursive predecessor-graph
+     walk checking whether the return register still holds a live call
+     result) at ~10–15% combined self-time. It cloned its `visited:
+     HashSet` once per predecessor edge before recursing — sibling
+     branches sharing an ancestor block (a diamond in the predecessor
+     graph, common with reconverging if/else) each re-explored that
+     shared ancestor's whole subtree independently, worst-case
+     exponential in diamond-heavy CFGs.
+  3. Fixed (commit `4bc9c62d`): replaced the cloned `visited` set with
+     a `HashMap<usize, Option<(...)>>` memo threaded by `&mut` through
+     the whole walk — a block's result is computed once and reused by
+     every branch that reaches it; a block still holding the
+     in-progress `None` placeholder when revisited means a genuine
+     back-edge cycle, preserving the original early-return-on-revisit
+     semantics. Deliberately scoped to one call of `live_call_result_
+     binding_for_return_register` (not cached on the builder across
+     calls): `self.call_result_bindings` grows as lowering proceeds, so
+     a longer-lived cache could return a stale answer from before a
+     predecessor block was lowered — the same mutation-safety class of
+     hazard round 9 found for `set_var`-toggled env flags, just for a
+     mutable `HashMap` field instead.
+  4. **Measured impact on this specific function: negligible** (~4.5s
+     before and after, confirmed via a `git stash`-based A/B).
+     `_nl_load_domain`'s own predecessor graph apparently isn't
+     diamond-heavy enough to trigger the redundant-re-exploration this
+     fixes — its self-time in that call chain is proportional work
+     (many distinct top-level calls across the function, not redundant
+     work within one). Kept the fix anyway: it's strictly safer (a real
+     exponential-blowup pattern removed, for whichever future function
+     does have a diamond-heavy predecessor graph) with zero measured
+     downside.
+  5. This continues round 8's pattern: not every profile-suggested fix
+     produces a measurable win on the specific function that surfaced
+     it, and that's fine to land anyway when the fix is a strict
+     safety/complexity improvement with no downside — the important
+     thing is measuring honestly rather than assuming the profile
+     percentage translates 1:1 into saved wall-clock time.
+  Validated: `cargo check --workspace` clean, 1962/1969 nextest passing
+  in 19.5s with no hangs (same 7 pre-existing unrelated failures),
+  byte-identical output (release before/after via `git stash`, release
+  vs quick-release), `golden_corpus_check.py` clean, 6-function
+  hand-curated regression byte-identical, `state_machine_score` 20/20
+  uniform, `_nl_load_domain` itself 20/20 deterministic.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
