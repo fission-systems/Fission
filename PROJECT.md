@@ -275,6 +275,40 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   byte-identical. The actual repros: `control_flow_gcc-elf_x64_O0`'s
   `main` 30/30 uniform (was ~50/50), `control_flow_gcc-aarch64_O0`'s
   `__dcigettext` 30/30 uniform (was 3+ distinct outputs across 5 runs).
+- **Perf sweep round 3, 2026-07-19/20** (corpus-wide `--all` batch sweep
+  across all 76 dev-corpus binaries, using `sample` on aarch64/x64 to
+  profile the worst outliers each round):
+  1. **`RuntimeFrontendArtifacts` deep-cloned under an exclusive `Mutex`
+     on every cache access** (commit `db04f32e`) — the single biggest
+     win of this round. `control_flow_gcc-aarch64_O0/O2` dominated the
+     sweep (16 of the top 25 slowest functions, every one from those two
+     binaries); `sample` on the actual `--all` batch (not a lone
+     single-function run, which didn't reproduce it) showed 35% of one
+     worker's time in `_pthread_mutex_firstfit_lock_wait` inside
+     `RuntimeSleighFrontend::from_entry`, plus heavy time cloning the
+     whole compiled SLEIGH constructor/subtable/pattern-node graph.
+     Wrapped `RuntimeFrontendArtifacts.compiled`/`RuntimeSleighFrontend.
+     compiled` in `Arc<CompiledFrontend>` so a cache hit is a refcount
+     bump instead of a deep clone. Corpus-wide effect: mean decomp_sec
+     0.60s → 0.18s, median 0.45s → 0.06s (all 2990 functions in the
+     dev corpus). Almost every aarch64 function dropped from 2-6s to
+     0.6-0.7s.
+  2. **`RegisterNamer::hw_name_at`'s SLA-map fallback did a full linear
+     scan on every call** (commit `d8acaee5`) — found profiling
+     `accumulate_pairs` (8.3s for 628 bytes, disproportionate vs peers).
+     Added `sla_map_by_offset: HashMap<u64, Vec<(u32, String)>>`, built
+     once alongside `sla_map`, so the "any size ≥ prefer_size at this
+     offset" fallback is an O(1) lookup + small scan instead of O(map
+     size). 8.3s → 6.1s, output byte-identical. Remaining cost there is
+     genuine SESE-region-search recursion depth (irreducible control
+     flow) — a harder, separate problem, not addressed.
+  3. Two outliers left unaddressed as of this round, both look like
+     genuine per-function cost rather than a bug: `_nl_load_domain`
+     (`control_flow_gcc-aarch64_*`, ~10.4s, but it's a real 5332-byte
+     function — profiled and the cost is spread across many legitimate
+     call sites, no single dominant site) and `bounded_tlv_sum`
+     (`semantic_stress_gcc_O3.exe`, down to ~3.2s from the original
+     63.8s bug fixed earlier this session).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
