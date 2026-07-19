@@ -10,9 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-07-10-x86-32-stack-parameters/">
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/v0.1.5/">
       
       
+        <link rel="prev" href="../../RELEASE/">
+      
+      
+        <link rel="next" href="../v0.1.4/">
       
       
         
@@ -23,7 +27,7 @@
     
     
       
-        <title>X86-32 Incoming Stack Parameter Recovery - Fission</title>
+        <title>Fission 0.1.5 - Fission</title>
       
     
     
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#x86-32-incoming-stack-parameter-recovery" class="md-skip">
+        <a href="#fission-v015" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              X86-32 Incoming Stack Parameter Recovery
+              Fission 0.1.5
             
           </span>
         </div>
@@ -382,11 +386,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../changelog/v0.1.5/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   
@@ -781,28 +787,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
-        
-          
-          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
             
   
   
@@ -820,7 +829,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
@@ -835,10 +844,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -854,6 +890,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#release-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#determinism-hardening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Determinism hardening
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-ten-round-profile-driven-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance: ten-round profile-driven sweep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#normalize-pass-framework-migration-track-b" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        normalize pass-framework migration (Track B)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-and-tooling-versions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package and tooling versions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrade notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commit-range" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit range
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -866,7 +999,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+      <a href="../v0.1.4/" class="md-nav__link">
         
   
   
@@ -894,7 +1027,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+      <a href="../v0.1.3/" class="md-nav__link">
         
   
   
@@ -922,7 +1055,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+      <a href="../v0.1.2/" class="md-nav__link">
         
   
   
@@ -977,10 +1110,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-baseline-row-anchor" class="md-nav__link">
+  <a href="#release-summary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Baseline Row Anchor
+        Release summary
       
     </span>
   </a>
@@ -988,10 +1121,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-owner-proof" class="md-nav__link">
+  <a href="#determinism-hardening" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Owner Proof
+        Determinism hardening
       
     </span>
   </a>
@@ -999,10 +1132,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-generality-invariant-proof" class="md-nav__link">
+  <a href="#performance-ten-round-profile-driven-sweep" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Generality / Invariant Proof
+        Performance: ten-round profile-driven sweep
       
     </span>
   </a>
@@ -1010,10 +1143,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-risk-and-ownership-check" class="md-nav__link">
+  <a href="#normalize-pass-framework-migration-track-b" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Risk And Ownership Check
+        normalize pass-framework migration (Track B)
       
     </span>
   </a>
@@ -1021,10 +1154,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-validation-matrix" class="md-nav__link">
+  <a href="#package-and-tooling-versions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Validation Matrix
+        Package and tooling versions
       
     </span>
   </a>
@@ -1032,10 +1165,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-ai-review-prompt-firewall" class="md-nav__link">
+  <a href="#upgrade-notes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. AI Review / Prompt Firewall
+        Upgrade notes
       
     </span>
   </a>
@@ -1043,10 +1176,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-review-notes" class="md-nav__link">
+  <a href="#commit-range" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Review Notes
+        Commit range
       
     </span>
   </a>
@@ -1073,125 +1206,175 @@
   
 
 
-<h1 id="x86-32-incoming-stack-parameter-recovery">X86-32 Incoming Stack Parameter Recovery<a class="headerlink" href="#x86-32-incoming-stack-parameter-recovery" title="Permanent link">&para;</a></h1>
-<h2 id="1-baseline-row-anchor">1. Baseline Row Anchor<a class="headerlink" href="#1-baseline-row-anchor" title="Permanent link">&para;</a></h2>
+<h1 id="fission-v015">Fission v0.1.5<a class="headerlink" href="#fission-v015" title="Permanent link">&para;</a></h1>
+<p>Fission 0.1.5 is a <strong>determinism and performance</strong> release. Compared with
+0.1.4, it closes out a multi-pass determinism-hardening effort (fixed-seed
+hashing across the normalize/structuring midend, wall-clock budgets replaced
+with deterministic call/work counters) and lands a ten-round performance
+sweep across the decompile pipeline — SLEIGH decode, structuring, and the
+<code>--all</code> batch CLI path — driven by profiling rather than guesswork, with
+every fix validated for byte-identical output before landing.</p>
+<p>This remains a pre-1.0 minor release: the documented CLI is the primary
+interface. <strong>NIR remains the semantic oracle</strong>; HIR is a clone-only
+readability polish layer.</p>
+<p>Tagged commit: <code>2cf042d0</code>
+Release: https://github.com/sjkim1127/Fission/releases/tag/v0.1.5</p>
+<h2 id="release-summary">Release summary<a class="headerlink" href="#release-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>v0.1.4</th>
+<th>v0.1.5</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Determinism</td>
+<td><code>HashMap</code>/<code>HashSet</code> iteration order and wall-clock budgets could shift output between runs (ELF/aarch64 repros)</td>
+<td><code>FxBuildHasher</code> swept across <code>fission-midend-normalize</code> and <code>fission-pcode::midend::cspec</code>; SESE region proof budget and <code>IfLoweringBudget</code> total-work budget are deterministic call-count proxies, not <code>Instant</code>-based</td>
+</tr>
+<tr>
+<td>Decompile throughput</td>
+<td>No systematic profiling pass since HIR presentation landed</td>
+<td>10-round profile-driven sweep (see below); several corpus functions 3–6x faster, <code>--all</code> batch CPU down ~45% on a 73-function binary</td>
+</tr>
+<tr>
+<td>Dev loop</td>
+<td>Full <code>--release</code> rebuild only</td>
+<td><code>quick-release</code> Cargo profile (no LTO, more codegen units) for ~2.9x faster local rebuilds; <code>golden_corpus_check.py</code> fast local regression gate (160 functions, no Docker/Ghidra)</td>
+</tr>
+<tr>
+<td><code>--all</code> batch CLI</td>
+<td>Per-function <code>FactStore</code> rebuild (re-runs whole-binary FID signature matching per function); per-task large-stack thread spawn always paid, timeout or not</td>
+<td><code>FactStore</code> built once per binary and shared; large-stack thread spawn skipped when no <code>--timeout-ms</code> is set</td>
+</tr>
+<tr>
+<td><code>normalize</code> pass migration</td>
+<td>Track B (<code>ActionGroup</code>) partially migrated</td>
+<td><code>deadcode_dynamic</code>, <code>proto_recovery</code> (5/6 chains), <code>stackstall</code> (11/12 chains), <code>block_structure_1</code>, SCCP, CSE, and several smaller chains migrated to <code>ActionGroup</code> passes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="determinism-hardening">Determinism hardening<a class="headerlink" href="#determinism-hardening" title="Permanent link">&para;</a></h2>
+<p>Two independent classes of nondeterminism were root-caused and fixed:</p>
+<ol>
+<li><strong>Unsorted hash-collection iteration feeding a "first match wins" pick.</strong>
+   <code>fission-midend-normalize</code>'s <code>variable_merge.rs::collect_direct_copies</code>
+   returned a fully-qualified <code>std::collections::HashSet</code> (missed by an
+   import-based <code>FxBuildHasher</code> sweep since it wasn't a bare <code>use</code> statement),
+   feeding a union-find merge where same-tier temp-prefixed names had no
+   secondary tiebreak — the root cause of a long-standing ELF/aarch64
+   nondeterminism repro (<code>control_flow_gcc-elf_x64_O0</code>'s <code>main</code>,
+   <code>control_flow_gcc-aarch64_O0</code>'s <code>__dcigettext</code>). Fixed by converting
+   fully-qualified <code>std::collections::HashMap</code>/<code>HashSet</code> references to the
+   crate's <code>FxBuildHasher</code>-backed aliases throughout the crate (13 files).</li>
+<li><strong>Wall-clock (<code>Instant::now()</code>) budgets whose completion point depended on
+   machine speed, not just input.</strong> <code>SESE_REGION_PROOF_BUDGET_MS</code> and the
+   shared <code>IfLoweringBudget</code>/<code>loops.rs</code> 5000ms budget were replaced with
+   deterministic call-count / total-work-unit proxies
+   (<code>SESE_REGION_PROOF_BUDGET_CALLS</code>, <code>STRUCTURING_TOTAL_WORK_BUDGET</code>).</li>
+</ol>
+<p>Both repros are now 30/30 uniform across repeat runs (previously ~50/50 and
+3+ distinct outputs across 5 runs, respectively).</p>
+<h2 id="performance-ten-round-profile-driven-sweep">Performance: ten-round profile-driven sweep<a class="headerlink" href="#performance-ten-round-profile-driven-sweep" title="Permanent link">&para;</a></h2>
+<p>Each round below started from a <code>sample</code>-based profile of a real corpus
+function, root-caused the dominant cost, fixed it, and verified byte-identical
+output before landing — full detail per round is in <code>PROJECT.md</code>.</p>
 <ul>
-<li>Binary: <code>corpus/dev/binaries/control_flow_gcc-m32_O0.exe</code></li>
-<li>Function: <code>count_bits</code> (representative; the same signature failure affects all sampled x86-32 rows)</li>
-<li>Address: <code>0x4015b0</code></li>
-<li>Corpus row or benchmark command: <code>FISSION_ENDPOINT=http://localhost:8007 python runner/runner.py --corpus dev --decompilers fission --limit 10 --output results/local_85867ecd.json</code></li>
-<li>Current output summary: the body reads <code>param_8</code>, but the function is emitted as <code>uint _count_bits(void)</code>.</li>
-<li>Semantic cases passed / total: 0 / 6</li>
-<li>Failure category: <code>compile_error</code> (<code>too many arguments to function call, expected 0, have 1</code>)</li>
-<li>Relevant observations: all 20 sampled <code>gcc-m32</code> rows fail compilation; the common signature symptom is missing formal parameters while positive EBP stack slots are present in HIR.</li>
+<li><strong>Round 1–2</strong>: fast local regression tooling
+  (<code>scripts/quality/golden_corpus_check.py</code>) and the <code>quick-release</code> Cargo
+  profile, so future rounds don't need a full <code>--release</code> rebuild per
+  iteration.</li>
+<li><strong>Round 3</strong>: <code>RuntimeFrontendArtifacts</code>/<code>RuntimeSleighFrontend.compiled</code>
+  deep-cloned the whole compiled SLEIGH grammar tree under a <code>Mutex</code> on every
+  cache access — <code>Arc</code>-wrapped so a hit is a refcount bump. Corpus-wide mean
+  <code>decomp_sec</code> 0.60s → 0.18s. <code>RegisterNamer::hw_name_at</code>'s SLA-map fallback
+  did an O(map size) linear scan per call — indexed by offset.</li>
+<li><strong>Round 4</strong>: <code>prove_loop_carried_register_update</code>'s BFS walked the whole
+  containing loop body uncached on every call — memoized per builder
+  lifetime.</li>
+<li><strong>Round 5</strong>: the entire <code>fission-pcode::midend::cspec</code> submodule (register
+  model / cspec / pspec loaders) bypassed the crate's <code>FxBuildHasher</code> alias
+  entirely; <code>RegisterModel::name_for</code>'s covering-register fallback had the
+  same linear-scan shape as round 3's <code>RegisterNamer</code> fix. <code>accumulate_pairs</code>:
+  6.06s → 1.05s (~5.8x).</li>
+<li><strong>Round 6</strong>: <code>DefinitionDependencyMap::address_contributors</code> rebuilt an
+  O(V+E) reverse-dependency graph from scratch on every pointer dereference
+  in a function instead of once for the whole walk. <code>bounded_tlv_sum</code>: 3.13s
+  → 1.15s (~2.7x).</li>
+<li><strong>Round 7</strong>: SLEIGH's per-instruction decode hot path checked several
+  diagnostic env vars via raw <code>std::env::var(_os)</code> syscalls on every
+  instruction; <code>--all</code> batch rebuilt the whole-binary <code>FactStore</code> (FID
+  signature matching + name facts) once <em>per function</em> instead of once per
+  binary. <code>advanced_patterns_gcc_O2.exe</code> (73 functions) <code>--all</code>: user CPU
+  6.4s → 3.5s (~45%).</li>
+<li><strong>Round 8</strong>: skipped a per-task watchdog-thread spawn in <code>--all</code>'s worker
+  pool when no <code>--timeout-ms</code> is set. Measured impact was inconclusive on
+  this platform — recorded honestly rather than claimed as a win.</li>
+<li><strong>Round 9</strong>: systematic sweep of ~19 more uncached diagnostic env-var
+  checks across <code>fission-pcode</code>/<code>fission-midend-normalize</code>/
+  <code>fission-midend-structuring</code>. Caught and fixed a self-inflicted <code>OnceLock</code>
+  reentrancy deadlock from an earlier mechanical refactor before it landed
+  (root-caused via <code>lldb</code> thread backtraces).</li>
+<li><strong>Round 10</strong>: memoized a predecessor-graph walk
+  (<code>live_call_result_binding_from_predecessors_for_return_register</code>) that
+  re-explored shared-ancestor blocks once per incoming branch instead of
+  reusing results — a real algorithmic soundness fix, though not the
+  dominant cost for the specific function that surfaced it.</li>
 </ul>
-<h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
+<h2 id="normalize-pass-framework-migration-track-b"><code>normalize</code> pass-framework migration (Track B)<a class="headerlink" href="#normalize-pass-framework-migration-track-b" title="Permanent link">&para;</a></h2>
+<p>Continued migrating <code>fission-midend-normalize</code>'s legacy driver chains onto
+the <code>ActionGroup</code>/<code>Pass</code> framework: <code>deadcode_dynamic</code> (complete, legacy
+driver deleted), <code>proto_recovery</code> (5/6 chains), <code>stackstall</code> (11/12 chains),
+<code>block_structure_1</code> (complete), plus SCCP, CSE, <code>conditional_const</code>,
+<code>constant_ptr_recovery</code>, and <code>entry_param_promotion</code>. Two chain-selection
+pitfalls documented in <code>PROJECT.md</code> for future migration slices
+(<code>cleanup_pass</code> vs <code>fn_pass</code> budget-gating; diag/perf-forwarding through
+callee passes).</p>
+<h2 id="package-and-tooling-versions">Package and tooling versions<a class="headerlink" href="#package-and-tooling-versions" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[ ] SLEIGH/raw p-code</li>
-<li>[x] Builder/materialize</li>
-<li>[ ] Normalize</li>
-<li>[ ] Structuring</li>
-<li>[ ] Type/data recovery</li>
-<li>[ ] Printer</li>
-<li>[ ] Benchmark/automation</li>
+<li>Release tag: <code>v0.1.5</code></li>
+<li>All workspace crate versions: <code>0.1.5</code></li>
+<li><code>fission_cli --version</code> reports <code>0.1.5</code></li>
+<li>Assets (each CLI archive includes verified <code>utils/</code>):</li>
+<li><code>fission-linux-x64.tar.gz</code></li>
+<li><code>fission-macos-arm64.tar.gz</code></li>
+<li><code>fission-windows-x64.zip</code></li>
+<li><code>fission-utils.tar.gz</code> (+ inventory / sha256)</li>
+<li><code>fission_cli-x86_64-unknown-linux-gnu</code> (Linux CLI-only convenience for benchmark consumers)</li>
 </ul>
-<p>Evidence:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uint _count_bits(void) {
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    ...
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    uint param_8;
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    ...
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    if (param_8) ...
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>}
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>PreviewBuilder::run_incremental_heritage classifies the EBP+8 slot as a local
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>StackOffset. build_hir then serializes it through HirFunction.locals, so the
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>printer correctly emits an empty formal parameter list from the wrong builder
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>fact.
-</span></code></pre></div>
-<h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
-<p>Generalized rule:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>For the x86-32 stack calling convention, incoming argument slots are ordered
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>pointer-sized locations above the return-address/frame-record boundary. With an
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>EBP frame, slot 0 starts at EBP + 2 * pointer_size. With an ESP-relative frame,
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>slot 0 starts at ESP + stack_frame_size + pointer_size. Aligned slots at or
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>above that boundary are formal parameters, not locals.
-</span></code></pre></div>
-<p>Comparable coverage:</p>
+<h2 id="upgrade-notes">Upgrade notes<a class="headerlink" href="#upgrade-notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Similar shape 1: one incoming EBP-relative scalar argument.</li>
-<li>Similar shape 2: three ordered EBP-relative arguments, including pointer-typed uses.</li>
-<li>Synthetic invariant test: x86-32 EBP+8/12 classify as parameter slots 0/1; EBP+4, negative offsets, x64, and non-x86-32 conventions do not.</li>
+<li><strong>No intentional CLI contract break</strong> relative to 0.1.4.</li>
+<li>Decompiled output (NIR and HIR) is byte-identical to 0.1.4 for the entire
+  golden corpus and the hand-curated 6-function regression set — this release
+  is a performance/determinism release, not a quality-changing one. The two
+  ELF/aarch64 determinism repros fixed in this release now produce a single,
+  consistent output rather than one of several possible outputs; treat that
+  as the only case where observed output for those specific functions may
+  differ from a pre-0.1.5 run.</li>
+<li><code>--all</code> batch consumers should see lower wall-clock and CPU time per
+  invocation, especially for binaries with many functions; no flag or output
+  shape changes.</li>
+<li>New <code>FISSION_RUST_DECOMP_WORKERS=1</code> / <code>FISSION_RUST_DECOMP_STACK_MB</code> env
+  vars are pre-existing tuning knobs for the <code>--all</code> worker pool, unchanged
+  by this release.</li>
+<li>fission-benchmark operators: set <code>FISSION_VERSION=v0.1.5</code> (release source
+  only for official/Pages).</li>
 </ul>
-<h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
+<h2 id="commit-range">Commit range<a class="headerlink" href="#commit-range" title="Permanent link">&para;</a></h2>
+<p><code>v0.1.4</code> … <code>v0.1.5</code> (<code>2cf042d0</code>), 77 commits. Representative themes:</p>
 <ul>
-<li>Existing pass/owner that might already own this behavior: <code>AbiState</code> stack-slot classification and <code>PreviewBuilder</code> incremental stack-slot materialization.</li>
-<li>Shared analysis/substrate candidate:</li>
-<li>[ ] CFG / dominance / postdominance fact</li>
-<li>[ ] Def-use / reaching-definition fact</li>
-<li>[x] Type constraint / calling-convention fact</li>
-<li>[x] Memory alias / stack-slot fact</li>
-<li>[ ] P-code semantic contract</li>
-<li>[ ] None; owner-local rule is justified</li>
-<li>Why extending that owner is sufficient: the builder already resolves EBP/ESP-relative addresses and owns both parameter and local binding tables.</li>
-<li>If adding a new pass/helper/metric: no pass or metric is added; one ABI query and one builder binding helper extend existing owners.</li>
-<li>Possible interaction: stack type hints and later normalize passes will see <code>ParamIndex</code> instead of <code>StackOffset</code>; outgoing call-argument slots must remain locals/outgoing slots.</li>
-<li>New or changed owner-to-owner dependency:</li>
-<li>[x] None</li>
-<li>[ ] Existing migration debt only</li>
-<li>[ ] New dependency justified below</li>
-<li>Telemetry impact: none.</li>
-<li>Known cases that must not change: x86-64 register parameters/home slots, x86-32 outgoing call arguments, negative local offsets, ARM/MIPS/PPC stack behavior.</li>
-</ul>
-<h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
-<ul>
-<li>[x] Targeted invariant test:</li>
-<li>Command: <code>cargo nextest run -p fission-pcode x86_32_incoming_stack --no-fail-fast</code></li>
-<li>Result: 2 / 2 passed, including the frameless-EBP negative case.</li>
-<li>[x] Crate-level gate:</li>
-<li>Command: <code>cargo nextest run -p fission-pcode</code></li>
-<li>Result: 1133 passed, 9 skipped.</li>
-<li>[x] Focused benchmark row:</li>
-<li>Command: rerun the local <code>gcc-m32 -O0</code> representative rows with SHA provenance and no stale result cache.</li>
-<li>Result: <code>count_bits</code> gcc-m32 O0 moved from compile error 0/6 to runtime error 1/6; its signature changed from <code>fn(void)</code> to one formal parameter. GCC x64 O0/O2 stayed 6/6.</li>
-<li>[x] Smoke or automation sample:</li>
-<li>Command: rerun the first 10 dev functions across compiler variants into a local-only result path.</li>
-<li>Expected no-regression signal: existing GCC x64 O0 pass rows remain pass.</li>
-<li>[x] Optional related checks:</li>
-<li>Command: <code>cargo check -p fission-pcode &amp;&amp; cargo check -p fission-decompiler</code></li>
-<li>Result: both checks passed.</li>
-<li>[x] Boundary audit:</li>
-<li>Command: <code>python3 scripts/audit/nir_boundary_scan.py --root .</code></li>
-<li>Expected signal: no new owner-boundary violation.</li>
-</ul>
-<h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Was an AI model asked for implementation advice?</li>
-<li>[x] No external model; this local implementation follows the repository skill and ADR gate.</li>
-<li>Information exposed in the AI prompt:</li>
-<li>[x] Structural failure pattern only for implementation reasoning</li>
-<li>[x] Owner evidence only</li>
-<li>[x] Invariant candidates only</li>
-<li>[x] Validation matrix only</li>
-<li>Redaction confirmed for external prompts:</li>
-<li>[x] Function names removed</li>
-<li>[x] Addresses removed</li>
-<li>[x] Binary paths removed</li>
-<li>[x] Corpus row ids removed</li>
-<li>[x] Compiler tuple / row-identifying labels removed</li>
-<li>Ghidra guidance confirmed:</li>
-<li>[x] Correctness/reference use only; no output-style mimicry request</li>
-<li>Unseen or synthetic validation evidence:</li>
-<li>Patch validation pool command/result: pending after focused validation.</li>
-<li>Synthetic invariant test command/result: 2 / 2 targeted tests passed.</li>
-</ul>
-<h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Production code contains no hardcoded binary/function/address/corpus guards:</li>
-<li>[x] Confirmed</li>
-<li>The change does not claim semantic improvement from dashboard or benchmark-only edits:</li>
-<li>[x] Confirmed</li>
-<li>Any new metric/pass/helper does not duplicate an existing owner:</li>
-<li>[x] Confirmed</li>
+<li><code>perf(pcode)</code> / <code>perf(sleigh)</code> / <code>perf(cli)</code> / <code>perf(normalize)</code> /
+  <code>perf(cspec)</code> / <code>perf(signatures)</code> — the ten-round performance sweep</li>
+<li><code>fix(normalize)</code> / <code>fix(pcode)</code> / <code>fix(structuring)</code> / <code>fix(midend)</code> /
+  <code>fix(materialize)</code> / <code>fix(loader)</code> — determinism hardening and pcode
+  lowering correctness fixes (CDQ/SubPiece signed division, loop-carried
+  cursor sharing, call-result save/observe)</li>
+<li><code>refactor(normalize)</code> — continued <code>ActionGroup</code> pass-framework migration</li>
+<li><code>docs(project)</code> / <code>docs(PROJECT)</code> — per-round findings recorded in
+  <code>PROJECT.md</code> as the working log for this effort</li>
 </ul>
 
 
