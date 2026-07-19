@@ -160,22 +160,55 @@ pub(crate) fn run_worker_fanout_fanin(
                         Ok(func) => func,
                         Err(_) => return,
                     };
-                    // Per-task timeout guard (same mechanism as the
-                    // single-function path): without this, a function whose
-                    // structuring never hits a budget checkpoint can wedge
-                    // this persistent worker forever, silently shrinking the
-                    // pool by one and -- if worker_count is 1, as it is for
-                    // small function counts -- hanging the whole batch. The
-                    // stuck computation's own thread is still abandoned in
-                    // the background (Rust has no thread cancellation), but
-                    // the queue keeps moving.
-                    let rendered = render_one_function_on_large_stack(
-                        Arc::clone(&binary),
-                        Arc::clone(&facts),
-                        &func,
-                        config,
-                        stack_size_bytes,
-                    );
+                    let rendered = if config.timeout_ms.filter(|ms| *ms > 0).is_some() {
+                        // Per-task timeout guard (same mechanism as the
+                        // single-function path): without this, a function
+                        // whose structuring never hits a budget checkpoint
+                        // can wedge this persistent worker forever, silently
+                        // shrinking the pool by one and -- if worker_count is
+                        // 1, as it is for small function counts -- hanging
+                        // the whole batch. The stuck computation's own thread
+                        // is still abandoned in the background (Rust has no
+                        // thread cancellation), but the queue keeps moving.
+                        // This needs its own spawned watchdog thread, since
+                        // that's the only way to bound this worker's wait.
+                        render_one_function_on_large_stack(
+                            Arc::clone(&binary),
+                            Arc::clone(&facts),
+                            &func,
+                            config,
+                            stack_size_bytes,
+                        )
+                    } else {
+                        // No timeout configured (the default): this worker
+                        // thread already runs with `stack_size_bytes` of
+                        // stack (see `.stack_size(stack_size_bytes)` on this
+                        // thread's own spawn above), so routing through
+                        // `render_one_function_on_large_stack` would just
+                        // spawn -- and immediately join -- a second
+                        // large-stack OS thread for no benefit: with no
+                        // timeout, a hang blocks this worker either way,
+                        // spawned-and-joined or not. A `sample` profile of a
+                        // `--all` batch run showed `thread_start` at ~9% of
+                        // self-time, almost entirely this redundant spawn.
+                        let func_owned = func.clone();
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            render_one_function_inner(
+                                binary.as_ref(),
+                                facts.as_ref(),
+                                &func_owned,
+                                config,
+                            )
+                        }))
+                        .unwrap_or_else(|_| {
+                            make_internal_error_result(
+                                binary.as_ref(),
+                                &func_owned,
+                                "worker thread panicked while rendering function".to_string(),
+                                config,
+                            )
+                        })
+                    };
                     if tx.send(rendered).is_err() {
                         return;
                     }
