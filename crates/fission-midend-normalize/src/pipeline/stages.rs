@@ -147,9 +147,9 @@ pub fn run_stage_proto_recovery(func: &mut HirFunction, diag: bool, perf: bool) 
 }
 
 /// Runs the `constant_ptr_recovery` → `cleanup_constant_ptr` chain that used
-/// to open [`run_stage_deadcode_dynamic`]. Migrated to declarative
-/// `ActionGroup` passes registered directly in `groups.rs`
-/// (`GatedFollowupPass` + `CleanupPass`); kept here only as the shared
+/// to open the `deadcode_dynamic` stage (now fully migrated to declarative
+/// `ActionGroup` passes registered directly in `groups.rs`, see
+/// `GatedFollowupPass` + `CleanupPass`); kept here only as the shared
 /// cleanup block body so both the pass registration and any direct callers
 /// see one definition.
 pub(super) fn cleanup_after_constant_ptr_recovery(func: &mut HirFunction) {
@@ -226,108 +226,40 @@ pub(super) fn defuse_after_cse_and_prune(func: &mut HirFunction) -> bool {
     changed
 }
 
-pub fn run_stage_deadcode_dynamic(func: &mut HirFunction, diag: bool, perf: bool) {
-    // Function-level def-use dead assignment: removes dead writes to ANY
-    // variable (not just trivially-named temps) across the whole body tree.
-    run_pass_logged(
-        func,
-        "defuse_dead_assignment",
-        perf,
-        defuse_dead_assignment_pass,
-    );
-    // Copy propagation: forward-substitute `x = y` (single-definition copy)
-    // to eliminate unnecessary temporaries.
-    if run_pass_logged(func, "copy_propagation", perf, copy_propagation_pass) {
-        // A second cleanup pass to catch newly-exposed dead code.
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_copy",
-            perf,
-            defuse_dead_assignment_pass,
-        );
-    }
-    // Remove dead callee-saved register assignments whose uses were all
-    // copy-propagated away (e.g. `rbx = param_3` after every `rbx` use
-    // was substituted with `param_3`). Runs unconditionally so it catches
-    // cases where copy propagation fired in an earlier pipeline wave.
-    run_pass_logged(
-        func,
-        "remove_dead_callee_param_loads",
-        perf,
-        remove_dead_callee_saved_param_loads,
-    );
-    // Join-variable coalescing: unify parallel temporaries assigned in both
-    // branches of an if-else (SSA out-of-SSA for 2-way joins).
-    run_pass_logged(func, "join_coalescing", perf, join_coalescing_pass);
-    // If-else common pure-prefix hoisting: move identical leading assignments
-    // out of both branches (partial redundancy elimination for branches).
-    if run_pass_logged(
-        func,
-        "branch_prefix_hoist",
-        perf,
-        apply_branch_prefix_hoist_pass,
-    ) {
-        cleanup_func_stmt_list(func);
-        if run_pass_logged(
-            func,
-            "copy_propagation_after_branch_hoist",
-            perf,
-            copy_propagation_pass,
-        ) {
-            run_pass_logged(
-                func,
-                "defuse_dead_assignment_after_branch_hoist_copy",
-                perf,
-                defuse_dead_assignment_pass,
-            );
-        }
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_branch_hoist",
-            perf,
-            defuse_dead_assignment_pass,
-        );
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
-        run_pass_logged(
-            func,
-            "remove_dead_callee_param_loads_after_branch_hoist",
-            perf,
-            remove_dead_callee_saved_param_loads,
-        );
-    }
-    // GVN-lite at 2-way joins: duplicate pure RHS, different LHS → hoist temp.
-    if run_pass_logged(func, "gvn_join_hoist", perf, apply_gvn_join_hoist_pass) {
-        cleanup_func_stmt_list(func);
-        if run_pass_logged(
-            func,
-            "copy_propagation_after_gvn",
-            perf,
-            copy_propagation_pass,
-        ) {
-            run_pass_logged(
-                func,
-                "defuse_dead_assignment_after_gvn_copy",
-                perf,
-                defuse_dead_assignment_pass,
-            );
-        }
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_gvn",
-            perf,
-            defuse_dead_assignment_pass,
-        );
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
-        run_pass_logged(
-            func,
-            "remove_dead_callee_param_loads_after_gvn",
-            perf,
-            remove_dead_callee_saved_param_loads,
-        );
-    }
+/// Cleanup for the `branch_prefix_hoist` chain: bare, unlogged
+/// `cleanup_func_stmt_list` that used to open the `if` body.
+pub(super) fn cleanup_after_branch_prefix_hoist(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    hir_shape(func) != before
 }
+
+/// Tail of the `branch_prefix_hoist` chain: `defuse_dead_assignment_after_branch_hoist`
+/// (already individually logged) plus the two bare prune calls that followed it.
+pub(super) fn defuse_after_branch_hoist_and_prune(func: &mut HirFunction) -> bool {
+    let changed = defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    changed
+}
+
+/// Cleanup for the `gvn_join_hoist` chain: bare, unlogged
+/// `cleanup_func_stmt_list` that used to open the `if` body.
+pub(super) fn cleanup_after_gvn_join_hoist(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    hir_shape(func) != before
+}
+
+/// Tail of the `gvn_join_hoist` chain: `defuse_dead_assignment_after_gvn`
+/// (already individually logged) plus the two bare prune calls that followed it.
+pub(super) fn defuse_after_gvn_and_prune(func: &mut HirFunction) -> bool {
+    let changed = defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    changed
+}
+
 
 pub fn run_stage_type_early(func: &mut HirFunction, diag: bool, perf: bool) {
     apply_type_signature_fixed_point(func, diag, perf);

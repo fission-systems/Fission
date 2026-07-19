@@ -2,17 +2,21 @@
 
 use fission_midend_core::wave_stats;
 use super::stages::{
-    cleanup_after_conditional_const, cleanup_after_constant_ptr_recovery,
-    cleanup_after_entry_param_promotion, cleanup_after_sccp, cleanup_elim_8,
-    defuse_after_cse_and_prune, run_stage_block_structure_1, run_stage_cleanup,
-    run_stage_deadcode_dynamic, run_stage_heritage_value_recovery, run_stage_memory_recovery,
+    cleanup_after_branch_prefix_hoist, cleanup_after_conditional_const,
+    cleanup_after_constant_ptr_recovery, cleanup_after_entry_param_promotion,
+    cleanup_after_gvn_join_hoist, cleanup_after_sccp, cleanup_elim_8, defuse_after_branch_hoist_and_prune,
+    defuse_after_cse_and_prune, defuse_after_gvn_and_prune, run_stage_block_structure_1,
+    run_stage_cleanup, run_stage_heritage_value_recovery, run_stage_memory_recovery,
     run_stage_merge, run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
     sccp_is_admitted, wide_dead_assignment_and_prune,
 };
 use super::super::analysis::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
-use super::super::global_opt::{apply_conditional_const_pass, apply_cse_pass, apply_sccp_pass};
+use super::super::global_opt::{
+    apply_conditional_const_pass, apply_cse_pass, apply_gvn_join_hoist_pass, apply_sccp_pass,
+};
+use super::super::idioms::{apply_branch_prefix_hoist_pass, remove_dead_callee_saved_param_loads};
 use super::super::memory::apply_constant_ptr_recovery_pass;
-use super::super::recovery::copy_propagation_pass;
+use super::super::recovery::{copy_propagation_pass, join_coalescing_pass};
 use super::super::types::apply_entry_param_promotion_pass;
 use fission_midend_core::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
@@ -164,10 +168,117 @@ pub fn build_normalize_pipeline() -> Pipeline {
                         ),
                     ],
                 ))
-                .pass(stage_pass(
-                    "deadcode_dynamic",
+                // Function-level def-use dead assignment: removes dead
+                // writes to ANY variable (not just trivially-named temps)
+                // across the whole body tree. Runs unconditionally.
+                .pass(fn_pass(
+                    "defuse_dead_assignment",
                     concept,
-                    run_stage_deadcode_dynamic,
+                    defuse_dead_assignment_pass,
+                ))
+                // Copy propagation: forward-substitute `x = y` (single-
+                // definition copy) to eliminate unnecessary temporaries.
+                .pass(gated_followup(
+                    fn_pass("copy_propagation", concept, copy_propagation_pass),
+                    vec![fn_pass(
+                        "defuse_dead_assignment_after_copy",
+                        concept,
+                        defuse_dead_assignment_pass,
+                    )],
+                ))
+                // Remove dead callee-saved register assignments whose uses
+                // were all copy-propagated away. Runs unconditionally so it
+                // catches cases where copy propagation fired in an earlier
+                // pipeline wave.
+                .pass(fn_pass(
+                    "remove_dead_callee_param_loads",
+                    concept,
+                    remove_dead_callee_saved_param_loads,
+                ))
+                // Join-variable coalescing: unify parallel temporaries
+                // assigned in both branches of an if-else (SSA out-of-SSA
+                // for 2-way joins).
+                .pass(fn_pass(
+                    "join_coalescing",
+                    concept,
+                    join_coalescing_pass,
+                ))
+                // If-else common pure-prefix hoisting: move identical
+                // leading assignments out of both branches (partial
+                // redundancy elimination for branches).
+                .pass(gated_followup(
+                    fn_pass(
+                        "branch_prefix_hoist",
+                        concept,
+                        apply_branch_prefix_hoist_pass,
+                    ),
+                    vec![
+                        fn_pass(
+                            "cleanup_branch_prefix_hoist",
+                            concept,
+                            cleanup_after_branch_prefix_hoist,
+                        ),
+                        gated_followup(
+                            fn_pass(
+                                "copy_propagation_after_branch_hoist",
+                                concept,
+                                copy_propagation_pass,
+                            ),
+                            vec![fn_pass(
+                                "defuse_dead_assignment_after_branch_hoist_copy",
+                                concept,
+                                defuse_dead_assignment_pass,
+                            )],
+                        ),
+                        fn_pass(
+                            "defuse_dead_assignment_after_branch_hoist",
+                            concept,
+                            defuse_after_branch_hoist_and_prune,
+                        ),
+                        fn_pass(
+                            "remove_dead_callee_param_loads_after_branch_hoist",
+                            concept,
+                            remove_dead_callee_saved_param_loads,
+                        ),
+                    ],
+                ))
+                // GVN-lite at 2-way joins: duplicate pure RHS, different LHS
+                // → hoist temp.
+                .pass(gated_followup(
+                    fn_pass(
+                        "gvn_join_hoist",
+                        concept,
+                        apply_gvn_join_hoist_pass,
+                    ),
+                    vec![
+                        fn_pass(
+                            "cleanup_gvn_join_hoist",
+                            concept,
+                            cleanup_after_gvn_join_hoist,
+                        ),
+                        gated_followup(
+                            fn_pass(
+                                "copy_propagation_after_gvn",
+                                concept,
+                                copy_propagation_pass,
+                            ),
+                            vec![fn_pass(
+                                "defuse_dead_assignment_after_gvn_copy",
+                                concept,
+                                defuse_dead_assignment_pass,
+                            )],
+                        ),
+                        fn_pass(
+                            "defuse_dead_assignment_after_gvn",
+                            concept,
+                            defuse_after_gvn_and_prune,
+                        ),
+                        fn_pass(
+                            "remove_dead_callee_param_loads_after_gvn",
+                            concept,
+                            remove_dead_callee_saved_param_loads,
+                        ),
+                    ],
                 )),
         )
         .group(group("type_early", proto).pass(stage_pass(

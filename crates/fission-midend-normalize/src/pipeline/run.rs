@@ -361,23 +361,6 @@ pub struct GlobalSymbolContext {
     pub sizes: HashMap<u64, u64>,
 }
 
-pub fn run_canonical_normalize_passes(func: &mut HirFunction, diag: bool, perf: bool) {
-    use super::stages::{
-        run_stage_block_structure_1, run_stage_cleanup, run_stage_deadcode_dynamic,
-        run_stage_heritage_value_recovery, run_stage_memory_recovery, run_stage_merge,
-        run_stage_proto_recovery, run_stage_stackstall, run_stage_type_early,
-    };
-    run_stage_proto_recovery(func, diag, perf);
-    run_stage_deadcode_dynamic(func, diag, perf);
-    run_stage_type_early(func, diag, perf);
-    run_stage_stackstall(func, diag, perf);
-    run_stage_heritage_value_recovery(func, diag, perf);
-    run_stage_memory_recovery(func, diag, perf);
-    run_stage_merge(func, diag, perf);
-    run_stage_block_structure_1(func, diag, perf);
-    run_stage_cleanup(func, diag, perf);
-}
-
 pub fn normalize_hir_function(func: &mut HirFunction) {
     super::groups::run_normalize_pipeline(func, normalize_diag_enabled(), normalize_perf_enabled());
 }
