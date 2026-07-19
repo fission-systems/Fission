@@ -2460,16 +2460,41 @@ impl<'a> PreviewBuilder<'a> {
             .get(&(block_idx, key.clone()))
             .map(|name| (key.clone(), name))
             .or_else(|| {
-                self.explicit_merge_bindings.iter().find_map(
-                    |((candidate_block_idx, candidate_key), name)| {
+                // `explicit_merge_bindings` is a HashMap: iteration order is
+                // randomized per-process. When more than one covering/
+                // zero-extending candidate exists for `block_idx`, an
+                // unsorted `.find_map` pick made this method (and therefore
+                // materialize order and synthetic temp naming) non-
+                // deterministic across separate fission_cli runs on the same
+                // binary. Collect all matches and pick the smallest key by a
+                // stable, well-defined order instead of "whichever the
+                // hasher visits first".
+                let mut candidates: Vec<(&VarnodeKey, &String)> = self
+                    .explicit_merge_bindings
+                    .iter()
+                    .filter_map(|((candidate_block_idx, candidate_key), name)| {
                         (*candidate_block_idx == block_idx
                             && (Self::register_key_covers(candidate_key, &key)
                                 || self.register_key_zero_extends(candidate_key, &key)
                                 || self.register_key_cross_space_covers(candidate_key, &key)
                                 || self.register_key_cross_space_zero_extends(candidate_key, &key)))
-                        .then_some((candidate_key.clone(), name))
-                    },
-                )
+                        .then_some((candidate_key, name))
+                    })
+                    .collect();
+                candidates.sort_unstable_by_key(|(candidate_key, name)| {
+                    (
+                        candidate_key.space_id,
+                        candidate_key.offset,
+                        candidate_key.size,
+                        candidate_key.is_constant,
+                        candidate_key.constant_val,
+                        (*name).clone(),
+                    )
+                });
+                candidates
+                    .into_iter()
+                    .next()
+                    .map(|(candidate_key, name)| (candidate_key.clone(), name))
             })?;
         let (candidate_key, binding_name) = binding;
         let expr = HirExpr::Var(binding_name.clone());
