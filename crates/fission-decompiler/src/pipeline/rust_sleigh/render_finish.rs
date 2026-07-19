@@ -53,7 +53,7 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
     };
     let reg_map = model.to_sla_register_map();
     if options.sla_register_map.is_none() {
-        options.sla_register_map = Some(model.to_offset_map());
+        options.sla_register_map = Some(model.to_offset_map().into_iter().collect());
     }
 
     let languages_root = fission_sleigh::compiler::sleigh_languages_root();
@@ -86,7 +86,7 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
             options.pspec_tracked_context = pspec.tracked_set;
         }
         if !pspec.hidden_registers.is_empty() {
-            options.pspec_hidden_registers = pspec.hidden_registers;
+            options.pspec_hidden_registers = pspec.hidden_registers.into_iter().collect();
         }
     }
 }

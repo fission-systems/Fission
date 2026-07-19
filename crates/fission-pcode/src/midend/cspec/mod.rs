@@ -19,7 +19,7 @@
 //! Callers must populate cspec fields from `utils/sleigh-specs/languages` before ABI-sensitive
 //! lowering (see [`apply::apply_cspec_for_options`]).
 
-use std::collections::HashMap;
+use crate::midend::HashMap;
 use std::path::Path;
 
 pub mod apply;
@@ -575,7 +575,7 @@ mod tests {
 
     /// Approximate x86-64 SLA register offsets (from ELEM_VARNODE_SYM in the .sla file).
     fn make_x64_reg_map() -> SlaRegisterMap {
-        let mut m = SlaRegisterMap::new();
+        let mut m = SlaRegisterMap::default();
         m.insert("RAX".into(), (0x00, 8));
         m.insert("RCX".into(), (0x08, 8));
         m.insert("RDX".into(), (0x10, 8));
@@ -702,7 +702,7 @@ mod tests {
 
     #[test]
     fn resolve_reg_offset_case_insensitive() {
-        let mut reg_map = SlaRegisterMap::new();
+        let mut reg_map = SlaRegisterMap::default();
         reg_map.insert("RAX".into(), (0x00, 8));
         assert_eq!(resolve_reg_offset("rax", &reg_map), Some(0x00));
         assert_eq!(resolve_reg_offset("RAX", &reg_map), Some(0x00));

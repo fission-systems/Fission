@@ -2,7 +2,7 @@
 //!
 //! Ghidra-style "names from SLA, slots from cspec" lookup.
 
-use std::collections::HashMap;
+use crate::midend::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -29,6 +29,13 @@ fn model_cache() -> &'static RwLock<HashMap<String, Arc<RegisterModel>>> {
 pub struct RegisterModel {
     /// `(offset, size)` → canonical lowercase hardware name.
     by_offset: HashMap<(u64, u32), String>,
+    /// `by_offset` grouped by offset, built once alongside it. `name_for`'s
+    /// "wider covering register at this offset" fallback used to do
+    /// `by_offset.iter().find(...)` -- an O(map size) scan on every miss.
+    /// This is `Arc`-cached per language (`register_model_for_language`), so
+    /// building the index once here amortizes across every builder that
+    /// shares the same cached model, not just one function.
+    by_offset_grouped: HashMap<u64, Vec<(u32, String)>>,
     /// Uppercase SLA name → `(offset, size)`.
     name_index: SlaRegisterMap,
     /// Lowercase name → GPR family index (same base offset + slot within define register).
@@ -45,9 +52,9 @@ impl RegisterModel {
     pub fn name_for(&self, offset: u64, size: u32) -> Option<&str> {
         self.exact_name_for(offset, size).or_else(|| {
             // Wider covering register (e.g. RAX covers EAX at same offset).
-            self.by_offset
-                .iter()
-                .find(|((off, sz), _)| *off == offset && *sz >= size)
+            self.by_offset_grouped
+                .get(&offset)
+                .and_then(|variants| variants.iter().find(|(sz, _)| *sz >= size))
                 .map(|(_, name)| name.as_str())
         })
     }
@@ -90,7 +97,7 @@ impl RegisterModel {
 
     pub fn build_from_parsed(parsed: &[ParsedRegister]) -> Self {
         let mut by_offset = HashMap::default();
-        let mut name_index = SlaRegisterMap::new();
+        let mut name_index = SlaRegisterMap::default();
         let mut family_keys: HashMap<u64, usize> = HashMap::default();
         let mut family_by_name = HashMap::default();
         let mut family_repr: HashMap<usize, (u64, u32)> = HashMap::default();
@@ -121,9 +128,11 @@ impl RegisterModel {
 
         let return_target_offset = detect_return_target(&by_offset);
         add_register_aliases(&mut name_index, &by_offset);
+        let by_offset_grouped = group_sla_map_by_offset(&by_offset);
 
         Self {
             by_offset,
+            by_offset_grouped,
             name_index,
             family_by_name,
             family_repr,
@@ -256,7 +265,7 @@ pub fn apply_register_model_for_language(
     let Some(model) = register_model_for_language(language_id) else {
         return false;
     };
-    options.sla_register_map = Some(model.to_offset_map());
+    options.sla_register_map = Some(model.to_offset_map().into_iter().collect());
     true
 }
 
@@ -291,7 +300,10 @@ impl RegisterNamer {
     pub fn from_options(options: &crate::midend::NirRenderOptions) -> Self {
         let model = super::apply::default_cspec_pair(options)
             .and_then(|(lang, _)| register_model_for_language(&lang));
-        let sla_map = options.sla_register_map.clone();
+        let sla_map = options
+            .sla_register_map
+            .as_ref()
+            .map(|m| m.iter().map(|(&k, v)| (k, v.clone())).collect());
         let sla_map_by_offset = sla_map.as_ref().map(group_sla_map_by_offset);
         Self {
             abi: options.calling_convention,

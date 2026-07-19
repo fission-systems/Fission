@@ -7,7 +7,6 @@ use super::loader::load_cspec_for_pair;
 use super::register_model::{apply_register_model_for_options, register_model_for_language};
 use super::{ResolvedPrototype, SlaRegisterMap};
 use crate::midend::{CallingConvention, NirRenderOptions};
-use std::collections::HashMap;
 
 /// Root of the checked-in Ghidra language tree (`utils/sleigh-specs/languages`).
 ///
@@ -156,7 +155,7 @@ pub(crate) fn register_model(
 }
 
 pub(crate) fn sla_register_map_from_offset_map(
-    map: &HashMap<(u64, u32), String>,
+    map: &std::collections::HashMap<(u64, u32), String>,
 ) -> SlaRegisterMap {
     map.iter()
         .map(|((off, sz), name)| (name.to_ascii_uppercase(), (*off, *sz)))
