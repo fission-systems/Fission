@@ -106,6 +106,23 @@ cargo build -p fission-cli --release
 ./target/release/fission_cli --help
 ```
 
+For local iteration, prefer `--profile quick-release` over `--release`:
+`[profile.release]` uses fat LTO + `codegen-units = 1` for shipping-quality
+runtime perf, which serializes codegen/linking and dominates rebuild time.
+`[profile.quick-release]` (workspace `Cargo.toml`) drops those two knobs but
+keeps `opt-level = 3`, so decomp-speed/output checks stay representative —
+measured ~2.9x faster on a touch-one-core-crate rebuild (44s → 15s), with
+byte-identical output on the real-binary regression set and ~9% slower
+runtime on the heaviest measured function. Binaries land in
+`target/quick-release/`. Use plain `--release` for anything going into a
+benchmark run, a release build, or a perf measurement that needs to match
+production codegen.
+
+```bash
+cargo build -p fission-cli --profile quick-release
+./target/quick-release/fission_cli --help
+```
+
 ### Run Common Checks
 
 ```bash
