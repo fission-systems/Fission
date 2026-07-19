@@ -100,6 +100,36 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   commit `d7da0216` for the full diagnostic writeup (deterministic-hasher
   experiment, ruled-out hypotheses, residual quality caveat for
   `state_machine_score`).
+- **RegisterNamer per-call reconstruction fixed 2026-07-19** (commit
+  `28cdfdad`): unrelated to the migration, found while investigating dev-loop
+  throughput. `PreviewBuilder::register_namer()` rebuilt a fresh
+  `RegisterNamer` (cloning `options.sla_register_map`, a
+  `HashMap<(u64,u32), String>`) on every call across 46 hot-path call sites
+  in varnode lowering. `options` is immutable for the builder's lifetime, so
+  cached the result in a `OnceCell`. Worst measured case
+  (`bounded_tlv_sum` in `semantic_stress_gcc_O3.exe`, SCC size 31 /
+  irreducible control flow): 63.8s → 3.4s decomp time (~18x), almost
+  entirely from `structuring_duration_ms` (60.0s → 1.9s).
+- **Follow-up opened by the above: `SESE_REGION_PROOF_BUDGET_MS` is
+  wall-clock, not deterministic** (`fission-midend-structuring/src/
+  linear_recovery.rs`, `= 500.0`, checked via `Instant::now()` in
+  `sese_region_proof_budget_exceeded`). The RegisterNamer fix sped up each
+  candidate-region proof attempt enough that more attempts complete inside
+  the same 500ms window, which changes *which* regions get promoted —
+  confirmed via `preview_build_stats` (`promoted_region_count`,
+  `region_proof_candidate_count` differ before/after) and confirmed NOT a
+  reintroduction of hash-order nondeterminism (both before- and after-fix
+  binaries are internally stable across repeat runs; they just disagree
+  with each other). Net effect: decompiled output for functions that brush
+  this budget depends on how fast the structuring pass happens to run on
+  the day — different hardware, machine load, or any future perf change can
+  silently shift output. This is the same category of concern as the
+  hash-iteration determinism fix above, just triggered by wall-clock timing
+  instead of hash seeding. **Not yet fixed** — the fix direction is to
+  replace the wall-clock budget with a deterministic proxy (e.g. candidate-
+  proof-attempt count or total ops visited) so budget exhaustion no longer
+  depends on machine speed. Tracked as follow-up work, deliberately not
+  bundled into the RegisterNamer perf commit.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
