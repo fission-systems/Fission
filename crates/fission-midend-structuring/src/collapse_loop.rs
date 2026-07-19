@@ -9,7 +9,8 @@ use fission_midend_core::ir::MlilPreviewError;
 
 /// Env gate for the collapse-loop structuring path.
 pub fn collapse_loop_admission_enabled() -> bool {
-    std::env::var_os("FISSION_COLLAPSE_LOOP").is_some()
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_COLLAPSE_LOOP").is_some())
 }
 
 /// Virtualize one irreducible back-edge selected by `select_bad_edge`.

@@ -23,7 +23,9 @@ pub(super) mod switch_table;
 mod telemetry;
 mod type_hints;
 
-use self::debug::preview_builder_diag_enabled;
+use self::debug::{
+    preview_builder_diag_enabled, preview_debug_enabled, preview_debug_regdump_enabled,
+};
 pub(in crate::midend::builder) use memory::aggregate_recovery;
 use tracing::trace_span;
 

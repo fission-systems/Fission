@@ -3,10 +3,13 @@ use super::*;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn no_consumer_suppression_enabled() -> bool {
-        matches!(
-            std::env::var("FISSION_ENABLE_NO_CONSUMER_SUPPRESSION"),
-            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-        )
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_ENABLE_NO_CONSUMER_SUPPRESSION"),
+                Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
     }
 
     pub(in crate::midend::builder) fn is_x86_status_flag_output(output: &Varnode) -> bool {

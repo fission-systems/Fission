@@ -26,7 +26,8 @@ use crate::HashMap;
 use crate::HashSet;
 
 pub fn guarded_tail_diag_enabled() -> bool {
-    std::env::var_os("FISSION_GUARDED_TAIL_DIAG").is_some()
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_GUARDED_TAIL_DIAG").is_some())
 }
 
 pub fn apply_guarded_tail_replacement_read(stmt: &mut HirStmt, merge: &GuardedTailSyntheticMerge) {

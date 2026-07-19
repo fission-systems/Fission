@@ -1456,7 +1456,8 @@ fn apply_address_contributor_param_pointer_types(
             scalar_params.remove(address_param);
         }
     }
-    if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+    static DIAG_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *DIAG_ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_DIAG").is_some()) {
         let mut address_params: Vec<_> = address_params.iter().cloned().collect();
         let mut scalar_params: Vec<_> = scalar_params.iter().cloned().collect();
         address_params.sort_unstable();

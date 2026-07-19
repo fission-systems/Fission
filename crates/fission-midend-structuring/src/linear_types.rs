@@ -147,8 +147,14 @@ impl IfLoweringBudget {
 }
 
 /// Env gate for structuring diagnostic traces (`FISSION_PREVIEW_DIAG`).
+///
+/// Checked from ~20 call sites across the structuring subsystem, several on
+/// hot per-region/per-block paths (`loops.rs`, `sese_driver.rs`,
+/// `conditionals/*.rs`). Cached with `OnceLock` so it's one syscall per
+/// process instead of one per call site visited.
 pub fn structuring_diag_enabled() -> bool {
-    std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_DIAG").is_some())
 }
 
 // ── Linear body recovery outcomes ──────────────────────────────────────────

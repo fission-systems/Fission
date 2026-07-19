@@ -64,7 +64,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn debug_call_recovery(&self, message: &str) {
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if preview_debug_enabled() {
             eprintln!("[mlil-preview] stage=call_arg_recovery {message}");
         }
     }

@@ -9,7 +9,7 @@ impl<'a> PreviewBuilder<'a> {
         opcode: PcodeOpcode,
         err: &MlilPreviewError,
     ) {
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if preview_debug_enabled() {
             let message = format!(
                 "[mlil-preview] stage={} block=0x{:x} seq=0x{:x} opcode={:?} err={}",
                 stage, block_addr, seq, opcode, err
@@ -137,7 +137,7 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
 
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if preview_debug_enabled() {
             let message = format!(
                 "[mlil-preview] stage={} block_idx={} block=0x{:x} seq=0x{:x} opcode={:?} target={} guessed_target={} succs=[{}]",
                 stage,
@@ -181,7 +181,7 @@ impl<'a> PreviewBuilder<'a> {
         fatal: bool,
         context: &str,
     ) {
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_none() {
+        if !preview_debug_enabled() {
             return;
         }
         let trace_id = self.inventory_trace_id().unwrap_or(0);
@@ -225,6 +225,23 @@ impl<'a> PreviewBuilder<'a> {
     }
 }
 
+// These flags are checked from many call sites across the builder,
+// several on hot per-block/per-op paths (e.g. `control/terminator.rs`'s
+// ~17 call sites, `expr/lower_expr.rs`, `memory/aggregate_recovery.rs`).
+// Cached with `OnceLock` so each is one syscall per process instead of
+// one per call site visited.
+
 pub(super) fn preview_builder_diag_enabled() -> bool {
-    std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_DIAG").is_some())
+}
+
+pub(super) fn preview_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_DEBUG").is_some())
+}
+
+pub(super) fn preview_debug_regdump_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_DEBUG_REGDUMP").is_some())
 }

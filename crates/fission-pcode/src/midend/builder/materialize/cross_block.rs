@@ -252,24 +252,33 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn copy_overwrite_restart_enabled() -> bool {
-        matches!(
-            std::env::var("FISSION_ENABLE_COPY_OVERWRITE_RESTART"),
-            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-        )
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_ENABLE_COPY_OVERWRITE_RESTART"),
+                Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
     }
 
     pub(super) fn predicate_refresh_restart_enabled() -> bool {
-        matches!(
-            std::env::var("FISSION_ENABLE_PREDICATE_REFRESH_RESTART"),
-            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-        )
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_ENABLE_PREDICATE_REFRESH_RESTART"),
+                Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
     }
 
     pub(super) fn explicit_merge_binding_enabled() -> bool {
-        matches!(
-            std::env::var("FISSION_ENABLE_EXPLICIT_MERGE_BINDING"),
-            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-        )
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_ENABLE_EXPLICIT_MERGE_BINDING"),
+                Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
     }
 
     pub(super) fn can_restart_def_window_at_copy_overwrite(
@@ -1103,7 +1112,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(predecessor_idxs) = self.predecessors.get(block_idx).cloned() else {
             return Ok(Vec::new());
         };
-        let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
+        let diag = preview_builder_diag_enabled();
         let stage_started = diag.then(std::time::Instant::now);
         self.ensure_conditional_loop_exit_accumulator_bindings_for_block(&predecessor_idxs)?;
         if let Some(started) = stage_started {

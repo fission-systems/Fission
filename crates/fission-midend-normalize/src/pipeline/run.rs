@@ -1916,9 +1916,11 @@ pub fn normalize_expr(expr: &mut HirExpr) {
 }
 
 fn normalize_diag_enabled() -> bool {
-    std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_DIAG").is_some())
 }
 
 fn normalize_perf_enabled() -> bool {
-    std::env::var_os("FISSION_PREVIEW_PERF").is_some()
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_PERF").is_some())
 }

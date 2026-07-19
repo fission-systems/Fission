@@ -1429,17 +1429,23 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn parity_chain_materialization_enabled() -> bool {
-        matches!(
-            std::env::var("FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION"),
-            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-        )
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_ENABLE_PARITY_CHAIN_MATERIALIZATION"),
+                Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
     }
 
     pub(super) fn stack_addr_frame_stable_replacement_enabled() -> bool {
-        matches!(
-            std::env::var("FISSION_ENABLE_STACK_ADDR_FRAME_STABLE_REPLACEMENT"),
-            Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-        )
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            matches!(
+                std::env::var("FISSION_ENABLE_STACK_ADDR_FRAME_STABLE_REPLACEMENT"),
+                Ok(value) if matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+            )
+        })
     }
 
     fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {

@@ -247,7 +247,8 @@ impl<'a> PreviewBuilder<'a> {
         subtype: ConditionalTailMismatchSubtype,
         stage: &str,
     ) {
-        if std::env::var_os("FISSION_RECOVERY_MISMATCH_TRACE").is_none() {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ENABLED.get_or_init(|| std::env::var_os("FISSION_RECOVERY_MISMATCH_TRACE").is_some()) {
             return;
         }
         let function_addr = self

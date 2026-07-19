@@ -8,7 +8,8 @@ use super::*;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn guarded_tail_diag_enabled() -> bool {
-        std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_DIAG").is_some())
     }
 
     pub(super) fn guarded_tail_function_address_impl(&self) -> u64 {
@@ -19,14 +20,21 @@ impl<'a> PreviewBuilder<'a> {
             .unwrap_or(0)
     }
 
+    // Called from `guarded_tail_trace_enabled_for_current_fn`, which is
+    // itself checked from ~20 sites in `fission-midend-structuring::
+    // guarded_tail::bodies`. Cached so parsing `FISSION_PREVIEW_DIAG_ADDR`
+    // happens once per process instead of once per call site visited.
     fn guarded_tail_trace_target_addr() -> Option<u64> {
-        let raw = std::env::var("FISSION_PREVIEW_DIAG_ADDR").ok()?;
-        let trimmed = raw.trim();
-        let hex = trimmed
-            .strip_prefix("0x")
-            .or_else(|| trimmed.strip_prefix("0X"))
-            .unwrap_or(trimmed);
-        u64::from_str_radix(hex, 16).ok()
+        static TARGET: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+        *TARGET.get_or_init(|| {
+            let raw = std::env::var("FISSION_PREVIEW_DIAG_ADDR").ok()?;
+            let trimmed = raw.trim();
+            let hex = trimmed
+                .strip_prefix("0x")
+                .or_else(|| trimmed.strip_prefix("0X"))
+                .unwrap_or(trimmed);
+            u64::from_str_radix(hex, 16).ok()
+        })
     }
 
     pub(crate) fn guarded_tail_trace_enabled_for_current_fn(&self) -> bool {

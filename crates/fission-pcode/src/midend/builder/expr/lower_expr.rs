@@ -201,7 +201,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn debug_preview_log(&self, message: &str) {
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_none() {
+        if !preview_debug_enabled() {
             return;
         }
         eprint!("{message}");
@@ -1790,7 +1790,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn debug_callind_target_recovery(&self, label: &str) {
-        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        if preview_debug_enabled() {
             eprintln!("[mlil-preview] stage={label}");
         }
     }

@@ -423,7 +423,7 @@ impl<'a> PreviewBuilder<'a> {
         // forward path. Keeping it as terminator bare-skips the guard and either
         // drops or unconditionally applies INT_MIN/INT_MAX-style copies.
         let terminator_index = self.materialize_block_terminator_index(block);
-        let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
+        let diag = preview_builder_diag_enabled();
         let stage_started = diag.then(std::time::Instant::now);
         let mut body = self.synthesize_explicit_merge_bindings_for_block(block)?;
         if let Some(started) = stage_started {
@@ -512,7 +512,7 @@ impl<'a> PreviewBuilder<'a> {
                     // lowering does not bare-skip an outer index.
                     let nested_body =
                         self.lower_block_ops_range(block, op_idx + 1, target_op_idx, None)?;
-                    if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+                    if preview_builder_diag_enabled() {
                         eprintln!(
                             "[DIAG] same_block_cmov block=0x{:x} op_idx={} target={} body_stmts={} term_is={:?} end={}",
                             block.start_address,

@@ -1002,6 +1002,11 @@ pub fn apply_wide_dead_assignment_pass(func: &mut HirFunction) -> bool {
 }
 
 fn wide_dead_assignment_rerun_admission_enabled() -> bool {
+    // NOT cached (unlike its siblings in this sweep): unit tests below
+    // toggle this exact env var at runtime via `set_var`/`remove_var`
+    // (see `WideDeadRerunAdmissionEnvGuard`) to exercise both the enabled
+    // and disabled paths within the same test binary process. A `OnceLock`
+    // here would freeze on whichever value the first caller observed.
     std::env::var("FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION")
         .map(|value| {
             let normalized = value.trim().to_ascii_lowercase();

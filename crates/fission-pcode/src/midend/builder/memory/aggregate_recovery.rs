@@ -7,7 +7,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         rhs: &Varnode,
     ) -> Result<Option<HirExpr>, MlilPreviewError> {
-        let debug = std::env::var_os("FISSION_PREVIEW_DEBUG").is_some();
+        let debug = preview_debug_enabled();
         if rhs.size < 16 {
             return Ok(None);
         }
@@ -230,10 +230,10 @@ impl<'a> PreviewBuilder<'a> {
         scan_end: usize,
         reg_vn: &Varnode,
     ) -> Option<(usize, Varnode, usize)> {
-        let debug = std::env::var_os("FISSION_PREVIEW_DEBUG").is_some();
+        let debug = preview_debug_enabled();
         let mut block_idx = start_block_idx;
         let mut current_scan_end = scan_end;
-        let dump_regs = std::env::var_os("FISSION_PREVIEW_DEBUG_REGDUMP").is_some();
+        let dump_regs = preview_debug_regdump_enabled();
 
         for depth in 0..4 {
             let block = &self.pcode.blocks[block_idx];
@@ -360,7 +360,7 @@ pub(in crate::midend::builder) fn recover_wide_register_source_from_block(
     scan_end: usize,
     reg_vn: &Varnode,
 ) -> Option<(Varnode, usize)> {
-    let debug = std::env::var_os("FISSION_PREVIEW_DEBUG").is_some();
+    let debug = preview_debug_enabled();
     if reg_vn.space_id != REGISTER_SPACE_ID || reg_vn.size < 16 || reg_vn.size % 4 != 0 {
         return None;
     }

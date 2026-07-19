@@ -56,6 +56,9 @@ pub fn decide_structuring_admission(
 }
 
 pub fn blockgraph_collapse_admission_enabled() -> bool {
-    std::env::var_os("FISSION_ENABLE_BLOCKGRAPH_COLLAPSE").is_some()
-        || std::env::var_os("FISSION_ENABLE_MIR_BLOCKGRAPH").is_some()
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("FISSION_ENABLE_BLOCKGRAPH_COLLAPSE").is_some()
+            || std::env::var_os("FISSION_ENABLE_MIR_BLOCKGRAPH").is_some()
+    })
 }
