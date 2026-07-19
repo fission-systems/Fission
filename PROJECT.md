@@ -552,6 +552,62 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   `golden_corpus_check.py`, 6-function regression, 10-run `--all`
   code-content determinism, `state_machine_score` 20/20,
   release/quick-release byte-identical).
+- **Perf sweep round 9, 2026-07-20** (systematic follow-up to round 7's
+  sleigh-only getenv fix — swept `fission-pcode`, `fission-midend-
+  normalize`, `fission-midend-structuring` for the same uncached
+  `std::env::var(_os)` pattern on hot per-block/per-op paths):
+  1. Cached ~19 diagnostic/feature-flag checks behind `OnceLock<bool>`
+     (commit `5c7ce180`), mirroring the existing `temp_name_trace_
+     enabled`/`fission-sleigh::diagnostics` precedent. Notable:
+     `preview_builder_diag_enabled` (~17 call sites in `control/
+     terminator.rs` alone) and `structuring_diag_enabled` (~20 call
+     sites across the structuring subsystem) were raw syscalls checked
+     from many places.
+  2. **Left `FISSION_ENABLE_WIDE_DEAD_ASSIGNMENT_RERUN_ADMISSION`
+     uncached** (`fission-midend-normalize/src/analysis/defuse.rs`):
+     its own unit tests toggle this exact env var at runtime via
+     `set_var`/`remove_var` (`WideDeadRerunAdmissionEnvGuard`) to
+     exercise both code paths in the same test binary process — a
+     `OnceLock` would freeze on whichever value the first caller
+     observed, permanently breaking the second path. Audited every
+     other cached flag name across the whole workspace for the same
+     `set_var`-in-tests hazard; none found. **This is a real hazard for
+     any future env-var-caching sweep — grep for `set_var` on the exact
+     flag name before caching it, every time.**
+  3. **Caught and fixed a self-inflicted bug before landing**: an
+     earlier mechanical find-and-replace script (converting raw
+     `std::env::var_os` calls to the new cached helper calls) ran over
+     `debug.rs` and accidentally rewrote its OWN just-written helper
+     definitions, turning `preview_debug_enabled`/`preview_debug_
+     regdump_enabled`'s `OnceLock` initializer closures into calls to
+     *themselves* — reentrant `OnceLock` access on the same thread,
+     which per Rust's docs is unspecified behavior allowed to deadlock
+     (observed) or panic. Root-caused via a full `lldb` thread
+     backtrace (`sample`'s tree view was too ambiguous to distinguish
+     real recursion from `Once::call`'s own internal retry-loop
+     framing — needed `lldb -p <pid> -o "thread backtrace all"` to see
+     the test thread genuinely parked inside its own `Once::call`,
+     waiting on itself). ~24 `fission-pcode` tests were hanging at the
+     nextest slow-test timeout (120s each) before this fix; all pass
+     cleanly (~0.2s each) afterward. **Lesson: a mechanical replace
+     script touching a file it also just wrote to needs the same
+     scrutiny as one touching pre-existing code** — "I just wrote this,
+     it's fine" is exactly the assumption that let this slip through.
+  4. Perf impact of this sweep alone is **inconclusive** on the
+     `advanced_patterns_gcc_O2.exe --all` benchmark (user CPU stayed in
+     the ~3.4–3.9s range, same ballpark as round 8's already-landed
+     fixes) — recorded honestly per round 8's methodology lesson,
+     rather than claimed as a clear win. The correctness value (closing
+     a real "uncached invariant check on a hot path" bug class, and
+     catching a genuine deadlock before it shipped) is the primary
+     justification for landing this, not a measured speedup.
+  Validated: `cargo check --workspace` clean, 1962/1969 nextest passing
+  (same 7 pre-existing unrelated failures; all previously-hanging
+  `fission-pcode` tests now pass in ~21s total for the full run),
+  `golden_corpus_check.py` clean, 6-function hand-curated regression
+  byte-identical, `state_machine_score` 20/20 uniform,
+  release/quick-release byte-identical, `bounded_tlv_sum`/
+  `accumulate_pairs` output unchanged from round 7's baseline.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
