@@ -107,7 +107,7 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   | Stage function | Status |
   |---|---|
   | `run_stage_deadcode_dynamic` | **DONE** — fully migrated, function deleted |
-  | `run_stage_proto_recovery` | not started (~5 call sites) |
+  | `run_stage_proto_recovery` | **5 of 6 chains done** (commit `4110b2ac`) — `run_cleanup_family_passes` head kept as `stage_pass` (`run_stage_proto_recovery_head`; needs diag/perf-through-callee, separate slice) |
   | `run_stage_type_early` | not started (small) |
   | `run_stage_stackstall` | not started (medium) |
   | `run_stage_heritage_value_recovery` | not started (medium) |
