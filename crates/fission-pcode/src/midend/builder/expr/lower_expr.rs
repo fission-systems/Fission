@@ -71,12 +71,12 @@ impl<'a> PreviewBuilder<'a> {
         ) {
             return Some(name);
         }
-        let mut visited = HashSet::default();
+        let mut memo = HashMap::default();
         let (call_site, name) = self
             .live_call_result_binding_from_predecessors_for_return_register(
                 vn,
                 site.block_idx,
-                &mut visited,
+                &mut memo,
             )?;
         let def_site = self.lookup_def_site(vn).map(|(site, _)| site);
         self.call_result_site_outranks_def_site(call_site, def_site)
@@ -113,46 +113,68 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    /// Recursive predecessor-graph walk for the "is the return register still
+    /// holding a live call result" check. `memo` is scoped to a single call
+    /// of `live_call_result_binding_for_return_register` (not cached across
+    /// calls -- `self.call_result_bindings` grows as lowering proceeds, so a
+    /// builder-lifetime cache could observe a stale answer from before a
+    /// predecessor block was lowered).
+    ///
+    /// Within one walk, `memo` both memoizes finished subtree results (so a
+    /// diamond-shaped predecessor structure -- common in real CFGs -- isn't
+    /// re-explored once per incoming branch) and detects cycles: a block
+    /// still `None`-valued while its own recursive call is on the stack
+    /// means we looped back via a back-edge, matching the old `visited`
+    /// set's early-return-on-revisit behavior. Replaces the previous
+    /// per-branch `visited.clone()`, which gave every sibling predecessor
+    /// its own independent copy and so re-walked shared ancestors from
+    /// scratch -- worst-case exponential in CFGs with repeated diamonds
+    /// (e.g. `_nl_load_domain`, ~40% of this function's own decompile time
+    /// before this fix).
     fn live_call_result_binding_from_predecessors_for_return_register(
         &self,
         vn: &Varnode,
         block_idx: usize,
-        visited: &mut HashSet<usize>,
+        memo: &mut HashMap<usize, Option<(LoweringSite, String)>>,
     ) -> Option<(LoweringSite, String)> {
-        if !visited.insert(block_idx) {
-            return None;
+        if let Some(cached) = memo.get(&block_idx) {
+            return cached.clone();
         }
-        let predecessors = self.predecessors.get(block_idx)?;
-        if predecessors.is_empty() {
-            return None;
-        }
+        memo.insert(block_idx, None);
 
-        let mut shared_binding: Option<(LoweringSite, String)> = None;
-        for pred_idx in predecessors {
-            let pred_block = self.pcode.blocks.get(*pred_idx)?;
-            let mut pred_visited = visited.clone();
-            let candidate = self
-                .live_call_result_site_in_block_for_return_register(
-                    vn,
-                    *pred_idx,
-                    pred_block.ops.len(),
-                )
-                .or_else(|| {
-                    self.live_call_result_binding_from_predecessors_for_return_register(
-                        vn,
-                        *pred_idx,
-                        &mut pred_visited,
-                    )
-                })?;
-            if shared_binding
-                .as_ref()
-                .is_some_and(|(_, name)| name != &candidate.1)
-            {
+        let result = (|| {
+            let predecessors = self.predecessors.get(block_idx)?;
+            if predecessors.is_empty() {
                 return None;
             }
-            shared_binding = Some(candidate);
-        }
-        shared_binding
+
+            let mut shared_binding: Option<(LoweringSite, String)> = None;
+            for pred_idx in predecessors {
+                let pred_block = self.pcode.blocks.get(*pred_idx)?;
+                let candidate = self
+                    .live_call_result_site_in_block_for_return_register(
+                        vn,
+                        *pred_idx,
+                        pred_block.ops.len(),
+                    )
+                    .or_else(|| {
+                        self.live_call_result_binding_from_predecessors_for_return_register(
+                            vn, *pred_idx, memo,
+                        )
+                    })?;
+                if shared_binding
+                    .as_ref()
+                    .is_some_and(|(_, name)| name != &candidate.1)
+                {
+                    return None;
+                }
+                shared_binding = Some(candidate);
+            }
+            shared_binding
+        })();
+
+        memo.insert(block_idx, result.clone());
+        result
     }
 
     fn live_call_result_site_in_block_for_return_register(
