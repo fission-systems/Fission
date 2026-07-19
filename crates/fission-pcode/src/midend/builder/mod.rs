@@ -740,7 +740,7 @@ impl<'a> PreviewBuilder<'a> {
     /// is available — it covers all architectures uniformly via the `.ldefs`/SLA map.
     #[inline]
     pub(crate) fn sla_hw_name(&self, offset: u64, size: u32) -> Option<String> {
-        crate::midend::cspec::RegisterNamer::from_options(&self.options).hw_name_at(offset, size)
+        self.register_namer().hw_name_at(offset, size)
     }
 
     /// ABI-independent hardware register name with SLA-first resolution.
