@@ -98,7 +98,7 @@ fn collect_single_defs(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
     count_flag_defs(stmts, &mut counts);
 
     // Only retain singly-defined flags (conservative correctness).
-    let single: std::collections::HashSet<String> = counts
+    let single: crate::HashSet<String> = counts
         .into_iter()
         .filter(|(_, c)| *c == 1)
         .map(|(k, _)| k)
@@ -116,7 +116,7 @@ fn collect_single_defs(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
 
 fn collect_defs_for(
     stmts: &[HirStmt],
-    wanted: &std::collections::HashSet<String>,
+    wanted: &crate::HashSet<String>,
     defs: &mut HashMap<String, HirExpr>,
 ) {
     for stmt in stmts {

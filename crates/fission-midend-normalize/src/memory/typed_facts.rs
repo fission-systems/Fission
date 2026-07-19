@@ -141,7 +141,7 @@ fn infer_struct_name_from_offsets(
     is_64bit: bool,
     structures: &WindowsStructures,
 ) -> (Option<String>, usize) {
-    let accessed_offsets: std::collections::HashSet<u32> = accesses.keys().copied().collect();
+    let accessed_offsets: crate::HashSet<u32> = accesses.keys().copied().collect();
 
     // Collect candidates where every accessed offset maps to a declared field.
     // Score each by how many struct fields are NOT covered by the accesses (extra_fields).

@@ -120,7 +120,7 @@ struct Builder {
     reaching: HashMap<AliasKey, usize>,
     next_id: usize,
     /// Set of variable names whose address has been observed as a Call arg.
-    escaped: std::collections::HashSet<String>,
+    escaped: crate::HashSet<String>,
 }
 
 impl Builder {
@@ -131,7 +131,7 @@ impl Builder {
             phis: Vec::new(),
             reaching: HashMap::default(),
             next_id: 0,
-            escaped: std::collections::HashSet::default(),
+            escaped: crate::HashSet::default(),
         }
     }
 
@@ -318,7 +318,7 @@ impl Builder {
 
     fn merge_reaching(&mut self, a: HashMap<AliasKey, usize>, b: HashMap<AliasKey, usize>) {
         // Union of all keys.
-        let mut all_keys: std::collections::HashSet<AliasKey> = a.keys().cloned().collect();
+        let mut all_keys: crate::HashSet<AliasKey> = a.keys().cloned().collect();
         all_keys.extend(b.keys().cloned());
         for key in all_keys {
             let def_a = a.get(&key);

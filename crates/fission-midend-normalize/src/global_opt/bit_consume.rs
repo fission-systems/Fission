@@ -37,7 +37,7 @@ use crate::HashMap;
 pub fn apply_bit_consume_dead_code_pass(func: &mut HirFunction) -> bool {
     // --- Phase 1: collect definitions and multi-def variables ---
     let mut def_map: HashMap<String, HirExpr> = HashMap::default();
-    let mut multi_def: std::collections::HashSet<String> = std::collections::HashSet::default();
+    let mut multi_def: crate::HashSet<String> = crate::HashSet::default();
     collect_definitions(&func.body, &mut def_map, &mut multi_def);
 
     // --- Phase 2: build initial consumed seeds from all use sites ---
@@ -95,7 +95,7 @@ pub fn apply_bit_consume_dead_code_pass(func: &mut HirFunction) -> bool {
 fn collect_definitions(
     stmts: &[HirStmt],
     def_map: &mut HashMap<String, HirExpr>,
-    multi_def: &mut std::collections::HashSet<String>,
+    multi_def: &mut crate::HashSet<String>,
 ) {
     for stmt in stmts {
         collect_def_stmt(stmt, def_map, multi_def);
@@ -105,7 +105,7 @@ fn collect_definitions(
 fn collect_def_stmt(
     stmt: &HirStmt,
     def_map: &mut HashMap<String, HirExpr>,
-    multi_def: &mut std::collections::HashSet<String>,
+    multi_def: &mut crate::HashSet<String>,
 ) {
     match stmt {
         HirStmt::Assign {
@@ -156,7 +156,7 @@ fn collect_consumed_seeds(
     stmts: &[HirStmt],
     consumed: &mut HashMap<String, u64>,
     def_map: &HashMap<String, HirExpr>,
-    multi_def: &std::collections::HashSet<String>,
+    multi_def: &crate::HashSet<String>,
 ) {
     for stmt in stmts {
         seed_stmt(stmt, consumed, def_map, multi_def);
@@ -167,7 +167,7 @@ fn seed_stmt(
     stmt: &HirStmt,
     consumed: &mut HashMap<String, u64>,
     def_map: &HashMap<String, HirExpr>,
-    multi_def: &std::collections::HashSet<String>,
+    multi_def: &crate::HashSet<String>,
 ) {
     match stmt {
         HirStmt::Assign {
@@ -518,7 +518,7 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
 fn simplify_stmts(
     stmts: &mut Vec<HirStmt>,
     consumed: &HashMap<String, u64>,
-    multi_def: &std::collections::HashSet<String>,
+    multi_def: &crate::HashSet<String>,
     type_map: &HashMap<String, NirType>,
     any_changed: &mut bool,
 ) {
@@ -530,7 +530,7 @@ fn simplify_stmts(
 fn simplify_stmt(
     stmt: &mut HirStmt,
     consumed: &HashMap<String, u64>,
-    multi_def: &std::collections::HashSet<String>,
+    multi_def: &crate::HashSet<String>,
     type_map: &HashMap<String, NirType>,
     any_changed: &mut bool,
 ) {

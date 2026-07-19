@@ -6,6 +6,33 @@ use super::concept::{GhidraActionConcept, record_ghidra_action_stage};
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
+// TEMP DIAGNOSTIC: per-pass HIR body hash, gated by FISSION_NORM_TRACE.
+// Bisects which normalize pass first diverges between a "good" and "bad"
+// process run of the same ELF-format-specific nondeterminism repro (see
+// PROJECT.md) -- FISSION_TEMP_TRACE already proved temp-name *allocation*
+// is identical between runs, so the divergence must show up as a body hash
+// change at some pass boundary here (this framework) or in the legacy
+// free-function driver's own run_pass_logged (fission-midend-normalize::
+// pipeline::run), which carries the same instrumentation.
+pub fn norm_trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_NORM_TRACE").is_some())
+}
+
+pub fn norm_trace_hash(func: &HirFunction) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Deliberately excludes callee_observed_max_arity/callee_summaries and
+    // other bookkeeping fields -- hashing the *whole* HirFunction produced
+    // a different hash on every run even when the final rendered output
+    // was byte-identical, so something outside body/locals/params/
+    // return_type has non-deterministic Debug output (a real bug on its
+    // own, but a distraction from this one). Only hash what actually
+    // determines the rendered text.
+    format!("{:?}", (&func.body, &func.locals, &func.params, &func.return_type)).hash(&mut hasher);
+    hasher.finish()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassOutcome {
     Changed,
@@ -93,6 +120,16 @@ pub fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_>, pass: &P) -> Pas
     let (after_stmts, after_locals) = hir_shape(ctx.func);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let changed = outcome.changed();
+
+    if norm_trace_enabled() {
+        eprintln!(
+            "[NORM_TRACE] fn={} pass={} changed={} hash={:016x}",
+            ctx.func.name,
+            pass_name,
+            changed,
+            norm_trace_hash(ctx.func)
+        );
+    }
 
     crate::wave_stats::add_pass_metric(
         pass_name,

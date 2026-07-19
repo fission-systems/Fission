@@ -1052,6 +1052,16 @@ where
     let (after_stmts, after_locals) = hir_shape(func);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
+    if fission_midend_core::action_pipeline::norm_trace_enabled() {
+        eprintln!(
+            "[NORM_TRACE] fn={} pass={} changed={} hash={:016x}",
+            func.name,
+            pass_name,
+            changed,
+            fission_midend_core::action_pipeline::norm_trace_hash(func)
+        );
+    }
+
     fission_midend_core::wave_stats::add_pass_metric(
         pass_name,
         elapsed_ms,

@@ -2,15 +2,15 @@ use crate::prelude::*; // For accessing normalizer structures
 use fission_midend_core::rename_vars_in_stmts;
 use crate::{HashMap, HashSet};
 
-fn collect_direct_copies(stmts: &[HirStmt]) -> std::collections::HashSet<(String, String)> {
-    let mut copies = std::collections::HashSet::default();
+fn collect_direct_copies(stmts: &[HirStmt]) -> crate::HashSet<(String, String)> {
+    let mut copies = crate::HashSet::default();
     // Only *unconditional* var copies establish merge identity. A copy inside
     // `if`/`while`/switch (e.g. x86 cmov `if (cond) acc = src`) is a
     // path-sensitive override: merging `acc` with `src` collapses distinct
     // values (hi default vs lo source) and destroys clamp/min/max chains.
     fn visit(
         stmts: &[HirStmt],
-        copies: &mut std::collections::HashSet<(String, String)>,
+        copies: &mut crate::HashSet<(String, String)>,
         under_control: bool,
     ) {
         for stmt in stmts {
@@ -500,7 +500,7 @@ fn sorted_var_pair(a: &str, b: &str) -> (String, String) {
 }
 
 fn transitive_copy_aliases(
-    direct_copies: &std::collections::HashSet<(String, String)>,
+    direct_copies: &crate::HashSet<(String, String)>,
     local_names: &HashSet<String>,
     copy_merge_barriers: &HashSet<String>,
     copy_merge_blocked_pairs: &HashSet<(String, String)>,
@@ -660,7 +660,7 @@ pub fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     let mut changed = false;
 
     // Keep track of parameters to avoid merging them
-    let param_names: std::collections::HashSet<String> =
+    let param_names: crate::HashSet<String> =
         func.params.iter().map(|p| p.name.clone()).collect();
 
     // Step 1: Merge overlapping stack variables (coalescing multiple stack-slot views)
@@ -746,7 +746,7 @@ pub fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
 
     if !stack_renames.is_empty() {
         rename_vars_in_stmts(&mut func.body, &stack_renames);
-        let renamed_from: std::collections::HashSet<String> =
+        let renamed_from: crate::HashSet<String> =
             stack_renames.iter().map(|(from, _)| from.clone()).collect();
         func.locals
             .retain(|local| !renamed_from.contains(&local.name));
@@ -795,7 +795,7 @@ pub fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
     if !copy_aliases.is_empty() {
         let copy_renames: Vec<(String, String)> = copy_aliases.into_iter().collect();
         rename_vars_in_stmts(&mut func.body, &copy_renames);
-        let renamed_from: std::collections::HashSet<String> =
+        let renamed_from: crate::HashSet<String> =
             copy_renames.iter().map(|(from, _)| from.clone()).collect();
         func.locals
             .retain(|local| !renamed_from.contains(&local.name));
@@ -998,7 +998,7 @@ pub fn apply_variable_merge_pass(func: &mut HirFunction) -> bool {
 
     if !disjoint_renames.is_empty() {
         rename_vars_in_stmts(&mut func.body, &disjoint_renames);
-        let renamed_from: std::collections::HashSet<String> = disjoint_renames
+        let renamed_from: crate::HashSet<String> = disjoint_renames
             .iter()
             .map(|(from, _)| from.clone())
             .collect();

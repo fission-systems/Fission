@@ -321,7 +321,7 @@ fn pointer_alias_replacement(expr: &HirExpr) -> Option<HirExpr> {
 }
 
 pub fn cast_elision_pass(func: &mut HirFunction) -> bool {
-    let binding_types: std::collections::HashMap<String, NirType> = func
+    let binding_types: crate::HashMap<String, NirType> = func
         .locals
         .iter()
         .chain(func.params.iter())
@@ -378,7 +378,7 @@ fn redundant_self_cast_assignment(name: &str, rhs: &HirExpr, binding_ty: &NirTyp
 
 fn elide_casts_in_stmts(
     stmts: &mut Vec<HirStmt>,
-    binding_types: &std::collections::HashMap<String, NirType>,
+    binding_types: &crate::HashMap<String, NirType>,
     return_type: Option<&NirType>,
     changed: &mut bool,
 ) {
@@ -389,7 +389,7 @@ fn elide_casts_in_stmts(
 
 fn elide_casts_in_stmt(
     stmt: &mut HirStmt,
-    binding_types: &std::collections::HashMap<String, NirType>,
+    binding_types: &crate::HashMap<String, NirType>,
     return_type: Option<&NirType>,
     changed: &mut bool,
 ) {

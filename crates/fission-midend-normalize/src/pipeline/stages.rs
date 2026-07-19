@@ -747,7 +747,7 @@ pub fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) {
     });
     // Drop temps left only by the pre-collapse wide dividend assign.
     run_pass_logged(func, "eliminate_dead_temp_after_cdq", perf, |f| {
-        eliminate_dead_temp_assigns(&mut f.body, &std::collections::HashSet::default())
+        eliminate_dead_temp_assigns(&mut f.body, &crate::HashSet::default())
     });
     // Collapse may leave pure temps with zero uses; final prune already ran
     // before CDQ, so re-prune trivial unused bindings (e.g. residual xVar).

@@ -29,13 +29,13 @@ pub fn apply_dead_store_elimination(func: &mut HirFunction) -> bool {
     // - use_count == 0 (no loads observe this store)
     // - key is a stack slot (no escape possible)
     // - no MemPhi depends on this def
-    let phi_inputs: std::collections::HashSet<usize> = mem_ssa
+    let phi_inputs: crate::HashSet<usize> = mem_ssa
         .phis
         .iter()
         .flat_map(|p| p.inputs.iter().copied())
         .collect();
 
-    let dead_def_ids: std::collections::HashSet<usize> = mem_ssa
+    let dead_def_ids: crate::HashSet<usize> = mem_ssa
         .defs
         .iter()
         .filter(|def| {
@@ -71,7 +71,7 @@ pub fn apply_dead_store_elimination(func: &mut HirFunction) -> bool {
 /// Identifies which statement positions (by path) correspond to dead stores.
 struct DeadStoreCollector<'a> {
     dead_defs: &'a [MemDef],
-    dead_ids: &'a std::collections::HashSet<usize>,
+    dead_ids: &'a crate::HashSet<usize>,
     /// Tracks which MemDef the current store maps to (linearised scan order).
     current_def_idx: usize,
 }
@@ -193,7 +193,7 @@ struct StmtPath(Vec<usize>);
 /// the statements marked for removal.
 fn remove_dead_stores(stmts: &mut Vec<HirStmt>, paths: &[StmtPath]) {
     // Collect top-level indices to remove.
-    let top_level: std::collections::HashSet<usize> = paths
+    let top_level: crate::HashSet<usize> = paths
         .iter()
         .filter(|p| p.0.len() == 1)
         .map(|p| p.0[0])
@@ -240,7 +240,7 @@ fn recurse_remove(stmt: &mut HirStmt, paths: &[&StmtPath], depth: usize) {
             remove_at_branch(body, paths, depth, 1);
         }
         HirStmt::Block(stmts) => {
-            let top: std::collections::HashSet<usize> = paths
+            let top: crate::HashSet<usize> = paths
                 .iter()
                 .filter(|p| p.0.len() == depth + 1)
                 .map(|p| p.0[depth])
@@ -272,7 +272,7 @@ fn remove_at_branch(body: &mut Vec<HirStmt>, paths: &[&StmtPath], depth: usize, 
         return;
     }
     let next_depth = depth + 1;
-    let top_level: std::collections::HashSet<usize> = relevant
+    let top_level: crate::HashSet<usize> = relevant
         .iter()
         .filter(|p| p.0.len() == next_depth + 1)
         .map(|p| p.0[next_depth])

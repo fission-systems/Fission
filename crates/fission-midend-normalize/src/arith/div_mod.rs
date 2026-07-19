@@ -21,8 +21,8 @@ pub fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> {
 pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
     // Live CDQ temps: name → (wide expr, free vars of wide).
-    let mut live: std::collections::HashMap<String, (HirExpr, std::collections::HashSet<String>)> =
-        std::collections::HashMap::default();
+    let mut live: crate::HashMap<String, (HirExpr, crate::HashSet<String>)> =
+        crate::HashMap::default();
 
     for i in 0..stmts.len() {
         // Nested structures first (independent scopes).
@@ -126,7 +126,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
         // use a pure just bound on this line).
         if let HirLValue::Var(name) = lhs {
             if extract_cdq_low_from_wide_dividend(rhs).is_some() {
-                let mut frees = std::collections::HashSet::default();
+                let mut frees = crate::HashSet::default();
                 collect_free_var_names(rhs, &mut frees);
                 live.insert(name.clone(), (rhs.clone(), frees));
             } else {
@@ -137,7 +137,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn collect_free_var_names(expr: &HirExpr, out: &mut std::collections::HashSet<String>) {
+fn collect_free_var_names(expr: &HirExpr, out: &mut crate::HashSet<String>) {
     match expr {
         HirExpr::Var(n) => {
             out.insert(n.clone());

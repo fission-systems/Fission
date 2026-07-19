@@ -34,6 +34,9 @@ pub use gates::{
     cleanup_round_limit_for, gate_not_large_function,
 };
 pub use group::{ActionGroup, Gate, Repeat};
-pub use pass::{FnPass, Pass, PassCtx, PassOutcome, fn_pass, run_pass_logged};
+pub use pass::{
+    FnPass, Pass, PassCtx, PassOutcome, fn_pass, norm_trace_enabled, norm_trace_hash,
+    run_pass_logged,
+};
 pub use pipeline::{Pipeline, group};
 pub use pool::{ActionPool, Rule, apply_rules_to_stmts};

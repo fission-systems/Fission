@@ -965,7 +965,7 @@ fn mask_to_bits(value: i64, bits: u32) -> i64 {
 /// read, because the write itself may be observable through aliased pointers.
 pub fn defuse_dead_assignment_pass(func: &mut HirFunction) -> bool {
     // Collect pure-temp variable names (including builder-preserved temps).
-    let mut temp_names: std::collections::HashSet<String> = func
+    let mut temp_names: crate::HashSet<String> = func
         .locals
         .iter()
         .filter(|b| b.is_temp_like())
@@ -1064,7 +1064,7 @@ fn count_hir_stmts_for_wide_dead_assignment(stmts: &[HirStmt]) -> usize {
 fn remove_dead_in_stmts(
     stmts: &mut Vec<HirStmt>,
     map: &DefUseMap,
-    temp_names: &std::collections::HashSet<String>,
+    temp_names: &crate::HashSet<String>,
     changed: &mut bool,
 ) {
     // First recurse into nested bodies.
@@ -1094,7 +1094,7 @@ fn remove_dead_in_stmts(
 fn remove_dead_in_stmt_nested(
     stmt: &mut HirStmt,
     map: &DefUseMap,
-    temp_names: &std::collections::HashSet<String>,
+    temp_names: &crate::HashSet<String>,
     changed: &mut bool,
 ) {
     match stmt {
@@ -1133,7 +1133,7 @@ fn remove_dead_in_stmt_nested(
 
 fn collect_temp_like_assignment_names(
     stmts: &[HirStmt],
-    names: &mut std::collections::HashSet<String>,
+    names: &mut crate::HashSet<String>,
 ) {
     for stmt in stmts {
         match stmt {

@@ -1866,7 +1866,7 @@ fn collapse_trivial_assign_returns_folds_rax_param_add() {
     ];
     assert!(collapse_trivial_assign_returns(
         &mut stmts,
-        &std::collections::HashSet::default()
+        &crate::HashSet::default()
     ));
     assert_eq!(stmts.len(), 1);
     match &stmts[0] {
