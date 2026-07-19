@@ -133,6 +133,7 @@ The repository is organized as a Cargo workspace plus documentation, resource bu
 ### Primary Documentation
 
 - `AGENTS.md` defines repository-level engineering rules and ownership boundaries.
+- `PROJECT.md` tracks the active normalize pass-pipeline migration: current per-stage status, the two pass-framework tracks, and recurring pitfalls found while migrating.
 - `docs/PROJECT_MAP.md` is the quick navigation map.
 - `docs/architecture/ARCHITECTURE.md` is the architecture source of truth.
 - `docs/CLI.md` documents command-line behavior.
@@ -701,11 +702,52 @@ The active structuring path is graph-oriented and proof-driven. It should use de
 
 ### Pass Pipeline Rules
 
-- New transformations should be expressed as `NirPass` implementations.
-- Passes should operate through `PassCtx` instead of capturing builder internals.
-- Analysis dependencies should be declared explicitly.
-- `PassOutcome::changed` must be accurate.
-- Binary-specific and address-specific guards are forbidden in pass bodies.
+There are two independent pass-orchestration tracks; neither subsumes the
+other, because they operate on different IR shapes. Current migration
+status and the full per-stage backlog live in `PROJECT.md`.
+
+- **Structuring (pre-structuring, block-CFG level):** new transformations
+  should be expressed as `NirPass` implementations
+  (`crates/fission-pcode/src/midend/pass/`), operating on `NirFunc` (wraps
+  `PreviewBuilder`'s block/CFG state) through `PassCtx` instead of capturing
+  builder internals. Every pass declares an `InvariantBasis` (dominator
+  tree, postdominator tree, SCC, loop body, edge classification) so review
+  can reject address/function-specific overfitting. `PassOutcome::changed`
+  must be accurate. Binary-specific and address-specific guards are
+  forbidden in pass bodies.
+- **Normalize (post-structuring, `HirFunction`/`Vec<HirStmt>` level):** new
+  transformations should be expressed as `action_pipeline::Pass`
+  implementations (`fission-midend-core::action_pipeline`), registered as
+  `ActionGroup` entries in `fission-midend-normalize/src/pipeline/groups.rs`.
+  Prefer the existing composable primitives (`fn_pass`, `cleanup_pass`,
+  `gated_followup`, `admission_gated`) over new free-function control flow
+  in `pipeline/stages.rs`; this migration is in progress, is done
+  stage-by-stage with a real-binary before/after parity check per slice, and
+  is not something to attempt in one large change. `cleanup_pass` is
+  budget-gated (mirrors the legacy `run_cleanup_block` admission check on
+  `EARLY_CLEANUP_BLOCK_STMT_LIMIT`/`BLOCK_LIMIT`); `fn_pass` is not — using
+  the wrong one silently changes admission behavior on large functions
+  without failing any test on small ones, so always check which one the
+  original call site used before registering.
+- A chain whose body calls something that itself needs `diag`/`perf`
+  (`apply_type_signature_fixed_point`, `run_cleanup_family_passes`) cannot
+  go through `fn_pass`/`GatedFollowupPass` — neither primitive carries
+  `diag`/`perf` through to a callee. Keep those as a named `stage_pass` step
+  instead of dropping the forwarding silently.
+
+### Determinism
+
+Decompiler output must be identical across separate process runs of the
+same binary (`AGENTS.md` Core Rule 4). `std::collections::HashMap`/`HashSet`
+use a per-process-random `RandomState` by default; any unsorted iteration
+over one that feeds a `.first()`/`.find_map()`-style pick (not just a
+`.contains()`/`.get()` membership check) is a real nondeterminism bug, not
+a style nit — two were found and fixed this way in
+`fission-pcode::midend::structuring`. When adding a new `HashMap`/`HashSet`
+in `fission-pcode::midend` or `fission-midend-structuring`, prefer the
+crate-local fixed-seed alias (`rustc_hash::FxBuildHasher`, already the
+default there) over `std::collections::HashMap` directly, and never iterate
+either collection to pick a specific value without sorting first.
 
 ## Telemetry and Reports
 
@@ -851,6 +893,7 @@ Reverse-engineering repositories often touch untrusted binaries. Treat samples a
 - Expand the pure-Rust symbolic execution engine: implement DPLL/CDCL bit-blasting in `fission-solver`.
 - Add more P-Code taint propagation opcodes in `fission-emulator`.
 - Connect taint-tracking results to decompiler type recovery.
+- Continue the normalize `action_pipeline`/`ActionGroup` migration stage by stage (see `PROJECT.md` for current status and backlog); each stage's imperative `run_stage_*` free function is replaced with declarative passes, validated with a real-binary before/after check.
 
 ## Appendix A: Commands
 
