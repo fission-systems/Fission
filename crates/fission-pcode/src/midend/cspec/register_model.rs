@@ -218,11 +218,24 @@ fn minimal_options_for_abi(abi: CallingConvention) -> crate::midend::NirRenderOp
 }
 
 /// Build a [`RegisterNamer`] from ABI defaults (no cspec param offsets unless supplied).
+fn group_sla_map_by_offset(
+    map: &HashMap<(u64, u32), String>,
+) -> HashMap<u64, Vec<(u32, String)>> {
+    let mut by_offset: HashMap<u64, Vec<(u32, String)>> = HashMap::default();
+    for (&(offset, size), name) in map {
+        by_offset.entry(offset).or_default().push((size, name.clone()));
+    }
+    by_offset
+}
+
 pub fn register_namer_for_abi(abi: CallingConvention) -> RegisterNamer {
     let model = register_model_for_abi(abi);
+    let sla_map = model.as_ref().map(|m| m.to_offset_map());
+    let sla_map_by_offset = sla_map.as_ref().map(group_sla_map_by_offset);
     RegisterNamer {
         abi,
-        sla_map: model.as_ref().map(|m| m.to_offset_map()),
+        sla_map,
+        sla_map_by_offset,
         int_param_offsets: Vec::new(),
         return_offset: model.as_ref().and_then(|m| m.return_offset()),
         return_target: model.as_ref().and_then(|m| m.return_target_offset()),
@@ -260,6 +273,13 @@ pub fn apply_register_model_for_options(options: &mut crate::midend::NirRenderOp
 pub struct RegisterNamer {
     pub abi: CallingConvention,
     pub sla_map: Option<HashMap<(u64, u32), String>>,
+    /// `sla_map` grouped by offset, built once alongside it. `hw_name_at`'s
+    /// "any size >= prefer_size at this offset" fallback used to do
+    /// `sla_map.iter().find(...)` -- an O(map size) scan on every call, and
+    /// this is one of the hottest functions in varnode lowering (called on
+    /// the deep SESE-region-search recursion). Grouping by offset up front
+    /// turns that into an O(variants at this offset) scan instead.
+    sla_map_by_offset: Option<HashMap<u64, Vec<(u32, String)>>>,
     pub int_param_offsets: Vec<u64>,
     pub return_offset: Option<u64>,
     pub return_target: Option<(u64, u32)>,
@@ -271,9 +291,12 @@ impl RegisterNamer {
     pub fn from_options(options: &crate::midend::NirRenderOptions) -> Self {
         let model = super::apply::default_cspec_pair(options)
             .and_then(|(lang, _)| register_model_for_language(&lang));
+        let sla_map = options.sla_register_map.clone();
+        let sla_map_by_offset = sla_map.as_ref().map(group_sla_map_by_offset);
         Self {
             abi: options.calling_convention,
-            sla_map: options.sla_register_map.clone(),
+            sla_map,
+            sla_map_by_offset,
             int_param_offsets: super::apply::int_param_offsets(options).to_vec(),
             return_offset: options.cspec_return_offset,
             return_target: model
@@ -367,9 +390,11 @@ impl RegisterNamer {
                     return Some(name.to_ascii_lowercase());
                 }
             }
-            if let Some((_, name)) = map
-                .iter()
-                .find(|((off, sz), _)| *off == offset && *sz >= prefer_size)
+            if let Some((_, name)) = self
+                .sla_map_by_offset
+                .as_ref()
+                .and_then(|by_offset| by_offset.get(&offset))
+                .and_then(|variants| variants.iter().find(|(sz, _)| *sz >= prefer_size))
             {
                 return Some(name.to_ascii_lowercase());
             }
