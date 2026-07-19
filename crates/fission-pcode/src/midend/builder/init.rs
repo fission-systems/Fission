@@ -157,6 +157,7 @@ impl<'a> PreviewBuilder<'a> {
             failed_loop_subgraphs: HashSet::default(),
             lower_varnode_cache: Default::default(),
             structured_body: None,
+            register_namer_cache: std::cell::OnceCell::new(),
         };
         b
     }

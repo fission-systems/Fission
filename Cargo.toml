@@ -30,5 +30,12 @@ lto = true
 strip = true
 codegen-units = 1
 
+# Release-equivalent codegen with symbols kept, for `sample`/`perf` profiling.
+# `cargo build --profile profiling -p fission-cli`
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = 1
+
 [profile.dev.package."*"]
 opt-level = 3

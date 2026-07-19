@@ -751,8 +751,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     #[inline]
-    pub(crate) fn register_namer(&self) -> crate::midend::cspec::RegisterNamer {
-        crate::midend::cspec::RegisterNamer::from_options(&self.options)
+    pub(crate) fn register_namer(&self) -> &crate::midend::cspec::RegisterNamer {
+        self.register_namer_cache
+            .get_or_init(|| crate::midend::cspec::RegisterNamer::from_options(self.options))
     }
 }
 

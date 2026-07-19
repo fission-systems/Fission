@@ -76,4 +76,10 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) failed_loop_subgraphs: HashSet<(usize, usize)>,
     pub(crate) lower_varnode_cache: BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), HirExpr>,
     pub(crate) structured_body: Option<Vec<HirStmt>>,
+    /// `options` is fixed for the builder's lifetime, so the `RegisterNamer`
+    /// it derives from (including a `sla_map` clone) only needs building
+    /// once instead of on every `register_namer()` call — that call is on
+    /// the hot varnode-lowering path (per-op, potentially per candidate
+    /// region-proof attempt during structuring).
+    pub(crate) register_namer_cache: std::cell::OnceCell<crate::midend::cspec::RegisterNamer>,
 }
