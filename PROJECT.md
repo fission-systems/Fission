@@ -339,6 +339,69 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   start by measuring whether `build_sese_region_body`'s own internal
   work (not the tree recursion around it) is where time actually goes
   for these two functions specifically.
+- **Perf sweep round 5, 2026-07-20** (user asked explicitly to go beyond
+  one-off caching fixes into deeper algorithmic/architectural bottleneck
+  analysis; started with a fresh `sample` profile of `accumulate_pairs`
+  now that round 3/4's fixes are in):
+  1. **`RegisterNamer::hw_name_at` was *still* ~96% of sampled time**
+     even after today's earlier `sla_map_by_offset` fix (commit
+     `d8acaee5`) — but now hitting a *different* fallback path
+     (`register_model.rs:425`, `self.model.and_then(|m|
+     m.name_for(...))`) that delegates to `RegisterModel::name_for`,
+     which had the exact same `by_offset.iter().find(|((off,sz),_)|
+     *off==offset && *sz>=size)` O(map size) linear-scan bug — just one
+     call frame deeper than the site fixed earlier today, so it wasn't
+     touched by that fix.
+  2. **Root cause of why the earlier fix didn't already cover this
+     class of bug: the whole `fission-pcode::midend::cspec` submodule
+     (`register_model.rs`, `pspec.rs`, `loader.rs`, `ldefs.rs`,
+     `apply.rs`, `mod.rs`) was never brought under the crate's
+     `FxBuildHasher` alias.** Visible in the profile as `RandomState::
+     hash_one` frames. None of these files had a bare `use
+     std::collections::HashMap;` line (the pattern every earlier sweep
+     grepped for) — they imported through a `crate::midend::HashMap`
+     re-export path that, on inspection, several of these files simply
+     didn't use. A previously-undiscovered gap with both determinism
+     and performance implications, same shape as the
+     `fission-midend-normalize` gap found and fixed in "ELF-format
+     nondeterminism found and FIXED 2026-07-19" above (commit
+     `6fadc75e`) but never swept for in this submodule specifically.
+  3. Fixed both together (commit `39169de6`): switched all 6 files'
+     imports to `crate::midend::HashMap`/`HashSet`; kept
+     `std::collections::HashMap` explicit only at the genuine
+     cross-crate boundary — `NirRenderOptions.sla_register_map`/
+     `pspec_hidden_registers` (`fission-midend-core`, not
+     FxBuildHasher-aliased) — converting with `.into_iter().collect()`
+     at the 4 read/write sites that cross it
+     (`RegisterNamer::from_options`, `apply_register_model_for_language`,
+     `render_finish.rs`'s two call sites). Added `RegisterModel.
+     by_offset_grouped: HashMap<u64, Vec<(u32, String)>>`, built once in
+     `build_from_parsed` via the existing `group_sla_map_by_offset`
+     helper (same helper already used for `RegisterNamer.
+     sla_map_by_offset`), turning `name_for`'s fallback into O(1) +
+     small scan. `RegisterModel` is `Arc`-cached per language
+     (`register_model_for_language`), so this amortizes across every
+     builder sharing the cached model, not just one function.
+  4. **Result: `accumulate_pairs` 6.06s → 1.05s (~5.8x)**, byte-identical
+     output (verified against pre-fix release build and against
+     `quick-release`). This is on top of round 3's earlier `d8acaee5`
+     fix (which had already taken it from 8.3s down, per round 3's own
+     note above — the two fixes address sibling fallback paths in the
+     same lookup chain, not the same line).
+  5. Lesson for future sweeps: grepping for bare `use std::collections::
+     HashMap;` is not sufficient to find every un-aliased submodule —
+     also worth spot-checking `RandomState`/`hash_one` frames in `sample`
+     profiles even after a submodule's imports "look" like they go
+     through the crate alias, since a re-export path existing doesn't
+     mean every file in the submodule actually uses it.
+  Validated: `cargo check --workspace` clean, 1962/1969 nextest passing
+  (7 failures are pre-existing `fission-emulator` `diag_*`/
+  `profile_static_crt_*`/`srd_semantic_replay` tests that fail
+  identically on unmodified `main`, confirmed via `git stash` — an
+  unrelated environment issue, not caused by this change),
+  `golden_corpus_check.py` clean (160 functions + determinism),
+  6-function hand-curated regression set byte-identical, `state_machine_
+  score` 20/20 uniform, release/quick-release byte-identical.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
