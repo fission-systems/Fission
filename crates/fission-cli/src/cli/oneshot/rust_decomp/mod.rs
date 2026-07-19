@@ -45,13 +45,15 @@ struct RustSleighRender {
 
 fn render_with_rust_sleigh(
     binary: &LoadedBinary,
+    facts: &fission_static::analysis::decomp::facts::FactStore,
     func: &FunctionInfo,
     timeout_ms: Option<u64>,
 ) -> Result<RustSleighRender, FissionError> {
     let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
     config.nir_timeout_ms = timeout_ms;
-    let result = fission_decompiler::decompile_with_rust_sleigh(
+    let result = fission_decompiler::decompile_with_rust_sleigh_with_facts(
         binary,
+        facts,
         func.address,
         &func.name,
         &config,
@@ -143,12 +145,13 @@ pub(crate) fn make_internal_error_result(
 
 pub(crate) fn render_one_function_inner(
     binary: &LoadedBinary,
+    facts: &fission_static::analysis::decomp::facts::FactStore,
     func: &FunctionInfo,
     config: RenderConfig,
 ) -> FunctionRenderResult {
     let start = std::time::Instant::now();
 
-    match render_with_rust_sleigh(binary, func, config.timeout_ms) {
+    match render_with_rust_sleigh(binary, facts, func, config.timeout_ms) {
         Ok(rendered) => {
             let decomp_sec = start.elapsed().as_secs_f64();
             let code = apply_output_filters(&rendered.code, config);
@@ -298,6 +301,12 @@ fn run_with_functions(
     } else {
         1
     };
+    // Built once per binary and shared across every function: FactStore
+    // construction runs FID signature matching against every function in
+    // the binary, so rebuilding it per function (as `decompile_with_rust_
+    // sleigh`'s convenience wrapper does) turned a `--all` batch of N
+    // functions into N redundant whole-binary analyses.
+    let facts = Arc::new(fission_static::analysis::decomp::facts::FactStore::from_binary(binary));
     let mut results = if use_worker_fanout {
         if cli.verbose {
             eprintln!(
@@ -309,6 +318,7 @@ fn run_with_functions(
         }
         workers::run_worker_fanout_fanin(
             Arc::new(binary.clone()),
+            Arc::clone(&facts),
             functions,
             config,
             worker_count,
@@ -321,6 +331,7 @@ fn run_with_functions(
             .map(|func| {
                 workers::render_one_function_on_large_stack(
                     Arc::clone(&binary_arc),
+                    Arc::clone(&facts),
                     func,
                     config,
                     stack_size_bytes,

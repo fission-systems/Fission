@@ -3,6 +3,7 @@ use crate::cli::oneshot::rust_decomp::{
     FunctionRenderResult, make_internal_error_result, render_one_function_inner,
 };
 use fission_loader::loader::FunctionInfo;
+use fission_static::analysis::decomp::facts::FactStore;
 use std::cmp::min;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -42,6 +43,7 @@ fn render_timeout_message(timeout_ms: u64) -> String {
 
 pub(crate) fn render_one_function_on_large_stack(
     binary: Arc<fission_loader::loader::LoadedBinary>,
+    facts: Arc<FactStore>,
     func: &FunctionInfo,
     config: RenderConfig,
     stack_size_bytes: usize,
@@ -49,6 +51,7 @@ pub(crate) fn render_one_function_on_large_stack(
     let func_owned = func.clone();
     let func_for_error = func.clone();
     let binary_for_thread = Arc::clone(&binary);
+    let facts_for_thread = Arc::clone(&facts);
     let (result_tx, result_rx) = mpsc::sync_channel::<FunctionRenderResult>(1);
 
     let spawn = thread::Builder::new()
@@ -56,7 +59,12 @@ pub(crate) fn render_one_function_on_large_stack(
         .stack_size(stack_size_bytes)
         .spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                render_one_function_inner(binary_for_thread.as_ref(), &func_owned, config)
+                render_one_function_inner(
+                    binary_for_thread.as_ref(),
+                    facts_for_thread.as_ref(),
+                    &func_owned,
+                    config,
+                )
             }))
             .unwrap_or_else(|_| {
                 make_internal_error_result(
@@ -123,6 +131,7 @@ pub(crate) fn render_one_function_on_large_stack(
 
 pub(crate) fn run_worker_fanout_fanin(
     binary: Arc<fission_loader::loader::LoadedBinary>,
+    facts: Arc<FactStore>,
     functions: &[FunctionInfo],
     config: RenderConfig,
     worker_count: usize,
@@ -137,6 +146,7 @@ pub(crate) fn run_worker_fanout_fanin(
         let rx = Arc::clone(&task_rx);
         let tx = result_tx.clone();
         let binary = Arc::clone(&binary);
+        let facts = Arc::clone(&facts);
         let spawn = thread::Builder::new()
             .name(format!("fission-rust-decomp-worker-{worker_idx}"))
             .stack_size(stack_size_bytes)
@@ -161,6 +171,7 @@ pub(crate) fn run_worker_fanout_fanin(
                     // the queue keeps moving.
                     let rendered = render_one_function_on_large_stack(
                         Arc::clone(&binary),
+                        Arc::clone(&facts),
                         &func,
                         config,
                         stack_size_bytes,
