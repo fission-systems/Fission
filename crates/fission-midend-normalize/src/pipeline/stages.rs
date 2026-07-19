@@ -603,79 +603,57 @@ pub fn run_stage_merge(func: &mut HirFunction, diag: bool, perf: bool) {
     }
 }
 
-pub fn run_stage_block_structure_1(func: &mut HirFunction, diag: bool, perf: bool) {
-    if run_pass_logged(func, "single_pred_label_inline", perf, |f| {
-        single_pred_label_inline(&mut f.body)
-    }) {
-        cleanup_func_stmt_list(func);
-        apply_for_loop_folding(&mut func.body);
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
-    }
-    run_pass_logged(func, "dowhile_decrement_condition_norm", perf, |f| {
-        normalize_dowhile_decrement_condition(&mut f.body)
-    });
-    if run_pass_logged(func, "loop_condition_trailing_temp_inline", perf, |f| {
-        inline_loop_condition_trailing_temps(f)
-    }) {
-        run_pass_logged(
-            func,
-            "ptr_arith_recovery_after_loop_condition_temps",
-            perf,
-            apply_ptr_arith_recovery_pass,
-        );
-        run_cleanup_block(func, "cleanup_loop_condition_temps", perf, |f| {
-            cleanup_func_stmt_list(f);
+/// Tail of the `single_pred_label_inline` chain: bare, unlogged
+/// `cleanup_func_stmt_list` + `apply_for_loop_folding` + the two bare prune
+/// calls that followed it in the original (never individually gated or
+/// logged, so this stays an unwrapped `fn_pass`, not a budget-gated
+/// `cleanup_pass`).
+pub(super) fn cleanup_after_single_pred_label_inline(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    apply_for_loop_folding(&mut func.body);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    hir_shape(func) != before
+}
 
-            prune_unused_temp_bindings(f);
+/// `run_cleanup_block`-wrapped tail of the `loop_condition_trailing_temp_inline`
+/// chain (budget-gated, matching the original).
+pub(super) fn cleanup_after_loop_condition_temps(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
 
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    // Loop IV recovery (SCEV-lite): upgrade While → For for linear induction
-    // variables.  Runs after label inlining so the loop body is maximally
-    // simplified first.
-    if run_pass_logged(func, "iv_recovery", perf, apply_iv_recovery_pass) {
-        run_cleanup_block(func, "cleanup_prune_9", perf, |f| {
-            cleanup_func_stmt_list(f);
+/// `run_cleanup_block`-wrapped tail of the `iv_recovery` chain.
+pub(super) fn cleanup_prune_9(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
 
-            prune_unused_temp_bindings(f);
+/// `run_cleanup_block`-wrapped tail of the `break_continue_recovery` chain.
+pub(super) fn cleanup_prune_10(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
 
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    // Break/Continue recovery: replace single-predecessor Goto-to-exit-label
-    // patterns inside loops with explicit break/continue statements.
-    if run_pass_logged(
-        func,
-        "break_continue_recovery",
-        perf,
-        apply_break_continue_pass,
-    ) {
-        run_cleanup_block(func, "cleanup_prune_10", perf, |f| {
-            cleanup_func_stmt_list(f);
+/// `run_cleanup_block`-wrapped head of the `licm` chain tail (just the
+/// statement-list cleanup; the rest of the original tail is
+/// `defuse_after_licm_and_prune` below).
+pub(super) fn cleanup_standalone_15(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+}
 
-            prune_unused_temp_bindings(f);
-
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    // Loop Invariant Code Motion: hoist pure loop-invariant assignments out of
-    // loop bodies (innermost-first).  Runs after break/continue recovery so the
-    // loop structure is finalised.
-    if run_pass_logged(func, "licm", perf, apply_licm_pass) {
-        run_cleanup_block(func, "cleanup_standalone_15", perf, |f| {
-            cleanup_func_stmt_list(f);
-        });
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_licm",
-            perf,
-            defuse_dead_assignment_pass,
-        );
-        prune_unused_temp_bindings(func);
-        prune_unused_dead_local_bindings(func);
-    }
+/// Tail of the `licm` chain: `defuse_dead_assignment_after_licm` (already
+/// individually logged in the original) plus the two bare, unlogged prune
+/// calls that followed it, bundled under the same telemetry name.
+pub(super) fn defuse_after_licm_and_prune(func: &mut HirFunction) -> bool {
+    let changed = defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+    changed
 }
 
 pub fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) {

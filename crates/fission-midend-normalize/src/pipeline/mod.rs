@@ -12,7 +12,6 @@ pub use run::{
     normalize_stmt,
 };
 pub use stages::{
-    run_stage_block_structure_1, run_stage_cleanup, run_stage_heritage_value_recovery,
-    run_stage_memory_recovery, run_stage_merge, run_stage_proto_recovery_head,
-    run_stage_type_early,
+    run_stage_cleanup, run_stage_heritage_value_recovery, run_stage_memory_recovery,
+    run_stage_merge, run_stage_proto_recovery_head, run_stage_type_early,
 };

@@ -7,13 +7,15 @@ use super::stages::{
     cleanup_after_constant_folding_init, cleanup_after_constant_ptr_recovery,
     cleanup_after_entry_param_promotion, cleanup_after_entry_stack_scaffold,
     cleanup_after_entry_stack_scaffold_late, cleanup_after_flag_recovery,
-    cleanup_after_gvn_join_hoist, cleanup_after_sccp, cleanup_after_split_flow,
-    cleanup_after_subvar_flow, cleanup_after_subvar_trim, cleanup_elim_8,
-    constant_folding_body_pass, defuse_after_branch_hoist_and_prune, defuse_after_cse_and_prune,
-    defuse_after_gvn_and_prune, prune_after_elide_popcount, run_stage_block_structure_1,
-    run_stage_cast_elision, run_stage_cleanup, run_stage_heritage_value_recovery,
-    run_stage_memory_recovery, run_stage_merge, run_stage_proto_recovery_head,
-    run_stage_type_early, sccp_is_admitted, wide_dead_assignment_and_prune,
+    cleanup_after_gvn_join_hoist, cleanup_after_loop_condition_temps,
+    cleanup_after_sccp, cleanup_after_single_pred_label_inline, cleanup_after_split_flow,
+    cleanup_after_subvar_flow, cleanup_after_subvar_trim, cleanup_elim_8, cleanup_prune_9,
+    cleanup_prune_10, cleanup_standalone_15, constant_folding_body_pass,
+    defuse_after_branch_hoist_and_prune, defuse_after_cse_and_prune, defuse_after_gvn_and_prune,
+    defuse_after_licm_and_prune, prune_after_elide_popcount, run_stage_cast_elision,
+    run_stage_cleanup, run_stage_heritage_value_recovery, run_stage_memory_recovery,
+    run_stage_merge, run_stage_proto_recovery_head, run_stage_type_early, sccp_is_admitted,
+    wide_dead_assignment_and_prune,
 };
 use super::super::analysis::defuse::{
     apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
@@ -21,11 +23,14 @@ use super::super::analysis::defuse::{
 use super::super::cleanup::{
     apply_deindirect_pass, apply_expand_load_pass, apply_subvar_trim_pass,
     apply_switch_norm_pass, cast_elision_pass, elide_unused_popcount_assigns,
+    inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
+    single_pred_label_inline,
 };
 use super::super::arith::apply_conditional_move_pass;
 use super::super::global_opt::{
     apply_bit_consume_dead_code_pass, apply_conditional_const_pass, apply_cse_pass,
-    apply_gvn_join_hoist_pass, apply_nz_mask_simplification_pass, apply_sccp_pass,
+    apply_gvn_join_hoist_pass, apply_licm_pass, apply_nz_mask_simplification_pass,
+    apply_sccp_pass,
 };
 use super::super::idioms::{
     apply_branch_prefix_hoist_pass, apply_split_flow_pass, apply_subflow_pruning,
@@ -33,8 +38,11 @@ use super::super::idioms::{
     remove_entry_stack_scaffold_stores,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
-use super::super::memory::apply_constant_ptr_recovery_pass;
-use super::super::recovery::{apply_flag_recovery_pass, copy_propagation_pass, join_coalescing_pass};
+use super::super::memory::{apply_constant_ptr_recovery_pass, apply_ptr_arith_recovery_pass};
+use super::super::recovery::{
+    apply_break_continue_pass, apply_flag_recovery_pass, apply_iv_recovery_pass,
+    copy_propagation_pass, join_coalescing_pass,
+};
 use super::super::types::apply_entry_param_promotion_pass;
 use fission_midend_core::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
@@ -524,11 +532,80 @@ pub fn build_normalize_pipeline() -> Pipeline {
             run_stage_memory_recovery,
         )))
         .group(group("merge", proto).pass(stage_pass("merge", proto, run_stage_merge)))
-        .group(group("block_structure_1", block).pass(stage_pass(
-            "block_structure_1",
-            block,
-            run_stage_block_structure_1,
-        )))
+        .group(
+            group("block_structure_1", block)
+                .pass(gated_followup(
+                    fn_pass(
+                        "single_pred_label_inline",
+                        block,
+                        |f| single_pred_label_inline(&mut f.body),
+                    ),
+                    vec![fn_pass(
+                        "cleanup_single_pred_label_inline",
+                        block,
+                        cleanup_after_single_pred_label_inline,
+                    )],
+                ))
+                .pass(fn_pass(
+                    "dowhile_decrement_condition_norm",
+                    block,
+                    |f| normalize_dowhile_decrement_condition(&mut f.body),
+                ))
+                // Runs after label inlining so the loop body is maximally
+                // simplified before trailing-temp inlining looks at loop
+                // conditions.
+                .pass(gated_followup(
+                    fn_pass(
+                        "loop_condition_trailing_temp_inline",
+                        block,
+                        inline_loop_condition_trailing_temps,
+                    ),
+                    vec![
+                        fn_pass(
+                            "ptr_arith_recovery_after_loop_condition_temps",
+                            block,
+                            apply_ptr_arith_recovery_pass,
+                        ),
+                        cleanup_pass(
+                            "cleanup_loop_condition_temps",
+                            block,
+                            cleanup_after_loop_condition_temps,
+                        ),
+                    ],
+                ))
+                // Loop IV recovery (SCEV-lite): upgrade While → For for
+                // linear induction variables.
+                .pass(gated_followup(
+                    fn_pass("iv_recovery", block, apply_iv_recovery_pass),
+                    vec![cleanup_pass("cleanup_prune_9", block, cleanup_prune_9)],
+                ))
+                // Break/Continue recovery: replace single-predecessor
+                // Goto-to-exit-label patterns inside loops with explicit
+                // break/continue statements.
+                .pass(gated_followup(
+                    fn_pass(
+                        "break_continue_recovery",
+                        block,
+                        apply_break_continue_pass,
+                    ),
+                    vec![cleanup_pass("cleanup_prune_10", block, cleanup_prune_10)],
+                ))
+                // Loop Invariant Code Motion: hoist pure loop-invariant
+                // assignments out of loop bodies (innermost-first). Runs
+                // after break/continue recovery so the loop structure is
+                // finalised.
+                .pass(gated_followup(
+                    fn_pass("licm", block, apply_licm_pass),
+                    vec![
+                        cleanup_pass("cleanup_standalone_15", block, cleanup_standalone_15),
+                        fn_pass(
+                            "defuse_dead_assignment_after_licm",
+                            block,
+                            defuse_after_licm_and_prune,
+                        ),
+                    ],
+                )),
+        )
         .group(group("cleanup", concept).pass(stage_pass("cleanup", concept, run_stage_cleanup)))
 }
 
