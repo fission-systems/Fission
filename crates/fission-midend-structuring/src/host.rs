@@ -66,6 +66,15 @@ pub trait StructuringHost {
     /// `sese_region_proof_budget_exceeded()`. Call once per structuring
     /// attempt, alongside `set_structuring_start`.
     fn reset_sese_region_proof_budget(&mut self);
+    /// Shared, live-updating checkpoint counter for the whole structuring
+    /// attempt's total-work budget (`STRUCTURING_TOTAL_WORK_BUDGET`).
+    /// `IfLoweringBudget` instances hold a clone of this handle so their
+    /// `checkpoint()` calls (which don't have `&host` in scope) can still
+    /// contribute to and observe one shared total across the many
+    /// `try_lower_if`/`try_lower_while` attempts a single function's
+    /// structuring makes. Reset alongside `reset_sese_region_proof_budget`.
+    fn structuring_total_work_counter(&self) -> std::rc::Rc<std::cell::Cell<u64>>;
+    fn reset_structuring_total_work_counter(&mut self);
 
     // ── Address / block identity ───────────────────────────────────────────
     fn block_target_key(&self, idx: usize) -> u64;

@@ -21,9 +21,8 @@ pub(crate) fn is_register_varnode(vn: &Varnode) -> bool {
 }
 
 pub(crate) use fission_midend_structuring::{
-    CONDITION_RECOVERY_BUDGET_MS, CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey,
-    IfLoweringBudget, LinearBodyCacheKey, LinearExit, LoweredTerminator,
-    SWITCH_CHAIN_PARSE_BUDGET_MAX,
+    CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey, IfLoweringBudget, LinearBodyCacheKey,
+    LinearExit, LoweredTerminator, SWITCH_CHAIN_PARSE_BUDGET_MAX,
 };
 /// Initial SESE recovery is a proof pass, not the final fallback renderer.
 /// Once proof-oriented recovery exceeds this ceiling, callers should fail

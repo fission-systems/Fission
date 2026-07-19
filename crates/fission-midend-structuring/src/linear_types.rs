@@ -7,12 +7,22 @@
 use fission_midend_core::ir::{
     DispatcherProofUnit, HirExpr, MlilPreviewOptions, UnsupportedControlEvidence,
 };
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Instant;
 
-/// Soft budget for condition-recovery lowering attempts.
-pub const CONDITION_RECOVERY_BUDGET_MS: f64 = 10.0;
-/// Soft subcall limit for condition-recovery lowering attempts.
+/// Soft subcall limit for condition-recovery lowering attempts. Wall-clock
+/// (`CONDITION_RECOVERY_BUDGET_MS`) was dropped in favor of this deterministic
+/// proxy: a wall-clock trip point made how far a single `try_lower_if`/
+/// `try_lower_while` attempt got -- and therefore decompiled output --
+/// depend on machine speed / load (see PROJECT.md).
 pub const CONDITION_RECOVERY_SUBCALL_LIMIT: usize = 512;
+/// Soft budget for the whole structuring attempt (all `IfLoweringBudget`
+/// instances and the direct loop-lowering checkpoints in `loops.rs`
+/// combined), in checkpoint calls since `CollapseDriver::run` began.
+/// Deterministic replacement for the same 5000ms wall-clock ceiling this
+/// budget used to share with the per-instance one above.
+pub const STRUCTURING_TOTAL_WORK_BUDGET: u64 = 200_000;
 
 /// How a linear region is expected to leave its body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,7 +75,7 @@ pub struct ConditionalTailKey {
     pub region_recovery: bool,
 }
 
-/// Soft wall-clock / subcall budget for `try_lower_*` condition recovery.
+/// Soft subcall / total-work budget for `try_lower_*` condition recovery.
 #[derive(Debug)]
 pub struct IfLoweringBudget {
     pub enabled: bool,
@@ -75,7 +85,7 @@ pub struct IfLoweringBudget {
     pub idx: usize,
     pub block_addr: u64,
     pub label: &'static str,
-    pub structuring_start: Option<Instant>,
+    pub structuring_total_work: Rc<Cell<u64>>,
 }
 
 impl IfLoweringBudget {
@@ -84,7 +94,7 @@ impl IfLoweringBudget {
         idx: usize,
         block_addr: u64,
         label: &'static str,
-        structuring_start: Option<Instant>,
+        structuring_total_work: Rc<Cell<u64>>,
     ) -> Self {
         Self {
             enabled: true,
@@ -94,7 +104,7 @@ impl IfLoweringBudget {
             idx,
             block_addr,
             label,
-            structuring_start,
+            structuring_total_work,
         }
     }
 
@@ -105,27 +115,20 @@ impl IfLoweringBudget {
         }
         self.subcalls += 1;
 
-        if let Some(total_start) = self.structuring_start {
-            let total_elapsed_ms = total_start.elapsed().as_secs_f64() * 1000.0;
-            if total_elapsed_ms > 5000.0 {
-                self.tripped = true;
-                if structuring_diag_enabled() {
-                    eprintln!(
-                        "[DIAG] TOTAL structuring budget exceeded: idx={} block=0x{:x} stage={} total_elapsed={:.3}s",
-                        self.idx,
-                        self.block_addr,
-                        stage,
-                        total_start.elapsed().as_secs_f64()
-                    );
-                }
-                return true;
+        let total_work = self.structuring_total_work.get() + 1;
+        self.structuring_total_work.set(total_work);
+        if total_work > STRUCTURING_TOTAL_WORK_BUDGET {
+            self.tripped = true;
+            if structuring_diag_enabled() {
+                eprintln!(
+                    "[DIAG] TOTAL structuring budget exceeded: idx={} block=0x{:x} stage={} total_work={}",
+                    self.idx, self.block_addr, stage, total_work
+                );
             }
+            return true;
         }
 
-        let elapsed_ms = self.start.elapsed().as_secs_f64() * 1000.0;
-        if self.subcalls > CONDITION_RECOVERY_SUBCALL_LIMIT
-            || elapsed_ms > CONDITION_RECOVERY_BUDGET_MS
-        {
+        if self.subcalls > CONDITION_RECOVERY_SUBCALL_LIMIT {
             self.tripped = true;
             if structuring_diag_enabled() {
                 eprintln!(

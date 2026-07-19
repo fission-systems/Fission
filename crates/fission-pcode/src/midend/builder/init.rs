@@ -159,6 +159,7 @@ impl<'a> PreviewBuilder<'a> {
             structured_body: None,
             register_namer_cache: std::cell::OnceCell::new(),
             sese_region_proof_calls: std::cell::Cell::new(0),
+            structuring_total_work_units: std::rc::Rc::new(std::cell::Cell::new(0)),
         };
         b
     }

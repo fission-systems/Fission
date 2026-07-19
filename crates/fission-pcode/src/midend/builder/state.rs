@@ -88,4 +88,11 @@ pub(crate) struct PreviewBuilder<'a> {
     /// elapsed time, so region-proof completion (and thus decompiled
     /// output) no longer depends on machine speed / load. See PROJECT.md.
     pub(crate) sese_region_proof_calls: std::cell::Cell<u64>,
+    /// Deterministic proxy for the old shared-5000ms `IfLoweringBudget`
+    /// "total structuring" check and the matching inline wall-clock checks
+    /// in `loops.rs` (`try_lower_while`, `try_lower_multiblock_dowhile`,
+    /// `lower_loop_body_subgraph`). `Rc` so `IfLoweringBudget` instances
+    /// (which don't hold a `&host` reference) can share a live handle. See
+    /// PROJECT.md.
+    pub(crate) structuring_total_work_units: std::rc::Rc<std::cell::Cell<u64>>,
 }

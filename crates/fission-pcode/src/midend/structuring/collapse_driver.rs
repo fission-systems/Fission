@@ -39,6 +39,7 @@ impl CollapseDriver {
 
         builder.structuring_start = Some(std::time::Instant::now());
         builder.reset_sese_region_proof_budget();
+        builder.reset_structuring_total_work_counter();
 
         let mut ir = NirFunc::new(builder);
         let mut store = AnalysisStore::new();

@@ -49,7 +49,7 @@ pub fn lower_linear_body_with_budget(host: &mut impl StructuringHost,
                 start_idx,
                 start_addr,
                 "lower_linear_body_auto",
-                host.structuring_start(),
+                host.structuring_total_work_counter(),
             ));
             auto_budget.as_mut().unwrap()
         };
@@ -76,7 +76,7 @@ pub fn lower_linear_body_for_region_recovery_detailed(host: &mut impl Structurin
                 start_idx,
                 start_addr,
                 "lower_linear_body_detailed_auto",
-                host.structuring_start(),
+                host.structuring_total_work_counter(),
             ));
             auto_budget.as_mut().unwrap()
         };

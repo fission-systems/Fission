@@ -93,6 +93,12 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn reset_sese_region_proof_budget(&mut self) {
         PreviewBuilder::reset_sese_region_proof_budget(self)
     }
+    fn structuring_total_work_counter(&self) -> std::rc::Rc<std::cell::Cell<u64>> {
+        self.structuring_total_work_units.clone()
+    }
+    fn reset_structuring_total_work_counter(&mut self) {
+        self.structuring_total_work_units.set(0);
+    }
     fn block_target_key(&self, idx: usize) -> u64 {
         PreviewBuilder::block_target_key(self, idx)
     }

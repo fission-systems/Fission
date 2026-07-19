@@ -9,7 +9,10 @@ use crate::conditionals::{
 use crate::graph::capture_structuring_failure;
 use crate::helpers::{block_label, recovered_switch_case_values};
 use crate::host::StructuringHost;
-use crate::linear_types::{IfLoweringBudget, LinearExit, LoweredTerminator, structuring_diag_enabled};
+use crate::linear_types::{
+    IfLoweringBudget, LinearExit, LoweredTerminator, STRUCTURING_TOTAL_WORK_BUDGET,
+    structuring_diag_enabled,
+};
 use crate::switch::try_lower_switch;
 use fission_midend_core::ir::{
     HirExpr, HirLValue, HirStmt, HirSwitchCase, MlilPreviewError, NirType,
@@ -349,13 +352,22 @@ pub fn try_lower_dowhile(host: &mut impl StructuringHost,
         Ok(Some((HirStmt::DoWhile { body, cond }, skip_to)))
     }
 
-pub fn try_lower_while(host: &mut impl StructuringHost, 
+/// Deterministic replacement for the old shared 5000ms wall-clock "total
+/// structuring" pre-check: counts checkpoint calls (shared with
+/// `IfLoweringBudget::checkpoint`) instead of measuring elapsed time, so
+/// how far a structuring attempt gets no longer depends on machine speed.
+fn structuring_total_work_budget_exceeded(host: &impl StructuringHost) -> bool {
+    let counter = host.structuring_total_work_counter();
+    let total = counter.get() + 1;
+    counter.set(total);
+    total > STRUCTURING_TOTAL_WORK_BUDGET
+}
+
+pub fn try_lower_while(host: &mut impl StructuringHost,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        if let Some(start) = host.structuring_start() {
-            if start.elapsed().as_secs_f64() * 1000.0 > 5000.0 {
-                return Ok(None);
-            }
+        if structuring_total_work_budget_exceeded(host) {
+            return Ok(None);
         }
 
         let diag = structuring_diag_enabled();
@@ -365,7 +377,7 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
             idx,
             block_addr,
             "try_lower_while",
-            host.structuring_start(),
+            host.structuring_total_work_counter(),
         );
         if diag {
             eprintln!(
@@ -721,10 +733,8 @@ pub fn lower_do_while_region(host: &mut impl StructuringHost,
 pub fn try_lower_multiblock_dowhile(host: &mut impl StructuringHost, 
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        if let Some(start) = host.structuring_start() {
-            if start.elapsed().as_secs_f64() * 1000.0 > 5000.0 {
-                return Ok(None);
-            }
+        if structuring_total_work_budget_exceeded(host) {
+            return Ok(None);
         }
         let diag = structuring_diag_enabled();
 
@@ -979,10 +989,8 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
         break_idx: Option<usize>,
         head_idx: usize,
     ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
-        if let Some(start) = host.structuring_start() {
-            if start.elapsed().as_secs_f64() * 1000.0 > 5000.0 {
-                return Ok(None);
-            }
+        if structuring_total_work_budget_exceeded(host) {
+            return Ok(None);
         }
 
         if body_set.is_empty() {

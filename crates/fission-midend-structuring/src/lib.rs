@@ -65,9 +65,9 @@ pub use admission::{
     decide_structuring_admission,
 };
 pub use linear_types::{
-    CONDITION_RECOVERY_BUDGET_MS, CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey,
-    ConditionalTailLoweringResult, ConditionalTailMismatchSubtype, IfLoweringBudget,
-    LinearBodyCacheKey, LinearBodyCachedOutcome, LinearBodyLoweringOutcome, LinearBodyRejectReason,
+    CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey, ConditionalTailLoweringResult,
+    ConditionalTailMismatchSubtype, IfLoweringBudget, LinearBodyCacheKey, LinearBodyCachedOutcome,
+    LinearBodyLoweringOutcome, LinearBodyRejectReason, STRUCTURING_TOTAL_WORK_BUDGET,
     LinearExit, LoweredTerminator, MAX_LINEAR_STRUCTURING_DEPTH, NormalizedConditionalTailArm,
     structuring_diag_enabled,
 };
