@@ -446,6 +446,63 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   nextest with the same 7 pre-existing unrelated failures,
   `golden_corpus_check.py`, 6-function regression, `state_machine_score`
   20/20, release/quick-release byte-identical).
+- **Perf sweep round 7, 2026-07-20** (user asked directly whether SLEIGH
+  decoding itself is a bottleneck — answered by profiling a `--all`
+  batch run and filtering `sample` output to just the actually-busy
+  per-function decode threads, excluding idle rayon-pool noise per the
+  established caveat above):
+  1. **Answer: no, not really** — direct `fission_sleigh` self-time
+     (`CompiledParserWalker::walk` + `walk_decision_tree` +
+     `bind_instruction_with_inst_next` + `select_constructors`) totaled
+     ~11% of busy-thread self-time on `advanced_patterns_gcc_O2.exe`
+     (73 functions). Proportional to instruction count decoded, not a
+     caching gap. Two adjacent, unrelated findings turned out to be
+     much bigger:
+  2. **`getenv`/`std::env::var_os` cluster was ~7.8% of self-time**
+     (commit `a4714641`). `terminal_reselect_trace_enabled()`
+     (`fission-sleigh/src/runtime/diagnostics.rs`) and an inline
+     `FISSION_TRACE_TERMINAL_VERIFY` check in `decision.rs`'s Terminal
+     probe handler ran on *every successfully decoded instruction*;
+     `FISSION_BUILD_DEBUG` checks in `template.rs`/`template_eval.rs`
+     ran on every matched constructor's p-code template evaluation.
+     None were cached — same "recompute per-call instead of once"
+     shape as every fix this round, just manifesting as a syscall
+     instead of a data-structure rebuild. Cached all three behind
+     `OnceLock<bool>`.
+  3. **`--all` batch rebuilt `FactStore` (FID signature matching + name
+     facts + sidecar-patch parsing across the *entire binary*) once per
+     function instead of once per binary** (commit `27552293`) — the
+     single biggest win of this round. `decompile_with_rust_sleigh`'s
+     convenience wrapper calls `FactStore::from_binary` internally, and
+     every `--all`-path call site used that wrapper instead of the
+     already-existing `decompile_with_rust_sleigh_with_facts`, which
+     takes a pre-built `&FactStore`. A batch of N functions did N
+     redundant whole-binary analyses. Threaded a single
+     `facts: Arc<FactStore>`, built once in `run_with_functions`,
+     through `render_one_function_on_large_stack` /
+     `run_worker_fanout_fanin` down to `render_with_rust_sleigh`, which
+     now calls the `_with_facts` entry point directly. Covers both the
+     worker-fanout `--all` path and the sequential/single-function path.
+  4. Also noted but not fixed this round: `thread_start` was ~9.3% of
+     self-time — `--all` spawns one OS thread per function (with a
+     32MB-by-default stack) rather than reusing a pool of
+     large-stack threads. Real architectural cost, bigger change
+     (thread-pool reuse instead of spawn-per-task), left for a future
+     round. Also noted: `fidbf`/signature-database parsing frames
+     (`parse_raw_fidbf_database`/`collect_records`/`decode_record`,
+     ~4.7% combined) are now amortized for free by the `FactStore`
+     fix above (parsed once per binary instead of once per function),
+     so no separate fix was needed there.
+  5. **Result**: `advanced_patterns_gcc_O2.exe` (73 functions), `--all
+     --json`: user CPU 6.4s → 3.5s (~45%), wall time 1.3–2.0s → 0.82s.
+     Verified byte-identical decompiled output for all 73 functions,
+     and byte-identical code content across 10 repeat `--all` runs
+     (only benchmark timing fields legitimately vary run to run).
+  Validated: same checklist as round 6 (workspace check, 1962/1969
+  nextest with the same 7 pre-existing unrelated failures,
+  `golden_corpus_check.py`, 6-function regression, `state_machine_score`
+  20/20, release/quick-release byte-identical, plus the 10-run `--all`
+  code-content determinism check above).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
