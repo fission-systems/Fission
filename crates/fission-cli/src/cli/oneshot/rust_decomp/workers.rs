@@ -150,17 +150,21 @@ pub(crate) fn run_worker_fanout_fanin(
                         Ok(func) => func,
                         Err(_) => return,
                     };
-                    let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        render_one_function_inner(binary.as_ref(), &func, config)
-                    }))
-                    .unwrap_or_else(|_| {
-                        make_internal_error_result(
-                            binary.as_ref(),
-                            &func,
-                            "worker thread panicked while rendering function".to_string(),
-                            config,
-                        )
-                    });
+                    // Per-task timeout guard (same mechanism as the
+                    // single-function path): without this, a function whose
+                    // structuring never hits a budget checkpoint can wedge
+                    // this persistent worker forever, silently shrinking the
+                    // pool by one and -- if worker_count is 1, as it is for
+                    // small function counts -- hanging the whole batch. The
+                    // stuck computation's own thread is still abandoned in
+                    // the background (Rust has no thread cancellation), but
+                    // the queue keeps moving.
+                    let rendered = render_one_function_on_large_stack(
+                        Arc::clone(&binary),
+                        &func,
+                        config,
+                        stack_size_bytes,
+                    );
                     if tx.send(rendered).is_err() {
                         return;
                     }
