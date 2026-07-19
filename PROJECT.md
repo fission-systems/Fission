@@ -402,6 +402,50 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   `golden_corpus_check.py` clean (160 functions + determinism),
   6-function hand-curated regression set byte-identical, `state_machine_
   score` 20/20 uniform, release/quick-release byte-identical.
+- **Perf sweep round 6, 2026-07-20** (continuing the same "go deeper,
+  not just cache the last hot function" mandate — profiled
+  `bounded_tlv_sum`, round 4's other flagged-but-unexplained outlier,
+  now that `accumulate_pairs`'s dominant cost is fixed):
+  1. `sample` on `bounded_tlv_sum` (1526 bytes, `semantic_stress_gcc_O3.exe
+     @ 0x140001560`) after round 5's fix showed no single 90%+ hotspot
+     anymore — cost spread across `lower_expr`/`lower_varnode_inner`,
+     `RootReachabilityProof::build`/`DefinitionDependencyMap::
+     address_nodes_reaching_roots`, `linear_exit_from`, and several
+     other structuring/normalize call sites. Investigated the
+     `RootReachabilityProof` frames since "proof-of-reachability" style
+     helpers were exactly the shape of bug found twice already this
+     session (recompute something that's actually invariant for the
+     whole call).
+  2. **Found: `DefinitionDependencyMap::address_contributors` walks
+     every statement in the function looking for pointer
+     dereferences/indexes/field accesses, and for each one called
+     `address_nodes_reaching_roots(name, pointer_roots)`, which
+     rebuilt a fresh reverse-dependency graph (`RootReachabilityProof::
+     build`, O(V+E) over the whole function's address-dependency graph)
+     from scratch on every single call.** `pointer_roots` (and the
+     dependency graph itself) never change across the whole
+     `address_contributors` walk, so this was O(D·(V+E)) instead of
+     O(V+E) where D = number of pointer-touching sites in the function
+     — the same "recompute per-query instead of once per fixed input"
+     shape as the `RegisterNamer`/`RegisterModel`/`loop_carried_proof`
+     fixes, just in a different analysis (`fission-midend-normalize`'s
+     def-use/address-provenance pass, not `fission-pcode`'s builder).
+  3. Fixed (commit `c33b6270`): build `RootReachabilityProof` once in
+     `address_contributors`, thread `&RootReachabilityProof` through
+     `collect_address_contributors_stmts`/`_lvalue`/`_expr`/
+     `record_address_contributors` instead of rebuilding it inside
+     `DefinitionDependencyMap::address_nodes_reaching_roots` on every
+     leaf call. `bounded_tlv_sum`: 3.13s → 1.15s (~2.7x), byte-identical
+     output.
+  4. Note: this is a distinct fix from round 5's `RegisterModel`
+     change — different crate, different analysis, sibling bug shape.
+     `accumulate_pairs` also improved slightly (1.05s → 0.99s) since
+     it has some pointer traffic too, but its dominant cost was already
+     resolved in round 5.
+  Validated: same as round 5's checklist (workspace check, 1962/1969
+  nextest with the same 7 pre-existing unrelated failures,
+  `golden_corpus_check.py`, 6-function regression, `state_machine_score`
+  20/20, release/quick-release byte-identical).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
