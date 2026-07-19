@@ -78,13 +78,12 @@ pub fn run_stage_proto_recovery_head(func: &mut HirFunction, _diag: bool, perf: 
     );
 }
 
-pub(super) fn cleanup_after_flag_recovery(func: &mut HirFunction) -> bool {
-    let before = hir_shape(func);
+/// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
+pub(super) fn cleanup_after_flag_recovery(func: &mut HirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
-    hir_shape(func) != before
 }
 
 /// Admission gate for the `elide_unused_popcount` chain: skips (with
@@ -106,34 +105,31 @@ pub(super) fn prune_after_elide_popcount(func: &mut HirFunction) -> bool {
     hir_shape(func) != before
 }
 
-pub(super) fn cleanup_after_entry_stack_scaffold(func: &mut HirFunction) -> bool {
-    let before = hir_shape(func);
+/// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
+pub(super) fn cleanup_after_entry_stack_scaffold(func: &mut HirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
-    hir_shape(func) != before
 }
 
-pub(super) fn cleanup_after_callee_save_prologue_epilogue(func: &mut HirFunction) -> bool {
-    let before = hir_shape(func);
+/// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
+pub(super) fn cleanup_after_callee_save_prologue_epilogue(func: &mut HirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
-    hir_shape(func) != before
 }
 
 pub(super) fn constant_folding_body_pass(func: &mut HirFunction) -> bool {
     constant_folding_pass(&mut func.body)
 }
 
-pub(super) fn cleanup_after_constant_folding_init(func: &mut HirFunction) -> bool {
-    let before = hir_shape(func);
+/// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
+pub(super) fn cleanup_after_constant_folding_init(func: &mut HirFunction) {
     cleanup_func_stmt_list(func);
     eliminate_dead_local_clobber_assigns(func);
     prune_unused_temp_bindings(func);
-    hir_shape(func) != before
 }
 
 /// Runs the `constant_ptr_recovery` → `cleanup_constant_ptr` chain that used
@@ -255,36 +251,26 @@ pub fn run_stage_type_early(func: &mut HirFunction, diag: bool, perf: bool) {
     apply_type_signature_fixed_point(func, diag, perf);
 }
 
-pub fn run_stage_stackstall(func: &mut HirFunction, diag: bool, perf: bool) {
-    run_pass_logged(
-        func,
-        "nz_mask_simplification",
-        perf,
-        apply_nz_mask_simplification_pass,
-    );
-    // Subflow / bitmask pruning: optimize redundant bit-widths and bitmasks (subflow.cc).
-    run_pass_logged(func, "subflow_pruning_early", perf, apply_subflow_pruning);
-    // Global subvariable flow analyzer: propagate active bitmasks globally to declare narrow subvariables.
-    if run_pass_logged(func, "subvar_flow_pass", perf, apply_subvar_flow_pass) {
-        run_cleanup_block(func, "cleanup_subvar_flow", perf, |f| {
-            cleanup_func_stmt_list(f);
-            defuse_dead_assignment_pass(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    // SplitFlow: identify and split artificially joined local variables.
-    if run_pass_logged(func, "split_flow_pass", perf, apply_split_flow_pass) {
-        run_cleanup_block(func, "cleanup_split_flow", perf, |f| {
-            cleanup_func_stmt_list(f);
-            defuse_dead_assignment_pass(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    // Cast elision: remove outer casts that are redundant given the binding's
-    // declared type (assignment-context cast: `x = (T)y` where x.ty == T).
-    // Runs after type inference so that NirBinding.ty is maximally populated.
+pub(super) fn cleanup_after_subvar_flow(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
+
+pub(super) fn cleanup_after_split_flow(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
+}
+
+/// `cast_elision` chain: kept as one `stage_pass` step (like
+/// `run_stage_proto_recovery_head`) because it conditionally calls
+/// `apply_type_signature_fixed_point(func, diag, perf)`, which needs
+/// diag/perf forwarded to its own internal `run_pass_logged` calls --
+/// `fn_pass` doesn't carry those through.
+pub fn run_stage_cast_elision(func: &mut HirFunction, diag: bool, perf: bool) {
     if run_pass_logged(func, "cast_elision", perf, cast_elision_pass) {
         cleanup_func_stmt_list(func);
         if !contains_call_stmts(&func.body) {
@@ -304,91 +290,19 @@ pub fn run_stage_stackstall(func: &mut HirFunction, diag: bool, perf: bool) {
             apply_wide_dead_assignment_pass,
         );
     }
-    // Sub-word data flow cast trimming: eliminate redundant casts of sub-word data flow variables.
-    if run_pass_logged(func, "subvar_trim", perf, apply_subvar_trim_pass) {
-        cleanup_func_stmt_list(func);
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_subvar_trim",
-            perf,
-            apply_wide_dead_assignment_pass,
-        );
-    }
-    // ExpandLoad: collapse Cast<narrow>(Load<wide>(ptr)) → Load<narrow>(ptr) for natural
-    // LSB truncations, and widen AND-comparison constants when the Load type is wider.
-    // Mirrors Ghidra's RuleExpandLoad. Runs after cast_elision so type annotations are fresh.
-    if run_pass_logged(func, "expand_load", perf, apply_expand_load_pass) {
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_expand_load",
-            perf,
-            apply_wide_dead_assignment_pass,
-        );
-    }
-    // Bit-level consumed-mask dead-code pass: eliminate dead OR-constant branches
-    // and redundant ZEXT operations by backward-propagating consumed bit masks.
-    // Mirrors Ghidra's ActionDeadCode (consumed-mask propagation) at the HIR level.
-    // Runs after subvar_flow (narrow variables confirmed) and cast_elision.
-    if run_pass_logged(
-        func,
-        "bit_consume_dead_code",
-        perf,
-        apply_bit_consume_dead_code_pass,
-    ) {
-        run_pass_logged(
-            func,
-            "defuse_dead_assignment_after_bit_consume",
-            perf,
-            apply_wide_dead_assignment_pass,
-        );
-        run_cleanup_block(func, "cleanup_bit_consume", perf, |f| {
-            cleanup_func_stmt_list(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    if run_pass_logged(func, "conditional_move", perf, apply_conditional_move_pass) {
-        run_cleanup_block(func, "cleanup_conditional_move", perf, |f| {
-            cleanup_func_stmt_list(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    if run_pass_logged(func, "switch_norm", perf, apply_switch_norm_pass) {
-        run_cleanup_block(func, "cleanup_switch_norm", perf, |f| {
-            cleanup_func_stmt_list(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    if run_pass_logged(func, "deindirect", perf, apply_deindirect_pass) {
-        run_cleanup_block(func, "cleanup_deindirect", perf, |f| {
-            cleanup_func_stmt_list(f);
-            prune_unused_temp_bindings(f);
-            prune_unused_dead_local_bindings(f);
-        });
-    }
-    if run_pass_logged(
-        func,
-        "remove_entry_stack_scaffold_stores_late",
-        perf,
-        remove_entry_stack_scaffold_stores,
-    ) {
-        run_cleanup_block(
-            func,
-            "cleanup_defuse_entry_stack_scaffold_late",
-            perf,
-            |f| {
-                cleanup_func_stmt_list(f);
+}
 
-                defuse_dead_assignment_pass(f);
+pub(super) fn cleanup_after_subvar_trim(func: &mut HirFunction) -> bool {
+    let before = hir_shape(func);
+    cleanup_func_stmt_list(func);
+    hir_shape(func) != before
+}
 
-                prune_unused_temp_bindings(f);
-
-                prune_unused_dead_local_bindings(f);
-            },
-        );
-    }
+pub(super) fn cleanup_after_entry_stack_scaffold_late(func: &mut HirFunction) {
+    cleanup_func_stmt_list(func);
+    defuse_dead_assignment_pass(func);
+    prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
 }
 
 pub fn run_stage_heritage_value_recovery(func: &mut HirFunction, diag: bool, perf: bool) {

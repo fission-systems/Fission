@@ -6,22 +6,33 @@ use super::stages::{
     cleanup_after_callee_save_prologue_epilogue, cleanup_after_conditional_const,
     cleanup_after_constant_folding_init, cleanup_after_constant_ptr_recovery,
     cleanup_after_entry_param_promotion, cleanup_after_entry_stack_scaffold,
-    cleanup_after_flag_recovery, cleanup_after_gvn_join_hoist, cleanup_after_sccp,
-    cleanup_elim_8, constant_folding_body_pass, defuse_after_branch_hoist_and_prune,
-    defuse_after_cse_and_prune, defuse_after_gvn_and_prune, prune_after_elide_popcount,
-    run_stage_block_structure_1, run_stage_cleanup, run_stage_heritage_value_recovery,
+    cleanup_after_entry_stack_scaffold_late, cleanup_after_flag_recovery,
+    cleanup_after_gvn_join_hoist, cleanup_after_sccp, cleanup_after_split_flow,
+    cleanup_after_subvar_flow, cleanup_after_subvar_trim, cleanup_elim_8,
+    constant_folding_body_pass, defuse_after_branch_hoist_and_prune, defuse_after_cse_and_prune,
+    defuse_after_gvn_and_prune, prune_after_elide_popcount, run_stage_block_structure_1,
+    run_stage_cast_elision, run_stage_cleanup, run_stage_heritage_value_recovery,
     run_stage_memory_recovery, run_stage_merge, run_stage_proto_recovery_head,
-    run_stage_stackstall, run_stage_type_early, sccp_is_admitted, wide_dead_assignment_and_prune,
+    run_stage_type_early, sccp_is_admitted, wide_dead_assignment_and_prune,
 };
-use super::super::analysis::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
-use super::super::cleanup::elide_unused_popcount_assigns;
+use super::super::analysis::defuse::{
+    apply_wide_dead_assignment_pass, constant_folding_pass, defuse_dead_assignment_pass,
+};
+use super::super::cleanup::{
+    apply_deindirect_pass, apply_expand_load_pass, apply_subvar_trim_pass,
+    apply_switch_norm_pass, cast_elision_pass, elide_unused_popcount_assigns,
+};
+use super::super::arith::apply_conditional_move_pass;
 use super::super::global_opt::{
-    apply_conditional_const_pass, apply_cse_pass, apply_gvn_join_hoist_pass, apply_sccp_pass,
+    apply_bit_consume_dead_code_pass, apply_conditional_const_pass, apply_cse_pass,
+    apply_gvn_join_hoist_pass, apply_nz_mask_simplification_pass, apply_sccp_pass,
 };
 use super::super::idioms::{
-    apply_branch_prefix_hoist_pass, remove_callee_save_prologue_epilogue,
-    remove_dead_callee_saved_param_loads, remove_entry_stack_scaffold_stores,
+    apply_branch_prefix_hoist_pass, apply_split_flow_pass, apply_subflow_pruning,
+    remove_callee_save_prologue_epilogue, remove_dead_callee_saved_param_loads,
+    remove_entry_stack_scaffold_stores,
 };
+use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::memory::apply_constant_ptr_recovery_pass;
 use super::super::recovery::{apply_flag_recovery_pass, copy_propagation_pass, join_coalescing_pass};
 use super::super::types::apply_entry_param_promotion_pass;
@@ -90,7 +101,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                 // variable assignments.
                 .pass(gated_followup(
                     fn_pass("flag_recovery", concept, apply_flag_recovery_pass),
-                    vec![fn_pass(
+                    vec![cleanup_pass(
                         "cleanup_defuse_4",
                         concept,
                         cleanup_after_flag_recovery,
@@ -124,7 +135,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                         concept,
                         remove_entry_stack_scaffold_stores,
                     ),
-                    vec![fn_pass(
+                    vec![cleanup_pass(
                         "cleanup_defuse_entry_stack_scaffold",
                         concept,
                         cleanup_after_entry_stack_scaffold,
@@ -136,7 +147,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                         concept,
                         remove_callee_save_prologue_epilogue,
                     ),
-                    vec![fn_pass(
+                    vec![cleanup_pass(
                         "cleanup_defuse_5",
                         concept,
                         cleanup_after_callee_save_prologue_epilogue,
@@ -146,7 +157,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                 // constants unlock further simplification in later passes.
                 .pass(gated_followup(
                     fn_pass("constant_folding", concept, constant_folding_body_pass),
-                    vec![fn_pass(
+                    vec![cleanup_pass(
                         "cleanup_elim_7",
                         concept,
                         cleanup_after_constant_folding_init,
@@ -369,11 +380,139 @@ pub fn build_normalize_pipeline() -> Pipeline {
             proto,
             run_stage_type_early,
         )))
-        .group(group("stackstall", concept).pass(stage_pass(
-            "stackstall",
-            concept,
-            run_stage_stackstall,
-        )))
+        .group(
+            group("stackstall", concept)
+                .pass(fn_pass(
+                    "nz_mask_simplification",
+                    concept,
+                    apply_nz_mask_simplification_pass,
+                ))
+                // Subflow / bitmask pruning: optimize redundant bit-widths
+                // and bitmasks (subflow.cc).
+                .pass(fn_pass(
+                    "subflow_pruning_early",
+                    concept,
+                    apply_subflow_pruning,
+                ))
+                // Global subvariable flow analyzer: propagate active
+                // bitmasks globally to declare narrow subvariables.
+                .pass(gated_followup(
+                    fn_pass("subvar_flow_pass", concept, apply_subvar_flow_pass),
+                    vec![cleanup_pass(
+                        "cleanup_subvar_flow",
+                        concept,
+                        cleanup_after_subvar_flow,
+                    )],
+                ))
+                // SplitFlow: identify and split artificially joined local
+                // variables.
+                .pass(gated_followup(
+                    fn_pass("split_flow_pass", concept, apply_split_flow_pass),
+                    vec![cleanup_pass(
+                        "cleanup_split_flow",
+                        concept,
+                        cleanup_after_split_flow,
+                    )],
+                ))
+                // Cast elision: kept as one stage_pass step (needs
+                // diag/perf forwarded to its own internal
+                // apply_type_signature_fixed_point call). See stages.rs.
+                .pass(stage_pass(
+                    "cast_elision",
+                    concept,
+                    run_stage_cast_elision,
+                ))
+                // Sub-word data flow cast trimming: eliminate redundant
+                // casts of sub-word data flow variables.
+                .pass(gated_followup(
+                    fn_pass("subvar_trim", concept, apply_subvar_trim_pass),
+                    vec![
+                        fn_pass(
+                            "cleanup_subvar_trim_stmt_list",
+                            concept,
+                            cleanup_after_subvar_trim,
+                        ),
+                        fn_pass(
+                            "defuse_dead_assignment_after_subvar_trim",
+                            concept,
+                            apply_wide_dead_assignment_pass,
+                        ),
+                    ],
+                ))
+                // ExpandLoad: collapse Cast<narrow>(Load<wide>(ptr)) →
+                // Load<narrow>(ptr) for natural LSB truncations, and widen
+                // AND-comparison constants when the Load type is wider.
+                .pass(gated_followup(
+                    fn_pass("expand_load", concept, apply_expand_load_pass),
+                    vec![fn_pass(
+                        "defuse_dead_assignment_after_expand_load",
+                        concept,
+                        apply_wide_dead_assignment_pass,
+                    )],
+                ))
+                // Bit-level consumed-mask dead-code pass: eliminate dead
+                // OR-constant branches and redundant ZEXT operations by
+                // backward-propagating consumed bit masks.
+                .pass(gated_followup(
+                    fn_pass(
+                        "bit_consume_dead_code",
+                        concept,
+                        apply_bit_consume_dead_code_pass,
+                    ),
+                    vec![
+                        fn_pass(
+                            "defuse_dead_assignment_after_bit_consume",
+                            concept,
+                            apply_wide_dead_assignment_pass,
+                        ),
+                        cleanup_pass(
+                            "cleanup_bit_consume",
+                            concept,
+                            cleanup_after_constant_ptr_recovery,
+                        ),
+                    ],
+                ))
+                .pass(gated_followup(
+                    fn_pass(
+                        "conditional_move",
+                        concept,
+                        apply_conditional_move_pass,
+                    ),
+                    vec![cleanup_pass(
+                        "cleanup_conditional_move",
+                        concept,
+                        cleanup_after_constant_ptr_recovery,
+                    )],
+                ))
+                .pass(gated_followup(
+                    fn_pass("switch_norm", concept, apply_switch_norm_pass),
+                    vec![cleanup_pass(
+                        "cleanup_switch_norm",
+                        concept,
+                        cleanup_after_constant_ptr_recovery,
+                    )],
+                ))
+                .pass(gated_followup(
+                    fn_pass("deindirect", concept, apply_deindirect_pass),
+                    vec![cleanup_pass(
+                        "cleanup_deindirect",
+                        concept,
+                        cleanup_after_constant_ptr_recovery,
+                    )],
+                ))
+                .pass(gated_followup(
+                    fn_pass(
+                        "remove_entry_stack_scaffold_stores_late",
+                        concept,
+                        remove_entry_stack_scaffold_stores,
+                    ),
+                    vec![cleanup_pass(
+                        "cleanup_defuse_entry_stack_scaffold_late",
+                        concept,
+                        cleanup_after_entry_stack_scaffold_late,
+                    )],
+                )),
+        )
         .group(group("heritage_value_recovery", heritage).pass(stage_pass(
             "heritage_value_recovery",
             heritage,
