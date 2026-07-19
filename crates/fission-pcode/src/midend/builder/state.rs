@@ -88,6 +88,15 @@ pub(crate) struct PreviewBuilder<'a> {
     /// elapsed time, so region-proof completion (and thus decompiled
     /// output) no longer depends on machine speed / load. See PROJECT.md.
     pub(crate) sese_region_proof_calls: std::cell::Cell<u64>,
+    /// Memoizes `prove_loop_carried_register_update`: the pcode/loop_bodies
+    /// this proof walks (a `VecDeque`-based BFS over the whole loop body,
+    /// per call) are fixed for the builder's lifetime, but the SESE region
+    /// search re-lowers overlapping candidate ranges many times, so without
+    /// caching the same (block, op, varnode) triple gets re-proven
+    /// repeatedly. Keyed by (block_idx, op_idx, output key).
+    pub(in crate::midend::builder) loop_carried_proof_cache: RefCell<
+        BuilderCacheMap<(usize, usize, VarnodeKey), Option<super::materialize::LoopCarriedDefinitionProof>>,
+    >,
     /// Deterministic proxy for the old shared-5000ms `IfLoweringBudget`
     /// "total structuring" check and the matching inline wall-clock checks
     /// in `loops.rs` (`try_lower_while`, `try_lower_multiblock_dowhile`,

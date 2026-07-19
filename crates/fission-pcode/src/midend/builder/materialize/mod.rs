@@ -12,6 +12,7 @@ pub(super) mod test_support;
 mod trace;
 
 pub(in crate::midend::builder) use self::contracts::MaterializeOwnerRepartition;
+pub(in crate::midend::builder) use self::loop_carried::LoopCarriedDefinitionProof;
 use self::contracts::*;
 use self::scans::DefinitionReachesReturnProof;
 

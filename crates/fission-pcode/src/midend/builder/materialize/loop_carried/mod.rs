@@ -4,6 +4,8 @@ mod provenance;
 mod seed;
 mod shape;
 
+pub(in crate::midend::builder) use shape::LoopCarriedDefinitionProof;
+
 #[cfg(test)]
 mod tests;
 

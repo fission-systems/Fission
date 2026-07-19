@@ -40,7 +40,12 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Option<LoopCarriedDefinitionProof> {
         let output_key = VarnodeKey::from(output);
-        self.loop_bodies
+        let cache_key = (block_idx, op_idx, output_key.clone());
+        if let Some(cached) = self.loop_carried_proof_cache.borrow().get(&cache_key) {
+            return *cached;
+        }
+        let result = self
+            .loop_bodies
             .iter()
             .filter(|loop_body| loop_body.body.contains(&block_idx))
             .filter(|loop_body| {
@@ -57,7 +62,11 @@ impl<'a> PreviewBuilder<'a> {
                 loop_head: loop_body.head,
                 definition_block: block_idx,
                 definition_op: op_idx,
-            })
+            });
+        self.loop_carried_proof_cache
+            .borrow_mut()
+            .insert(cache_key, result);
+        result
     }
 
     fn definition_reaches_loop_backedge(
