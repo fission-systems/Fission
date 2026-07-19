@@ -260,7 +260,15 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
         let mut resolved = HashMap::new();
         let mut visiting = std::collections::HashSet::new();
-        for &offset in all_types.keys() {
+        // Sorted, not raw HashMap iteration order: `resolve_type_name` is a
+        // memoized recursive walk with cycle detection (`visiting`), so for
+        // mutually-referential types (e.g. linked-list-style self/mutual
+        // struct refs) which offset gets visited *first* can change which
+        // side of the cycle resolves a name vs bails out -- unstable
+        // std HashMap iteration order made this run-to-run nondeterministic.
+        let mut offsets: Vec<_> = all_types.keys().copied().collect();
+        offsets.sort();
+        for offset in offsets {
             resolve_type_name(offset, &all_types, &mut resolved, &mut visiting);
         }
 
