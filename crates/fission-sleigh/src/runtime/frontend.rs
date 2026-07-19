@@ -5,9 +5,15 @@ use std::path::{Path, PathBuf};
 
 use std::sync::{Mutex, OnceLock};
 
+// `Arc`-wrapped so cache hits are a refcount bump instead of a deep clone of
+// the whole compiled SLEIGH constructor/subtable/pattern-node graph -- for
+// aarch64 in particular that graph is large enough that cloning it under
+// an exclusive Mutex on every cache access (previously: every candidate
+// frontend lookup, every decode call) was the dominant per-function decomp
+// cost under `--all` batch parallelism. See PROJECT.md.
 #[derive(Clone)]
 struct RuntimeFrontendArtifacts {
-    compiled: Option<CompiledFrontend>,
+    compiled: Option<std::sync::Arc<CompiledFrontend>>,
 }
 
 static RUNTIME_FRONTEND_ARTIFACT_CACHE: OnceLock<Mutex<HashMap<String, RuntimeFrontendArtifacts>>> =
@@ -68,7 +74,9 @@ impl RuntimeSleighFrontend {
         status: RuntimeFrontendStatus,
     ) -> Result<RuntimeFrontendArtifacts> {
         let compiled = if status == RuntimeFrontendStatus::ExecutableCandidate {
-            Some(compile_frontend_for_entry_spec(&entry.path)?)
+            Some(std::sync::Arc::new(compile_frontend_for_entry_spec(
+                &entry.path,
+            )?))
         } else {
             None
         };
@@ -150,7 +158,7 @@ impl RuntimeSleighFrontend {
     }
 
     pub fn compiled_frontend(&self) -> Option<&CompiledFrontend> {
-        self.compiled.as_ref()
+        self.compiled.as_deref()
     }
 
     pub fn compile_language_runtime(&self) -> Result<LanguageRuntime> {

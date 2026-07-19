@@ -174,7 +174,7 @@ pub struct RuntimeSleighFrontend {
     language: String,
     entry: EntrySpec,
     status: RuntimeFrontendStatus,
-    compiled: Option<CompiledFrontend>,
+    compiled: Option<std::sync::Arc<CompiledFrontend>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
