@@ -309,6 +309,36 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
      call sites, no single dominant site) and `bounded_tlv_sum`
      (`semantic_stress_gcc_O3.exe`, down to ~3.2s from the original
      63.8s bug fixed earlier this session).
+- **Perf sweep round 4, 2026-07-20** (re-profiled `_nl_load_domain`,
+  round 3's #1 remaining outlier, since it's a large-but-real function
+  worth one more pass before writing it off as "just big"):
+  `prove_loop_carried_register_update` (`fission-pcode/src/midend/
+  builder/materialize/loop_carried/shape.rs`) and its two BFS-based
+  helpers (`loop_entry_value_reaches_definition`,
+  `definition_reaches_loop_backedge`) did a fresh `VecDeque` walk of
+  the *entire containing loop body* on every call, uncached — same
+  "input is fixed for the builder's lifetime, but nothing memoizes it"
+  shape as the RegisterNamer/hw_name_at fixes. Added
+  `loop_carried_proof_cache` (commit `bd4a9df2`), keyed by `(block_idx,
+  op_idx, VarnodeKey)`, matching the existing `lookup_site_cache`/
+  `peel_cache` pattern already on `PreviewBuilder`. Confirmed safe to
+  cache for the whole builder lifetime: `loop_bodies` is set once at
+  construction and `StructuringHost::set_loop_bodies` (the only thing
+  that could mutate it later) has zero call sites anywhere in the tree.
+  `_nl_load_domain`: 10.4s → 8.0s, output byte-identical. Modest
+  (~23%) compared to earlier wins in this thread — the remaining cost
+  for this specific function is spread across genuine lowering/
+  structuring work proportional to its size (5332 bytes, the largest
+  function in the dev corpus by a wide margin), not a single
+  remaining dominant site. `accumulate_pairs` and `bounded_tlv_sum`
+  still show deep `sese_structure_region` recursion in profiles, but
+  that recursion is a proper post-order tree walk over `build_sese_tree`
+  output (not obviously re-visiting the same region twice) — the cost
+  looks like genuine irreducible-control-flow search depth rather than
+  a caching gap. Not pursued further this round; if picked back up,
+  start by measuring whether `build_sese_region_body`'s own internal
+  work (not the tree recursion around it) is where time actually goes
+  for these two functions specifically.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
