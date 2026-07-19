@@ -148,6 +148,35 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   (`try_lower_while`, `try_lower_multiblock_dowhile`,
   `lower_loop_body_subgraph`). Same category of machine-speed-dependence;
   tracked as further follow-up if it turns out to matter in practice.
+- **`--all` batch decompile ignored `--timeout-ms` entirely, fixed
+  2026-07-19** (commit `0808b8a3`): found while sweeping the corpus for
+  perf outliers — `decomp --all --limit 40 --timeout-ms 3000` on
+  `semantic_stress_clang_O0.exe` hung 70+ minutes on one function
+  (`state_machine_score`). `run_worker_fanout_fanin` (the `--all` worker
+  pool, used whenever more than one function is selected) called
+  `render_one_function_inner` directly with no timeout wrapper; the only
+  existing enforcement (`render_one_function_on_large_stack`'s
+  `recv_timeout`) was used solely by the single-function (`--addr`) path.
+  A stuck function permanently occupied a worker-pool slot — fatal when
+  `resolve_worker_count` returns 1 (common for small function counts),
+  since the sole worker never reaches the rest of the queue. Fixed by
+  routing batch tasks through `render_one_function_on_large_stack` too.
+  **Not a real fix for the underlying hang** — Rust has no thread-abort
+  primitive, so the stuck function's own thread is still abandoned
+  running in the background for the process's lifetime; this only stops
+  it from blocking the *queue*. The deeper issue: `timeout_ms` is
+  threaded through five call layers (`render_one_function_inner` →
+  `render_with_rust_sleigh` → `select_nir_output_from_prebuilt_pcode_
+  with_facts` → `select_nir_output_from_pcode_with_facts` →
+  `render_selection_from_pcode` → `render_nir_from_pcode_with_decomp_
+  context`) only to land on a parameter literally named `_timeout_ms`
+  in `rendering/render.rs` — explicitly unused. There is currently no
+  cooperative-cancellation checkpoint anywhere in the structuring/
+  rendering pipeline that consults the user's requested timeout; the
+  `IfLoweringBudget`/`loops.rs` wall-clock checks noted above are fixed
+  constants (10ms/5000ms) unrelated to `--timeout-ms`. Real fix would be
+  wiring a shared deadline/cancellation token through those existing
+  checkpoints — tracked as further follow-up, out of scope for this pass.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
