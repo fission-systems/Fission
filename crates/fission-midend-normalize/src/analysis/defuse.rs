@@ -288,7 +288,13 @@ impl DefinitionDependencyMap {
         pointer_roots: &HashSet<String>,
     ) -> HashMap<String, NirType> {
         let mut contributors = HashMap::default();
-        collect_address_contributors_stmts(self, stmts, pointer_roots, &mut contributors);
+        // Built once for the whole walk: `pointer_roots` is fixed for every
+        // call site below, so the reverse-dependency closure this computes
+        // doesn't need to be recomputed per address-provenance query (it
+        // used to be rebuilt from scratch on every pointer dereference in
+        // the function via `address_nodes_reaching_roots`).
+        let proof = RootReachabilityProof::build(&self.address_dependencies, pointer_roots);
+        collect_address_contributors_stmts(&proof, stmts, &mut contributors);
         contributors
     }
 
@@ -448,38 +454,37 @@ pub fn collect_expr_vars(expr: &HirExpr, out: &mut HashSet<String>) {
 }
 
 fn collect_address_contributors_stmts(
-    dependencies: &DefinitionDependencyMap,
+    proof: &RootReachabilityProof,
     stmts: &[HirStmt],
-    pointer_roots: &HashSet<String>,
     out: &mut HashMap<String, NirType>,
 ) {
     for stmt in stmts {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
-                collect_address_contributors_lvalue(dependencies, lhs, pointer_roots, out);
-                collect_address_contributors_expr(dependencies, rhs, pointer_roots, out);
+                collect_address_contributors_lvalue(proof, lhs, out);
+                collect_address_contributors_expr(proof, rhs, out);
             }
             HirStmt::VaStart { va_list, .. } => {
-                collect_address_contributors_expr(dependencies, va_list, pointer_roots, out);
+                collect_address_contributors_expr(proof, va_list, out);
             }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-                collect_address_contributors_expr(dependencies, expr, pointer_roots, out);
+                collect_address_contributors_expr(proof, expr, out);
             }
             HirStmt::Block(body) | HirStmt::While { body, .. } => {
-                collect_address_contributors_stmts(dependencies, body, pointer_roots, out);
+                collect_address_contributors_stmts(proof, body, out);
             }
             HirStmt::DoWhile { body, cond } => {
-                collect_address_contributors_stmts(dependencies, body, pointer_roots, out);
-                collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
+                collect_address_contributors_stmts(proof, body, out);
+                collect_address_contributors_expr(proof, cond, out);
             }
             HirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
-                collect_address_contributors_stmts(dependencies, then_body, pointer_roots, out);
-                collect_address_contributors_stmts(dependencies, else_body, pointer_roots, out);
+                collect_address_contributors_expr(proof, cond, out);
+                collect_address_contributors_stmts(proof, then_body, out);
+                collect_address_contributors_stmts(proof, else_body, out);
             }
             HirStmt::For {
                 init,
@@ -488,41 +493,26 @@ fn collect_address_contributors_stmts(
                 body,
             } => {
                 if let Some(init) = init {
-                    collect_address_contributors_stmts(
-                        dependencies,
-                        std::slice::from_ref(init.as_ref()),
-                        pointer_roots,
-                        out,
-                    );
+                    collect_address_contributors_stmts(proof, std::slice::from_ref(init.as_ref()), out);
                 }
                 if let Some(cond) = cond {
-                    collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
+                    collect_address_contributors_expr(proof, cond, out);
                 }
                 if let Some(update) = update {
-                    collect_address_contributors_stmts(
-                        dependencies,
-                        std::slice::from_ref(update.as_ref()),
-                        pointer_roots,
-                        out,
-                    );
+                    collect_address_contributors_stmts(proof, std::slice::from_ref(update.as_ref()), out);
                 }
-                collect_address_contributors_stmts(dependencies, body, pointer_roots, out);
+                collect_address_contributors_stmts(proof, body, out);
             }
             HirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                collect_address_contributors_expr(dependencies, expr, pointer_roots, out);
+                collect_address_contributors_expr(proof, expr, out);
                 for case in cases {
-                    collect_address_contributors_stmts(
-                        dependencies,
-                        &case.body,
-                        pointer_roots,
-                        out,
-                    );
+                    collect_address_contributors_stmts(proof, &case.body, out);
                 }
-                collect_address_contributors_stmts(dependencies, default, pointer_roots, out);
+                collect_address_contributors_stmts(proof, default, out);
             }
             HirStmt::Return(None)
             | HirStmt::Label(_)
@@ -534,70 +524,68 @@ fn collect_address_contributors_stmts(
 }
 
 fn collect_address_contributors_lvalue(
-    dependencies: &DefinitionDependencyMap,
+    proof: &RootReachabilityProof,
     lhs: &HirLValue,
-    pointer_roots: &HashSet<String>,
     out: &mut HashMap<String, NirType>,
 ) {
     match lhs {
         HirLValue::Var(_) => {}
         HirLValue::Deref { ptr, ty } => {
-            record_address_contributors(dependencies, ptr, ty, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, ptr, pointer_roots, out);
+            record_address_contributors(proof, ptr, ty, out);
+            collect_address_contributors_expr(proof, ptr, out);
         }
         HirLValue::Index {
             base,
             index,
             elem_ty,
         } => {
-            record_address_contributors(dependencies, base, elem_ty, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, index, pointer_roots, out);
+            record_address_contributors(proof, base, elem_ty, out);
+            collect_address_contributors_expr(proof, base, out);
+            collect_address_contributors_expr(proof, index, out);
         }
         HirLValue::FieldAccess { base, ty, .. } => {
-            record_address_contributors(dependencies, base, ty, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
+            record_address_contributors(proof, base, ty, out);
+            collect_address_contributors_expr(proof, base, out);
         }
     }
 }
 
 fn collect_address_contributors_expr(
-    dependencies: &DefinitionDependencyMap,
+    proof: &RootReachabilityProof,
     expr: &HirExpr,
-    pointer_roots: &HashSet<String>,
     out: &mut HashMap<String, NirType>,
 ) {
     match expr {
         HirExpr::Load { ptr, ty } => {
-            record_address_contributors(dependencies, ptr, ty, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, ptr, pointer_roots, out);
+            record_address_contributors(proof, ptr, ty, out);
+            collect_address_contributors_expr(proof, ptr, out);
         }
         HirExpr::Index {
             base,
             index,
             elem_ty,
         } => {
-            record_address_contributors(dependencies, base, elem_ty, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, index, pointer_roots, out);
+            record_address_contributors(proof, base, elem_ty, out);
+            collect_address_contributors_expr(proof, base, out);
+            collect_address_contributors_expr(proof, index, out);
         }
         HirExpr::FieldAccess { base, ty, .. } => {
-            record_address_contributors(dependencies, base, ty, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, base, pointer_roots, out);
+            record_address_contributors(proof, base, ty, out);
+            collect_address_contributors_expr(proof, base, out);
         }
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => {
-            collect_address_contributors_expr(dependencies, expr, pointer_roots, out);
+            collect_address_contributors_expr(proof, expr, out);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
-            collect_address_contributors_expr(dependencies, lhs, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, rhs, pointer_roots, out);
+            collect_address_contributors_expr(proof, lhs, out);
+            collect_address_contributors_expr(proof, rhs, out);
         }
         HirExpr::Call { args, .. } => {
             for arg in args {
-                collect_address_contributors_expr(dependencies, arg, pointer_roots, out);
+                collect_address_contributors_expr(proof, arg, out);
             }
         }
         HirExpr::Select {
@@ -606,25 +594,24 @@ fn collect_address_contributors_expr(
             else_expr,
             ..
         } => {
-            collect_address_contributors_expr(dependencies, cond, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, then_expr, pointer_roots, out);
-            collect_address_contributors_expr(dependencies, else_expr, pointer_roots, out);
+            collect_address_contributors_expr(proof, cond, out);
+            collect_address_contributors_expr(proof, then_expr, out);
+            collect_address_contributors_expr(proof, else_expr, out);
         }
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
     }
 }
 
 fn record_address_contributors(
-    dependencies: &DefinitionDependencyMap,
+    proof: &RootReachabilityProof,
     address: &HirExpr,
     pointee: &NirType,
-    pointer_roots: &HashSet<String>,
     out: &mut HashMap<String, NirType>,
 ) {
     let mut address_names = HashSet::default();
     collect_address_provenance_vars(address, &mut address_names);
     for name in address_names {
-        for contributor in dependencies.address_nodes_reaching_roots(&name, pointer_roots) {
+        for contributor in proof.nodes_reaching_from(&name) {
             out.entry(contributor).or_insert_with(|| pointee.clone());
         }
     }
