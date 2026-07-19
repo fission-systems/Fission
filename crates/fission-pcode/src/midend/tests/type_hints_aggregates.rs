@@ -75,9 +75,9 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
         pointee_sizes: vec![16],
     });
 
-    let mut hints = std::collections::HashMap::new();
+    let mut hints = std::collections::HashMap::default();
     hints.insert("param_2".to_string(), context.call_param_rules[0].clone());
-    let mut local_hints = std::collections::HashMap::new();
+    let mut local_hints = std::collections::HashMap::default();
     collect_local_surface_hints(&func.body, &hints, &func, &mut local_hints);
     assert_eq!(
         local_hints.get("local_3c").map(String::as_str),
@@ -164,7 +164,7 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
         ..Default::default()
     };
 
-    let mut hints = std::collections::HashMap::new();
+    let mut hints = std::collections::HashMap::default();
     hints.insert(
         "param_2".to_string(),
         PreviewCallParamRule {
@@ -177,7 +177,7 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
             pointee_sizes: vec![16],
         },
     );
-    let mut local_hints = std::collections::HashMap::new();
+    let mut local_hints = std::collections::HashMap::default();
     collect_local_surface_hints(&func.body, &hints, &func, &mut local_hints);
     assert_eq!(
         local_hints.get("local_3c").map(String::as_str),

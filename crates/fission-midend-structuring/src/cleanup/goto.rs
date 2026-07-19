@@ -1,6 +1,7 @@
 use fission_midend_core::ir::*;
 use fission_midend_core::{collect_referenced_label_counts, negate_expr};
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 // ---------------------------------------------------------------------------
 // Goto elimination post-pass

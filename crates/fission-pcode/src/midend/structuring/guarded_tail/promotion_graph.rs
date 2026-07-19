@@ -269,7 +269,7 @@ mod region_exit_determinism_tests {
     #[test]
     fn region_external_exit_nodes_is_sorted_regardless_of_hashset_iteration_order() {
         let builder = make_builder_with_successors(vec![vec![1, 2], vec![3], vec![3], vec![]]);
-        let region: std::collections::HashSet<usize> = [0, 1, 2].into_iter().collect();
+        let region: HashSet<usize> = [0, 1, 2].into_iter().collect();
         let exits = builder.region_external_exit_nodes(&region);
         assert_eq!(
             exits,

@@ -8,7 +8,7 @@ use crate::cleanup::{collect_referenced_label_counts, normalize_guarded_tail_lay
 use crate::host::StructuringHost;
 use crate::regions::RegionKind;
 use fission_midend_core::ir::{HirExpr, HirStmt};
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Promote all single-entry guarded-tail shapes in `body` (one pass).
 pub fn promote_single_entry_guarded_tail_regions(

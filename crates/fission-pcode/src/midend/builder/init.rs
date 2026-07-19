@@ -17,11 +17,11 @@ impl<'a> PreviewBuilder<'a> {
         binary: Option<&'a LoadedBinary>,
         type_context: Option<&'a PreviewTypeContext>,
     ) -> Self {
-        let mut defs = HashMap::new();
-        let mut def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>> = HashMap::new();
+        let mut defs = HashMap::default();
+        let mut def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>> = HashMap::default();
         let mut block_defs = Vec::with_capacity(pcode.blocks.len());
         for (block_idx, block) in pcode.blocks.iter().enumerate() {
-            let mut block_def_map: HashMap<VarnodeKey, Vec<usize>> = HashMap::new();
+            let mut block_def_map: HashMap<VarnodeKey, Vec<usize>> = HashMap::default();
             for (op_idx, op) in block.ops.iter().enumerate() {
                 if let Some(output) = &op.output {
                     let key = VarnodeKey::from(output);
@@ -122,11 +122,11 @@ impl<'a> PreviewBuilder<'a> {
             locals_next_id: 0,
             temps: BTreeMap::new(),
             temp_next_id: 0,
-            materialized_vns: HashMap::new(),
-            load_address_bindings: HashSet::new(),
-            load_value_bindings: HashSet::new(),
-            explicit_merge_bindings: HashMap::new(),
-            call_result_bindings: HashMap::new(),
+            materialized_vns: HashMap::default(),
+            load_address_bindings: HashSet::default(),
+            load_value_bindings: HashSet::default(),
+            explicit_merge_bindings: HashMap::default(),
+            call_result_bindings: HashMap::default(),
             selector_representatives: BuilderCacheMap::default(),
             current_lowering_site: None,
             register_param_aliases,
@@ -147,14 +147,14 @@ impl<'a> PreviewBuilder<'a> {
                 super::materialize::MaterializeOwnerRepartition::default(),
             ),
             current_stack_home_ptr: None,
-            active_switch_targets: HashSet::new(),
+            active_switch_targets: HashSet::default(),
             telemetry: super::telemetry::BuilderTelemetry::default(),
             structuring_start: None,
             fas_virtual_edges: Vec::new(),
             lowered_block_stmts_cache: Default::default(),
             partial_gpr_live_binding_cache: Default::default(),
             follow_blocks: Vec::new(),
-            failed_loop_subgraphs: HashSet::new(),
+            failed_loop_subgraphs: HashSet::default(),
             lower_varnode_cache: Default::default(),
             structured_body: None,
         };

@@ -5,7 +5,7 @@ use super::util::{
     reverse_reachable_from,
 };
 use fission_midend_core::fast_hash::FastMap as HashMap;
-use std::collections::HashSet;
+use crate::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostDomTree {
@@ -45,7 +45,7 @@ impl PostDomTree {
         for idx in 0..node_count {
             postdominators
                 .entry(idx)
-                .or_insert_with(|| HashSet::from([idx]));
+                .or_insert_with(|| [idx].into_iter().collect::<HashSet<_>>());
         }
 
         Self {

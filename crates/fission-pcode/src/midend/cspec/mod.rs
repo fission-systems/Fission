@@ -544,7 +544,7 @@ fn parse_tag_body(body: &str) -> (String, HashMap<String, String>) {
         .find_map(|(idx, ch)| ch.is_whitespace().then_some(idx))
         .unwrap_or(body.len());
     let name = body[..name_end].to_string();
-    let mut attrs = HashMap::new();
+    let mut attrs = HashMap::default();
     let mut rest = body[name_end..].trim_start();
 
     while !rest.is_empty() {

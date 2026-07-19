@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 /// Evidence that one exact register definition, rather than merely the
 /// register name, carries a value across a loop backedge.
@@ -87,7 +87,7 @@ impl<'a> PreviewBuilder<'a> {
                 .flatten()
                 .copied(),
         );
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         while let Some(block_idx) = queue.pop_front() {
             if block_idx == loop_body.head {
                 return true;
@@ -124,7 +124,7 @@ impl<'a> PreviewBuilder<'a> {
         output_key: &VarnodeKey,
     ) -> bool {
         let mut queue = VecDeque::from([(loop_body.head, false)]);
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         while let Some((block_idx, mut observed_read)) = queue.pop_front() {
             if !loop_body.body.contains(&block_idx) || !visited.insert((block_idx, observed_read)) {
                 continue;

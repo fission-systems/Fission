@@ -11,7 +11,7 @@ use crate::linear_types::{LinearExit, LoweredTerminator};
 use crate::regions::EmitReadyDecision;
 use crate::switch::{SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch};
 use fission_midend_core::ir::{DispatcherProofUnit, HirExpr, HirStmt, HirSwitchCase, MlilPreviewError};
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Admit switch-chain recovery from CFG shape alone (no p-code opcodes).
 pub fn switch_recovery_cfg_admitted(host: &impl StructuringHost, start_idx: usize) -> bool {
@@ -27,7 +27,7 @@ pub fn switch_recovery_cfg_admitted(host: &impl StructuringHost, start_idx: usiz
 
     let mut cursor = start_idx;
     let mut conditional_nodes = 0usize;
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     let max_steps = host
         .successors()
         .len()
@@ -154,7 +154,7 @@ pub fn build_linear_multiblock_body(
 ) -> Result<Vec<HirStmt>, MlilPreviewError> {
     let mut body = Vec::new();
     let targeted = host.collect_jump_targets()?;
-    let mut emitted_labels = HashSet::new();
+    let mut emitted_labels = HashSet::default();
     let mut idx = 0usize;
     while idx < host.block_count() {
         let block_key = host.block_target_key(idx);

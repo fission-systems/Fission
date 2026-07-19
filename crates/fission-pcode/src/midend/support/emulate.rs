@@ -1,6 +1,5 @@
 use super::*;
 use fission_loader::loader::LoadedBinary;
-use std::collections::{HashMap, HashSet};
 
 /// Traces the operations required to compute a target varnode.
 /// Returns a topologically sorted vector of PcodeOps and a set of leaf varnode keys (un-defined variables).
@@ -9,9 +8,9 @@ pub(crate) fn collect_switch_dependencies(
     defs: &HashMap<VarnodeKey, DefSite<'_>>,
     pcode: &PcodeFunction,
 ) -> Option<(Vec<PcodeOp>, HashSet<VarnodeKey>)> {
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     let mut ordered_ops = Vec::new();
-    let mut leaves = HashSet::new();
+    let mut leaves = HashSet::default();
 
     fn visit(
         vn: &Varnode,
@@ -102,7 +101,7 @@ pub(crate) fn emulate_path(
     binary: Option<&LoadedBinary>,
     is_big_endian: bool,
 ) -> Option<u64> {
-    let mut values = HashMap::new();
+    let mut values: HashMap<VarnodeKey, u64> = HashMap::default();
 
     // Populate leaf values
     for (k, &v) in leaf_values {
@@ -345,7 +344,7 @@ mod tests {
             asm_mnemonic: None,
         };
 
-        let mut leaf_values = HashMap::new();
+        let mut leaf_values = HashMap::default();
         leaf_values.insert(VarnodeKey::from(&v_in1), 15);
         leaf_values.insert(VarnodeKey::from(&v_in2), 27);
 
@@ -379,7 +378,7 @@ mod tests {
             asm_mnemonic: None,
         };
 
-        let mut leaf_values = HashMap::new();
+        let mut leaf_values = HashMap::default();
         leaf_values.insert(VarnodeKey::from(&v_in), 0x80); // -128 in 8-bit signed
 
         let res = emulate_path(&[op_sext], &leaf_values, None, false);

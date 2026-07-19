@@ -261,7 +261,7 @@ type PspecCache = std::collections::HashMap<std::path::PathBuf, Option<PspecDocu
 static PSPEC_CACHE: OnceLock<std::sync::Mutex<PspecCache>> = OnceLock::new();
 
 fn pspec_cache() -> &'static std::sync::Mutex<PspecCache> {
-    PSPEC_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+    PSPEC_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::default()))
 }
 
 /// Load and cache a `.pspec` document by absolute path.

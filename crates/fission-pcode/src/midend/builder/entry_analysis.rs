@@ -5,7 +5,7 @@ pub(super) fn collect_entry_register_param_aliases(
     pcode: &PcodeFunction,
     namer: &RegisterNamer,
 ) -> HashMap<u64, usize> {
-    let mut aliases = HashMap::new();
+    let mut aliases = HashMap::default();
     let Some(entry) = pcode.blocks.first() else {
         return aliases;
     };
@@ -65,7 +65,7 @@ pub(super) fn infer_entry_stack_layout(
 
     let mut frame_size = 0_i64;
     let mut frame_pointer_established = false;
-    let mut seen_addrs = HashSet::new();
+    let mut seen_addrs = HashSet::default();
     let mut started = false;
     let register_namer = RegisterNamer::from_options(options);
     for op in &entry.ops {

@@ -2,7 +2,6 @@ use crate::midend::builder::*;
 use crate::midend::support::*;
 use crate::midend::ir::*;
 use crate::pcode::*;
-use std::collections::HashSet;
 
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend::builder) fn run_incremental_heritage(&mut self) {
@@ -121,7 +120,7 @@ pub(super) fn refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
         return Vec::new();
     }
 
-    let mut boundaries = HashSet::new();
+    let mut boundaries = HashSet::default();
     for &(offset, size) in accesses {
         boundaries.insert(offset);
         boundaries.insert(offset + size as i64);

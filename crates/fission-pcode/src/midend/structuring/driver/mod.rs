@@ -112,7 +112,7 @@ impl<'a> PreviewBuilder<'a> {
         exit: usize,
         child_map: crate::fast_hash::FastMap<usize, (Vec<HirStmt>, usize, RegionProof)>,
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        let child_map_std: std::collections::HashMap<_, _> = child_map.into_iter().collect();
+        let child_map_std: HashMap<_, _> = child_map.into_iter().collect();
         fission_midend_structuring::sese_driver::build_sese_region_body(
             self, entry, exit, child_map_std,
         )

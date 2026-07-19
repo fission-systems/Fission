@@ -180,7 +180,7 @@ impl<'a> PreviewBuilder<'a> {
         referenced: &HashMap<String, usize>,
     ) -> Option<(String, usize)> {
         let mut current = target_label.to_string();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut rewrites = 0usize;
 
         loop {

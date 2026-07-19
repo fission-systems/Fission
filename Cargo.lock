@@ -2529,6 +2529,7 @@ dependencies = [
  "fission-core",
  "fission-midend-core",
  "indexmap 2.14.0",
+ "rustc-hash 2.1.2",
  "tracing",
 ]
 

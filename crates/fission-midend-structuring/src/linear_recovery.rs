@@ -11,7 +11,7 @@ use crate::linear_types::{
     LinearBodyLoweringOutcome, LinearExit, structuring_diag_enabled,
 };
 use fission_midend_core::ir::{HirStmt, MlilPreviewError};
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Soft SESE region proof budget (ms), kept aligned with pcode builder_types.
 pub const SESE_REGION_PROOF_BUDGET_MS: f64 = 500.0;

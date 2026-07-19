@@ -11,7 +11,8 @@ use crate::host::StructuringHost;
 use fission_midend_core::ir::{
     CallEffectSummarySource, HirStmt, NirCallEffectSummary, parse_call_target_address,
 };
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 /// Pure: does this preview-callee summary make a call unsafe for suffix ownership?
 pub fn nir_call_summary_is_preview_unsafe(summary: &NirCallEffectSummary) -> bool {
@@ -334,7 +335,7 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
         let mut current_label = start_label.to_string();
         let mut current_label_idx = start_label_idx;
         let mut rewrites = 0usize;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
 
         while current_label_idx < terminal_label_idx {
             if !seen.insert(current_label.clone()) {

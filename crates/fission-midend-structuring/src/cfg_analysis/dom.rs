@@ -4,7 +4,7 @@ use super::util::{
     compute_dominator_sets, compute_rpo, cooper_intersect, nearest_common_from_sets, reachable_from,
 };
 use fission_midend_core::fast_hash::FastMap as HashMap;
-use std::collections::HashSet;
+use crate::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomTree {
@@ -121,7 +121,7 @@ pub struct DominanceFrontier {
 impl DominanceFrontier {
     pub fn compute(predecessors: &[Vec<usize>], imm_dom: &ImmDomTree) -> Self {
         let node_count = predecessors.len();
-        let mut frontiers = vec![HashSet::new(); node_count];
+        let mut frontiers = vec![HashSet::default(); node_count];
         for block in 0..node_count {
             if predecessors[block].len() < 2 {
                 continue;
@@ -201,7 +201,7 @@ impl DomTree {
             roots.push(idx);
             let component = reachable_from(idx, successors);
             if component.is_empty() {
-                dominators.insert(idx, HashSet::from([idx]));
+                dominators.insert(idx, [idx].into_iter().collect::<HashSet<_>>());
                 continue;
             }
             let local = compute_dominator_sets(&component, predecessors, idx);

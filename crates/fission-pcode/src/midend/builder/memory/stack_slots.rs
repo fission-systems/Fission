@@ -448,7 +448,7 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         ptr: &Varnode,
     ) -> Option<(StackBase, i64)> {
-        self.resolve_stack_address_inner(ptr, &mut HashSet::new())
+        self.resolve_stack_address_inner(ptr, &mut HashSet::default())
     }
 
     fn resolve_stack_address_inner(

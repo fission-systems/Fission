@@ -17,7 +17,8 @@ use crate::regions::{
 use fission_midend_core::ir::{HirExpr, HirLValue, HirStmt, NirBindingOrigin, NirType};
 use fission_midend_core::util::expr::expr_type;
 use fission_midend_core::{negate_expr, simplify_logical_expr, strip_casts};
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 /// Typed counters for residual telemetry bumps from free-fn GT bodies.
 ///
@@ -56,7 +57,7 @@ pub fn canonicalize_interleaved_local_aliases(
         referenced: &HashMap<String, usize>,
     ) -> Result<(Vec<HirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
         let local_refs = crate::guarded_tail::pure_hir::local_goto_positions_by_label(body);
-        let mut alias_redirects = HashMap::new();
+        let mut alias_redirects = HashMap::default();
         let mut canonicalized_local_nonfallthrough = 0usize;
         let mut external_safe_redirect_labels = Vec::new();
         let segment_end = segment_start + body.len();

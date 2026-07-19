@@ -396,7 +396,7 @@ pub fn infer_entry_register_param_arity(
         pcode.blocks.iter().map(|b| (b.index, b)).collect();
 
     let has_no_succs = pcode.blocks.iter().all(|b| b.successors.is_empty());
-    let mut block_successors = HashMap::new();
+    let mut block_successors: HashMap<u32, Vec<u32>> = HashMap::default();
     if has_no_succs && pcode.blocks.len() > 1 {
         let address_to_index = super::cfg::build_address_to_index_map(pcode);
         let layout_fallthrough = super::cfg::build_layout_fallthrough_map(pcode);
@@ -415,8 +415,8 @@ pub fn infer_entry_register_param_arity(
         }
     }
 
-    let mut detected_params = HashSet::new();
-    let mut visited_active_params: HashMap<u32, HashSet<usize>> = HashMap::new();
+    let mut detected_params: HashSet<usize> = HashSet::default();
+    let mut visited_active_params: HashMap<u32, HashSet<usize>> = HashMap::default();
     let mut queue = VecDeque::new();
 
     let initial_active: HashSet<usize> = (0..num_params).collect();
@@ -465,7 +465,7 @@ pub fn infer_entry_register_param_arity(
         if let Some(succs) = block_successors.get(&block_idx) {
             for &succ_idx in succs {
                 let succ_visited = visited_active_params.entry(succ_idx).or_default();
-                let mut new_active = HashSet::new();
+                let mut new_active = HashSet::default();
                 for &param in &current_active {
                     if !succ_visited.contains(&param) {
                         new_active.insert(param);

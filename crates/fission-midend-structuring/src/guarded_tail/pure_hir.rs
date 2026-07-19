@@ -22,7 +22,8 @@ use fission_midend_core::ir::{
     HirBinaryOp, HirExpr, HirLValue, HirStmt, HirUnaryOp, NirBindingOrigin, NirType,
 };
 use fission_midend_core::{negate_expr, simplify_logical_expr, strip_casts};
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 pub fn guarded_tail_diag_enabled() -> bool {
     std::env::var_os("FISSION_GUARDED_TAIL_DIAG").is_some()
@@ -786,7 +787,7 @@ pub fn flatten_guarded_tail_segment(segment: &[HirStmt], out: &mut Vec<HirStmt>)
     }
 
 pub fn goto_ref_counts(body: &[HirStmt]) -> HashMap<String, usize> {
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         for stmt in body {
             count_goto_refs_in_stmt(stmt, &mut out);
         }
@@ -1018,7 +1019,7 @@ pub fn local_forward_branch_target(
     }
 
 pub fn local_goto_positions_by_label(body: &[HirStmt]) -> HashMap<String, Vec<usize>> {
-        let mut refs = HashMap::new();
+        let mut refs = HashMap::default();
         for (idx, stmt) in body.iter().enumerate() {
             if let HirStmt::Goto(label) = stmt {
                 refs.entry(label.clone()).or_insert_with(Vec::new).push(idx);
@@ -1087,7 +1088,7 @@ pub fn resolve_alias_redirect(
         redirects: &HashMap<String, Option<String>>,
     ) -> Option<String> {
         let mut current = label.to_string();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some(next) = redirects.get(&current) {
             if !seen.insert(current.clone()) {
                 return Some(current);
@@ -1121,7 +1122,7 @@ pub fn resolve_terminal_tail_exit_stmt(
         target_label: &str,
     ) -> Option<HirStmt> {
         let mut current = target_label.to_string();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
 
         loop {
             if !seen.insert(current.clone()) {
@@ -3010,7 +3011,7 @@ pub fn resolve_suffix_redirect_to_terminal(
             return false;
         };
         let mut current = target_label.to_string();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
 
         while current != next_label {
             if !seen.insert(current.clone()) {
@@ -3177,7 +3178,7 @@ pub fn suffix_is_nonowned_terminal_tail(
         let mut current_label = start_label.to_string();
         let mut current_label_idx = start_label_idx;
         let mut rewrites = 0usize;
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
 
         while current_label_idx < terminal_label_idx {
             if !seen.insert(current_label.clone()) {

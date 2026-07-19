@@ -1,6 +1,6 @@
 //! Tarjan SCC + irreducible multi-header detection.
 
-use std::collections::HashSet;
+use crate::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IrreducibleComponent {
@@ -31,7 +31,7 @@ impl SccAnalysis {
                 continue;
             }
             let component_set = component.iter().copied().collect::<HashSet<_>>();
-            let mut headers = HashSet::new();
+            let mut headers = HashSet::default();
             for node in component.iter().copied() {
                 for pred in predecessors.get(node).into_iter().flatten().copied() {
                     if !component_set.contains(&pred) {

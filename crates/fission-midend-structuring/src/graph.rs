@@ -1,7 +1,8 @@
 use crate::regions::{RegionKind, RegionProof};
 use fission_midend_core::ir::{HirStmt, MlilPreviewError};
 use fission_midend_core::ir::*;
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 pub type StructureNodeId = usize;
 

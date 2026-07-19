@@ -186,7 +186,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(expr);
             }
             return self
-                .lower_wrapped_varnode(&source, &mut HashSet::new())
+                .lower_wrapped_varnode(&source, &mut HashSet::default())
                 .ok();
         }
         if let Some(expr) =
@@ -197,7 +197,7 @@ impl<'a> PreviewBuilder<'a> {
         // x86: register target with no further param alias — still a callable fp.
         if allow_x86_fp_tail && is_register_varnode(switch_var) {
             return self
-                .lower_wrapped_varnode(switch_var, &mut HashSet::new())
+                .lower_wrapped_varnode(switch_var, &mut HashSet::default())
                 .ok();
         }
         None
@@ -492,8 +492,8 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx: term_idx,
             },
             |this| {
-                let low = this.lower_wrapped_varnode(&low_vn, &mut HashSet::new())?;
-                let high = this.lower_wrapped_varnode(&high_vn, &mut HashSet::new())?;
+                let low = this.lower_wrapped_varnode(&low_vn, &mut HashSet::default())?;
+                let high = this.lower_wrapped_varnode(&high_vn, &mut HashSet::default())?;
                 if this.arm32_return_pair_part_is_address_like(&high) {
                     return Ok(None);
                 }
@@ -557,7 +557,7 @@ impl<'a> PreviewBuilder<'a> {
                 block_idx,
                 op_idx: term_idx,
             },
-            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
+            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::default()),
         )
         .map(Some)
     }
@@ -817,7 +817,7 @@ impl<'a> PreviewBuilder<'a> {
                         block_idx: pred_pcode_idx,
                         op_idx: pred_term_idx,
                     },
-                    |this| this.lower_wrapped_varnode(&source_vn, &mut HashSet::new()),
+                    |this| this.lower_wrapped_varnode(&source_vn, &mut HashSet::default()),
                 )
                 .map(Some);
         }
@@ -876,7 +876,7 @@ impl<'a> PreviewBuilder<'a> {
                 block_idx: pred_pcode_idx,
                 op_idx: pred_term_idx,
             },
-            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
+            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::default()),
         )
         .map(Some)
     }
@@ -1044,7 +1044,7 @@ impl<'a> PreviewBuilder<'a> {
                         block_idx: idx,
                         op_idx: term_idx,
                     },
-                    |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
+                    |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::default()),
                 )
                 .map(Some)?;
             if preview_builder_diag_enabled() {
@@ -1099,7 +1099,7 @@ impl<'a> PreviewBuilder<'a> {
             && !self.return_input_is_control_target(input)
         {
             return self
-                .lower_wrapped_varnode(input, &mut HashSet::new())
+                .lower_wrapped_varnode(input, &mut HashSet::default())
                 .map(Some);
         }
         if self.uses_primary_return_registers()
@@ -1115,7 +1115,7 @@ impl<'a> PreviewBuilder<'a> {
         let op = &block.ops[term_idx];
         op.inputs
             .last()
-            .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::new()))
+            .map(|input| self.lower_wrapped_varnode(input, &mut HashSet::default()))
             .transpose()
     }
 
@@ -1140,7 +1140,7 @@ impl<'a> PreviewBuilder<'a> {
                 block_idx,
                 op_idx: term_idx,
             },
-            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::new()),
+            |this| this.lower_wrapped_varnode(&ret_vn, &mut HashSet::default()),
         )
         .map(Some)
     }
@@ -1436,21 +1436,21 @@ impl<'a> PreviewBuilder<'a> {
                 block_idx: branch_block_idx,
                 op_idx: branch_term_idx,
             },
-            |this| this.lower_wrapped_varnode(&branch_op.inputs[1], &mut HashSet::new()),
+            |this| this.lower_wrapped_varnode(&branch_op.inputs[1], &mut HashSet::default()),
         )?;
         let default_expr = self.with_lowering_site(
             LoweringSite {
                 block_idx: branch_block_idx,
                 op_idx: default_op_idx,
             },
-            |this| this.lower_def_op(&branch_block.ops[default_op_idx], &mut HashSet::new()),
+            |this| this.lower_def_op(&branch_block.ops[default_op_idx], &mut HashSet::default()),
         )?;
         let alt_expr = self.with_lowering_site(
             LoweringSite {
                 block_idx: copy_idx,
                 op_idx: 0,
             },
-            |this| this.lower_def_op(&copy_block.ops[0], &mut HashSet::new()),
+            |this| this.lower_def_op(&copy_block.ops[0], &mut HashSet::default()),
         )?;
 
         Ok(Some(vec![
@@ -1567,7 +1567,7 @@ impl<'a> PreviewBuilder<'a> {
                     op_idx: term_idx,
                 },
                 |this| {
-                    let mut visiting = HashSet::new();
+                    let mut visiting = HashSet::default();
                     match op.opcode {
                         PcodeOpcode::Return => Ok(LoweredTerminator::Return(
                             this.lower_return_terminator(idx, block, term_idx)?,
@@ -1603,7 +1603,7 @@ impl<'a> PreviewBuilder<'a> {
                             }
                             if let Some(target_vn) = op.inputs.first() {
                                 let target_expr = this
-                                    .lower_wrapped_varnode(target_vn, &mut HashSet::new())
+                                    .lower_wrapped_varnode(target_vn, &mut HashSet::default())
                                     .ok();
                                 let succ_addrs = block
                                     .successors
@@ -1682,7 +1682,7 @@ impl<'a> PreviewBuilder<'a> {
                             } else {
                                 if let Some(target_vn) = op.inputs.first() {
                                     let target_expr = this
-                                        .lower_wrapped_varnode(target_vn, &mut HashSet::new())
+                                        .lower_wrapped_varnode(target_vn, &mut HashSet::default())
                                         .ok();
                                     let succ_addrs = block
                                         .successors
@@ -1744,7 +1744,7 @@ impl<'a> PreviewBuilder<'a> {
                             let cond = recovered_cond
                                 .map(Ok)
                                 .unwrap_or_else(|| {
-                                    this.lower_wrapped_varnode(&op.inputs[1], &mut HashSet::new())
+                                    this.lower_wrapped_varnode(&op.inputs[1], &mut HashSet::default())
                                 })
                                 .map_err(|err| {
                                     this.debug_lowering_error(
@@ -2235,7 +2235,7 @@ impl<'a> PreviewBuilder<'a> {
                         .try_recover_branch_condition(&cond_input)?
                         .filter(|expr| !Self::branch_cond_too_complex(expr));
                     recovered.map(Ok).unwrap_or_else(|| {
-                        this.lower_wrapped_varnode(&cond_input, &mut HashSet::new())
+                        this.lower_wrapped_varnode(&cond_input, &mut HashSet::default())
                     })
                 },
             )
@@ -2416,7 +2416,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         predicate: X86BranchPredicate,
     ) -> Result<HirExpr, MlilPreviewError> {
-        let mut visiting = HashSet::new();
+        let mut visiting = HashSet::default();
         // Tested values (EqZero/NeZero/…) freeze Copy sources; compare operands
         // still use ordinary lowering so both sides stay live-SSA consistent.
         let lower_tested = |this: &mut Self, vn: &Varnode, visiting: &mut HashSet<VarnodeKey>| {
@@ -3001,7 +3001,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let normalized_selector = selector_alias
             .and_then(|alias| {
-                let mut selector_visiting = HashSet::new();
+                let mut selector_visiting = HashSet::default();
                 self.recover_selector_expr_from_predecessors(idx, alias, &mut selector_visiting)
             })
             .unwrap_or_else(|| selector.discriminant.clone());
@@ -3145,7 +3145,7 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         let mut selector_leaf: Option<VarnodeKey> = None;
-        let mut other_leaf_values = HashMap::new();
+        let mut other_leaf_values = HashMap::default();
 
         for leaf in &leaves {
             let is_reg = is_register_space_id(leaf.space_id);
@@ -3389,7 +3389,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut best: Option<u64> = None;
         let predecessors = self.predecessors.get(idx)?.clone();
 
-        let mut selector_names = HashSet::new();
+        let mut selector_names = HashSet::default();
         if let HirExpr::Var(name) = &normalized {
             selector_names.insert(name.clone());
         }
@@ -3402,7 +3402,7 @@ impl<'a> PreviewBuilder<'a> {
             queue.push(alias.clone());
         }
 
-        let mut visited_vns = HashSet::new();
+        let mut visited_vns = HashSet::default();
         while let Some(current_vn) = queue.pop() {
             let key = VarnodeKey::from(&current_vn);
             if !visited_vns.insert(key) {

@@ -479,7 +479,7 @@ fn partial_register_zero_extend_ignores_stale_virtual_lowering_site_bound() {
         block_idx: 0,
         op_idx: 12,
     });
-    let mut visiting = HashSet::new();
+    let mut visiting = HashSet::default();
 
     let lowered = builder
         .try_lower_zero_extended_partial_register(&w0, &mut visiting)
@@ -555,7 +555,7 @@ fn join_register_read_uses_edge_zero_as_carried_initializer() {
         block_idx: 2,
         op_idx: 0,
     });
-    let mut visiting = HashSet::new();
+    let mut visiting = HashSet::default();
 
     let lowered = builder
         .lower_varnode(&w0, &mut visiting)
@@ -657,7 +657,7 @@ fn loop_exit_register_read_uses_predecessor_path_zero_seed() {
         block_idx: 2,
         op_idx: 0,
     });
-    let mut visiting = HashSet::new();
+    let mut visiting = HashSet::default();
 
     let lowered = builder
         .lower_varnode(&r10, &mut visiting)
@@ -1055,7 +1055,7 @@ fn join_register_update_read_stays_live_register_instead_of_abi_param() {
         block_idx: 2,
         op_idx: 0,
     });
-    let mut visiting = HashSet::new();
+    let mut visiting = HashSet::default();
 
     let lowered = builder
         .lower_varnode(&w0, &mut visiting)

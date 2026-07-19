@@ -5,7 +5,7 @@ use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator};
 use fission_midend_core::ir::{HirStmt, MlilPreviewError};
 use fission_midend_core::negate_expr;
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Follow a linear single-predecessor chain to a Return within `[start, follow)`.
 pub fn try_lower_return_chain_arm(
@@ -14,7 +14,7 @@ pub fn try_lower_return_chain_arm(
     follow_idx: usize,
 ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
     let mut body: Vec<HirStmt> = Vec::new();
-    let mut visited: HashSet<usize> = HashSet::new();
+    let mut visited: HashSet<usize> = HashSet::default();
     let mut idx = start_idx;
     loop {
         if idx >= follow_idx || !visited.insert(idx) {

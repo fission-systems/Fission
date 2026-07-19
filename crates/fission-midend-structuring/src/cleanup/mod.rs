@@ -1,6 +1,7 @@
 use fission_midend_core::ir::{HirExpr, HirLValue, HirStmt, HirSwitchCase, NirType};
 use fission_midend_core::util::label_cleanup as core_labels;
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 
 mod goto;
@@ -136,7 +137,7 @@ pub fn orphan_goto_labels(body: &[HirStmt]) -> Vec<String> {
 /// Collects the set of label names that are *declared* (i.e. `Label(name)`)
 /// anywhere in the body, recursing into nested statement blocks.
 fn collect_declared_labels(body: &[HirStmt]) -> HashSet<String> {
-    let mut declared = HashSet::new();
+    let mut declared = HashSet::default();
     for stmt in body {
         collect_stmt_declared_labels(stmt, &mut declared);
     }
@@ -194,7 +195,7 @@ fn collect_stmt_declared_labels(stmt: &HirStmt, declared: &mut HashSet<String>) 
 
 pub fn cleanup_redundant_labels(
     body: Vec<HirStmt>,
-    global_refs: Option<&HashSet<String>>,
+    global_refs: Option<&std::collections::HashSet<String>>,
 ) -> Vec<HirStmt> {
     core_labels::cleanup_redundant_labels(body, global_refs)
 }
@@ -240,7 +241,7 @@ pub fn canonicalize_top_level_forward_label_aliases(
 fn top_level_forward_label_aliases_with_ranges(
     body: &[HirStmt],
 ) -> (HashMap<String, String>, Vec<(usize, usize)>) {
-    let mut aliases = HashMap::new();
+    let mut aliases = HashMap::default();
     let mut ranges = Vec::new();
     let mut idx = 0usize;
     while idx < body.len() {
@@ -283,7 +284,7 @@ fn is_top_level_forward_alias_segment(segment: &[HirStmt], next_label: &str) -> 
 }
 
 fn adjacent_label_aliases(body: &[HirStmt]) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
+    let mut aliases = HashMap::default();
     let mut idx = 0usize;
     while idx < body.len() {
         let HirStmt::Label(_) = &body[idx] else {
@@ -312,7 +313,7 @@ fn adjacent_label_aliases(body: &[HirStmt]) -> HashMap<String, String> {
 
 fn canonicalize_label(label: &str, aliases: &HashMap<String, String>) -> String {
     let mut current = label.to_string();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     while let Some(next) = aliases.get(&current) {
         if !seen.insert(current.clone()) {
             break;
@@ -395,7 +396,7 @@ fn rewrite_stmt_label(stmt: HirStmt, aliases: &HashMap<String, String>) -> HirSt
 }
 
 fn collect_referenced_labels(body: &[HirStmt]) -> HashSet<String> {
-    let mut referenced = HashSet::new();
+    let mut referenced = HashSet::default();
     for stmt in body {
         collect_stmt_referenced_labels(stmt, &mut referenced);
     }
@@ -403,7 +404,7 @@ fn collect_referenced_labels(body: &[HirStmt]) -> HashSet<String> {
 }
 
 pub fn collect_referenced_label_counts(body: &[HirStmt]) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
+    let mut counts = HashMap::default();
     for stmt in body {
         collect_stmt_referenced_label_counts(stmt, &mut counts);
     }

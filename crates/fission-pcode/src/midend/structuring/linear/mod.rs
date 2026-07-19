@@ -63,7 +63,7 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(cached) = &self.jump_targets_cache {
             return Ok(cached.clone());
         }
-        let mut targets = HashSet::new();
+        let mut targets = HashSet::default();
         for idx in 0..self.pcode.blocks.len() {
             for succ in &self.successors[idx] {
                 targets.insert(self.block_target_key(*succ));

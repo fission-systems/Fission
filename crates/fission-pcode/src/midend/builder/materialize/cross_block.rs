@@ -1,7 +1,6 @@
 use super::contracts::*;
 use super::*;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 
 impl<'a> PreviewBuilder<'a> {
     fn best_prior_definition_for_missing_pred(
@@ -149,7 +148,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(0);
         }
         let mut queue = std::collections::VecDeque::from([(start_idx, 0usize)]);
-        let mut visited = HashSet::from([start_idx]);
+        let mut visited = [start_idx].into_iter().collect::<HashSet<_>>();
         while let Some((idx, distance)) = queue.pop_front() {
             if let Some(succs) = self.successors.get(idx) {
                 for succ in succs {
@@ -168,7 +167,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn nearest_forward_join_block(&self, start_idx: usize) -> Option<(usize, usize)> {
         let mut queue = std::collections::VecDeque::from([(start_idx, 0usize)]);
-        let mut visited = HashSet::from([start_idx]);
+        let mut visited = [start_idx].into_iter().collect::<HashSet<_>>();
         while let Some((idx, distance)) = queue.pop_front() {
             if distance > 0 && self.predecessors.get(idx).map_or(0, Vec::len) > 1 {
                 return Some((idx, distance));
@@ -202,8 +201,8 @@ impl<'a> PreviewBuilder<'a> {
             return Some(vec![start_idx]);
         }
         let mut queue = std::collections::VecDeque::from([start_idx]);
-        let mut parents = std::collections::HashMap::new();
-        let mut visited = HashSet::from([start_idx]);
+        let mut parents: HashMap<usize, usize> = HashMap::default();
+        let mut visited = [start_idx].into_iter().collect::<HashSet<_>>();
         while let Some(idx) = queue.pop_front() {
             if let Some(succs) = self.successors.get(idx) {
                 for succ in succs {
@@ -1128,7 +1127,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let scan_started = diag.then(std::time::Instant::now);
         let mut lowered_candidate_count = 0usize;
-        let mut pending: HashMap<VarnodeKey, PendingMergeBinding> = HashMap::new();
+        let mut pending: HashMap<VarnodeKey, PendingMergeBinding> = HashMap::default();
         for pred_idx in predecessor_idxs {
             let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
                 continue;
@@ -1183,7 +1182,7 @@ impl<'a> PreviewBuilder<'a> {
                     incoming_value_kinds: proof.incoming_value_kinds.clone(),
                     incoming_values: join_proof.incoming_values.clone(),
                     rhs_kind: proof.rhs_kind,
-                    incoming_by_pred: HashMap::new(),
+                    incoming_by_pred: HashMap::default(),
                 });
                 entry
                     .incoming_by_pred

@@ -21,7 +21,8 @@ use crate::loops::{
 use crate::regions::{RegionKind, RegionProof};
 use crate::switch::try_lower_switch;
 use fission_midend_core::ir::{HirStmt, MlilPreviewError};
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 /// Collapse rule tags (Ghidra ActionStructureTransform analog).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,7 +196,7 @@ pub fn build_sese_region_body(
     }
 
     let targeted = host.collect_jump_targets()?;
-    let mut emitted_labels = HashSet::new();
+    let mut emitted_labels = HashSet::default();
     let follow_blocks = compute_follow_blocks(
         host.successors(),
         host.predecessors(),
@@ -206,7 +207,7 @@ pub fn build_sese_region_body(
     let mut active_child_map = child_map;
     active_child_map.retain(|&k, &mut (_, child_exit, _)| child_exit > k);
     let mut progress = true;
-    let mut tier1_failures: HashMap<usize, MlilPreviewError> = HashMap::new();
+    let mut tier1_failures: HashMap<usize, MlilPreviewError> = HashMap::default();
     let mut collapse_iterations = 0;
 
     while progress {
@@ -389,8 +390,8 @@ pub fn reconstruct_sese_final_body(
     host: &mut impl StructuringHost,
     entry: usize,
     exit: usize,
-    active_child_map: &std::collections::HashMap<usize, (Vec<HirStmt>, usize, crate::regions::RegionProof)>,
-    targeted: &std::collections::HashSet<u64>,
+    active_child_map: &HashMap<usize, (Vec<HirStmt>, usize, crate::regions::RegionProof)>,
+    targeted: &HashSet<u64>,
     diag: bool,
 ) -> Result<Vec<HirStmt>, MlilPreviewError> {
     use crate::cleanup::child_body_has_entry_label;
@@ -401,7 +402,7 @@ pub fn reconstruct_sese_final_body(
     use fission_midend_core::ir::HirSwitchCase;
 
     let mut graph = StructureGraph::default();
-    let mut emitted_labels = std::collections::HashSet::new();
+    let mut emitted_labels: HashSet<u64> = HashSet::default();
     let mut previous_node_id = None;
 
         let mut idx = entry;

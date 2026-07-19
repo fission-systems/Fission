@@ -15,7 +15,7 @@ use fission_midend_core::ir::{
     HirExpr, HirLValue, HirStmt, HirSwitchCase, MlilPreviewError, NirType,
 };
 use fission_midend_core::negate_expr;
-use std::collections::HashSet;
+use crate::HashSet;
 
 // ---------------------------------------------------------------------------
 // Loop-context-aware break/continue rewriting
@@ -96,8 +96,8 @@ fn rewrite_loop_control_gotos_with_stack(
             HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 stats.skipped_nested_scope_count += 1;
                 stack.push(ScopeFrame::Loop {
-                    continue_labels: std::collections::HashSet::new(),
-                    break_labels: std::collections::HashSet::new(),
+                    continue_labels: std::collections::HashSet::default(),
+                    break_labels: std::collections::HashSet::default(),
                 });
                 rewrite_loop_control_gotos_with_stack(body, stack, stats);
                 stack.pop();
@@ -105,8 +105,8 @@ fn rewrite_loop_control_gotos_with_stack(
             HirStmt::For { body, .. } => {
                 stats.skipped_nested_scope_count += 1;
                 stack.push(ScopeFrame::Loop {
-                    continue_labels: std::collections::HashSet::new(),
-                    break_labels: std::collections::HashSet::new(),
+                    continue_labels: std::collections::HashSet::default(),
+                    break_labels: std::collections::HashSet::default(),
                 });
                 rewrite_loop_control_gotos_with_stack(body, stack, stats);
                 stack.pop();
@@ -114,7 +114,7 @@ fn rewrite_loop_control_gotos_with_stack(
             HirStmt::Switch { cases, default, .. } => {
                 stats.skipped_nested_scope_count += 1;
                 stack.push(ScopeFrame::Switch {
-                    break_labels: std::collections::HashSet::new(),
+                    break_labels: std::collections::HashSet::default(),
                 });
                 for case in cases {
                     rewrite_loop_control_gotos_with_stack(&mut case.body, stack, stats);
@@ -139,11 +139,11 @@ fn rewrite_loop_control_gotos_in_stmts(
     break_label: Option<&str>,
     stats: &mut LoopControlRewriteStats,
 ) {
-    let mut continue_labels = std::collections::HashSet::new();
+    let mut continue_labels = std::collections::HashSet::default();
     if let Some(cl) = continue_label {
         continue_labels.insert(cl.to_string());
     }
-    let mut break_labels = std::collections::HashSet::new();
+    let mut break_labels = std::collections::HashSet::default();
     if let Some(bl) = break_label {
         break_labels.insert(bl.to_string());
     }
@@ -206,7 +206,7 @@ fn collect_defined_labels(stmts: &[HirStmt], labels: &mut HashSet<String>) {
 }
 
 fn has_goto_to_undefined_label(stmts: &[HirStmt]) -> bool {
-    let mut labels = HashSet::new();
+    let mut labels = HashSet::default();
     collect_defined_labels(stmts, &mut labels);
     stmts_have_goto_to_undefined_label(stmts, &labels)
 }
@@ -631,7 +631,7 @@ pub fn lower_do_while_region(host: &mut impl StructuringHost,
     ) -> Result<Option<(Vec<HirStmt>, HirExpr, usize, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
         let mut idx = start_idx;
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         let mut path = Vec::new();
         let (cond_idx, exit_idx) = loop {
             if host.sese_region_proof_budget_exceeded() {
@@ -1020,13 +1020,13 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
         };
 
         let mut result_stmts: Vec<HirStmt> = Vec::new();
-        let mut emitted_labels: HashSet<u64> = HashSet::new();
+        let mut emitted_labels: HashSet<u64> = HashSet::default();
         // Addresses within body_set that must have a label emitted regardless of `targeted`.
         // Pre-populated by scanning:
         //   (a) terminator_cache for already-lowered terminators, and
         //   (b) raw CFG successors (always available) for body-internal edges.
         // This handles both forward and backward jump references before blocks are lowered.
-        let mut force_labels: HashSet<u64> = HashSet::new();
+        let mut force_labels: HashSet<u64> = HashSet::default();
         {
             let body_addrs: HashSet<u64> = body_set
                 .iter()
@@ -1277,12 +1277,12 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                 } else if let Some(ref bstr) = break_addr.map(block_label) {
                     std::iter::once(bstr.clone()).collect()
                 } else {
-                    std::collections::HashSet::new()
+                    std::collections::HashSet::default()
                 }
             } else if let Some(ref bstr) = break_addr.map(block_label) {
                 std::iter::once(bstr.clone()).collect()
             } else {
-                std::collections::HashSet::new()
+                std::collections::HashSet::default()
             }
         };
         let mut stats = LoopControlRewriteStats::default();

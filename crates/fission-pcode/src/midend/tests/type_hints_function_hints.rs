@@ -36,18 +36,18 @@ fn preview_type_hints_rename_params_from_function_hints() {
     };
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: HashMap::default(),
+        call_target_refs: HashMap::default(),
+        iat_target_refs: HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: HashMap::default(),
+        call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["hwnd".to_string(), "lpRect".to_string()],
-            param_type_names: HashMap::new(),
-            stack_local_names: HashMap::new(),
-            stack_local_type_names: HashMap::new(),
+            param_type_names: HashMap::default(),
+            stack_local_names: HashMap::default(),
+            stack_local_type_names: HashMap::default(),
             return_type_name: Some("BOOL".to_string()),
         }),
     };
@@ -97,18 +97,18 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
     };
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: HashMap::default(),
+        call_target_refs: HashMap::default(),
+        iat_target_refs: HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: HashMap::default(),
+        call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
-            param_type_names: HashMap::new(),
+            param_type_names: HashMap::default(),
             stack_local_names: HashMap::from([(-0x20, "rect".to_string())]),
-            stack_local_type_names: HashMap::new(),
+            stack_local_type_names: HashMap::default(),
             return_type_name: None,
         }),
     };
@@ -156,18 +156,18 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
     };
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: HashMap::default(),
+        call_target_refs: HashMap::default(),
+        iat_target_refs: HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: HashMap::default(),
+        call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::from([(0, "HWND".to_string()), (1, "LPRECT".to_string())]),
-            stack_local_names: HashMap::new(),
-            stack_local_type_names: HashMap::new(),
+            stack_local_names: HashMap::default(),
+            stack_local_type_names: HashMap::default(),
             return_type_name: None,
         }),
     };
@@ -207,16 +207,16 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
     };
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: HashMap::default(),
+        call_target_refs: HashMap::default(),
+        iat_target_refs: HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: HashMap::default(),
+        call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
-            param_type_names: HashMap::new(),
+            param_type_names: HashMap::default(),
             stack_local_names: HashMap::from([(-0x20, "rect".to_string())]),
             stack_local_type_names: HashMap::from([(-0x20, "RECT".to_string())]),
             return_type_name: None,
@@ -245,18 +245,18 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
     };
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: HashMap::default(),
+        call_target_refs: HashMap::default(),
+        iat_target_refs: HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: HashMap::default(),
+        call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
-            param_type_names: HashMap::new(),
-            stack_local_names: HashMap::new(),
-            stack_local_type_names: HashMap::new(),
+            param_type_names: HashMap::default(),
+            stack_local_names: HashMap::default(),
+            stack_local_type_names: HashMap::default(),
             return_type_name: Some("BOOL".to_string()),
         }),
     };
@@ -317,18 +317,18 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
     };
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: HashMap::default(),
+        call_target_refs: HashMap::default(),
+        iat_target_refs: HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: HashMap::default(),
+        call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["a".to_string(), "b".to_string()],
             param_type_names: HashMap::from([(0, "int".to_string()), (1, "int".to_string())]),
-            stack_local_names: HashMap::new(),
-            stack_local_type_names: HashMap::new(),
+            stack_local_names: HashMap::default(),
+            stack_local_type_names: HashMap::default(),
             return_type_name: Some("int".to_string()),
         }),
     };
@@ -354,18 +354,18 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
     };
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: HashMap::default(),
+        call_target_refs: HashMap::default(),
+        iat_target_refs: HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: HashMap::default(),
+        call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["param_1".to_string()],
             param_type_names: HashMap::from([(0, "_func_5014 *".to_string())]),
-            stack_local_names: HashMap::new(),
-            stack_local_type_names: HashMap::new(),
+            stack_local_names: HashMap::default(),
+            stack_local_type_names: HashMap::default(),
             return_type_name: Some("int".to_string()),
         }),
     };
@@ -437,8 +437,8 @@ fn preview_type_hints_explicit_function_types_override_derived_aliases() {
     context.function_hints = Some(PreviewFunctionHints {
         param_names: Vec::new(),
         param_type_names: HashMap::from([(1, "MY_RECT_PTR".to_string())]),
-        stack_local_names: HashMap::new(),
-        stack_local_type_names: HashMap::new(),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
         return_type_name: None,
     });
 

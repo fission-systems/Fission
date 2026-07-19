@@ -1,7 +1,8 @@
 //! Structuring admission gate and budget decisions.
 
 use fission_midend_core::ir::*;
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

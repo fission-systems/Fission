@@ -20,7 +20,7 @@ type CspecCache = HashMap<PathBuf, Option<CspecDocument>>;
 static CSPEC_CACHE: OnceLock<std::sync::Mutex<CspecCache>> = OnceLock::new();
 
 fn global_cache() -> &'static std::sync::Mutex<CspecCache> {
-    CSPEC_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+    CSPEC_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::default()))
 }
 
 /// Load and cache a `.cspec` document by absolute path.

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, usize> {
-    let mut address_to_index = HashMap::new();
+    let mut address_to_index = HashMap::default();
     for (idx, block) in pcode.blocks.iter().enumerate() {
         address_to_index.entry(block.start_address).or_insert(idx);
     }
@@ -11,7 +11,7 @@ pub(super) fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, 
 const DUPLICATE_BLOCK_KEY_TAG: u64 = 0x8000_0000_0000_0000;
 
 pub(super) fn build_block_target_keys(pcode: &PcodeFunction) -> Vec<u64> {
-    let mut seen = HashMap::<u64, u32>::new();
+    let mut seen: HashMap<u64, u32> = HashMap::default();
     pcode
         .blocks
         .iter()

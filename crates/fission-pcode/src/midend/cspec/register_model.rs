@@ -21,7 +21,7 @@ static REGISTER_MODEL_CACHE: OnceLock<RwLock<HashMap<String, Arc<RegisterModel>>
     OnceLock::new();
 
 fn model_cache() -> &'static RwLock<HashMap<String, Arc<RegisterModel>>> {
-    REGISTER_MODEL_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+    REGISTER_MODEL_CACHE.get_or_init(|| RwLock::new(HashMap::default()))
 }
 
 /// SLA register table for one Ghidra `language_id`.
@@ -89,11 +89,11 @@ impl RegisterModel {
     }
 
     pub fn build_from_parsed(parsed: &[ParsedRegister]) -> Self {
-        let mut by_offset = HashMap::new();
+        let mut by_offset = HashMap::default();
         let mut name_index = SlaRegisterMap::new();
-        let mut family_keys: HashMap<u64, usize> = HashMap::new();
-        let mut family_by_name = HashMap::new();
-        let mut family_repr: HashMap<usize, (u64, u32)> = HashMap::new();
+        let mut family_keys: HashMap<u64, usize> = HashMap::default();
+        let mut family_by_name = HashMap::default();
+        let mut family_repr: HashMap<usize, (u64, u32)> = HashMap::default();
         let mut next_family = 0usize;
 
         for reg in parsed {

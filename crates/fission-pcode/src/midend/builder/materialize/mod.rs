@@ -98,7 +98,7 @@ impl<'a> PreviewBuilder<'a> {
         fn visit(this: &mut PreviewBuilder<'_>, expr: &HirExpr) {
             match expr {
                 HirExpr::Load { ptr, .. } => {
-                    let mut ptr_vars = HashSet::new();
+                    let mut ptr_vars = HashSet::default();
                     PreviewBuilder::collect_var_names_in_expr(ptr, &mut ptr_vars);
                     this.load_address_bindings.extend(ptr_vars);
                     visit(this, ptr);
@@ -500,7 +500,7 @@ impl<'a> PreviewBuilder<'a> {
                     // later cmov in the same block.
                     let site = LoweringSite { block_idx, op_idx };
                     let cond = self.with_lowering_site(site, |this| {
-                        this.lower_varnode(&op.inputs[1], &mut HashSet::new())
+                        this.lower_varnode(&op.inputs[1], &mut HashSet::default())
                     })?;
                     let inverted_cond = HirExpr::Unary {
                         op: HirUnaryOp::Not,
@@ -552,7 +552,7 @@ impl<'a> PreviewBuilder<'a> {
             let maybe_stmt = self.with_lowering_site(
                 site,
                 |this| -> Result<Option<HirStmt>, MlilPreviewError> {
-                    let mut visiting = HashSet::new();
+                    let mut visiting = HashSet::default();
                     match op.opcode {
                         PcodeOpcode::Store => {
                             if op.inputs.len() < 3 {
@@ -586,7 +586,7 @@ impl<'a> PreviewBuilder<'a> {
                             } else {
                                 HirLValue::Deref {
                                     ptr: Box::new(
-                                        this.lower_varnode(&op.inputs[1], &mut HashSet::new())
+                                        this.lower_varnode(&op.inputs[1], &mut HashSet::default())
                                             .map_err(|err| {
                                                 this.debug_lowering_error(
                                                     "store_ptr",
@@ -619,7 +619,7 @@ impl<'a> PreviewBuilder<'a> {
                             {
                                 expr
                             } else {
-                                this.lower_varnode(&op.inputs[2], &mut HashSet::new())
+                                this.lower_varnode(&op.inputs[2], &mut HashSet::default())
                                     .map_err(|err| {
                                         this.debug_lowering_error(
                                             "store_rhs",
@@ -2149,7 +2149,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let mut incoming = Vec::new();
         for pred in predecessors {
-            let mut visiting = HashSet::new();
+            let mut visiting = HashSet::default();
             match self.partial_gpr_incoming_expr_from_pred_path(
                 pred,
                 block_idx,
@@ -2612,7 +2612,7 @@ impl<'a> PreviewBuilder<'a> {
             return Err("missing_loop_exit_live_def");
         }
         let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
-        let mut visiting = HashSet::new();
+        let mut visiting = HashSet::default();
         if !self.pred_path_has_zero_accumulator_seed(
             external_pred,
             block_idx,
@@ -2987,7 +2987,7 @@ impl<'a> PreviewBuilder<'a> {
             .collect::<Vec<_>>();
         !incoming.is_empty()
             && incoming.into_iter().all(|pred| {
-                let mut visiting = HashSet::new();
+                let mut visiting = HashSet::default();
                 self.pred_path_has_zero_accumulator_seed(
                     pred,
                     header_idx,
@@ -3018,7 +3018,7 @@ impl<'a> PreviewBuilder<'a> {
             .collect::<Vec<_>>();
         !incoming.is_empty()
             && incoming.into_iter().all(|pred| {
-                let mut visiting = HashSet::new();
+                let mut visiting = HashSet::default();
                 self.pred_path_has_external_live_accumulator_def(
                     pred,
                     header_idx,
@@ -3268,7 +3268,7 @@ impl<'a> PreviewBuilder<'a> {
         conservative_mem_check: bool,
     ) -> bool {
         let body = loop_body.body.iter().copied().collect::<HashSet<_>>();
-        let mut visiting = HashSet::new();
+        let mut visiting = HashSet::default();
         self.pred_path_has_live_accumulator_def_inner(
             pred_idx,
             target_idx,
@@ -3648,7 +3648,7 @@ impl<'a> PreviewBuilder<'a> {
         if !is_materializable_output_opcode(op.opcode) {
             return Ok(None);
         }
-        let rhs = match self.lower_def_op(op, &mut HashSet::new()) {
+        let rhs = match self.lower_def_op(op, &mut HashSet::default()) {
             Ok(rhs) => rhs,
             Err(err)
                 if matches!(

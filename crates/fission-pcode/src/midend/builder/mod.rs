@@ -7,7 +7,6 @@
 pub(super) use super::support::*;
 use super::*;
 use indexmap::IndexMap;
-use std::collections::HashMap;
 mod state;
 pub(super) use state::PreviewBuilder;
 

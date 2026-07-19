@@ -2,7 +2,7 @@
 
 use fission_midend_core::ir::{HirExpr, HirStmt};
 use crate::regions::{RegionKind, RegionLegality, RegionRejectionReason};
-use std::collections::HashMap;
+use crate::HashMap;
 
 pub fn guarded_tail_call_target_is_known_pure_helper(target: &str) -> bool {
     matches!(target, "__carry" | "__scarry" | "__sborrow" | "__popcount")

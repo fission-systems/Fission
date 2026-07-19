@@ -16,7 +16,8 @@ use crate::linear_types::{
 use crate::cfg_analysis::PostDomTree;
 use fission_midend_core::ir::{HirExpr, HirStmt, MlilPreviewError};
 use fission_midend_core::negate_expr;
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 pub fn has_linear_body_cache(host: &impl StructuringHost, start_idx: usize, exit: LinearExit) -> bool {
         host.linear_body_cache_get(&LinearBodyCacheKey {
@@ -165,7 +166,7 @@ pub fn lower_linear_body_with_depth_detailed(host: &mut impl StructuringHost,
         }
 
         let mut idx = start_idx;
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         let mut body = Vec::new();
 
         loop {
@@ -386,7 +387,7 @@ pub fn shared_exit_for_indices(host: &mut impl StructuringHost,
             return Ok(None);
         }
 
-        let mut exits_set = std::collections::HashSet::new();
+        let mut exits_set: HashSet<usize> = HashSet::default();
         for idx in indices {
             exits_set.insert(*idx);
         }
@@ -425,7 +426,7 @@ pub fn linear_exit_with_budget(host: &mut impl StructuringHost,
             return Ok(None);
         }
         let result =
-            linear_exit_from(host, start_idx, &mut HashSet::new(), 0, budget.as_deref_mut())?;
+            linear_exit_from(host, start_idx, &mut HashSet::default(), 0, budget.as_deref_mut())?;
         let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
         if should_cache {
             host.linear_exit_cache_insert(start_idx, result);
@@ -914,7 +915,7 @@ pub fn collect_local_recovery_window_nodes(host: &impl StructuringHost,
         false_start_idx: usize,
         join_idx: usize,
     ) -> Result<(HashSet<usize>, bool), ConditionalTailMismatchSubtype> {
-        let mut nodes = HashSet::new();
+        let mut nodes = HashSet::default();
         let mut reached_beyond = false;
         for start_idx in [true_start_idx, false_start_idx] {
             if start_idx <= origin_idx {
@@ -990,8 +991,8 @@ pub fn window_contains_cycle(host: &impl StructuringHost, window: &HashSet<usize
     }
 
     let successors = host.successors();
-    let mut visiting = HashSet::new();
-    let mut visited = HashSet::new();
+    let mut visiting = HashSet::default();
+    let mut visited = HashSet::default();
     for node in window {
         if !visited.contains(node)
             && dfs(successors, *node, window, &mut visiting, &mut visited)
@@ -1061,7 +1062,7 @@ pub fn collect_region_trivial_forward_chain(host: &impl StructuringHost,
         let mut chain = vec![start_idx];
         let mut current = start_idx;
         let mut steps = 0usize;
-        let mut seen = HashSet::from([start_idx]);
+        let mut seen = [start_idx].into_iter().collect::<HashSet<_>>();
         while current != join_idx && steps < MAX_REGION_SHARED_TAIL_STEPS {
             if host.successors()[current].len() != 1 {
                 break;
@@ -1104,7 +1105,7 @@ pub fn canonicalize_region_target_for_exit(host: &impl StructuringHost,
         }
         let mut current = target_idx;
         let mut steps = 0usize;
-        let mut visited = HashSet::from([target_idx]);
+        let mut visited = [target_idx].into_iter().collect::<HashSet<_>>();
         loop {
             if let LinearExit::Join(join_idx) = exit {
                 if current == join_idx {

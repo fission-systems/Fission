@@ -1,5 +1,6 @@
 use super::*;
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TraceDagError {
@@ -45,8 +46,8 @@ impl<'a> TraceDag<'a> {
             dom_tree,
             branch_points: Vec::new(),
             traces: Vec::new(),
-            active_traces: HashSet::new(),
-            node_visit_counts: HashMap::new(),
+            active_traces: HashSet::default(),
+            node_visit_counts: HashMap::default(),
         }
     }
 

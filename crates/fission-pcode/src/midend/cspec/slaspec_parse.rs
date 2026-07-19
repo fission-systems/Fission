@@ -41,7 +41,7 @@ fn expand_entry_spec(entry_spec: &Path) -> Result<ExpandedSpec> {
         root_dir,
         defines: BTreeMap::new(),
         lines: Vec::new(),
-        seen_files: HashSet::new(),
+        seen_files: HashSet::default(),
     };
     state.expand_file(entry_spec)?;
     Ok(ExpandedSpec {

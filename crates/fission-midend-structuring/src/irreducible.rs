@@ -306,7 +306,7 @@ pub fn compute_fas_virtual_gotos(
 
         // Greedily select edges until the component is acyclic.
         let mut removed_edges: std::collections::HashSet<(usize, usize)> =
-            std::collections::HashSet::new();
+            std::collections::HashSet::default();
 
         for edge in &candidate_edges {
             if !component_has_cycle(&component_set, successors, &removed_edges) {
@@ -344,8 +344,8 @@ fn component_has_cycle(
     removed_edges: &std::collections::HashSet<(usize, usize)>,
 ) -> bool {
     // DFS-based cycle detection on the component subgraph.
-    let mut visited = std::collections::HashSet::new();
-    let mut on_stack = std::collections::HashSet::new();
+    let mut visited = std::collections::HashSet::default();
+    let mut on_stack = std::collections::HashSet::default();
 
     fn dfs(
         node: usize,

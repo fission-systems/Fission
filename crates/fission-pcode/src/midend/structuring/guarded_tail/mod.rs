@@ -81,7 +81,7 @@ mod tests {
         builder.successors = successors.clone();
         builder.predecessors = build_predecessor_index_map(&successors);
 
-        let targeted = HashSet::from([builder.block_target_key(1)]);
+        let targeted = [builder.block_target_key(1)].into_iter().collect::<HashSet<_>>();
         let result = builder.is_minimal_structured_promotion_candidate(0, 3, &targeted);
         assert!(result.is_ok());
     }
@@ -96,7 +96,7 @@ mod tests {
         builder.successors = successors.clone();
         builder.predecessors = build_predecessor_index_map(&successors);
 
-        let targeted = HashSet::from([builder.block_target_key(1)]);
+        let targeted = [builder.block_target_key(1)].into_iter().collect::<HashSet<_>>();
         let result = builder.is_minimal_structured_promotion_candidate(0, 3, &targeted);
         assert_eq!(result, Err(PromotionGateRejection::NotSinglePredSucc));
     }

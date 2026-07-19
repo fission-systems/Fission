@@ -396,7 +396,7 @@ impl<'a> PreviewBuilder<'a> {
             return true;
         }
         let mut stack = vec![start_idx];
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         while let Some(idx) = stack.pop() {
             if !visited.insert(idx) {
                 continue;

@@ -79,7 +79,7 @@ pub fn global_ldefs_index(languages_root: &Path) -> &'static LdefsIndex {
 
 /// Scan `languages_root` for all `.ldefs` files and return the full index.
 pub fn build_ldefs_index(languages_root: &Path) -> LdefsIndex {
-    let mut index = HashMap::new();
+    let mut index = HashMap::default();
     if let Ok(entries) = std::fs::read_dir(languages_root) {
         for entry in entries.flatten() {
             let dir = entry.path();
@@ -92,7 +92,7 @@ pub fn build_ldefs_index(languages_root: &Path) -> LdefsIndex {
 }
 
 pub fn build_language_slaspec_index(languages_root: &Path) -> LanguageSlaspecIndex {
-    let mut index = HashMap::new();
+    let mut index = HashMap::default();
     if let Ok(entries) = std::fs::read_dir(languages_root) {
         for entry in entries.flatten() {
             let dir = entry.path();
@@ -289,7 +289,7 @@ mod tests {
 
         use std::path::PathBuf;
         let dir = PathBuf::from("/tmp/AARCH64");
-        let mut index = HashMap::new();
+        let mut index = HashMap::default();
         parse_ldefs_into_index(xml, &dir, &mut index);
 
         let key_default = ("AARCH64:LE:64:v8A".to_string(), "default".to_string());
@@ -327,7 +327,7 @@ mod tests {
 
         use std::path::PathBuf;
         let dir = PathBuf::from("/tmp/x86");
-        let mut index = HashMap::new();
+        let mut index = HashMap::default();
         parse_ldefs_into_index(xml, &dir, &mut index);
 
         assert_eq!(

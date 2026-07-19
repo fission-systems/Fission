@@ -1,5 +1,7 @@
 use fission_midend_core::ir::*;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+use crate::HashMap;
+use crate::HashSet;
 use super::cfg_analysis::{CfgAnalysis, EdgeClass};
 
 #[derive(Debug, Clone)]
@@ -23,7 +25,7 @@ impl LoopBody {
         cfg_analysis: &CfgAnalysis,
         irreducible_edges: &HashSet<(usize, usize)>,
     ) -> Vec<LoopBody> {
-        let mut loops: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut loops: HashMap<usize, Vec<usize>> = HashMap::default();
 
         // 1. Group all tails by their head
         for (&(tail, head), &class) in cfg_analysis.edge_classes() {
@@ -62,7 +64,7 @@ impl LoopBody {
         predecessors: &[Vec<usize>],
         irreducible_edges: &HashSet<(usize, usize)>,
     ) {
-        let mut marked = HashSet::new();
+        let mut marked = HashSet::default();
 
         self.body.push(self.head);
         marked.insert(self.head);
@@ -141,7 +143,7 @@ impl LoopBody {
         irreducible_edges: &HashSet<(usize, usize)>,
     ) {
         let body_set: HashSet<usize> = self.body.iter().copied().collect();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
 
         for &bl in &self.body {
             if bl >= successors.len() {
@@ -278,7 +280,7 @@ impl LoopBody {
         irreducible_edges: &HashSet<(usize, usize)>,
     ) {
         let mut marked_body: HashSet<usize> = self.body.iter().copied().collect();
-        let mut visit_counts: HashMap<usize, usize> = HashMap::new();
+        let mut visit_counts: HashMap<usize, usize> = HashMap::default();
 
         let mut i = 0;
         while i < self.body.len() {

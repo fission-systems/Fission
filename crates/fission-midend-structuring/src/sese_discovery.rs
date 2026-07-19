@@ -7,7 +7,8 @@ use crate::linear_recovery::build_linear_sese_child_fallback;
 use crate::regions::{RegionKind, RegionProof};
 use crate::sese_driver::build_sese_region_body;
 use fission_midend_core::ir::{HirStmt, MlilPreviewError};
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeseRegion {
@@ -62,9 +63,9 @@ pub fn find_sese_regions(
                 continue;
             }
 
-            let mut members = HashSet::new();
+            let mut members = HashSet::default();
             let mut queue = vec![u];
-            let mut visited = HashSet::new();
+            let mut visited = HashSet::default();
             visited.insert(u);
             let mut reaches_exit = false;
 
@@ -195,7 +196,7 @@ pub fn sese_structure_region(
         }
     }
 
-    let mut child_map = HashMap::new();
+    let mut child_map = HashMap::default();
     for child in &region.children {
         if let Some(body) = results.get(&(child.entry, child.exit)) {
             let proof =
@@ -232,7 +233,7 @@ pub fn structure_cfg_via_sese(
     let regions = find_sese_regions(host.successors(), host.predecessors(), &dom, &postdom);
     let tree = build_sese_tree(regions, total_nodes);
 
-    let mut results = HashMap::new();
+    let mut results = HashMap::default();
     sese_structure_region(host, &tree.root, &mut results, total_nodes)?;
 
     Ok(results.remove(&(0, total_nodes)).unwrap_or_default())

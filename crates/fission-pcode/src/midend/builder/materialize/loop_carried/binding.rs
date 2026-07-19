@@ -180,7 +180,7 @@ impl<'a> PreviewBuilder<'a> {
             let mut names = BTreeSet::new();
             let mut complete = true;
             for pred_idx in external_preds {
-                let mut visiting = HashSet::new();
+                let mut visiting = HashSet::default();
                 if !self.collect_external_seed_names_on_path(
                     pred_idx,
                     block_idx,

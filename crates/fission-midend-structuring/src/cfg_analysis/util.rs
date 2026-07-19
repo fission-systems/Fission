@@ -1,7 +1,7 @@
 //! Shared helpers for dominators, postdominators, and graph walks.
 
 use fission_midend_core::fast_hash::FastMap as HashMap;
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Cooper et al.'s `intersect(b1, b2)`: walk both fingers up the idom tree
 /// (guided by RPO numbers) until they meet.  Returns the LCA node.
@@ -112,7 +112,7 @@ pub fn nearest_common_from_sets(
 }
 
 pub fn reachable_from(root: usize, successors: &[Vec<usize>]) -> HashSet<usize> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if node >= successors.len() || !seen.insert(node) {
@@ -126,7 +126,7 @@ pub fn reachable_from(root: usize, successors: &[Vec<usize>]) -> HashSet<usize> 
 }
 
 pub fn reverse_reachable_from(exit: usize, predecessors: &[Vec<usize>]) -> HashSet<usize> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut stack = vec![exit];
     while let Some(node) = stack.pop() {
         if node >= predecessors.len() || !seen.insert(node) {
@@ -151,7 +151,7 @@ pub fn compute_dominator_sets(
 
     for node in sorted_nodes.iter().copied() {
         if node == root {
-            dom.insert(node, HashSet::from([root]));
+            dom.insert(node, [root].into_iter().collect::<HashSet<_>>());
         } else {
             dom.insert(node, nodes.clone());
         }
@@ -173,7 +173,7 @@ pub fn compute_dominator_sets(
                 .filter(|pred| nodes.contains(pred))
                 .collect::<Vec<_>>();
             if in_component_preds.is_empty() {
-                dom.insert(node, HashSet::from([node]));
+                dom.insert(node, [node].into_iter().collect::<HashSet<_>>());
                 continue;
             }
             let mut intersection = dom
@@ -207,7 +207,7 @@ pub fn compute_postdominator_sets_for_exit(
 
     for node in sorted_nodes.iter().copied() {
         if node == exit {
-            postdom.insert(node, HashSet::from([exit]));
+            postdom.insert(node, [exit].into_iter().collect::<HashSet<_>>());
         } else {
             postdom.insert(node, nodes.clone());
         }
@@ -229,7 +229,7 @@ pub fn compute_postdominator_sets_for_exit(
                 .filter(|succ| nodes.contains(succ))
                 .collect::<Vec<_>>();
             if in_component_succs.is_empty() {
-                postdom.insert(node, HashSet::from([node]));
+                postdom.insert(node, [node].into_iter().collect::<HashSet<_>>());
                 continue;
             }
             let mut intersection = postdom

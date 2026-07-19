@@ -138,7 +138,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn extract_subpiece_origin(&self, vn: &Varnode) -> Option<SubpieceOrigin> {
-        self.extract_subpiece_origin_inner(vn, &mut HashSet::new())
+        self.extract_subpiece_origin_inner(vn, &mut HashSet::default())
     }
 
     fn extract_subpiece_origin_inner(

@@ -11,7 +11,21 @@
 // Bridge imports used by child owners via `super::…` (historical shared prelude).
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 #[allow(unused_imports)]
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+// Fixed-seed hasher for HashMap/HashSet across builder/materialize/structuring.
+// std's default RandomState draws a fresh per-process seed, so any unsorted
+// iteration over one of these collections (a `.first()`/`.find_map()` pick
+// among multiple valid candidates) produced run-to-run-varying materialize
+// order and synthetic temp naming on the same binary -- a determinism
+// violation (Core Rule 4). FxBuildHasher is deterministic across runs, same
+// hasher already used for `BuilderCacheMap`/`BuilderCacheSet`. This does not
+// replace fixing individual unordered-pick call sites (see
+// `region_external_exit_nodes`, `current_explicit_merge_binding_expr`) when
+// found -- it closes the remaining, not-yet-individually-identified sources.
+#[allow(unused_imports)]
+pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+#[allow(unused_imports)]
+pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHasher>;
 #[allow(unused_imports)]
 use std::time::Instant;
 

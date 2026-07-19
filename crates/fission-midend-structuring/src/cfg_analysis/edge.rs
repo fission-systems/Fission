@@ -2,7 +2,7 @@
 
 use super::dom::DomTree;
 use fission_midend_core::fast_hash::FastMap as HashMap;
-use std::collections::HashSet;
+use crate::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EdgeClass {

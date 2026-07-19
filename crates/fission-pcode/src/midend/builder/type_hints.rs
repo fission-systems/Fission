@@ -39,7 +39,7 @@ pub(super) fn apply_preview_type_hints(
     let mut stats = apply_function_name_hints(func, context);
     let alias_collector = StackAliasCollector::new(func);
 
-    let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::new();
+    let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::default();
     collect_call_type_hints(&func.body, context, &mut pointer_hints);
 
     for (var_name, hint) in &pointer_hints {
@@ -60,7 +60,7 @@ pub(super) fn apply_preview_type_hints(
         }
     }
 
-    let mut local_hints: HashMap<String, String> = HashMap::new();
+    let mut local_hints: HashMap<String, String> = HashMap::default();
     collect_local_surface_hints(
         &func.body,
         &pointer_hints,

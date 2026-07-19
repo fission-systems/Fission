@@ -28,7 +28,8 @@ use crate::linear_types::{
 };
 use crate::loop_analysis::LoopBody;
 use fission_midend_core::ir::{HirExpr, HirStmt, MlilPreviewError, MlilPreviewOptions};
-use std::collections::{HashMap, HashSet};
+use crate::HashMap;
+use crate::HashSet;
 
 /// Context required by free-function structuring algorithms.
 pub trait StructuringHost {

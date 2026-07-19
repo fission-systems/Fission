@@ -17,7 +17,7 @@ use fission_midend_core::ir::{
 };
 use fission_midend_core::wave_stats;
 use fission_midend_core::{strip_casts, SWITCH_FALLTHROUGH_SENTINEL};
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// Soft budget for compare-chain switch parsing steps.
 pub const SWITCH_CHAIN_PARSE_BUDGET_MAX: usize = 16;
@@ -47,7 +47,7 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
             host.bump_switch_emit_ready_failed();
             return Ok(None);
         }
-        let mut seen_case_values = HashSet::new();
+        let mut seen_case_values = HashSet::default();
         if !parsed
             .cases
             .iter()
@@ -66,7 +66,7 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
             return Ok(None);
         };
 
-        let mut case_targets = std::collections::HashSet::new();
+        let mut case_targets = std::collections::HashSet::default();
         for case_idx in &exits {
             case_targets.insert(*case_idx);
         }
@@ -162,7 +162,7 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
             return Ok(None);
         }
 
-        let mut seen_case_values = HashSet::new();
+        let mut seen_case_values = HashSet::default();
         if !case_values
             .iter()
             .all(|(value, _)| seen_case_values.insert(*value))
@@ -193,7 +193,7 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
             return Ok(None);
         };
 
-        let mut case_targets = std::collections::HashSet::new();
+        let mut case_targets = std::collections::HashSet::default();
         for case_idx in &exits {
             case_targets.insert(*case_idx);
         }
@@ -277,7 +277,7 @@ pub fn parse_switch_chain(host: &mut impl StructuringHost,
         let mut cases = Vec::new();
         let mut guarded_default_idx: Option<usize> = None;
         let mut saw_range_guard = false;
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         let max_chain_steps = host
             .successors()
             .len()
@@ -427,7 +427,7 @@ pub fn parse_switch_chain(host: &mut impl StructuringHost,
 pub fn canonicalize_switch_target(host: &impl StructuringHost, start_idx: usize) -> usize {
         const MAX_SWITCH_TARGET_CANON_STEPS: usize = 32;
         let mut current = start_idx;
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         for _ in 0..MAX_SWITCH_TARGET_CANON_STEPS {
             if !visited.insert(current) {
                 break;

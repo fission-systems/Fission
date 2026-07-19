@@ -680,18 +680,18 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
     normalize_hir_function(&mut func);
 
     let context = PreviewTypeContext {
-        call_targets: HashMap::new(),
-        call_target_refs: HashMap::new(),
-        iat_target_refs: HashMap::new(),
+        call_targets: std::collections::HashMap::default(),
+        call_target_refs: std::collections::HashMap::default(),
+        iat_target_refs: std::collections::HashMap::default(),
         ambiguous_call_targets: Default::default(),
-        call_effect_summaries: HashMap::new(),
-        call_prototype_summaries: HashMap::new(),
+        call_effect_summaries: std::collections::HashMap::default(),
+        call_prototype_summaries: std::collections::HashMap::default(),
         call_param_rules: Vec::new(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
-            param_type_names: HashMap::new(),
-            stack_local_names: HashMap::from([(-0x20, "base_ptr".to_string())]),
-            stack_local_type_names: HashMap::from([(-0x20, "RECT".to_string())]),
+            param_type_names: std::collections::HashMap::default(),
+            stack_local_names: [(-0x20, "base_ptr".to_string())].into_iter().collect::<std::collections::HashMap<_,_>>(),
+            stack_local_type_names: [(-0x20, "RECT".to_string())].into_iter().collect::<std::collections::HashMap<_,_>>(),
             return_type_name: None,
         }),
     };

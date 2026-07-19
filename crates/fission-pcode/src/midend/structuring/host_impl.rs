@@ -44,10 +44,10 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn fas_virtual_edges_mut(&mut self) -> &mut Vec<(usize, usize)> {
         &mut self.fas_virtual_edges
     }
-    fn irreducible_edges(&self) -> &std::collections::HashSet<(usize, usize)> {
+    fn irreducible_edges(&self) -> &HashSet<(usize, usize)> {
         &self.irreducible_edges
     }
-    fn irreducible_edges_mut(&mut self) -> &mut std::collections::HashSet<(usize, usize)> {
+    fn irreducible_edges_mut(&mut self) -> &mut HashSet<(usize, usize)> {
         &mut self.irreducible_edges
     }
     fn virtual_block_map(&self) -> &[usize] {
@@ -65,10 +65,10 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn set_follow_blocks(&mut self, blocks: Vec<Option<usize>>) {
         self.follow_blocks = blocks;
     }
-    fn active_switch_targets(&self) -> &std::collections::HashSet<usize> {
+    fn active_switch_targets(&self) -> &HashSet<usize> {
         &self.active_switch_targets
     }
-    fn active_switch_targets_mut(&mut self) -> &mut std::collections::HashSet<usize> {
+    fn active_switch_targets_mut(&mut self) -> &mut HashSet<usize> {
         &mut self.active_switch_targets
     }
     fn options(&self) -> &MlilPreviewOptions {
@@ -200,7 +200,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         &self,
         from_idx: usize,
         next_idx: usize,
-        visited: &std::collections::HashSet<usize>,
+        visited: &HashSet<usize>,
     ) -> bool {
         fission_midend_structuring::can_inline_linear_successor(self, from_idx, next_idx, visited)
     }
@@ -208,7 +208,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         &self,
         from_idx: usize,
         next_idx: usize,
-        visited: &std::collections::HashSet<usize>,
+        visited: &HashSet<usize>,
         exit: LinearExit,
     ) -> bool {
         fission_midend_structuring::can_inline_linear_successor_for_region(
@@ -255,14 +255,14 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
         fission_midend_structuring::shared_exit_for_indices(self, indices)
     }
-    fn collect_jump_targets(&mut self) -> Result<std::collections::HashSet<u64>, MlilPreviewError> {
+    fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
         PreviewBuilder::collect_jump_targets(self)
     }
     fn accept_structured_region(
         &mut self,
         start_idx: usize,
         skip_to: usize,
-        targeted: &std::collections::HashSet<u64>,
+        targeted: &HashSet<u64>,
     ) -> bool {
         PreviewBuilder::accept_structured_region(self, start_idx, skip_to, targeted)
     }
@@ -271,7 +271,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn region_has_external_entry(
         &self,
-        region: &std::collections::HashSet<usize>,
+        region: &HashSet<usize>,
         header_idx: usize,
     ) -> bool {
         PreviewBuilder::region_has_external_entry(self, region, header_idx)
@@ -497,7 +497,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         &mut self,
         body: &[HirStmt],
         idx: usize,
-        referenced: &std::collections::HashMap<String, usize>,
+        referenced: &HashMap<String, usize>,
     ) -> Option<
         Result<
             fission_midend_structuring::guarded_tail::GuardedTailTrial,
@@ -603,7 +603,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         body: &[HirStmt],
         anchor_idx: usize,
         target_label: &str,
-        referenced: &std::collections::HashMap<String, usize>,
+        referenced: &HashMap<String, usize>,
     ) -> Option<(String, usize)> {
         // Inherent method has the same name; use an explicit free helper name.
         gt_resolve_terminal_join_target(self, body, anchor_idx, target_label, referenced)
@@ -744,7 +744,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         body: &[HirStmt],
         anchor_idx: usize,
         terminal_label_idx: usize,
-        referenced: &std::collections::HashMap<String, usize>,
+        referenced: &HashMap<String, usize>,
         trace_enabled: bool,
     ) -> Option<(String, usize)> {
         fission_midend_structuring::guarded_tail::find_earliest_owned_join_label_with_diag(
@@ -853,7 +853,7 @@ fn gt_resolve_terminal_join_target(
     body: &[HirStmt],
     anchor_idx: usize,
     target_label: &str,
-    referenced: &std::collections::HashMap<String, usize>,
+    referenced: &HashMap<String, usize>,
 ) -> Option<(String, usize)> {
     builder.resolve_terminal_join_target_impl(body, anchor_idx, target_label, referenced)
 }

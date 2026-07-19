@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::HashSet;
 
 fn resolve_add_op_stack_address(
     builder: &PreviewBuilder<'_>,
@@ -229,7 +228,7 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             let value = self.with_lowering_site(site, |this| {
-                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())
+                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::default())
             })?;
             recovered.insert(stack_index, value);
         }
@@ -307,7 +306,7 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx: prev_idx,
             };
             let value = self.with_lowering_site(site, |this| {
-                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())
+                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::default())
             })?;
             out.push(self.normalize_recovered_call_arg(value));
             current_push_address = Some(prev.address);
@@ -346,13 +345,13 @@ impl<'a> PreviewBuilder<'a> {
                 if let Some(name) = this.try_x86_32_stack_param_snapshot(&src) {
                     return Ok(HirExpr::Var(name));
                 }
-                this.lower_varnode(&src, &mut HashSet::new())
+                this.lower_varnode(&src, &mut HashSet::default())
             });
         }
         if let Some(name) = self.try_x86_32_stack_param_snapshot(rhs) {
             return Ok(HirExpr::Var(name));
         }
-        self.lower_varnode(rhs, &mut HashSet::new())
+        self.lower_varnode(rhs, &mut HashSet::default())
     }
 
     /// If `vn` is (or Copy-reaches) a Load from an incoming stack param slot,
@@ -542,7 +541,7 @@ impl<'a> PreviewBuilder<'a> {
                     continue;
                 }
                 let value = self.with_lowering_site(site, |this| {
-                    this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::new())
+                    this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::default())
                 })?;
                 recovered.insert(stack_index, self.normalize_recovered_call_arg(value));
             }
@@ -991,7 +990,7 @@ impl<'a> PreviewBuilder<'a> {
                 {
                     HirExpr::Var(name)
                 } else {
-                    match self.lower_varnode(&source, &mut HashSet::new()) {
+                    match self.lower_varnode(&source, &mut HashSet::default()) {
                         Ok(expr) => expr,
                         Err(MlilPreviewError::UnsupportedPattern("opcode"))
                             if self.surface_call_carrier_name(output).is_some() =>
@@ -1056,7 +1055,7 @@ impl<'a> PreviewBuilder<'a> {
                     _marker: std::marker::PhantomData,
                 };
                 if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx) {
-                    let expr = self.lower_varnode(&vn, &mut HashSet::new())?;
+                    let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
                     recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
                     continue;
                 }

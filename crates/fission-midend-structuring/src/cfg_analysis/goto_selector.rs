@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashSet;
+use crate::HashSet;
 
 use crate::irreducible::compute_fas_virtual_gotos;
 

@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 /// Opaque evidence that one exact p-code definition reaches a target block
 /// entry without an overlapping write on the selected CFG path.
@@ -153,7 +153,7 @@ impl<'a> PreviewBuilder<'a> {
                 .flatten()
                 .copied(),
         );
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
 
         while let Some(block_idx) = queue.pop_front() {
             if !visited.insert(block_idx) {
@@ -213,7 +213,7 @@ impl<'a> PreviewBuilder<'a> {
                 .flatten()
                 .copied(),
         );
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         while let Some(block_idx) = queue.pop_front() {
             if block_idx == target_block_idx {
                 return Some(DefinitionReachesBlockProof {
@@ -252,7 +252,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<DefinitionReachesReturnProof> {
         let key = VarnodeKey::from(output);
         let mut queue = VecDeque::from([(definition_block_idx, definition_op_idx + 1)]);
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
 
         while let Some((block_idx, start_op_idx)) = queue.pop_front() {
             if !visited.insert((block_idx, start_op_idx)) {

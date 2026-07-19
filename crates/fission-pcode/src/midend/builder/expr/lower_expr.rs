@@ -71,7 +71,7 @@ impl<'a> PreviewBuilder<'a> {
         ) {
             return Some(name);
         }
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         let (call_site, name) = self
             .live_call_result_binding_from_predecessors_for_return_register(
                 vn,
@@ -760,7 +760,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some((_, pred_op)) =
                 self.last_register_redefinition_before(pred_block, term_idx, vn)
             else {
-                let mut visiting = HashSet::new();
+                let mut visiting = HashSet::default();
                 if self.predecessor_path_has_zero_register_seed(
                     pred_idx,
                     site.block_idx,
@@ -1455,7 +1455,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn resolve_copy_only_constant_chain(&self, target: &Varnode) -> Option<u64> {
         let mut current = target.clone();
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         for _ in 0..16 {
             if current.is_constant {
                 return Some(current.constant_val as u64);

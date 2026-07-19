@@ -15,6 +15,15 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
+// Fixed-seed hasher, mirrors fission-pcode::midend's HashMap/HashSet alias so
+// types match at the StructuringHost trait boundary. See that module's doc
+// comment for why: std's RandomState made unsorted iteration/`.first()`/
+// `.find_map()` picks over these collections vary per process run.
+#[allow(unused_imports)]
+pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+#[allow(unused_imports)]
+pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHasher>;
+
 pub mod admission;
 pub mod cfg_analysis;
 pub mod cleanup;
