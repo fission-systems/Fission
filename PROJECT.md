@@ -992,6 +992,106 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
       renames correctly (`uVar0` → `total`); a genuinely multi-register
       loclist (RAX → RBP → RAX across ranges, real register churn around
       a call) correctly does *not* rename.
+  - **Update, 2026-07-20 (broader metadata audit)**: user asked whether
+    other DWARF/loader metadata is collected but never consumed by the
+    decompiler, the same class of gap as the register-locals work above.
+    Found several, ranked by size:
+    1. **FID (Function ID) signature matching is fully dead** — biggest
+       finding. `fission-signatures/src/fidbf/` has a complete `.fidbf`
+       parser (`parser.rs`/`loader.rs`/`types.rs`/`tables.rs`,
+       `FidbfDatabase::identify_by_hashes` and hash-index lookups all
+       implemented) and `utils/signatures` ships real FID databases, but
+       the only production caller is `fission-loader/src/loader/identity/
+       resources.rs`'s `count_fidbf` — which only counts `.fidbf` files
+       for a resource-inventory health check. Nothing computes a query
+       hash to look functions up by, so statically-linked library
+       functions (memcpy, OpenSSL, etc.) in stripped binaries are never
+       identified via FID at all — Ghidra's FID analyzer equivalent is
+       entirely unused. **In progress, see below.**
+    2. DWARF enum types: `DW_TAG_enumeration_type` (0x04) is registered in
+       `types.rs`'s `collect_type_names` type-name cache (so a variable's
+       type resolves to the enum's name), but `analyze_types_inner`'s
+       extraction only handles `DW_TAG_structure_type`/`class_type`/
+       `union_type` (0x13/0x02/0x17) — enumerator names/values
+       (`RED=0, GREEN=1, ...`) are never extracted, so decompiled output
+       always shows raw integer comparisons, never the named constant.
+    3. DWARF array types: `DW_TAG_array_type`/`DW_TAG_subrange_type`
+       aren't in `resolve_type_name`'s match arms or `collect_type_names`'s
+       registered tag list at all — a struct field whose type is an array
+       resolves to `"unknown"`.
+    4. `DW_TAG_lexical_block` PC ranges aren't tracked anywhere — no
+       variable scoping/shadowing model, which also matters for properly
+       scoping register-locals to a lexical block rather than the whole
+       function (deferred in the entry above).
+    5. `.debug_line` (the line-number program) is section-loaded into
+       `gimli::Dwarf` but `unit.line_program`/its row iterator is never
+       consumed anywhere — no address-to-source-line mapping capability
+       exists despite the raw data being available.
+    6. **PDB has no equivalent of any of this session's DWARF work at
+       all**: `pdb_sidecar.rs` only extracts function/param names; local
+       variable `location` is hardcoded `DwarfLocation::Unknown` (line
+       156); there's no `PdbTypeInfo`/struct-layout extractor. Everything
+       built this session (struct fields, register locals) only benefits
+       DWARF-carrying binaries — Windows PE/PDB binaries get none of it.
+    User chose to pursue (1), FID, first.
+  - **FID implementation, in progress**: computing Ghidra-compatible query
+    hashes requires reproducing `MessageDigestFidHasher.hash()`
+    (`Ghidra/Features/FunctionID/.../hash/MessageDigestFidHasher.java`):
+    FNV-1a 64-bit digest (`generic.hash.FNV1a64MessageDigest.java` — simple,
+    ported exactly), a per-architecture "instruction skipper" (NOP-equivalent
+    byte patterns to exclude, e.g. `X86InstructionSkipper.java` — simple,
+    just a raw byte-pattern list), and an **instruction mask** that zeroes
+    operand bytes while keeping opcode/pattern bytes (the "full hash") plus
+    operand-scalar handling for the "specific hash". The mask was the
+    unknown: Fission's SLEIGH runtime (`fission-sleigh`) doesn't read
+    Ghidra's *packaged* `.sla` (`vendor/` is reference-only per
+    `THIRD_PARTY.md`), but does self-compile the real `.sla` *format* from
+    the same open `.slaspec` sources and read that at runtime
+    (`compiler/sla/{native,packed}.rs`, `discovery::
+    require_packaged_sla_for_entry_spec` — "required for production lift
+    frontends") — so the underlying pattern/mask data is the same
+    representation Ghidra itself derives its mask from, not a
+    reimplementation guess.
+    - `instruction_pattern_mask` (`fission-sleigh/src/runtime/spine/
+      compiled_table/mod.rs`, commits `854393c2`/`96b17a3b`) walks the
+      decoded `RuntimeConstructState` tree (root + every subtable-resolved
+      operand) and unions each node's *instruction*-relative
+      `CompiledPatternBlock` (from `match_trace.matched_leaf_pattern`,
+      already captured during normal decode for other purposes — no new
+      SLEIGH-level instrumentation needed) at each node's absolute byte
+      offset. Context-register pattern bits are excluded (matches Ghidra's
+      `getInstructionMask()` scope). An `Or(...)` pattern (a constructor's
+      own `cond1 | cond2` statement) takes the intersection across
+      alternatives, not the union — erring toward a missed hash match
+      over a wrong one when it can't tell which alternative actually fired.
+    - Found and fixed a real bug surfaced only by this work: a "replaces
+      current" wrapper constructor (an x86 legacy/REX prefix byte's own
+      constructor, which matches just that byte then hands off entirely to
+      the constructor for the rest of the instruction —
+      `constructor_replaces_current` in `walker.rs`) had its own matched
+      pattern silently discarded, so any prefixed instruction's mask was
+      missing that byte's contribution even though real Ghidra's mask
+      includes it. Fixed via a new, purely-additive
+      `RuntimeConstructState.replaced_wrapper_patterns` field populated
+      only at the `replace_current` call site (commit `96b17a3b`).
+    - **Validated against real Ghidra 12.0.4** (headless, `analyzeHeadless`
+      + a small script printing `InstructionPrototype.getInstructionMask()`
+      — Java 17 + the vendored Ghidra distribution are both usable
+      locally) on three cases, all exact byte-for-byte matches: `jnz +5`
+      (no prefix), `mov rax,0x1234` (REX.W prefix), `mov ax,0x1234`
+      (0x66 operand-size-override prefix — confirms the wrapper-pattern
+      fix isn't REX-specific).
+    - **Not yet done**: function-extent calculation (which code units
+      belong to a function's FID hash, matching Ghidra's own algorithm),
+      operand-type classification for the "specific hash" (scalar vs.
+      address vs. register, per `OperandType`/relocation-awareness in
+      `MessageDigestFidHasher.java`), wiring a query hash through
+      `FidbfDatabase::identify_by_hashes` into an actual decompiler-facing
+      "identified function" fact, and non-x86 architectures (only x86-64
+      validated so far). The mask — the part with the highest risk of a
+      silent, permanent correctness gap if wrong — is now proven correct
+      against real Ghidra output; the remaining pieces are comparatively
+      mechanical.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
