@@ -1081,17 +1081,50 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
       (no prefix), `mov rax,0x1234` (REX.W prefix), `mov ax,0x1234`
       (0x66 operand-size-override prefix — confirms the wrapper-pattern
       fix isn't REX-specific).
-    - **Not yet done**: function-extent calculation (which code units
-      belong to a function's FID hash, matching Ghidra's own algorithm),
-      operand-type classification for the "specific hash" (scalar vs.
-      address vs. register, per `OperandType`/relocation-awareness in
-      `MessageDigestFidHasher.java`), wiring a query hash through
-      `FidbfDatabase::identify_by_hashes` into an actual decompiler-facing
-      "identified function" fact, and non-x86 architectures (only x86-64
-      validated so far). The mask — the part with the highest risk of a
-      silent, permanent correctness gap if wrong — is now proven correct
-      against real Ghidra output; the remaining pieces are comparatively
-      mechanical.
+    - **Update, same day — full hash done, commit `ad053d72`**: the
+      "function extent" question turned out to already be answered —
+      `DecodedPcodeFunction.instructions` (computed by the existing
+      `lift_raw_pcode_function_with_context_and_memory_context` for every
+      normal decompile) is exactly Ghidra's `FunctionBodyFunctionExtent
+      Generator` concept, just previously discarded by every caller.
+      `compute_fid_full_hash` (`compiled_table/fid_hash.rs`) ports the rest
+      of `MessageDigestFidHasher.hash()`'s *full*-hash path: a byte-for-byte
+      port of `FNV1a64MessageDigest` (offset basis `0xcbf29ce484222325`,
+      prime `1099511628211`, reset-after-digest), the x86
+      `X86InstructionSkipper` NOP-equivalent byte patterns, call counting,
+      and per-operand mixing (a register operand mixes in its SLEIGH
+      offset; a scalar/immediate contributes a fixed `0xfeeddead`
+      placeholder — full-hash-only, doesn't need the scalar's actual
+      value). Takes a caller-supplied `resolve_register_offset` callback
+      rather than depending on `fission_pcode::midend::cspec::
+      RegisterModel` directly (wrong dependency direction — `fission-pcode`
+      depends on `fission-sleigh`). Exposed via `RuntimeSleighFrontend::
+      fid_full_hash`.
+      - Validated against real Ghidra 12.0.4 (`FidService.hashFunction`,
+        headless) on `push rbp; mov rbp,rsp; mov eax,0x2a; pop rbp; ret` (5
+        instructions, register+immediate operands only — deliberately
+        chosen to sidestep the memory-operand gap below): exact match on
+        the first attempt, `full_hash=0x37783a7364fbdfe5`,
+        `code_unit_count=5`, both sides.
+      - **Known, deliberate gap**: memory operands (`[rbp+8]` etc.) aren't
+        mixed in at all yet. `RuntimeConstructState` doesn't capture a
+        usable base-register/displacement decomposition for them today —
+        checked directly: decoding `mov eax,[rbp+8]` leaves that operand's
+        `debug_value` as `None` and it's silently dropped from
+        `state.operands`, because the computed address lives only in the
+        p-code that computes it (`RBP + 8` evaluated into a `unique`-space
+        temp), not traced back to source operand objects at the
+        construct-state level this works from. Since most real
+        instructions have at least one memory operand, this is the next
+        real-value slice, not a corner case — deferred, not attempted half
+        correct, same principle as the register-locals work above.
+      - **Also not yet done**: the "specific hash" (needs actual scalar
+        values + relocation-awareness — `OperandType.isAddress`/
+        `hasRelocation` in `MessageDigestFidHasher.java` — which needs the
+        same operand-classification work the memory-operand gap needs),
+        wiring a query hash through `FidbfDatabase::identify_by_hashes`
+        into an actual decompiler-facing "identified function" fact, and
+        non-x86 architectures (only x86-64 validated so far).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
