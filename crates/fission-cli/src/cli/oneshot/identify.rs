@@ -30,6 +30,7 @@ pub(super) fn run_identify(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<(
                     "score": m.score,
                     "full_hash": format!("0x{:016x}", m.full_hash),
                     "code_unit_count": m.code_unit_count,
+                    "specific_matched": m.specific_matched,
                 }),
                 None => json!({
                     "address": format!("0x{:x}", address),
@@ -43,8 +44,14 @@ pub(super) fn run_identify(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<(
         match result {
             Some(m) => writeln!(
                 stdout,
-                "0x{:012x}  {}  ({})  score={:.1}  full_hash=0x{:016x}  code_units={}",
-                address, m.name, m.library_family, m.score, m.full_hash, m.code_unit_count
+                "0x{:012x}  {}  ({})  score={:.1}  full_hash=0x{:016x}  code_units={}  specific_matched={}",
+                address,
+                m.name,
+                m.library_family,
+                m.score,
+                m.full_hash,
+                m.code_unit_count,
+                m.specific_matched
             )
             .context("write identify match")?,
             None => writeln!(stdout, "0x{:012x}  no match", address)
@@ -77,6 +84,7 @@ pub(super) fn run_identify(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<(
                     "score": m.score,
                     "full_hash": format!("0x{:016x}", m.full_hash),
                     "code_unit_count": m.code_unit_count,
+                    "specific_matched": m.specific_matched,
                 })
             })
             .collect();

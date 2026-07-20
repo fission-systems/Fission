@@ -1,32 +1,44 @@
-//! Ghidra-compatible FID (Function ID) "full hash" computation.
+//! Ghidra-compatible FID (Function ID) full *and* specific hash computation.
 //!
-//! Ports the full-hash half of `MessageDigestFidHasher.hash()`
-//! (`Ghidra/Features/FunctionID/.../hash/MessageDigestFidHasher.java`):
-//! an FNV-1a 64-bit digest over each code unit's masked bytes (see
-//! [`super::instruction_pattern_mask`]) plus a per-operand mixing step,
-//! now including simple memory operands (`[reg]`, `[reg+disp]`).
+//! Ports `MessageDigestFidHasher.hash()`
+//! (`Ghidra/Features/FunctionID/.../hash/MessageDigestFidHasher.java`): an
+//! FNV-1a 64-bit digest, computed twice in one pass (full and specific),
+//! over each code unit's masked bytes (see [`super::instruction_pattern_mask`])
+//! plus a per-operand mixing step, including simple memory operands
+//! (`[reg]`, `[reg+disp]`) and SIB addressing.
 //!
 //! RIP-relative operands (memory loads *and* `LEA`) need no special
 //! handling: Fission's runtime resolves them to a literal target address at
-//! decode time (`BoundOperand::Immediate`), and `MessageDigestFidHasher.java`
-//! mixes `Address` and `Scalar` objects identically for the *full* hash
-//! (`fullUpdate += 0xfeeddead` either way -- they only diverge for the
-//! *specific* hash) -- see
-//! `fid_full_hash_matches_ghidra_exactly_for_rip_relative_memory_load`/`_lea`
-//! in `tests.rs`, which exist specifically to prove that rather than assume
-//! it.
+//! decode time (`BoundOperand::Immediate`). For the *full* hash,
+//! `MessageDigestFidHasher.java` mixes `Address` and `Scalar` objects
+//! identically (`fullUpdate += 0xfeeddead` either way). For the *specific*
+//! hash they diverge -- but not the way the object type alone would
+//! suggest: empirically (a headless Ghidra script printing
+//! `OperandType.isAddress`/`getOperandType` for several real instructions --
+//! see `fid_full_hash_matches_ghidra_exactly_for_rip_relative_memory_load`/
+//! `_lea` and the specific-hash tests below), a dereferenced RIP-relative
+//! memory *load* is `isAddress=true` (placeholder), while `LEA`'s computed
+//! value is `isAddress=false` (real value used) even though both are
+//! "addresses" in a colloquial sense -- LEA computes a value, it doesn't
+//! dereference one. The signal that actually matches Ghidra's classification
+//! is `RuntimeFixedHandle::space == "ram"`: true for memory dereferences
+//! *and*, surprisingly, direct `CALL`/`JMP` targets (both resolve through
+//! the code/ram address space), false for `LEA` and plain immediates (both
+//! land in `"const"` space). See `mix_operand`'s doc comment for the full
+//! reasoning and `tests.rs` for the Ghidra cross-checks.
 //!
-//! Deliberately **not** implemented yet: the "specific hash" (needs actual
-//! scalar operand values and relocation-awareness -- see
-//! `MessageDigestFidHasher.java`'s `hasRelocation`/`OperandType.isAddress`
-//! handling, which Fission's flat `BoundOperand` model doesn't currently
-//! distinguish). A wrong operand mix would make the hash wrong in a way
-//! nothing could ever detect (unlike an incomplete extent, which just
-//! produces `None`), so unhandled memory-address shapes (address computed
-//! through an op `trace_simple_memory_address` doesn't recognize) fail the
-//! whole function's hash rather than silently mixing a placeholder for
-//! something that isn't actually a scalar or omitting an operand Ghidra
-//! wouldn't.
+//! Not relocation-aware yet (`MessageDigestFidHasher.java`'s
+//! `hasRelocation` check, which forces the placeholder regardless of the
+//! above when an operand's bytes carry a relocation) -- see
+//! `compute_fid_hashes`'s doc comment for the concrete, bounded impact of
+//! that gap.
+//!
+//! A wrong operand mix would make the hash wrong in a way nothing could
+//! ever detect (unlike an incomplete extent, which just produces `None`),
+//! so unhandled memory-address shapes (address computed through an op
+//! `trace_simple_memory_address` doesn't recognize) fail the whole
+//! function's hash rather than silently mixing a placeholder for something
+//! that isn't actually a scalar or omitting an operand Ghidra wouldn't.
 
 use super::*;
 use crate::compiler::CompiledDisplayPiece;
@@ -49,13 +61,14 @@ enum MemoryAddressShape {
     /// `[reg+disp]` / `[reg-disp]` -- base register offset, signed displacement.
     RegisterPlusConstant(u64, i64),
     /// `[base+index*scale]` / `[base+index*scale+disp]` -- SIB addressing.
-    /// The scale value itself isn't tracked: only its *presence* (always
-    /// true for SIB, per the Ghidra cross-check above) matters for the full
-    /// hash, which never mixes in actual scalar values.
+    /// The scale and displacement values are tracked (not just presence) for
+    /// the specific hash, which mixes small (`-256 < v < 256`) compound-operand
+    /// scalars by their real value -- see `mix_memory_operand`.
     BaseIndexScale {
         base: u64,
         index: u64,
-        has_displacement: bool,
+        displacement: Option<i64>,
+        scale: i64,
     },
 }
 
@@ -66,13 +79,14 @@ fn as_register_offset(v: &fission_pcode::Varnode, register_space_index: u64) -> 
 }
 
 /// If `varnode` was computed by an `IntAdd(register, constant)` op earlier
-/// in `ops` (either input order), returns the register's offset. Used both
-/// directly (`[reg+disp]`) and as a sub-match inside SIB base+disp folding.
+/// in `ops` (either input order), returns the register's offset and the
+/// constant. Used both directly (`[reg+disp]`) and as a sub-match inside SIB
+/// base+disp folding.
 fn producer_reg_plus_const(
     ops: &[fission_pcode::PcodeOp],
     v: &fission_pcode::Varnode,
     register_space_index: u64,
-) -> Option<u64> {
+) -> Option<(u64, i64)> {
     let producer = ops
         .iter()
         .find(|op| op.output.as_ref().is_some_and(|out| out == v))?;
@@ -84,12 +98,12 @@ fn producer_reg_plus_const(
     };
     if let Some(offset) = as_register_offset(a, register_space_index) {
         if b.is_constant {
-            return Some(offset);
+            return Some((offset, b.constant_val as i64));
         }
     }
     if let Some(offset) = as_register_offset(b, register_space_index) {
         if a.is_constant {
-            return Some(offset);
+            return Some((offset, a.constant_val as i64));
         }
     }
     None
@@ -97,12 +111,12 @@ fn producer_reg_plus_const(
 
 /// If `varnode` was computed by an `IntMult(register, constant)` op earlier
 /// in `ops` (either input order) -- SLEIGH's encoding of `index*scale` --
-/// returns the index register's offset.
+/// returns the index register's offset and the scale.
 fn producer_scaled_index(
     ops: &[fission_pcode::PcodeOp],
     v: &fission_pcode::Varnode,
     register_space_index: u64,
-) -> Option<u64> {
+) -> Option<(u64, i64)> {
     let producer = ops
         .iter()
         .find(|op| op.output.as_ref().is_some_and(|out| out == v))?;
@@ -114,12 +128,12 @@ fn producer_scaled_index(
     };
     if let Some(offset) = as_register_offset(a, register_space_index) {
         if b.is_constant {
-            return Some(offset);
+            return Some((offset, b.constant_val as i64));
         }
     }
     if let Some(offset) = as_register_offset(b, register_space_index) {
         if a.is_constant {
-            return Some(offset);
+            return Some((offset, a.constant_val as i64));
         }
     }
     None
@@ -181,7 +195,7 @@ fn trace_simple_memory_address(
             // other is either a bare base register (no displacement) or
             // itself an `IntAdd(base,disp)` producer (folded displacement).
             for (base_side, index_side) in [(a, b), (b, a)] {
-                let Some(index_offset) =
+                let Some((index_offset, scale)) =
                     producer_scaled_index(ops, index_side, register_space_index)
                 else {
                     continue;
@@ -190,16 +204,18 @@ fn trace_simple_memory_address(
                     return Some(MemoryAddressShape::BaseIndexScale {
                         base: base_offset,
                         index: index_offset,
-                        has_displacement: false,
+                        displacement: None,
+                        scale,
                     });
                 }
-                if let Some(base_offset) =
+                if let Some((base_offset, disp)) =
                     producer_reg_plus_const(ops, base_side, register_space_index)
                 {
                     return Some(MemoryAddressShape::BaseIndexScale {
                         base: base_offset,
                         index: index_offset,
-                        has_displacement: true,
+                        displacement: Some(disp),
+                        scale,
                     });
                 }
             }
@@ -213,51 +229,110 @@ fn trace_simple_memory_address(
     }
 }
 
+/// One display operand's contribution to both digests, plus whether it
+/// counted toward `specificAdditionalSize` (mirrors `MessageDigestFidHasher.
+/// java`'s `specificCount` -- incremented once per `Scalar` sub-object whose
+/// *real* value was mixed in, not once per operand).
+struct OperandContribution {
+    full: i32,
+    specific: i32,
+    specific_count: u32,
+}
+
+const SCALAR_PLACEHOLDER: i32 = 0xfeed_dead_u32 as i32;
+
+fn reg_mix(offset: u64) -> Option<i32> {
+    let offset = i32::try_from(offset).ok()?;
+    Some(offset.wrapping_add(7_654_321).wrapping_mul(98_777))
+}
+
+/// Mixes one `Scalar` sub-object of a *compound* operand (a memory
+/// reference's displacement or SIB scale -- never the whole display
+/// operand). Ghidra's `else` branch (not `OperandType.isScalar`): the real
+/// value is used only when `-256 < val < 256` (scale is always 1/2/4/8, so
+/// always counts; displacement often doesn't). No relocation-awareness yet
+/// (see module doc comment) -- deliberately not attempted rather than
+/// guessed.
+fn mix_compound_scalar(val: i64) -> (i32, bool) {
+    let counted = (-256..256).contains(&val);
+    let used = if counted {
+        val
+    } else {
+        SCALAR_PLACEHOLDER as i64
+    };
+    let term = (used as i32).wrapping_add(1_234_567).wrapping_mul(67_999);
+    (term, counted)
+}
+
 /// Mixing for a memory operand's object list (`[Register(base)]`,
 /// `[Register(base), Scalar(disp)]`, or SIB's
 /// `[Register(base), Register(index), Scalar(scale), Scalar(disp)?]`) --
-/// every object accumulates into *one* `fullUpdate` before a single digest
-/// update, mirroring `MessageDigestFidHasher.java`'s per-operand loop (the
-/// outer `for (Object obj : opObjects)` accumulates before
-/// `fullDigest.update(fullUpdate)`, not once per object). A `Scalar` object
-/// always contributes the same flat `0xfeeddead` placeholder to the full
-/// hash regardless of its actual value (`fullUpdate += 0xfeeddead` in the
-/// Java source, unconditionally) -- so SIB's scale-always-present +
-/// disp-if-nonzero shape can contribute the placeholder once or twice.
-fn mix_memory_operand_full(operand_index: usize, shape: &MemoryAddressShape) -> Option<i32> {
-    let mut full_update = i32::try_from(operand_index)
+/// every object accumulates into *one* `fullUpdate`/`specificUpdate` pair
+/// before a single digest update each, mirroring `MessageDigestFidHasher.
+/// java`'s per-operand loop (the outer `for (Object obj : opObjects)`
+/// accumulates before `fullDigest.update(fullUpdate)`, not once per object).
+/// A `Scalar` object always contributes the same flat `0xfeeddead`
+/// placeholder to the *full* hash regardless of its actual value
+/// (`fullUpdate += 0xfeeddead` in the Java source, unconditionally) -- so
+/// SIB's scale-always-present + disp-if-nonzero shape can contribute the
+/// placeholder once or twice there. The *specific* hash instead mixes each
+/// `Scalar` sub-object's real value via [`mix_compound_scalar`] when small
+/// enough.
+fn mix_memory_operand(
+    operand_index: usize,
+    shape: &MemoryAddressShape,
+) -> Option<OperandContribution> {
+    let index_term = i32::try_from(operand_index)
         .ok()?
         .wrapping_add(1)
         .wrapping_mul(7777);
-    let reg_mix = |offset: u64| -> Option<i32> {
-        let offset = i32::try_from(offset).ok()?;
-        Some(offset.wrapping_add(7_654_321).wrapping_mul(98_777))
-    };
-    const SCALAR_PLACEHOLDER: i32 = 0xfeed_dead_u32 as i32;
+    let mut full = index_term;
+    let mut specific = index_term;
+    let mut specific_count = 0u32;
     match shape {
         MemoryAddressShape::Register(offset) => {
-            full_update = full_update.wrapping_add(reg_mix(*offset)?);
+            let reg = reg_mix(*offset)?;
+            full = full.wrapping_add(reg);
+            specific = specific.wrapping_add(reg);
         }
-        MemoryAddressShape::RegisterPlusConstant(offset, _) => {
-            full_update = full_update.wrapping_add(reg_mix(*offset)?);
-            full_update = full_update.wrapping_add(SCALAR_PLACEHOLDER);
+        MemoryAddressShape::RegisterPlusConstant(offset, disp) => {
+            let reg = reg_mix(*offset)?;
+            full = full.wrapping_add(reg);
+            specific = specific.wrapping_add(reg);
+            full = full.wrapping_add(SCALAR_PLACEHOLDER);
+            let (term, counted) = mix_compound_scalar(*disp);
+            specific = specific.wrapping_add(term);
+            specific_count += u32::from(counted);
         }
         MemoryAddressShape::BaseIndexScale {
             base,
             index,
-            has_displacement,
+            displacement,
+            scale,
         } => {
-            full_update = full_update.wrapping_add(reg_mix(*base)?);
-            full_update = full_update.wrapping_add(reg_mix(*index)?);
+            let base_reg = reg_mix(*base)?;
+            let index_reg = reg_mix(*index)?;
+            full = full.wrapping_add(base_reg).wrapping_add(index_reg);
+            specific = specific.wrapping_add(base_reg).wrapping_add(index_reg);
             // The scale factor is always present as its own Scalar object
             // for SIB addressing, even when scale == 1.
-            full_update = full_update.wrapping_add(SCALAR_PLACEHOLDER);
-            if *has_displacement {
-                full_update = full_update.wrapping_add(SCALAR_PLACEHOLDER);
+            full = full.wrapping_add(SCALAR_PLACEHOLDER);
+            let (scale_term, scale_counted) = mix_compound_scalar(*scale);
+            specific = specific.wrapping_add(scale_term);
+            specific_count += u32::from(scale_counted);
+            if let Some(disp) = displacement {
+                full = full.wrapping_add(SCALAR_PLACEHOLDER);
+                let (disp_term, disp_counted) = mix_compound_scalar(*disp);
+                specific = specific.wrapping_add(disp_term);
+                specific_count += u32::from(disp_counted);
             }
         }
     }
-    Some(full_update)
+    Some(OperandContribution {
+        full,
+        specific,
+        specific_count,
+    })
 }
 
 /// Ghidra's `FidHasher.SHORT_HASH_CODE_UNIT_LIMIT` (`FidService.java`):
@@ -325,36 +400,62 @@ fn x86_skip_instruction(bytes: &[u8]) -> bool {
     X86_SKIP_PATTERNS.iter().any(|pattern| *pattern == bytes)
 }
 
-/// Per-operand mixing for the *full* hash only (`fullUpdate` in
-/// `MessageDigestFidHasher.java`'s operand loop), for a display operand that
-/// resolved to a `BoundOperand` directly (register or immediate -- memory
-/// operands go through [`mix_memory_operand_full`] instead, since they never
-/// get a `BoundOperand` at this level). A register operand mixes in its
-/// SLEIGH register-space offset (which register matters for identity); a
-/// scalar or address operand -- indistinguishable from Fission's
-/// `BoundOperand::Immediate` today, but they're mixed identically for the
-/// full hash regardless (`fullUpdate += 0xfeeddead` either way in the Java
-/// source) -- contributes a fixed placeholder, since only its *presence*,
-/// not its value, is part of an instruction's full-hash identity.
-fn mix_operand_full(
+/// Per-operand mixing for a display operand that resolved to a
+/// `BoundOperand` directly (register or immediate -- memory operands go
+/// through [`mix_memory_operand`] instead, since they never get a
+/// `BoundOperand` at this level).
+///
+/// A register operand mixes in its SLEIGH register-space offset identically
+/// for both digests (`obj instanceof Register` in the Java source).
+///
+/// An immediate is always the *whole* display operand at this level (SLEIGH
+/// never surfaces a memory reference's displacement/scale as a top-level
+/// `BoundOperand::Immediate` handle -- those go through
+/// `trace_simple_memory_address` instead), matching Ghidra's
+/// `OperandType.isScalar(operandType) == true` branch: the real value is
+/// used unconditionally (no magnitude cap, unlike the compound-operand
+/// branch) *unless* Ghidra would also flag `isAddress` -- which,
+/// empirically (`fid_full_hash_matches_ghidra_exactly_for_specific_hash_*`
+/// in `tests.rs`), is exactly when this handle's `RuntimeFixedHandle::space`
+/// is `"ram"`: true for a dereferenced memory load (`mov eax,[rip+0x100]`)
+/// and, surprisingly, a direct `CALL`/`JMP` target too (both resolve
+/// through the ram/code address space), but **false** for `LEA` (its
+/// computed value lands in `"const"` space, since it's a value, not a
+/// dereference) and plain immediates (`mov eax,0x2a`, also `"const"`) --
+/// both of which use their real value in the specific hash.
+fn mix_operand(
     operand_index: usize,
     operand: &BoundOperand,
+    handle_space_is_ram: bool,
     resolve_register_offset: &dyn Fn(&str) -> Option<i64>,
-) -> Option<i32> {
+) -> Option<OperandContribution> {
     let index_term = i32::try_from(operand_index)
         .ok()?
         .wrapping_add(1)
         .wrapping_mul(7777);
     match operand {
-        BoundOperand::Immediate { .. } => {
-            let placeholder = 0xfeed_dead_u32 as i32;
-            Some(index_term.wrapping_add(placeholder))
+        BoundOperand::Immediate { value, .. } => {
+            let full = index_term.wrapping_add(SCALAR_PLACEHOLDER);
+            let (used, counted) = if handle_space_is_ram {
+                (SCALAR_PLACEHOLDER as i64, false)
+            } else {
+                (*value as i64, true)
+            };
+            let term = (used as i32).wrapping_add(1_234_567).wrapping_mul(67_999);
+            Some(OperandContribution {
+                full,
+                specific: index_term.wrapping_add(term),
+                specific_count: u32::from(counted),
+            })
         }
         BoundOperand::NamedVarnode { name, .. } => {
             let offset = resolve_register_offset(name)?;
-            let offset = i32::try_from(offset).ok()?;
-            let mixed = offset.wrapping_add(7_654_321).wrapping_mul(98_777);
-            Some(index_term.wrapping_add(mixed))
+            let mixed = reg_mix(u64::try_from(offset).ok()?)?;
+            Some(OperandContribution {
+                full: index_term.wrapping_add(mixed),
+                specific: index_term.wrapping_add(mixed),
+                specific_count: 0,
+            })
         }
         // Memory/relative operands: no reliable base-register/displacement
         // decomposition available from RuntimeConstructState today (see
@@ -365,10 +466,23 @@ fn mix_operand_full(
     }
 }
 
-/// Compute Ghidra FID's "full hash" for a function, given its instruction
-/// extent (e.g. `DecodedPcodeFunction.instructions`, which the normal
-/// decompile path already computes and currently discards -- see
+/// The four values `MessageDigestFidHasher.hash()` returns as a
+/// `FidHashQuad`: full hash + its code unit count, specific hash + its
+/// additional (real-value-used) scalar count.
+pub(crate) struct FidHashes {
+    pub full_count: u16,
+    pub full_hash: u64,
+    pub specific_count: u8,
+    pub specific_hash: u64,
+}
+
+/// Compute Ghidra FID's full *and* specific hashes for a function, given its
+/// instruction extent (e.g. `DecodedPcodeFunction.instructions`, which the
+/// normal decompile path already computes and currently discards -- see
 /// `RuntimeSleighFrontend::lift_raw_pcode_function_with_context_and_memory_context`).
+/// Both digests are computed in one pass since they share the same masked
+/// bytes and operand traversal, only diverging in per-operand mixing values
+/// (see `mix_operand`/`mix_memory_operand`/`mix_compound_scalar`).
 ///
 /// `resolve_register_offset` resolves a `BoundOperand::NamedVarnode`'s
 /// Ghidra-style register name (e.g. `"EAX"`) to its SLEIGH register-space
@@ -377,18 +491,29 @@ fn mix_operand_full(
 /// RegisterModel`) lives in a crate that depends on `fission-sleigh`, not
 /// the other way around.
 ///
+/// Not yet relocation-aware (see module doc comment): a genuine immediate or
+/// small memory displacement/scale whose bytes happen to carry a relocation
+/// will use its real (link-time-specific) value here where Ghidra would use
+/// a placeholder, understating how often the specific-hash bonus should
+/// apply. This can only cause a real match to be scored more conservatively
+/// (missing the +10 bonus it should have gotten) -- `identify_by_hashes`'
+/// `force_specific` filter is the one case this could cause an *incorrect
+/// rejection* rather than just a lower score, until relocation-awareness is
+/// added.
+///
 /// Returns `None` if the extent has fewer than [`FID_SHORT_CODE_UNIT_LIMIT`]
 /// code units after skipping (mirrors Ghidra returning `null` for "function
-/// too small"), or `Some((code_unit_count, hash))` mirroring
-/// `FidHashQuad`'s `(fullCount, fullHash)` pair.
-pub(crate) fn compute_fid_full_hash(
+/// too small").
+pub(crate) fn compute_fid_hashes(
     compiled: &CompiledFrontend,
     extent: &[crate::runtime::DecodedInstruction],
     resolve_register_offset: &dyn Fn(&str) -> Option<i64>,
-) -> Option<(u16, u64)> {
-    let mut digest = Fnv1a64::new();
+) -> Option<FidHashes> {
+    let mut full_digest = Fnv1a64::new();
+    let mut specific_digest = Fnv1a64::new();
     let mut code_unit_index: i32 = -1;
     let mut call_count: i32 = 0;
+    let mut specific_count: i32 = 0;
 
     // Ghidra caps at Short.MAX_VALUE - 1 code units.
     const SHORT_MAX_VALUE: usize = i16::MAX as usize;
@@ -427,9 +552,15 @@ pub(crate) fn compute_fid_full_hash(
                 .handles
                 .iter()
                 .find(|h| h.operand_index == handle_index)?;
-            let update = if let Some(operand) = &handle.debug_value {
-                mix_operand_full(operand_index, operand, resolve_register_offset)?
-            } else if handle.fixed.space.as_ref().is_some_and(|s| s.name == "ram") {
+            let handle_space_is_ram = handle.fixed.space.as_ref().is_some_and(|s| s.name == "ram");
+            let contribution = if let Some(operand) = &handle.debug_value {
+                mix_operand(
+                    operand_index,
+                    operand,
+                    handle_space_is_ram,
+                    resolve_register_offset,
+                )?
+            } else if handle_space_is_ram {
                 let shape = trace_simple_memory_address(
                     &decode_and_lift_with_details(compiled, &instr.bytes, instr.address)
                         .ok()?
@@ -439,14 +570,16 @@ pub(crate) fn compute_fid_full_hash(
                     handle.fixed.offset_offset,
                     handle.fixed.offset_size,
                 )?;
-                mix_memory_operand_full(operand_index, &shape)?
+                mix_memory_operand(operand_index, &shape)?
             } else {
                 // An operand shape this doesn't understand -- fail the whole
                 // function's hash rather than silently mix a wrong or
                 // missing contribution in (see module doc comment).
                 return None;
             };
-            digest.update_i32(update);
+            full_digest.update_i32(contribution.full);
+            specific_digest.update_i32(contribution.specific);
+            specific_count += i32::try_from(contribution.specific_count).ok()?;
         }
 
         let mask = instruction_pattern_mask(&state, instr.bytes.len());
@@ -456,7 +589,8 @@ pub(crate) fn compute_fid_full_hash(
             .zip(mask.iter())
             .map(|(&b, &m)| b & m)
             .collect();
-        digest.update_bytes(&masked_bytes);
+        full_digest.update_bytes(&masked_bytes);
+        specific_digest.update_bytes(&masked_bytes);
     }
 
     code_unit_index += 1; // now a count, not an index
@@ -465,5 +599,12 @@ pub(crate) fn compute_fid_full_hash(
     }
     let full_count = code_unit_index - call_count;
     let full_count = u16::try_from(full_count).ok()?;
-    Some((full_count, digest.digest_long()))
+    // Ghidra: `Math.min(specificCount, Byte.MAX_VALUE)`.
+    let specific_count = u8::try_from(specific_count.clamp(0, i32::from(i8::MAX))).ok()?;
+    Some(FidHashes {
+        full_count,
+        full_hash: full_digest.digest_long(),
+        specific_count,
+        specific_hash: specific_digest.digest_long(),
+    })
 }

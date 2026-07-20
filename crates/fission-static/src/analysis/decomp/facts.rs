@@ -324,18 +324,15 @@ impl FactStore {
                 continue;
             };
 
-            let Some((_code_unit_count, full_hash)) =
-                frontend.fid_full_hash(&decoded.instructions, &resolve_register_offset)
+            let Some((_full_count, full_hash, _specific_count, specific_hash)) =
+                frontend.fid_hashes(&decoded.instructions, &resolve_register_offset)
             else {
                 continue;
             };
 
-            // No specific hash yet -- pass 0, so a match only survives
-            // identify_by_hashes' acceptance threshold on full-hash
-            // code-unit-size alone (no specific-hash bonus).
             let best_match = databases
                 .iter()
-                .flat_map(|db| db.identify_by_hashes(full_hash, 0))
+                .flat_map(|db| db.identify_by_hashes(full_hash, specific_hash))
                 .max_by(|a, b| a.score.total_cmp(&b.score));
 
             if let Some(best_match) = best_match {

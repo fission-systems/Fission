@@ -197,11 +197,10 @@ fn fid_full_hash_matches_ghidra_exactly_for_register_only_function() {
         }
     };
 
-    let (count, hash) =
-        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-            .expect("function has enough code units to hash");
-    assert_eq!(count, 5);
-    assert_eq!(hash, 0x37783a7364fbdfe5);
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("function has enough code units to hash");
+    assert_eq!(hashes.full_count, 5);
+    assert_eq!(hashes.full_hash, 0x37783a7364fbdfe5);
 }
 
 /// Cross-checked against real Ghidra 12.0.4 (headless, `FidService.hashFunction`)
@@ -241,11 +240,10 @@ fn fid_full_hash_matches_ghidra_exactly_for_function_with_memory_operand() {
         }
     };
 
-    let (count, hash) =
-        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-            .expect("function has enough code units to hash");
-    assert_eq!(count, 5);
-    assert_eq!(hash, 0x82d2e963fd88461b);
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("function has enough code units to hash");
+    assert_eq!(hashes.full_count, 5);
+    assert_eq!(hashes.full_hash, 0x82d2e963fd88461b);
 }
 
 /// Cross-checked against real Ghidra 12.0.4 (headless, `FidService.hashFunction`,
@@ -303,19 +301,17 @@ fn fid_full_hash_matches_ghidra_exactly_for_sib_addressing() {
         &[0x01, 0xD0],
         &[0xC3],
     ]);
-    let (count, hash) =
-        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-            .expect("SIB with scale+disp hashes");
-    assert_eq!(count, 4);
-    assert_eq!(hash, 0x45285b0d87470466);
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("SIB with scale+disp hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0x45285b0d87470466);
 
     // xor edx,edx; mov eax,[rax+rcx*1]; add eax,edx; ret
     let extent = decode_extent(&[&[0x31, 0xD2], &[0x8B, 0x04, 0x08], &[0x01, 0xD0], &[0xC3]]);
-    let (count, hash) =
-        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-            .expect("SIB with scale==1, disp==0 hashes");
-    assert_eq!(count, 4);
-    assert_eq!(hash, 0x71e530ce7190c262);
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("SIB with scale==1, disp==0 hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0x71e530ce7190c262);
 
     // xor edx,edx; mov eax,[rax+rcx*8+0x100]; add eax,edx; ret
     let extent = decode_extent(&[
@@ -324,11 +320,10 @@ fn fid_full_hash_matches_ghidra_exactly_for_sib_addressing() {
         &[0x01, 0xD0],
         &[0xC3],
     ]);
-    let (count, hash) =
-        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-            .expect("SIB with scale+32-bit disp hashes");
-    assert_eq!(count, 4);
-    assert_eq!(hash, 0xf66301fb4931933a);
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("SIB with scale+32-bit disp hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0xf66301fb4931933a);
 }
 
 #[test]
@@ -1753,11 +1748,10 @@ fn fid_full_hash_matches_ghidra_exactly_for_rip_relative_memory_load() {
         address += decoded.length as u64;
         extent.push(decoded);
     }
-    let (count, hash) =
-        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-            .expect("RIP-relative memory load hashes");
-    assert_eq!(count, 4);
-    assert_eq!(hash, 0x3768fc2909545fcc);
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("RIP-relative memory load hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0x3768fc2909545fcc);
 }
 
 /// Cross-checked against real Ghidra 12.0.4 for `31 d2 48 8d 05 00 02 00 00
@@ -1792,9 +1786,163 @@ fn fid_full_hash_matches_ghidra_exactly_for_rip_relative_lea() {
         address += decoded.length as u64;
         extent.push(decoded);
     }
-    let (count, hash) =
-        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-            .expect("RIP-relative LEA hashes");
-    assert_eq!(count, 4);
-    assert_eq!(hash, 0xae465fd70004f692);
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("RIP-relative LEA hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0xae465fd70004f692);
+}
+
+/// Cross-checked against real Ghidra 12.0.4 (`FidService.hashFunction`, plus
+/// `Instruction.getOperandType(ii)`/`OperandType.isScalar`/`isAddress`
+/// printed directly) for six `xor edx,edx; <op>; add eax/rax,edx/rdx; ret`
+/// GCC-compiled variants, isolating each operand-classification case the
+/// specific hash needs to distinguish:
+///
+/// - `imm_func` (`mov eax,0x2a`): plain immediate, `isScalar=true
+///   isAddress=false` -- real value used, counted.
+/// - `rip_load_func` (`mov eax,[rip+0x100]`): RIP-relative memory
+///   dereference, `isScalar=false isAddress=true` (an `Address` object, not
+///   `Scalar`) -- placeholder, not counted.
+/// - `rip_lea_func` (`lea rax,[rip+0x200]`): RIP-relative *computed value*,
+///   `isScalar=true isAddress=false` -- despite also being RIP-relative,
+///   the opposite classification from the memory-load case, since `LEA`
+///   computes a value rather than dereferencing one -- real value used,
+///   counted. (Fission distinguishes the two via `RuntimeFixedHandle::space`:
+///   `"ram"` for the dereference, `"const"` for `LEA`.)
+/// - `sib_func` (`mov eax,[rax+rcx*4+0x10]`): compound/dynamic operand,
+///   `isScalar=false isAddress=false` -- both the scale and displacement
+///   sub-scalars are small enough (`-256 < v < 256`) to use their real
+///   values, both counted.
+/// - `call_func` (`call imm_func`): direct call target, `isScalar=false
+///   isAddress=true` -- placeholder, not counted; also drops out of
+///   `fullCount` (3, not 4) since `CALL` code units are excluded from the
+///   reported count while still being hashed.
+/// - `abs_addr_func` (`mov eax,ds:0x404040`, `-no-pie` so it's a real
+///   absolute address rather than RIP-relative): same classification as
+///   `rip_load_func` -- `isAddress=true`, placeholder, not counted.
+#[test]
+fn fid_hashes_match_ghidra_exactly_for_specific_hash_operand_classification() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let resolve_register_offset = |name: &str| -> Option<i64> {
+        match name.to_ascii_uppercase().as_str() {
+            "RAX" | "EAX" => Some(0x0),
+            "RCX" | "ECX" => Some(0x8),
+            "RDX" | "EDX" => Some(0x10),
+            _ => None,
+        }
+    };
+    let decode_extent =
+        |address: u64, instruction_bytes: &[&[u8]]| -> Vec<crate::runtime::DecodedInstruction> {
+            let mut address = address;
+            let mut extent = Vec::new();
+            for bytes in instruction_bytes {
+                let decoded =
+                    decode_instruction(&compiled, bytes, address).expect("decode instruction");
+                address += decoded.length as u64;
+                extent.push(decoded);
+            }
+            extent
+        };
+
+    // imm_func @ 0x40171e: xor edx,edx; mov eax,0x2a; add eax,edx; ret
+    let extent = decode_extent(
+        0x40171e,
+        &[
+            &[0x31, 0xD2],
+            &[0xB8, 0x2A, 0x00, 0x00, 0x00],
+            &[0x01, 0xD0],
+            &[0xC3],
+        ],
+    );
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("imm_func hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0xc4654e18387e22d8);
+    assert_eq!(hashes.specific_count, 1);
+    assert_eq!(hashes.specific_hash, 0x860bebdb442635e3);
+
+    // rip_load_func @ 0x401728: xor edx,edx; mov eax,[rip+0x100]; add eax,edx; ret
+    let extent = decode_extent(
+        0x401728,
+        &[
+            &[0x31, 0xD2],
+            &[0x8B, 0x05, 0x00, 0x01, 0x00, 0x00],
+            &[0x01, 0xD0],
+            &[0xC3],
+        ],
+    );
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("rip_load_func hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0x3768fc2909545fcc);
+    assert_eq!(hashes.specific_count, 0);
+    assert_eq!(hashes.specific_hash, 0xa3e9a2fb37c9be98);
+
+    // rip_lea_func @ 0x401733: xor edx,edx; lea rax,[rip+0x200]; add rax,rdx; ret
+    let extent = decode_extent(
+        0x401733,
+        &[
+            &[0x31, 0xD2],
+            &[0x48, 0x8D, 0x05, 0x00, 0x02, 0x00, 0x00],
+            &[0x48, 0x01, 0xD0],
+            &[0xC3],
+        ],
+    );
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("rip_lea_func hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0xae465fd70004f692);
+    assert_eq!(hashes.specific_count, 1);
+    assert_eq!(hashes.specific_hash, 0x49aeb0721995d677);
+
+    // sib_func @ 0x401740: xor edx,edx; mov eax,[rax+rcx*4+0x10]; add eax,edx; ret
+    let extent = decode_extent(
+        0x401740,
+        &[
+            &[0x31, 0xD2],
+            &[0x8B, 0x44, 0x88, 0x10],
+            &[0x01, 0xD0],
+            &[0xC3],
+        ],
+    );
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("sib_func hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0x45285b0d87470466);
+    assert_eq!(hashes.specific_count, 2);
+    assert_eq!(hashes.specific_hash, 0x4a89d3b5375081ca);
+
+    // call_func @ 0x401749: xor edx,edx; call imm_func; add eax,edx; ret
+    let extent = decode_extent(
+        0x401749,
+        &[
+            &[0x31, 0xD2],
+            &[0xE8, 0xCE, 0xFF, 0xFF, 0xFF],
+            &[0x01, 0xD0],
+            &[0xC3],
+        ],
+    );
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("call_func hashes");
+    assert_eq!(hashes.full_count, 3);
+    assert_eq!(hashes.full_hash, 0xd6299a1775049934);
+    assert_eq!(hashes.specific_count, 0);
+    assert_eq!(hashes.specific_hash, 0x743b8c40dc55c620);
+
+    // abs_addr_func @ 0x401753: xor edx,edx; mov eax,ds:0x404040; add eax,edx; ret
+    let extent = decode_extent(
+        0x401753,
+        &[
+            &[0x31, 0xD2],
+            &[0x8B, 0x04, 0x25, 0x40, 0x40, 0x40, 0x00],
+            &[0x01, 0xD0],
+            &[0xC3],
+        ],
+    );
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("abs_addr_func hashes");
+    assert_eq!(hashes.full_count, 4);
+    assert_eq!(hashes.full_hash, 0x3f84cd43d7843202);
+    assert_eq!(hashes.specific_count, 0);
+    assert_eq!(hashes.specific_hash, 0x7f404fe629d3715e);
 }

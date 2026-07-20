@@ -96,11 +96,11 @@ impl RuntimeSleighFrontend {
         Ok((ops, len))
     }
 
-    /// Ghidra-compatible FID (Function ID) "full hash" for a function's
-    /// instruction extent (e.g. `DecodedPcodeFunction.instructions`).
+    /// Ghidra-compatible FID (Function ID) full and specific hashes for a
+    /// function's instruction extent (e.g. `DecodedPcodeFunction.instructions`).
     ///
     /// See `compiled_table::fid_hash` for the algorithm and its current
-    /// limitations (no memory-operand mixing, no "specific hash" yet).
+    /// limitations (no relocation-awareness yet).
     /// `resolve_register_offset` resolves a Ghidra-style register name (as
     /// carried by a decoded `BoundOperand::NamedVarnode`) to its SLEIGH
     /// register-space offset -- typically
@@ -111,18 +111,26 @@ impl RuntimeSleighFrontend {
     /// Returns `None` if the extent is too short to hash reliably (fewer
     /// than `compiled_table::fid_hash::FID_SHORT_CODE_UNIT_LIMIT` code
     /// units after skipping alignment padding) or if this frontend has no
-    /// compiled-table engine available.
-    pub fn fid_full_hash(
+    /// compiled-table engine available. On success, returns
+    /// `(full_count, full_hash, specific_count, specific_hash)` mirroring
+    /// Ghidra's `FidHashQuad` field order.
+    pub fn fid_hashes(
         &self,
         extent: &[DecodedInstruction],
         resolve_register_offset: &dyn Fn(&str) -> Option<i64>,
-    ) -> Option<(u16, u64)> {
+    ) -> Option<(u16, u64, u8, u64)> {
         let compiled = self.compiled.as_ref()?;
-        spine::compiled_table::fid_hash::compute_fid_full_hash(
+        let hashes = spine::compiled_table::fid_hash::compute_fid_hashes(
             compiled,
             extent,
             resolve_register_offset,
-        )
+        )?;
+        Some((
+            hashes.full_count,
+            hashes.full_hash,
+            hashes.specific_count,
+            hashes.specific_hash,
+        ))
     }
 
     pub fn decode_window(

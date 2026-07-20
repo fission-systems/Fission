@@ -1,13 +1,13 @@
 //! Function ID (FID) identification: match a function's decoded bytes
 //! against Ghidra-shipped `.fidbf` signature databases via
-//! `fission_sleigh::runtime::RuntimeSleighFrontend::fid_full_hash`.
+//! `fission_sleigh::runtime::RuntimeSleighFrontend::fid_hashes`.
 //!
 //! See `PROJECT.md`'s FID entry for the algorithm's provenance and
 //! validation history (byte-for-byte matched against real Ghidra 12.0.4 on
-//! register/immediate/simple-memory/SIB/RIP-relative operands, then proven
-//! end-to-end against a real Ghidra-shipped database). Current scope: x86-64
-//! only, full hash only (no specific-hash bonus yet, so short functions
-//! rarely clear the acceptance threshold on full hash alone).
+//! register/immediate/simple-memory/SIB/RIP-relative operands and both full
+//! and specific hashes). Current scope: x86-64 only, not relocation-aware
+//! yet (see `fid_hash.rs`'s doc comment for the bounded impact of that
+//! gap).
 
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::midend::cspec::{RegisterModel, register_model_for_language};
@@ -34,6 +34,8 @@ pub struct FidIdentification {
     pub score: f32,
     pub full_hash: u64,
     pub code_unit_count: u16,
+    /// Whether the specific hash also matched (the `+10` score bonus).
+    pub specific_matched: bool,
 }
 
 /// Load every `.fidbf` database matching the binary's pointer width.
@@ -100,14 +102,14 @@ impl<'a> FidIdentifier<'a> {
                 .lookup_name(name)
                 .map(|(offset, _size)| offset as i64)
         };
-        let (code_unit_count, full_hash) = self
+        let (code_unit_count, full_hash, _specific_count, specific_hash) = self
             .lifter
-            .fid_full_hash(&decoded.instructions, &resolve_register_offset)?;
+            .fid_hashes(&decoded.instructions, &resolve_register_offset)?;
 
         let best: Option<FidbfMatch> = self
             .databases
             .iter()
-            .flat_map(|db| db.identify_by_hashes(full_hash, 0))
+            .flat_map(|db| db.identify_by_hashes(full_hash, specific_hash))
             .max_by(|a, b| a.score.total_cmp(&b.score));
 
         best.map(|m| FidIdentification {
@@ -116,6 +118,7 @@ impl<'a> FidIdentifier<'a> {
             score: m.score,
             full_hash,
             code_unit_count,
+            specific_matched: m.specific_matched,
         })
     }
 }
