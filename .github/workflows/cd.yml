@@ -185,7 +185,7 @@ jobs:
           cat ${{ matrix.asset_name }}.sha256
 
       - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -197,7 +197,7 @@ jobs:
           prerelease: false
 
       - name: Upload Benchmark CLI Asset
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         if: runner.os == 'Linux'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -263,7 +263,7 @@ jobs:
           } | tee fission-utils.inventory.txt
 
       - name: Upload utils assets to GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
