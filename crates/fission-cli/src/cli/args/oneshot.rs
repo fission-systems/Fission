@@ -80,6 +80,10 @@ pub struct OneShotArgs {
     pub debug_decomp_bundle: Option<PathBuf>,
     /// Canonical `callgraph` subcommand.
     pub callgraph_cmd: bool,
+    /// Canonical `identify` subcommand (FID signature matching).
+    pub identify_cmd: bool,
+    /// Optional single function VA to identify (`identify --function`).
+    pub identify_function: Option<u64>,
 }
 
 impl Default for OneShotArgs {
@@ -150,6 +154,8 @@ impl Default for OneShotArgs {
             debug_decomp: false,
             debug_decomp_bundle: None,
             callgraph_cmd: false,
+            identify_cmd: false,
+            identify_function: None,
         }
     }
 }

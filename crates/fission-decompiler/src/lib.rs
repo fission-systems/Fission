@@ -25,6 +25,7 @@ pub use fission_midend_structuring as midend_structuring;
 
 pub mod context;
 pub mod facts;
+pub mod fid;
 pub mod orchestration;
 pub mod pipeline;
 pub mod rendering;

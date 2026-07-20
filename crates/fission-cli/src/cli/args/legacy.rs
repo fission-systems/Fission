@@ -255,6 +255,8 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         xref_function: None,
         info_xrefs: false,
         callgraph_cmd: false,
+        identify_cmd: false,
+        identify_function: None,
     };
 
     ParsedOneShotArgs {

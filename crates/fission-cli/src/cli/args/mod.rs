@@ -140,6 +140,8 @@ enum CliCommand {
     Xrefs(XrefsArgs),
     /// Call graph (caller/callee relationships from xref analysis)
     Callgraph(CallgraphArgs),
+    /// Identify functions against bundled Ghidra FID (Function ID) signature databases
+    Identify(IdentifyArgs),
     /// Operator-oriented inventory and batch emitters
     Inventory(InventoryArgs),
     /// Inspect resolved resource paths and bundle-root candidates
@@ -548,6 +550,23 @@ struct CallgraphArgs {
 
 #[derive(Args, Debug)]
 #[command(
+    long_about = "Identify functions against bundled Ghidra FID (Function ID) signature databases (`utils/signatures/fid/*.fidbf`).\n\nHashes each function's decoded instructions the same way Ghidra's FID service does (see MessageDigestFidHasher) and looks the hash up. x86-64 only; SIB (base+index*scale) memory operands and the specific-hash bonus aren't supported yet, so some functions won't hash at all -- that's a missed identification, not a wrong one.",
+    after_help = "Examples:\n  fission_cli identify app.exe\n  fission_cli identify app.exe --json\n  fission_cli identify app.exe --function 0x140001000"
+)]
+struct IdentifyArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Identify only this function entry VA instead of every discovered function
+    #[arg(long, value_parser = parse_hex_address)]
+    function: Option<u64>,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
     long_about = "Inspect bundled runtime resources (signatures, type corpora, detectors).\n\nUse `resources status` to see candidate bundle roots and paths resolved via `PATHS`.",
     after_help = "Examples:\n  fission_cli resources status\n  fission_cli resources status --json\n  fission_cli --resource-root /opt/fission-data resources status --json"
 )]
@@ -624,6 +643,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "strings",
     "xrefs",
     "callgraph",
+    "identify",
     "inventory",
     "resources",
     "script",
@@ -817,6 +837,14 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.callgraph_cmd = true;
                     args.json = callgraph.common.json;
                     args.verbose = callgraph.common.verbose;
+                    args
+                }
+                CliCommand::Identify(identify) => {
+                    let mut args = OneShotArgs::with_binary(identify.binary);
+                    args.identify_cmd = true;
+                    args.identify_function = identify.function;
+                    args.json = identify.common.json;
+                    args.verbose = identify.common.verbose;
                     args
                 }
                 CliCommand::Inventory(inventory) => match inventory.command {

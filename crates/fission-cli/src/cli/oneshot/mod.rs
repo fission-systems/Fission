@@ -16,6 +16,7 @@ mod decompile;
 mod disasm;
 mod function_select;
 mod functions;
+mod identify;
 mod inventory;
 mod nir_stats;
 mod pcode_diagnostics;
@@ -36,6 +37,7 @@ use decompile::{
 };
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
+use identify::run_identify;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
 use nir_stats::emit_nir_stats;
 use pcode_stages::emit_pcode_stages;
@@ -469,6 +471,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.callgraph_cmd {
         return Ok(run_callgraph(cli, &binary)?);
+    }
+
+    if cli.identify_cmd {
+        return Ok(run_identify(cli, &binary)?);
     }
 
     if cli.list {
