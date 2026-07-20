@@ -1235,6 +1235,63 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           the decompiler's own naming/rendering (`identify` is a
           standalone report command for now, not yet consulted by
           `decomp`/`list` to rename functions).
+      - **Update — SIB addressing** (commit `64245e16`). User picked SIB
+        first among the four remaining items, since it's the biggest
+        remaining hashing-coverage gap (most non-trivial array/struct field
+        accesses are `[base+index*scale(+disp)]`, and every function
+        containing one previously bailed out of hashing entirely).
+        - Discovered via a headless Ghidra script printing raw
+          `Instruction.getOpObjects(ii)` for three real SIB instructions
+          (`[rax+rcx*4+0x10]`, `[rax+rcx*1]` with disp==0, `[rax+rcx*8+0x100]`):
+          a SIB memory operand's object list is `[Register(base),
+          Register(index), Scalar(scale), Scalar(disp)?]` — the scale
+          `Scalar` is **always present, even at scale == 1**; the
+          displacement `Scalar` is present **only when disp != 0**. Since
+          `MessageDigestFidHasher.java`'s full-hash mixing adds the same
+          flat `0xfeeddead` placeholder for *every* `Scalar` object
+          unconditionally, this means a SIB operand with a nonzero
+          displacement contributes the placeholder **twice** (once for
+          scale, once for disp) — a detail invisible from the Java source
+          alone without seeing real `getOpObjects()` output.
+        - `fission_cli raw-pcode` against the same three instructions showed
+          Fission's own SLEIGH-generated p-code resolves the address via one
+          of two backward `IntAdd`/`IntMult` producer chains depending on
+          whether disp is zero: `IntAdd(base,disp) → IntMult(index,scale) →
+          IntAdd(combine)` when disp != 0, or directly
+          `IntMult(index,scale) → IntAdd(base,combine)` when disp == 0 (no
+          intermediate base+disp op at all — order of the two source ops
+          also flips). `trace_simple_memory_address` now recognizes both,
+          alongside the pre-existing bare-register and register+constant
+          shapes, via two new small producer-matching helpers
+          (`producer_reg_plus_const`, `producer_scaled_index`) rather than a
+          generic recursive expression matcher — SLEIGH only ever emits
+          this fixed small set of shapes for x86 addressing, so a general
+          matcher would be unused generality.
+        - `MemoryAddressShape` gained a `BaseIndexScale{base, index,
+          has_displacement}` variant (scale's *value* is never tracked —
+          only presence matters for the full hash, which never mixes in
+          actual scalar values); `mix_memory_operand_full` mixes both
+          register offsets plus one placeholder for the always-present
+          scale scalar and a second if `has_displacement`.
+        - Added `fid_full_hash_matches_ghidra_exactly_for_sib_addressing`,
+          validated byte-for-byte against real Ghidra 12.0.4
+          `FidService.hashFunction()` output for all three cases on the
+          first attempt (`45285b0d87470466`/`71e530ce7190c262`/
+          `f66301fb4931933a`, all `codeUnitSize=4`) — no back-and-forth
+          debugging needed, since the `getOpObjects()` inspection up front
+          resolved the ambiguity that would otherwise have required trial
+          and error.
+        - Validated: `cargo nextest run` 379/379 across
+          fission-sleigh/fission-decompiler/fission-cli, release build,
+          `golden_corpus_check.py` clean, manual smoke test (no crashes on
+          both the SIB test binary and the earlier Docker-built static ELF;
+          still zero confident matches against the bundled databases, as
+          expected — this only widens *what can be hashed*, not which
+          databases a given binary's toolchain happens to match).
+        - Still not done: specific hash, non-x86 architectures, wiring a
+          match into decompiler-facing naming/rendering, and RIP-relative
+          addressing (a fourth p-code shape `trace_simple_memory_address`
+          doesn't recognize — noted but not investigated this round).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
