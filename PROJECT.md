@@ -1106,25 +1106,47 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
         chosen to sidestep the memory-operand gap below): exact match on
         the first attempt, `full_hash=0x37783a7364fbdfe5`,
         `code_unit_count=5`, both sides.
-      - **Known, deliberate gap**: memory operands (`[rbp+8]` etc.) aren't
-        mixed in at all yet. `RuntimeConstructState` doesn't capture a
-        usable base-register/displacement decomposition for them today —
-        checked directly: decoding `mov eax,[rbp+8]` leaves that operand's
-        `debug_value` as `None` and it's silently dropped from
-        `state.operands`, because the computed address lives only in the
-        p-code that computes it (`RBP + 8` evaluated into a `unique`-space
-        temp), not traced back to source operand objects at the
-        construct-state level this works from. Since most real
-        instructions have at least one memory operand, this is the next
-        real-value slice, not a corner case — deferred, not attempted half
-        correct, same principle as the register-locals work above.
-      - **Also not yet done**: the "specific hash" (needs actual scalar
-        values + relocation-awareness — `OperandType.isAddress`/
-        `hasRelocation` in `MessageDigestFidHasher.java` — which needs the
-        same operand-classification work the memory-operand gap needs),
-        wiring a query hash through `FidbfDatabase::identify_by_hashes`
-        into an actual decompiler-facing "identified function" fact, and
-        non-x86 architectures (only x86-64 validated so far).
+      - **Update, same day — simple memory operands closed, commit
+        `8f61f44d`**: `[reg]`/`[reg+disp]` (the common case — most real
+        instructions have at least one memory operand) now mix in
+        correctly. Two things needed solving:
+        1. **Address recovery**: a memory operand still produces no
+           `BoundOperand` at the `RuntimeConstructState` level (confirmed:
+           `mov eax,[rbp+8]`'s handle keeps `debug_value: None`). The
+           computed address only exists in *this instruction's own p-code*
+           — `IntAdd(RBP, 8)` feeding a `Load`.
+           `trace_simple_memory_address` walks the instruction's p-code
+           backward from the owning handle's `RuntimeFixedHandle::
+           {offset_space, offset_offset, offset_size}` triple to the
+           producing op, recognizing a bare register or a
+           register+constant `IntAdd` — bails (rather than guess) on
+           anything else, e.g. SIB `base+index*scale` addressing, still
+           not handled.
+        2. **Operand ordering, a second real bug caught before it shipped**:
+           Ghidra's `getNumOperands()`/`getOpObjects(ii)` enumerate
+           *display* operands (`"mov eax,[rbp+8]"` has exactly 2), which
+           turned out not to match `state.handles`' own count *or order* —
+           that instruction has 3 handles (one a hidden zero-extend
+           wrapper, never displayed), with the memory operand's handle
+           listed *first* and EAX's *second*, the opposite of display
+           order. The original (register/immediate-only) implementation
+           iterated `state.handles`/`state.operands` directly and happened
+           to work purely because that case has no hidden operands to
+           misorder — silently wrong once memory operands entered the
+           picture. Fixed by deriving order from
+           `state.display_template.pieces`'s `OperandRef` sequence, which
+           is what actually encodes Ghidra-equivalent display order.
+        - Validated against real Ghidra 12.0.4 on the *same* function as
+          above with the immediate replaced by `[rbp+8]`: exact match on
+          the first attempt, `full_hash=0x82d2e963fd88461b`,
+          `code_unit_count=5`.
+      - **Still not done**: SIB addressing (`base+index*scale`), the
+        "specific hash" (needs actual scalar values + relocation-awareness
+        — `OperandType.isAddress`/`hasRelocation` in
+        `MessageDigestFidHasher.java`), wiring a query hash through
+        `FidbfDatabase::identify_by_hashes` into an actual
+        decompiler-facing "identified function" fact, and non-x86
+        architectures (only x86-64 validated so far).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
