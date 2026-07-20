@@ -1946,3 +1946,19 @@ fn fid_hashes_match_ghidra_exactly_for_specific_hash_operand_classification() {
     assert_eq!(hashes.specific_count, 0);
     assert_eq!(hashes.specific_hash, 0x7f404fe629d3715e);
 }
+
+/// `X86InstructionSkipper` is the only `InstructionSkipper` in all of
+/// Ghidra (`Ghidra/Processors/x86/.../fid/hash/`) -- non-x86 architectures
+/// get zero skippers in real Ghidra, so applying x86's alignment-NOP byte
+/// patterns unconditionally (as an earlier version of this code did) would
+/// have skipped any non-x86 instruction whose bytes happened to coincide
+/// with one, silently diverging from Ghidra. Fixed by gating on
+/// `CompiledFrontend::arch` (the `.ldefs` `processor` attribute).
+#[test]
+fn fid_x86_skip_patterns_gated_by_architecture() {
+    assert!(fid_hash::x86_skip_instruction("x86", &[0x90]));
+    assert!(fid_hash::x86_skip_instruction("x86", &[0x8b, 0xc0]));
+    assert!(!fid_hash::x86_skip_instruction("AARCH64", &[0x90]));
+    assert!(!fid_hash::x86_skip_instruction("ARM", &[0x8b, 0xc0]));
+    assert!(!fid_hash::x86_skip_instruction("MIPS", &[0x90]));
+}

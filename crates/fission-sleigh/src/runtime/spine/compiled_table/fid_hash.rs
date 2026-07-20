@@ -384,6 +384,17 @@ impl Fnv1a64 {
 /// semantically-identical functions hash differently. Excluded from the hash
 /// entirely (not even as masked bytes) and not counted toward the code unit
 /// total.
+///
+/// `X86InstructionSkipper` is the *only* `InstructionSkipper` implementation
+/// anywhere in Ghidra (`Ghidra/Processors/x86/.../fid/hash/`) -- non-x86
+/// architectures get zero skippers in real Ghidra. These byte patterns are
+/// short (1-2 bytes) and could in principle collide with an unrelated
+/// non-x86 instruction's encoding (most architectures use fixed 4-byte
+/// instructions, which can never match a 1-2 byte pattern via the length-
+/// sensitive slice equality below, but variable-length ones like ARM Thumb
+/// or 68k could) -- so this must only run for x86, gated on
+/// `CompiledFrontend::arch` (the SLEIGH `.ldefs` `processor` attribute,
+/// e.g. `"x86"` vs `"AARCH64"`), not applied unconditionally.
 const X86_SKIP_PATTERNS: &[&[u8]] = &[
     &[0x90],
     &[0x8b, 0xc0],
@@ -396,8 +407,8 @@ const X86_SKIP_PATTERNS: &[&[u8]] = &[
     &[0x8b, 0xff],
 ];
 
-fn x86_skip_instruction(bytes: &[u8]) -> bool {
-    X86_SKIP_PATTERNS.iter().any(|pattern| *pattern == bytes)
+pub(crate) fn x86_skip_instruction(arch: &str, bytes: &[u8]) -> bool {
+    arch.eq_ignore_ascii_case("x86") && X86_SKIP_PATTERNS.iter().any(|pattern| *pattern == bytes)
 }
 
 /// Per-operand mixing for a display operand that resolved to a
@@ -520,7 +531,7 @@ pub(crate) fn compute_fid_hashes(
     for instr in extent.iter().take(SHORT_MAX_VALUE - 1) {
         code_unit_index += 1;
 
-        if x86_skip_instruction(&instr.bytes) {
+        if x86_skip_instruction(&compiled.arch, &instr.bytes) {
             code_unit_index -= 1;
             continue;
         }
