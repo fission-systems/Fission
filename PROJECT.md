@@ -664,6 +664,94 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   vs quick-release), `golden_corpus_check.py` clean, 6-function
   hand-curated regression byte-identical, `state_machine_score` 20/20
   uniform, `_nl_load_domain` itself 20/20 deterministic.
+- **DWARF/PDB struct field layouts wired into aggregate field naming,
+  2026-07-20** (found while auditing Fission against Ghidra for
+  genuinely-unimplemented decompiler features, at user request — see
+  `docs/architecture/GHIDRA_PARITY_GAP_AUDIT.md` for the broader
+  audit, which is narrower in scope than this finding):
+  1. **Root cause**: `fission-loader`'s DWARF parser (`dwarf/types.rs`)
+     already extracts full struct/union/class layouts (field names,
+     byte offsets, types) from `DW_TAG_structure_type`/`DW_TAG_member`
+     into `LoadedBinary.inferred_types` — but grepping the whole
+     Rust-native decompile pipeline (`fission-pcode`,
+     `fission-midend-normalize`, `fission-midend-structuring`,
+     `fission-decompiler`) found **zero** references to it. The only
+     consumer (`fission-static/src/analysis/decomp/prepare.rs`'s
+     `apply_struct_to_param`) is entirely
+     `#[cfg(feature = "native_decomp")]`-gated — i.e. only reachable
+     when Fission calls out to Ghidra's actual C++ decompiler via FFI,
+     a completely different backend than the pure-Rust one this
+     session's ten perf rounds targeted. Register-resident DWARF
+     locals (as opposed to stack-offset ones) were a smaller,
+     related gap: `nir_hints_from_debug_function`
+     (`fission-decompiler/src/facts/facts.rs`) only handled
+     `DwarfLocation::StackOffset`, silently dropping names/types for
+     any local DWARF placed in a register (common at -O1+). Not fixed
+     in this change — noted for a future slice.
+  2. Meanwhile `fission-midend-normalize::memory::aggregate_fields.rs`
+     already has its own **independent, heuristic** aggregate-field
+     recovery (promotes `Ptr(Unknown)` → `Ptr(Aggregate{fields})` from
+     observed constant-offset `Load`/`Store` access patterns, naming
+     fields synthetically as `field_8`, `field_c`, ...). The two
+     systems had just never been connected.
+  3. Fixed (commit `617cf988`): added `NirStructTypeHint`/
+     `NirStructFieldHint` (`fission-midend-core`) and a
+     `struct_types: HashMap<String, NirStructTypeHint>` field on
+     `NirTypeContext`, populated once per binary from
+     `LoadedBinary.inferred_types`
+     (`build_nir_struct_type_hints`). `type_hints.rs`'s new
+     `apply_debug_struct_field_names` overlays real field names onto
+     already-recovered `NirType::Aggregate` fields, matched by byte
+     offset, for any param/local whose `surface_type_name` (already
+     populated by the pre-existing DWARF param/local type-hint
+     plumbing) resolves to a known struct name through **exactly one**
+     level of pointer indirection.
+  4. **Deliberately narrow scope, matching this session's established
+     "only touch what's proven safe" discipline**: does not decide
+     which variables become aggregates (keeps the existing, separately
+     -validated heuristic as sole gatekeeper — no new false-positive
+     aggregate promotions introduced), does not touch field *offsets*,
+     and does not touch field *types* — `aggregate_fields.rs` derives
+     those from real observed load/store access width, which is
+     grounded in actual pcode and safer to trust for cast/size
+     correctness than a naively re-parsed debug-info type string. Only
+     a field's *name* is ever overwritten, and only when a debug-info
+     field exists at the exact same offset. Multi-level pointers
+     (`Foo**`) are rejected outright by
+     `struct_base_name_for_single_pointer`: the aggregate whose fields
+     would be named belongs to `**binding`, not `*binding`, so applying
+     the layout at this binding's own offset set would be a semantic
+     mismatch, not just an imprecision.
+  5. **Verified via two focused unit tests**, not an end-to-end binary:
+     real compiler output at `-O0` frequently doesn't trigger
+     `aggregate_fields.rs`'s own promotion heuristic for even a
+     two-field `struct Point { int x, y; }` accessed as `p->x + p->y`
+     (confirmed empirically with a `zig cc`-built ELF test binary) —
+     that non-triggering is a **separate, pre-existing gap in the
+     heuristic itself**, out of scope for this change, which is purely
+     about connecting already-collected data to an already-existing
+     recovery mechanism. The unit tests
+     (`preview_type_hints_overlay_debug_struct_field_names_onto_
+     recovered_aggregate`, `..._reject_multi_level_pointer`) construct
+     an already-aggregate-typed binding directly (as
+     `aggregate_fields.rs` would have left it) and confirm the overlay
+     — and its multi-pointer-level rejection — both work correctly in
+     isolation.
+  Validated: `cargo check --workspace` clean, 1964/1971 nextest passing
+  (1969 baseline + 2 new tests; same 7 pre-existing unrelated
+  failures), `golden_corpus_check.py` clean (160 functions,
+  byte-identical — none of the golden corpus's DWARF-bearing functions
+  hit this new path, confirming zero regression risk), 6-function
+  hand-curated regression byte-identical, `state_machine_score` 20/20
+  uniform, release/quick-release byte-identical.
+  **Follow-up candidates, not done here**: (a) extend
+  `nir_hints_from_debug_function` to cover `DwarfLocation::Register`
+  locals, not just `StackOffset`; (b) investigate why
+  `aggregate_fields.rs`'s promotion heuristic doesn't fire for the
+  simple `-O0` `ptr->field` pcode shape found during manual testing —
+  that's likely a bigger and more broadly valuable fix than this one,
+  since it gates whether *any* of this new field-naming machinery ever
+  gets exercised in practice.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
