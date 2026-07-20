@@ -158,31 +158,10 @@ fn fid_mask_matches_ghidra_exactly_for_operand_size_prefix() {
     assert_eq!(mask, vec![0xff, 0xf8, 0x00, 0x00]);
 }
 
-#[test]
-fn fid_operand_explore_mov_mem_disp8() {
-    let compiled = compile_x86_64_frontend().expect("compile frontend");
-    // mov eax, [rbp+8]
-    let bytes = [0x8B, 0x45, 0x08];
-    let state = decode_instruction_raw_state(&compiled, &bytes, 0x1000).expect("decode raw state");
-    eprintln!("mnemonic={} handles.len()={}", state.mnemonic, state.handles.len());
-    for h in &state.handles {
-        eprintln!(
-            "  op_index={} space={:?} size={} offset_space={:?} offset_offset={:#x} debug_value={:?}",
-            h.operand_index,
-            h.fixed.space.as_ref().map(|s| &s.name),
-            h.fixed.size,
-            h.fixed.offset_space.as_ref().map(|s| &s.name),
-            h.fixed.offset_offset,
-            h.debug_value
-        );
-    }
-    eprintln!("operands (display order) = {:?}", state.operands);
-}
-
 /// Cross-checked against real Ghidra 12.0.4 (headless, `FidService.hashFunction`)
 /// for `55 48 89 e5 b8 2a 00 00 00 5d c3` (`push rbp; mov rbp,rsp; mov eax,0x2a;
-/// pop rbp; ret`, no memory operands -- the shape this increment supports):
-/// Ghidra prints `FID full hash: 37783a7364fbdfe5`, `FID code unit size: 5`.
+/// pop rbp; ret`): Ghidra prints `FID full hash: 37783a7364fbdfe5`,
+/// `FID code unit size: 5`.
 ///
 /// Register offsets (RAX=0x0, RSP=0x20, RBP=0x28 -- the standard Ghidra
 /// x86-64 SLEIGH register-space layout, independently confirmed earlier this
@@ -222,6 +201,49 @@ fn fid_full_hash_matches_ghidra_exactly_for_register_only_function() {
         .expect("function has enough code units to hash");
     assert_eq!(count, 5);
     assert_eq!(hash, 0x37783a7364fbdfe5);
+}
+
+/// Cross-checked against real Ghidra 12.0.4 (headless, `FidService.hashFunction`)
+/// for `55 48 89 e5 8b 45 08 5d c3` (`push rbp; mov rbp,rsp; mov eax,[rbp+8];
+/// pop rbp; ret` -- same shape as the register-only case above but with the
+/// immediate replaced by a `[rbp+8]` memory operand, exercising
+/// `trace_simple_memory_address`/`mix_memory_operand_full` and the
+/// `display_template.pieces`-derived operand ordering -- "mov eax,[rbp+8]"
+/// has EAX at Ghidra display position 0 and the memory reference at
+/// position 1, but `state.handles` orders them the other way around, with a
+/// third, hidden, non-displayed handle (a zero-extend wrapper) alongside):
+/// Ghidra prints `FID full hash: 82d2e963fd88461b`, `FID code unit size: 5`.
+#[test]
+fn fid_full_hash_matches_ghidra_exactly_for_function_with_memory_operand() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let instruction_bytes: [&[u8]; 5] = [
+        &[0x55],                   // push rbp
+        &[0x48, 0x89, 0xE5],       // mov rbp, rsp
+        &[0x8B, 0x45, 0x08],       // mov eax, [rbp+8]
+        &[0x5D],                   // pop rbp
+        &[0xC3],                   // ret
+    ];
+    let mut address = 0x1000u64;
+    let mut extent = Vec::new();
+    for bytes in instruction_bytes {
+        let decoded = decode_instruction(&compiled, bytes, address).expect("decode instruction");
+        address += decoded.length as u64;
+        extent.push(decoded);
+    }
+
+    let resolve_register_offset = |name: &str| -> Option<i64> {
+        match name.to_ascii_uppercase().as_str() {
+            "RAX" | "EAX" => Some(0x0),
+            "RSP" | "ESP" => Some(0x20),
+            "RBP" | "EBP" => Some(0x28),
+            _ => None,
+        }
+    };
+
+    let (count, hash) = fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+        .expect("function has enough code units to hash");
+    assert_eq!(count, 5);
+    assert_eq!(hash, 0x82d2e963fd88461b);
 }
 
 #[test]

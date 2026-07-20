@@ -3,21 +3,112 @@
 //! Ports the full-hash half of `MessageDigestFidHasher.hash()`
 //! (`Ghidra/Features/FunctionID/.../hash/MessageDigestFidHasher.java`):
 //! an FNV-1a 64-bit digest over each code unit's masked bytes (see
-//! [`super::instruction_pattern_mask`]) plus a per-operand mixing step.
+//! [`super::instruction_pattern_mask`]) plus a per-operand mixing step,
+//! now including simple memory operands (`[reg]`, `[reg+disp]`).
 //!
 //! Deliberately **not** implemented yet: the "specific hash" (needs actual
 //! scalar operand values and relocation-awareness -- see
 //! `MessageDigestFidHasher.java`'s `hasRelocation`/`OperandType.isAddress`
 //! handling, which Fission's flat `BoundOperand` model doesn't currently
-//! distinguish) and memory-operand mixing (a memory reference like
-//! `[rbp+8]` doesn't produce a `BoundOperand` at all in the current
-//! `RuntimeConstructState` -- its base register/displacement live only in
-//! the p-code that computes the address, which isn't traced back here).
-//! Both are silently skipped rather than guessed at, since a wrong operand
-//! mix would make the hash wrong in a way nothing could ever detect (unlike
-//! an incomplete extent, which just produces `None`).
+//! distinguish) and SIB-style memory operands (`[base+index*scale+disp]`
+//! -- `trace_simple_memory_address` bails on anything beyond a bare
+//! register or register+constant `IntAdd`). A wrong operand mix would make
+//! the hash wrong in a way nothing could ever detect (unlike an incomplete
+//! extent, which just produces `None`), so unhandled shapes fail the whole
+//! function's hash rather than silently mixing a placeholder for something
+//! that isn't actually a scalar or omitting an operand Ghidra wouldn't.
 
 use super::*;
+use crate::compiler::CompiledDisplayPiece;
+
+/// Ghidra's `getOpObjects(ii)` returns multiple sub-objects for one display
+/// operand (e.g. a memory reference is `[Register(base), Scalar(disp)]`);
+/// this is the address-shape Fission recovers for the "ram"-space handles
+/// that `RuntimeConstructState` doesn't otherwise carry a `BoundOperand`
+/// for, by tracing backward through this instruction's own p-code from the
+/// handle's `(offset_space, offset_offset, offset_size)` triple to whichever
+/// earlier op computed it.
+enum MemoryAddressShape {
+    /// `[reg]` -- SLEIGH register-space offset of the base register.
+    Register(u64),
+    /// `[reg+disp]` / `[reg-disp]` -- base register offset, signed displacement.
+    RegisterPlusConstant(u64, i64),
+}
+
+/// Trace a memory operand's address computation backward through `ops`
+/// (this instruction's own p-code) to recover a [`MemoryAddressShape`].
+/// `target` identifies the address-holding varnode via the owning handle's
+/// `RuntimeFixedHandle::{offset_space, offset_offset, offset_size}`.
+/// Returns `None` for anything beyond a bare register or register+constant
+/// `IntAdd` (e.g. SIB addressing with an index register) rather than guess.
+fn trace_simple_memory_address(
+    ops: &[fission_pcode::PcodeOp],
+    register_space_index: u64,
+    target_space_id: u64,
+    target_offset: u64,
+    target_size: u32,
+) -> Option<MemoryAddressShape> {
+    let is_register = |v: &fission_pcode::Varnode| -> bool {
+        !v.is_constant && u64::from(v.space_id) == register_space_index
+    };
+    let matches_target = |v: &fission_pcode::Varnode| -> bool {
+        v.space_id == target_space_id && v.offset == target_offset && v.size == target_size
+    };
+
+    let producer = ops
+        .iter()
+        .find(|op| op.output.as_ref().is_some_and(matches_target))?;
+
+    match producer.opcode {
+        fission_pcode::PcodeOpcode::IntAdd => {
+            let [a, b] = producer.inputs.as_slice() else {
+                return None;
+            };
+            let (reg, scalar) = if is_register(a) && b.is_constant {
+                (a, b)
+            } else if is_register(b) && a.is_constant {
+                (b, a)
+            } else {
+                // e.g. base+index (SIB addressing) -- not handled yet.
+                return None;
+            };
+            let displacement = scalar.constant_val as i64;
+            Some(MemoryAddressShape::RegisterPlusConstant(
+                reg.offset,
+                displacement,
+            ))
+        }
+        fission_pcode::PcodeOpcode::Copy => {
+            let input = producer.inputs.first()?;
+            is_register(input).then(|| MemoryAddressShape::Register(input.offset))
+        }
+        _ => None,
+    }
+}
+
+/// Mixing for a memory operand's `[Register(base), Scalar(disp)]` object
+/// list -- both objects accumulate into *one* `fullUpdate` before a single
+/// digest update, mirroring `MessageDigestFidHasher.java`'s per-operand loop
+/// (the outer `for (Object obj : opObjects)` accumulates before
+/// `fullDigest.update(fullUpdate)`, not once per object).
+fn mix_memory_operand_full(operand_index: usize, shape: &MemoryAddressShape) -> Option<i32> {
+    let mut full_update = i32::try_from(operand_index)
+        .ok()?
+        .wrapping_add(1)
+        .wrapping_mul(7777);
+    let base_offset = match shape {
+        MemoryAddressShape::Register(offset) | MemoryAddressShape::RegisterPlusConstant(offset, _) => {
+            *offset
+        }
+    };
+    let base_offset = i32::try_from(base_offset).ok()?;
+    let reg_mix = base_offset.wrapping_add(7_654_321).wrapping_mul(98_777);
+    full_update = full_update.wrapping_add(reg_mix);
+    if matches!(shape, MemoryAddressShape::RegisterPlusConstant(..)) {
+        full_update = full_update.wrapping_add(0xfeed_dead_u32 as i32);
+    }
+    Some(full_update)
+}
 
 /// Ghidra's `FidHasher.SHORT_HASH_CODE_UNIT_LIMIT` (`FidService.java`):
 /// functions with fewer code units than this are too generic to fingerprint
@@ -85,15 +176,16 @@ fn x86_skip_instruction(bytes: &[u8]) -> bool {
 }
 
 /// Per-operand mixing for the *full* hash only (`fullUpdate` in
-/// `MessageDigestFidHasher.java`'s operand loop). A register operand mixes
-/// in its SLEIGH register-space offset (which register matters for
-/// identity); a scalar or address operand -- indistinguishable from
-/// Fission's `BoundOperand::Immediate` today, but they're mixed identically
-/// for the full hash regardless (`fullUpdate += 0xfeeddead` either way in
-/// the Java source) -- contributes a fixed placeholder, since only its
-/// *presence*, not its value, is part of an instruction's full-hash
-/// identity. Returns `None` for operand shapes this doesn't handle yet
-/// (memory references -- see module doc comment).
+/// `MessageDigestFidHasher.java`'s operand loop), for a display operand that
+/// resolved to a `BoundOperand` directly (register or immediate -- memory
+/// operands go through [`mix_memory_operand_full`] instead, since they never
+/// get a `BoundOperand` at this level). A register operand mixes in its
+/// SLEIGH register-space offset (which register matters for identity); a
+/// scalar or address operand -- indistinguishable from Fission's
+/// `BoundOperand::Immediate` today, but they're mixed identically for the
+/// full hash regardless (`fullUpdate += 0xfeeddead` either way in the Java
+/// source) -- contributes a fixed placeholder, since only its *presence*,
+/// not its value, is part of an instruction's full-hash identity.
 fn mix_operand_full(
     operand_index: usize,
     operand: &BoundOperand,
@@ -164,12 +256,47 @@ pub(crate) fn compute_fid_full_hash(
 
         let state = decode_instruction_raw_state(compiled, &instr.bytes, instr.address).ok()?;
 
-        for (operand_index, operand) in state.operands.iter().enumerate() {
-            if let Some(update) =
-                mix_operand_full(operand_index, operand, resolve_register_offset)
-            {
-                digest.update_i32(update);
-            }
+        // Ghidra's getNumOperands()/getOpObjects(ii) enumerate *display*
+        // operands, e.g. "mov eax,[rbp+8]" has exactly 2 -- not
+        // state.handles' own count, which includes internal/hidden operands
+        // (a zero-extend wrapper, an address subtable's own inner unique-space
+        // handle, ...) that never appear in the display string. The display
+        // template's OperandRef sequence is the authoritative order.
+        let display_order = state
+            .display_template
+            .pieces
+            .iter()
+            .filter_map(|piece| match piece {
+                CompiledDisplayPiece::OperandRef(handle_index) => Some(*handle_index),
+                CompiledDisplayPiece::Literal(_) => None,
+            })
+            .collect::<Vec<_>>();
+
+        for (operand_index, &handle_index) in display_order.iter().enumerate() {
+            let handle = state
+                .handles
+                .iter()
+                .find(|h| h.operand_index == handle_index)?;
+            let update = if let Some(operand) = &handle.debug_value {
+                mix_operand_full(operand_index, operand, resolve_register_offset)?
+            } else if handle.fixed.space.as_ref().is_some_and(|s| s.name == "ram") {
+                let shape = trace_simple_memory_address(
+                    &decode_and_lift_with_details(compiled, &instr.bytes, instr.address)
+                        .ok()?
+                        .0,
+                    compiled.sla_register_space_index,
+                    compiled.sla_unique_space_index,
+                    handle.fixed.offset_offset,
+                    handle.fixed.offset_size,
+                )?;
+                mix_memory_operand_full(operand_index, &shape)?
+            } else {
+                // An operand shape this doesn't understand -- fail the whole
+                // function's hash rather than silently mix a wrong or
+                // missing contribution in (see module doc comment).
+                return None;
+            };
+            digest.update_i32(update);
         }
 
         let mask = instruction_pattern_mask(&state, instr.bytes.len());
