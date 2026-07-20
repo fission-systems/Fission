@@ -1292,6 +1292,86 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           match into decompiler-facing naming/rendering, and RIP-relative
           addressing (a fourth p-code shape `trace_simple_memory_address`
           doesn't recognize — noted but not investigated this round).
+      - **Update — "wiring a match into decompiler-facing naming" turned
+        out to already exist, but broken** (commit `fbcc7f16`). User picked
+        this next. Before adding a new `--identify` flag to `list`/`decomp`
+        as planned, checking whether FID *output* already reached decomp
+        surfaced `FactStore::from_binary` → `ingest_signature_matches`
+        (`fission-static/src/analysis/decomp/facts.rs`) — already wired,
+        already feeding `StrongFid`-provenance `NameFact`s into
+        `CallTargetIndex` (used to rename call *targets* in decomp output,
+        e.g. `call sub_402000` → `call memcpy` for a statically-linked
+        libc function — the actually-common FID use case, more so than
+        renaming the decompiled function's own header). It just never
+        worked, silently, via an entirely separate, pre-existing FID
+        implementation (`fission-signatures/src/fid/{hash,x86_decoder,matcher}.rs`,
+        838 lines, distinct from the `fidbf/` parser this session's FID
+        work builds on) with two independent, source-verifiable bugs:
+        - `hash.rs`'s digest folded state after every byte
+          (`state ^= state >> 32`) — not part of real FNV-1a, which
+          Ghidra's `FNV1a64MessageDigest` is (confirmed by porting and
+          Ghidra-validating the real algorithm this session) — and mixed
+          operand `i32`s little-endian where Ghidra's
+          `AbstractMessageDigest.update(int)` is big-endian.
+        - `x86_decoder.rs` (a hand-rolled x86 length-decoder, not
+          SLEIGH-based) never captured register operands into
+          `FidOperandValue` at all — only displacement/immediate scalars.
+          Ghidra mixes register operands into every hash, and nearly every
+          x86 instruction has one.
+        - Net effect: this already-shipped path could never produce a
+          correct match against a real `.fidbf` database. Not "rarely" —
+          structurally never, for any function with a register operand
+          (i.e. nearly all of them).
+        - Fix: swapped `ingest_signature_matches`' hashing to
+          `fission_sleigh::runtime::RuntimeSleighFrontend::fid_full_hash` +
+          `fission_pcode::midend::cspec::register_model_for_language` —
+          `fission-static` already depends on both (`fission-sleigh`,
+          `fission-pcode`), so no new crate-graph edge. `FidDatabaseSet`'s
+          discovery (compiler/format-filtered path resolution via
+          `ResourceProvider`) was correct and is unchanged — only the
+          per-function hash computation was swapped. Deleted `hash.rs`
+          and `x86_decoder.rs` (confirmed via grep across the workspace
+          that nothing else used their types) and trimmed `matcher.rs`
+          down to just `FidDatabaseSet`.
+        - Split `ingest_signature_matches` into a thin outer function
+          (real database discovery) and
+          `ingest_signature_matches_with_databases(binary,
+          &[FidbfDatabase])`, specifically so the fix could be proven
+          end-to-end without needing a real binary whose toolchain
+          happens to exactly match a bundled `.fidbf`'s build — every
+          attempt this session to get a *live* positive match (GCC 16 via
+          Docker `gcc:latest`, then GCC 4.8.5/glibc-2.17 via a CentOS 7
+          container specifically chosen to match the "el7" naming
+          convention seen in `utils/signatures/fid/el7.x86_64.fidbf`)
+          came back "no match" — FID's own well-documented brittleness
+          (any byte-level codegen difference, e.g. a glibc patch release,
+          invalidates a match), not a bug. Added
+          `fid_signature_match_ingests_strong_fid_name_fact`: a synthetic
+          in-memory `FidbfDatabase` seeded with the exact full hash
+          already Ghidra-validated earlier this session
+          (`fid_full_hash_matches_ghidra_exactly_for_register_only_function`'s
+          `0x37783a7364fbdfe5`) proves the decode → hash → lookup →
+          `StrongFid` `NameFact` chain works end-to-end, on the first
+          attempt.
+        - Validated: `cargo check --workspace --all-targets` clean.
+          `cargo nextest run --workspace`: 2088/2095 passed; the 7
+          failures are pre-existing and bit-for-bit identical on
+          unmodified `main` (confirmed via `git stash` — all
+          `fission-emulator` diag/profile tests failing with "Failed to
+          fetch instruction bytes at 0xFFFFFFFF", unrelated to FID).
+          Release build + `golden_corpus_check.py` both clean (no change
+          to the golden corpus's decompile output either way, since none
+          of those 16 binaries happen to trigger a real match).
+        - Net effect for the user-facing ask: `decomp`'s call-target
+          renaming now has a chance of actually firing when a binary
+          happens to match a bundled database, instead of the silent
+          no-op it always was before. No new CLI surface was needed for
+          this half of "wire into decomp/list" — the plumbing already
+          existed, it just needed the broken half replaced.
+        - Still open: `list`'s own `--identify`-style annotation (this
+          repo's `identify` subcommand from the previous slice already
+          covers that as a standalone report), specific hash, non-x86
+          architectures, and RIP-relative addressing.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
