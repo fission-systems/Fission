@@ -1424,6 +1424,80 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           `golden_corpus_check.py` clean.
         - Remaining open items, unchanged: specific hash, non-x86
           architectures. RIP-relative is no longer on this list.
+      - **Update — specific hash implemented** (commit `687bf756`). User
+        picked this next of the remaining two (specific hash, non-x86). The
+        biggest single FID slice this session: `compute_fid_full_hash`
+        became `compute_fid_hashes`, computing full and specific digests
+        together in one pass (they share masked bytes and operand
+        traversal, diverging only in per-operand mixing values).
+        - Two things needed real Ghidra cross-checking, not just a Java
+          source read: a headless script printed
+          `Instruction.getOperandType(ii)` /
+          `OperandType.isScalar`/`isAddress` for six cases (plain immediate,
+          RIP-relative memory load, RIP-relative `LEA`, SIB memory, a direct
+          `CALL` target, a `-no-pie` static absolute address). The real
+          classification wasn't what the Java object type (`Scalar` vs
+          `Address`) alone suggested: a RIP-relative memory *load* is
+          `isAddress=true` (placeholder in the specific hash), but `LEA`'s
+          *computed* value is `isAddress=false` (real value used) even
+          though both are RIP-relative — `LEA` computes a value, it doesn't
+          dereference one. Fission's own signal for this, found by comparing
+          `decode_instruction_raw_state` output for `LEA` vs `CALL` vs a
+          memory load: `RuntimeFixedHandle::space == "ram"` — true for
+          memory dereferences *and*, surprisingly, direct `CALL`/`JMP`
+          targets (both resolve through the code/ram address space), false
+          for `LEA` and plain immediates (both land in `"const"` space).
+          This single check unifies both placeholder cases cleanly.
+        - SIB's compound-operand scalars (displacement, scale) needed their
+          real numeric values threaded through `MemoryAddressShape`
+          (previously only presence booleans, sufficient for the full
+          hash), gated by Ghidra's `-256 < v < 256` magnitude check that
+          applies only to compound (not whole-operand) scalars — confirmed
+          scale is small enough to always count (1/2/4/8), displacement
+          sometimes isn't.
+        - `fission-static`'s `ingest_signature_matches_with_databases` and
+          `fission-decompiler`'s `FidIdentifier` now pass the real
+          `specific_hash` to `identify_by_hashes` instead of a hardcoded
+          `0`, enabling the `+10` score bonus and the `force_specific`
+          database-entry filter (previously always incorrectly rejecting
+          any `force_specific` entry, since `0` could never equal a real
+          specific hash). `fission_cli identify`'s output gained a
+          `specific_matched` field.
+        - Deliberately still not relocation-aware
+          (`MessageDigestFidHasher.java`'s `hasRelocation` check, which
+          forces the placeholder regardless of the classification above
+          when an operand's bytes carry a relocation) — documented in
+          `fid_hash.rs` with the concrete, bounded impact: can only make a
+          real match score more conservatively (missing the bonus it should
+          have gotten), except for a `force_specific` database entry, which
+          could be incorrectly rejected until relocation-awareness lands.
+        - Added `fid_hashes_match_ghidra_exactly_for_specific_hash_operand_classification`,
+          covering all six classification cases in one test, all matching
+          real Ghidra 12.0.4 byte-for-byte on the first attempt — no
+          debugging iteration needed, since the `getOperandType` inspection
+          up front resolved the classification question before writing any
+          mixing code.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run --workspace` 2092/2099 (+4 vs. the prior 2095-test
+          baseline; same 7 pre-existing unrelated `fission-emulator`
+          failures as every prior check this series), release build,
+          `golden_corpus_check.py` clean.
+        - **First live, non-synthetic confident match this entire FID
+          series**: `fission_cli identify` against the CentOS 7 (GCC
+          4.8.5/glibc-2.17) statically-linked test binary from the earlier
+          `ingest_signature_matches` fix (commit `fbcc7f16`) — every prior
+          attempt this session against a real binary came back "no match"
+          (compiler/library version mismatch against the bundled `.fidbf`
+          databases, expected per FID's own brittleness) — now finds
+          `__register_frame_table` (`libgcc-7`) at `0x491c70`, score 18.0,
+          `specific_matched: true`. The binary's own ELF symbol table
+          (unstripped) already names this function `__register_frame_table`
+          too — FID's independent hash-based identification exactly
+          reproduces a name that's independently known correct, real
+          end-to-end confirmation that specific-hash support widened real
+          matches, not just synthetic test coverage.
+        - Remaining open item: non-x86 architectures (only x86-64 validated
+          all series).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
