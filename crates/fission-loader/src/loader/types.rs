@@ -387,6 +387,10 @@ pub struct LoadedBinary {
     /// `address` (required by [`LoadedBinary::line_for_address`]'s binary
     /// search). Not serialized — rebuilt on each load from debug sections.
     pub dwarf_lines: Vec<DwarfLineRow>,
+    /// GCC/Itanium C++ exception-handling tables (`.gcc_except_table`),
+    /// keyed by the covered function's start address. Not serialized —
+    /// rebuilt on each load from `.eh_frame`/`.gcc_except_table`.
+    pub eh_lsda: std::collections::HashMap<u64, super::elf::lsda::LsdaInfo>,
 }
 
 impl LoadedBinary {
@@ -400,6 +404,7 @@ impl LoadedBinary {
             go_version: None,
             function_candidates: Vec::new(),
             dwarf_lines: Vec::new(),
+            eh_lsda: std::collections::HashMap::new(),
         }
     }
 

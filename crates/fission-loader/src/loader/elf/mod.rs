@@ -7,6 +7,7 @@ use fission_core::architecture::select_elf_load_spec;
 use std::collections::{HashMap, HashSet};
 
 pub mod eh_frame;
+pub mod lsda;
 pub mod schema;
 use schema::*;
 
@@ -3542,8 +3543,7 @@ mod tests {
 
     #[test]
     fn dynamic_elf_populates_iat_symbols_from_got_plt() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("testdata/x64_dyn_puts.elf");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
         assert!(
             path.is_file(),
             "missing fixture {} (rebuild with zig if needed)",

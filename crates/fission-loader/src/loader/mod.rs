@@ -63,6 +63,9 @@ impl LoadedBinary {
                 tracing::debug!("[Loader] focused PDB function ingestion skipped: {err}");
             }
         }
+        if format.starts_with("ELF") {
+            binary.eh_lsda = elf::lsda::analyze_eh_lsda(&binary);
+        }
         merge_debug_function_sizes(&mut binary);
 
         // Go Language Analysis
