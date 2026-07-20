@@ -53,10 +53,19 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
             while let Some((delta_depth, entry)) = entries.next_dfs()? {
                 if current_func.is_some() {
-                    // We're inside a subprogram — track depth relative to the function DIE
+                    // We're inside a subprogram — track depth relative to the function DIE.
+                    // `func_depth` was set to 1 *at* the subprogram's own tag (see below), so
+                    // a direct child reports delta=+1 and lands at 2; staying at 1 means this
+                    // entry is back at the subprogram's *own* depth -- a sibling, not a child
+                    // (e.g. a trailing type DIE GCC places after a function's last real child,
+                    // immediately followed by the next DW_TAG_subprogram). The threshold must
+                    // be `<= 1`, not `<= 0`: with `<= 0`, a sibling at func_depth==1 was
+                    // wrongly treated as still "inside" the current subprogram, silently
+                    // folding the next function's own tag (unmatched by any case in the
+                    // children match below) and all of its params/locals into the current one.
                     func_depth += delta_depth;
 
-                    if func_depth <= 0 {
+                    if func_depth <= 1 {
                         // We've exited the subprogram — finalize it
                         if let Some(func) = current_func.take() {
                             if let Some(fi) = func.build() {
@@ -66,7 +75,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                         // Fall through to check if this entry is another subprogram
                     } else {
                         // Process children of the current subprogram
-                        // Note: func_depth > 0 guarantees current_func is Some
+                        // Note: func_depth > 1 guarantees current_func is Some
                         let Some(func) = current_func.as_mut() else {
                             // This should never happen if func_depth tracking is correct
                             tracing::warn!("Inconsistent DWARF function depth tracking");
@@ -113,11 +122,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
                     let name = crate::loader::demangle::demangle(&raw_name);
                     let return_type = self.resolve_type_ref(entry, &unit, &type_cache)?;
-                    let high_pc = self.get_attr_u64(entry, DwAt(0x12))?;
-                    let size = high_pc
-                        .filter(|high| *high > address)
-                        .map(|high| high - address)
-                        .unwrap_or(0);
+                    let size = self.subprogram_size(entry, address)?;
 
                     current_func = Some(FuncBuilder {
                         address,
@@ -142,6 +147,36 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         Ok(functions)
     }
 
+    /// Resolve a `DW_TAG_subprogram`'s size from `DW_AT_high_pc`.
+    ///
+    /// Per the DWARF spec, `DW_AT_high_pc` is either an absolute address
+    /// (`DW_FORM_addr`/`DW_FORM_addrx*`, same as `DW_AT_low_pc`) or an
+    /// unsigned constant *offset from* `DW_AT_low_pc` (`DW_FORM_data*`/
+    /// `DW_FORM_udata`) -- compilers are free to pick either, and modern GCC
+    /// (observed: GCC 16) emits the offset form. Reading the raw integer
+    /// through `get_attr_u64` without checking the form silently produces the
+    /// wrong end address for offset-form high_pc (a small byte count, far
+    /// below `low_pc`), which used to collapse `size` to `0` via the
+    /// `high > address` guard -- and a size-0 function can be mismatched
+    /// against a *later* function's address by whatever consumes
+    /// `DwarfFunctionInfo` by address range.
+    fn subprogram_size(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        low_pc: u64,
+    ) -> Result<u64, gimli::Error> {
+        let end = match entry.attr_value(DwAt(0x12))? {
+            Some(gimli::AttributeValue::Addr(v)) => v,
+            Some(gimli::AttributeValue::Udata(v)) => low_pc.saturating_add(v),
+            Some(gimli::AttributeValue::Data1(v)) => low_pc.saturating_add(u64::from(v)),
+            Some(gimli::AttributeValue::Data2(v)) => low_pc.saturating_add(u64::from(v)),
+            Some(gimli::AttributeValue::Data4(v)) => low_pc.saturating_add(u64::from(v)),
+            Some(gimli::AttributeValue::Data8(v)) => low_pc.saturating_add(v),
+            _ => return Ok(0),
+        };
+        Ok(end.saturating_sub(low_pc))
+    }
+
     /// Extract parameter information from a DW_TAG_formal_parameter DIE
     pub(super) fn extract_param_info(
         &self,
@@ -161,7 +196,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             .resolve_type_ref(entry, unit, type_cache)?
             .unwrap_or_else(|| "int".to_string());
 
-        let location = self.extract_location(entry, unit)?;
+        let location = self.extract_location(entry, unit, dwarf)?;
 
         Ok(Some(DwarfParamInfo {
             name,
@@ -189,7 +224,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             .resolve_type_ref(entry, unit, type_cache)?
             .unwrap_or_else(|| "int".to_string());
 
-        let location = self.extract_location(entry, unit)?;
+        let location = self.extract_location(entry, unit, dwarf)?;
 
         Ok(Some(DwarfLocalVar {
             name,
@@ -199,13 +234,71 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
     }
 
     /// Extract DW_AT_location → DwarfLocation
+    ///
+    /// Handles both a bare `Exprloc` (location is invariant for the whole
+    /// declared scope) and a location list (`LocListsRef` / `DebugLocListsIndex`
+    /// — location varies across PC ranges, the common shape real compilers
+    /// emit for locals even when the underlying storage never actually
+    /// changes). For a location list we only report `DwarfLocation::Register`
+    /// when *every* range resolves to the exact same register: real compilers
+    /// routinely split ranges for reasons that have nothing to do with the
+    /// variable moving (e.g. an `entry_value`-computed range appended after
+    /// the raw register range once the register might get reused for
+    /// something else) -- picking the first entry's register there would call
+    /// a reused scratch register the variable's permanent home. Any
+    /// disagreement across ranges, or any non-register range, falls back to
+    /// `Unknown` -- a missed rename, never a wrong one.
     pub(super) fn extract_location(
         &self,
         entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
         unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
     ) -> Result<DwarfLocation, gimli::Error> {
         match entry.attr_value(DwAt(0x02))? {
             Some(gimli::AttributeValue::Exprloc(expr)) => self.parse_location_expr(expr, unit),
+            Some(attr @ (gimli::AttributeValue::LocationListsRef(_)
+            | gimli::AttributeValue::DebugLocListsIndex(_))) => {
+                self.parse_location_list(attr, unit, dwarf)
+            }
+            _ => Ok(DwarfLocation::Unknown),
+        }
+    }
+
+    /// Resolve a location-list attribute to a single register, only when
+    /// every entry agrees on the same DWARF register number. See
+    /// `extract_location` for why disagreement (or any non-register entry)
+    /// must fall back to `Unknown` rather than guess.
+    fn parse_location_list(
+        &self,
+        attr: gimli::AttributeValue<EndianSlice<'a, RunTimeEndian>>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
+    ) -> Result<DwarfLocation, gimli::Error> {
+        let Some(mut iter) = dwarf.attr_locations(unit, attr)? else {
+            return Ok(DwarfLocation::Unknown);
+        };
+
+        let mut agreed_register: Option<u64> = None;
+        let mut saw_entry = false;
+        while let Some(list_entry) = iter.next()? {
+            saw_entry = true;
+            let parsed = self.parse_location_expr(list_entry.data, unit)?;
+            let DwarfLocation::Register(reg_str) = parsed else {
+                return Ok(DwarfLocation::Unknown);
+            };
+            let Some(reg_num) = reg_str.strip_prefix("reg").and_then(|n| n.parse::<u64>().ok())
+            else {
+                return Ok(DwarfLocation::Unknown);
+            };
+            match agreed_register {
+                None => agreed_register = Some(reg_num),
+                Some(prev) if prev == reg_num => {}
+                Some(_) => return Ok(DwarfLocation::Unknown),
+            }
+        }
+
+        match (saw_entry, agreed_register) {
+            (true, Some(reg_num)) => Ok(DwarfLocation::Register(format!("reg{reg_num}"))),
             _ => Ok(DwarfLocation::Unknown),
         }
     }

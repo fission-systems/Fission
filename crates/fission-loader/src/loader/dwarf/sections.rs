@@ -30,6 +30,8 @@ impl SectionData {
                 ".debug_addr" | "__debug_addr" => Some(".debug_addr"),
                 ".debug_line_str" | "__debug_line_str" => Some(".debug_line_str"),
                 ".debug_types" | "__debug_types" => Some(".debug_types"),
+                ".debug_loc" | "__debug_loc" => Some(".debug_loc"),
+                ".debug_loclists" | "__debug_loclists" => Some(".debug_loclists"),
                 _ => None,
             };
 

@@ -199,13 +199,19 @@ pub fn render_mlil_preview_with_binary_and_context(
         );
     }
     debug_log("normalize_done");
+    // Always drain the register-origin side channel, even when `type_context`
+    // is `None` below -- otherwise a leftover entry from this function could
+    // wrongly satisfy a name lookup for the next function built on this
+    // thread (register-derived binding names like a generic `uVar0` are
+    // reused across unrelated functions' compilations).
+    let register_origins = super::builder::take_register_origins();
     if let Some(context) = type_context {
         if debug.preview_debug {
             eprintln!("[mlil-preview] stage=type_hints start fn=0x{address:x}");
         }
         debug_log("type_hints_start");
         let type_hints_start = Instant::now();
-        let hint_stats = apply_preview_type_hints(&mut hir, context);
+        let hint_stats = apply_preview_type_hints(&mut hir, context, &register_origins);
         telemetry::store_preview_hint_stats(hint_stats);
         if debug.diag {
             eprintln!(

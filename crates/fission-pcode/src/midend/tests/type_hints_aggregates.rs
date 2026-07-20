@@ -84,7 +84,7 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
         Some("RECT")
     );
 
-    apply_preview_type_hints(&mut func, &context);
+    apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
     assert_eq!(func.params[1].surface_type_name.as_deref(), Some("LPRECT"));
     assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("RECT"));
     let rendered = print_hir_function(&func);

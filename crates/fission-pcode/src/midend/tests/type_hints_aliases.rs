@@ -54,7 +54,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
         pointee_sizes: vec![16],
     });
 
-    apply_preview_type_hints(&mut func, &context);
+    apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
     assert_eq!(func.params[1].surface_type_name.as_deref(), Some("LPRECT"));
     let rendered = print_hir_function(&func);
     assert!(rendered.contains("undefined FUN_0x140006260(longlong param_1, LPRECT param_2)"));
@@ -124,6 +124,6 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
         pointee_sizes: vec![16],
     });
 
-    apply_preview_type_hints(&mut func, &context);
+    apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
     assert_eq!(func.params[1].surface_type_name.as_deref(), Some("LPRECT"));
 }

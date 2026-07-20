@@ -23,6 +23,7 @@ use crate::midend::HashMap;
 use std::path::Path;
 
 pub mod apply;
+pub mod dwarf_regs;
 pub mod ldefs;
 pub mod loader;
 pub mod pspec;

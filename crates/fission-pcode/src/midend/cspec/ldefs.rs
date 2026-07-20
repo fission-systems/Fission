@@ -37,6 +37,14 @@ pub struct LdefsEntry {
     /// `.pspec` filename from `processorspec="..."` on `<language>`, if present.
     /// e.g. `"x86-64.pspec"`, `"AARCH64.pspec"`, `"ARMCortex.pspec"`.
     pub pspec_filename: Option<String>,
+    /// `.dwarf` filename from
+    /// `<external_name tool="DWARF.register.mapping.file" name="..."/>` inside
+    /// `<language>`, if present. e.g. `"x86-64.dwarf"`, `"AARCH64.dwarf"`.
+    /// Unlike `pspec_filename` this is a *child element*, not a `<language>`
+    /// attribute, and Ghidra's real `.ldefs` files declare it after the
+    /// `<compiler>` children — so the parser buffers compiler entries and
+    /// backfills this at `</language>` rather than capturing it inline.
+    pub dwarf_mapping_filename: Option<String>,
 }
 
 impl LdefsEntry {
@@ -48,6 +56,14 @@ impl LdefsEntry {
     /// Absolute path to the `.pspec` file, or `None` if no `processorspec` was declared.
     pub fn pspec_path(&self) -> Option<PathBuf> {
         self.pspec_filename
+            .as_deref()
+            .map(|name| self.language_dir.join(name))
+    }
+
+    /// Absolute path to the `.dwarf` register mapping file, or `None` if the
+    /// language declares no `DWARF.register.mapping.file` external name.
+    pub fn dwarf_mapping_path(&self) -> Option<PathBuf> {
+        self.dwarf_mapping_filename
             .as_deref()
             .map(|name| self.language_dir.join(name))
     }
@@ -189,10 +205,18 @@ fn scan_processor_dir(dir: &Path, index: &mut LdefsIndex) {
 /// ```
 ///
 /// We use a minimal hand-written state machine — no XML library dependency.
+///
+/// `<compiler>` entries are buffered per-`<language>` block and only inserted
+/// into `index` at `</language>`, because `<external_name
+/// tool="DWARF.register.mapping.file">` is a child element that Ghidra's real
+/// `.ldefs` files declare *after* the `<compiler>` children — capturing it
+/// inline (like the `processorspec` attribute) would miss it.
 fn parse_ldefs_into_index(contents: &str, dir: &Path, index: &mut LdefsIndex) {
     let mut current_language_id: Option<String> = None;
     // `processorspec` attribute from `<language>` — shared by all `<compiler>` children.
     let mut current_pspec_filename: Option<String> = None;
+    let mut current_dwarf_filename: Option<String> = None;
+    let mut pending_compilers: Vec<(String, String)> = Vec::new();
 
     let mut rest = contents;
     loop {
@@ -208,9 +232,14 @@ fn parse_ldefs_into_index(contents: &str, dir: &Path, index: &mut LdefsIndex) {
             continue;
         }
 
-        // Read tag name
-        let tag_end = rest
+        // Read tag name. A leading '/' (closing tag, e.g. `</language>`) must
+        // stay part of the name -- scanning for the name-terminator has to
+        // start *after* it, or `</language>` reads as an empty tag and the
+        // "/language" arm below never fires.
+        let tag_start = usize::from(rest.starts_with('/'));
+        let tag_end = rest[tag_start..]
             .find(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/')
+            .map(|pos| pos + tag_start)
             .unwrap_or(rest.len());
         let tag = &rest[..tag_end];
 
@@ -221,28 +250,47 @@ fn parse_ldefs_into_index(contents: &str, dir: &Path, index: &mut LdefsIndex) {
                 let segment = &rest[..close];
                 current_language_id = extract_attr(segment, "id").map(str::to_string);
                 current_pspec_filename = extract_attr(segment, "processorspec").map(str::to_string);
+                current_dwarf_filename = None;
+                pending_compilers.clear();
                 rest = &rest[close.min(rest.len())..];
             }
             "/language" => {
-                current_language_id = None;
+                if let Some(lang_id) = current_language_id.take() {
+                    for (compiler_id, cspec_filename) in pending_compilers.drain(..) {
+                        index.insert(
+                            (lang_id.clone(), compiler_id),
+                            LdefsEntry {
+                                language_dir: dir.to_path_buf(),
+                                cspec_filename,
+                                pspec_filename: current_pspec_filename.clone(),
+                                dwarf_mapping_filename: current_dwarf_filename.clone(),
+                            },
+                        );
+                    }
+                }
                 current_pspec_filename = None;
+                current_dwarf_filename = None;
+                pending_compilers.clear();
                 rest = &rest[tag_end.min(rest.len())..];
             }
             "compiler" => {
-                if let Some(lang_id) = &current_language_id {
+                if current_language_id.is_some() {
                     let close = rest.find('>').unwrap_or(rest.len());
                     let segment = &rest[..close];
                     if let (Some(compiler_id), Some(spec)) =
                         (extract_attr(segment, "id"), extract_attr(segment, "spec"))
                     {
-                        index.insert(
-                            (lang_id.clone(), compiler_id.to_string()),
-                            LdefsEntry {
-                                language_dir: dir.to_path_buf(),
-                                cspec_filename: spec.to_string(),
-                                pspec_filename: current_pspec_filename.clone(),
-                            },
-                        );
+                        pending_compilers.push((compiler_id.to_string(), spec.to_string()));
+                    }
+                    rest = &rest[close.min(rest.len())..];
+                }
+            }
+            "external_name" => {
+                if current_language_id.is_some() {
+                    let close = rest.find('>').unwrap_or(rest.len());
+                    let segment = &rest[..close];
+                    if extract_attr(segment, "tool") == Some("DWARF.register.mapping.file") {
+                        current_dwarf_filename = extract_attr(segment, "name").map(str::to_string);
                     }
                     rest = &rest[close.min(rest.len())..];
                 }

@@ -93,9 +93,12 @@ impl<'a> DwarfAnalyzer<'a> {
             gimli::DebugRngLists::new(sections.get(".debug_rnglists", data), endian);
         let ranges = gimli::RangeLists::new(debug_ranges, debug_rnglists);
 
-        let debug_loc = gimli::DebugLoc::new(&[], endian);
-        let debug_loclists = gimli::DebugLocLists::new(&[], endian);
+        let debug_loc = gimli::DebugLoc::new(sections.get(".debug_loc", data), endian);
+        let debug_loclists =
+            gimli::DebugLocLists::new(sections.get(".debug_loclists", data), endian);
         let locations = gimli::LocationLists::new(debug_loc, debug_loclists);
+        let debug_addr =
+            gimli::DebugAddr::from(EndianSlice::new(sections.get(".debug_addr", data), endian));
 
         Ok(gimli::Dwarf {
             debug_abbrev: gimli::DebugAbbrev::new(sections.get(".debug_abbrev", data), endian),
@@ -104,6 +107,7 @@ impl<'a> DwarfAnalyzer<'a> {
             debug_line: gimli::DebugLine::new(sections.get(".debug_line", data), endian),
             debug_line_str: gimli::DebugLineStr::new(sections.get(".debug_line_str", data), endian),
             debug_types: gimli::DebugTypes::new(sections.get(".debug_types", data), endian),
+            debug_addr,
             ranges,
             locations,
             ..Default::default()

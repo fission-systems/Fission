@@ -694,10 +694,11 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
             stack_local_names: [(-0x20, "base_ptr".to_string())].into_iter().collect::<std::collections::HashMap<_,_>>(),
             stack_local_type_names: [(-0x20, "RECT".to_string())].into_iter().collect::<std::collections::HashMap<_,_>>(),
             return_type_name: None,
+            register_local_names: std::collections::HashMap::default(),
         }),
     };
 
-    apply_preview_type_hints(&mut func, &context);
+    apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
 
     let direct_binding = func
         .locals

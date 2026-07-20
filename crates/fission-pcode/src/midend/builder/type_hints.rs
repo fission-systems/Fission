@@ -34,9 +34,10 @@ impl StackAliasCollector {
 pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
+    register_origins: &HashMap<String, (u64, u32)>,
 ) -> PreviewHintStats {
     let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
-    let mut stats = apply_function_name_hints(func, context);
+    let mut stats = apply_function_name_hints(func, context, register_origins);
     apply_debug_struct_promotions(func, context, &mut stats);
     apply_debug_struct_field_names(func, context, &mut stats);
     let alias_collector = StackAliasCollector::new(func);
@@ -89,6 +90,7 @@ pub(super) fn apply_preview_type_hints(
 fn apply_function_name_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
+    register_origins: &HashMap<String, (u64, u32)>,
 ) -> PreviewHintStats {
     let mut stats = PreviewHintStats::default();
     let Some(hints) = &context.function_hints else {
@@ -150,6 +152,55 @@ fn apply_function_name_hints(
         renames.push((binding.name.clone(), new_name.to_string()));
         binding.name = new_name.to_string();
         stats.explicit_local_name_hits += 1;
+    }
+
+    if !hints.register_local_names.is_empty() {
+        // A register has no stable per-function identity the way a stack
+        // slot's address does -- it gets reused for unrelated values
+        // constantly, which is why `register_local_names` only ever contains
+        // an entry when the DWARF location agrees on the *same* register
+        // across every range of the variable's declared scope (see
+        // `DwarfAnalyzer::parse_location_list` / `extract_location`) --
+        // never a guess from a single range. Given that, an *assignment
+        // count* gate here would be redundant in the wrong direction: the
+        // dominant real case (a loop accumulator, `total = 0; ... total +=
+        // x;`) is written more than once *by construction*, and
+        // materialization already gives every write to the same physical
+        // register the same one binding for the whole function -- multiple
+        // assignments to it are normal read-modify-write on that one
+        // variable, not evidence of the register being repurposed. The
+        // residual risk this doesn't cover -- Fission reusing the same
+        // binding name for an unrelated value *outside* the DWARF-declared
+        // scope -- isn't something a body-wide assignment count can
+        // distinguish from the accumulator case either, so it isn't gated
+        // away here.
+        for binding in &mut func.locals {
+            if !matches!(
+                binding.origin,
+                Some(NirBindingOrigin::Temp | NirBindingOrigin::TempPreserved)
+            ) {
+                continue;
+            }
+            let Some((register_offset, _register_size)) = register_origins.get(&binding.name)
+            else {
+                continue;
+            };
+            let Some(new_name) = hints.register_local_names.get(register_offset) else {
+                continue;
+            };
+            let new_name = new_name.trim();
+            if new_name.is_empty() || new_name == binding.name {
+                continue;
+            }
+            if reserved_names.contains(new_name) {
+                continue;
+            }
+            reserved_names.remove(&binding.name);
+            reserved_names.insert(new_name.to_string());
+            renames.push((binding.name.clone(), new_name.to_string()));
+            binding.name = new_name.to_string();
+            stats.explicit_register_local_name_hits += 1;
+        }
     }
 
     if !renames.is_empty() {

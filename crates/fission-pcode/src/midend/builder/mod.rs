@@ -29,11 +29,42 @@ use self::debug::{
 pub(in crate::midend::builder) use memory::aggregate_recovery;
 use tracing::trace_span;
 
+// Register-origin side channel: materialization (`bind_materialized_output_to_fresh_temp`,
+// `ensure_live_register_binding`) records which SLEIGH register `(offset, size)` produced
+// each binding here. Register values almost never keep their hw register name once
+// materialized -- most get a generic `uVarN`/`iVarN` name for readability, same as
+// Ghidra -- so by the time `apply_preview_type_hints` runs, matching a DWARF register
+// hint by binding *name* only catches the narrow case where the raw hw name survived
+// (call-result registers). Carrying the real `(offset, size)` alongside lets the
+// DWARF-register-local rename in `type_hints.rs` match by identity instead, without
+// adding a field to `NirBinding` (constructed at ~300 call sites across the workspace --
+// far riskier to touch than this thread-local, mirroring the existing
+// `LAST_LAYERED_PSEUDOCODE` pattern in `orchestrate.rs`). Explicit `take` + pass-as-parameter
+// into `apply_preview_type_hints` (rather than reading the thread-local inside
+// `type_hints.rs`) keeps that function's tests deterministic and thread-independent.
+thread_local! {
+    static REGISTER_ORIGINS: std::cell::RefCell<HashMap<String, (u64, u32)>> =
+        std::cell::RefCell::new(HashMap::default());
+}
+
+pub(super) fn record_register_origin(name: &str, offset: u64, size: u32) {
+    REGISTER_ORIGINS.with(|slot| {
+        slot.borrow_mut()
+            .entry(name.to_string())
+            .or_insert((offset, size));
+    });
+}
+
+pub(super) fn take_register_origins() -> HashMap<String, (u64, u32)> {
+    REGISTER_ORIGINS.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+}
+
 pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
+    register_origins: &HashMap<String, (u64, u32)>,
 ) -> PreviewHintStats {
-    type_hints::apply_preview_type_hints(func, context)
+    type_hints::apply_preview_type_hints(func, context, register_origins)
 }
 
 fn seed_callee_summaries_from_type_context(
@@ -148,6 +179,9 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             NirBindingOrigin::Temp
         };
+        if is_register_space_id(output.space_id) {
+            record_register_origin(&name, output.offset, output.size);
+        }
         self.temps.insert(
             name.clone(),
             NirBinding {
@@ -648,6 +682,9 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let name = name.unwrap_or_else(|| self.next_unused_temp_binding_name(&ty));
+        if is_register_space_id(output.space_id) {
+            record_register_origin(&name, output.offset, output.size);
+        }
 
         let origin = if preserve_materialization {
             NirBindingOrigin::TempPreserved
@@ -734,6 +771,9 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             self.next_unused_temp_binding_name(&ty)
         };
+        if !output.is_constant && is_register_space_id(output.space_id) {
+            record_register_origin(&name, output.offset, output.size);
+        }
         let binding = NirBinding {
             name: name.clone(),
             ty,

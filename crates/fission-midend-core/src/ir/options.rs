@@ -271,6 +271,9 @@ pub struct NirHintStats {
     /// not wider integer pointer types -- the common case for a struct
     /// whose first field is >= 32 bits).
     pub debug_struct_promotions: usize,
+    /// Register-resident DWARF locals (`register_local_names`) renamed onto
+    /// their matching Fission binding.
+    pub explicit_register_local_name_hits: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -291,6 +294,26 @@ pub struct NirFunctionHints {
     pub stack_local_names: HashMap<i64, String>,
     pub stack_local_type_names: HashMap<i64, String>,
     pub return_type_name: Option<String>,
+    /// DWARF locals whose `DW_AT_location` is a single register for their
+    /// whole visible scope (`DW_OP_reg*`, or a location list where every
+    /// range agrees on the same register), keyed by the underlying SLEIGH
+    /// register *offset* -- not by name, since most register-resident values
+    /// get a generic `uVarN`/`iVarN` display name rather than their raw
+    /// hardware register name, so name-matching alone misses most real cases
+    /// (only caught the narrow call-result-register path). Keyed by offset
+    /// only, not `(offset, size)`: DWARF's `DW_OP_reg*` doesn't carry a width
+    /// (the register holds the value; the *variable's own type* says how wide
+    /// it is), so a binding's access width can differ slightly from the
+    /// declared type without meaning it's an unrelated value -- the separate
+    /// "written at most once" safety gate is what actually guards against
+    /// genuine reuse. The builder's materialization side channel
+    /// (`register_origins` in `apply_preview_type_hints`) supplies each
+    /// binding's actual originating register offset for the match. Unlike
+    /// `stack_local_names`, a register has no stable per-function identity --
+    /// it gets reused for unrelated values constantly -- so this is only safe
+    /// to apply when the matching binding is written at most once in the
+    /// function body (see `apply_function_name_hints`'s use of this field).
+    pub register_local_names: HashMap<u64, String>,
 }
 
 /// One field of a struct/union/class type known from debug info (DWARF or

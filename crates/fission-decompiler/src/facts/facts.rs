@@ -42,6 +42,7 @@ fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
         stack_local_names: HashMap::new(),
         stack_local_type_names: HashMap::new(),
         return_type_name: Some(matched_sig.return_type.clone()),
+        register_local_names: HashMap::new(),
     })
 }
 
@@ -67,6 +68,7 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
         stack_local_names: HashMap::new(),
         stack_local_type_names: HashMap::new(),
         return_type_name,
+        register_local_names: HashMap::new(),
     })
 }
 
@@ -164,7 +166,7 @@ pub(crate) fn build_nir_type_context(
         .map(|(address, target_ref)| (*address, target_ref.clone()))
         .collect::<HashMap<_, _>>();
 
-    let mut function_hints = build_nir_function_hints(fact_store, address);
+    let mut function_hints = build_nir_function_hints(binary, fact_store, address);
     if function_hints.is_none() {
         let name = all_target_refs
             .get(&address)
@@ -759,15 +761,97 @@ fn addr_within_function_bounds(
     address >= start_addr
 }
 
-fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirFunctionHints> {
+fn build_nir_function_hints(
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+) -> Option<NirFunctionHints> {
     let debug_hints = fact_store
         .preferred_debug_function(address)
-        .and_then(nir_hints_from_debug_function);
+        .and_then(|debug| nir_hints_from_debug_function(debug, binary));
     merge_nir_function_hints(debug_hints, fact_store.structuring_hints(address))
+}
+
+/// Resolve register-resident DWARF locals (`DW_OP_reg*` for the whole
+/// declared scope, or a location list where every range agrees on the same
+/// register -- see `DwarfAnalyzer::parse_location_list`) to the underlying
+/// SLEIGH register *offset*, e.g. DWARF `reg5` on x86-64 -> Ghidra `RDI` ->
+/// offset via the checked-in `.slaspec` register model (the size half of
+/// `RegisterModel::lookup_name`'s result is dropped: `DW_OP_reg*` doesn't
+/// carry a width, and a binding's access width can legitimately differ
+/// slightly from the declared variable's type without meaning it's an
+/// unrelated value -- see `NirFunctionHints::register_local_names`).
+/// Deliberately keyed by offset rather than by name: most register-resident
+/// values get a generic `uVarN`/`iVarN` display name during materialization
+/// rather than their raw hardware register name, so matching by name alone
+/// would miss most real cases (`type_hints.rs`'s `apply_function_name_hints`
+/// matches this against each binding's actual `register_origins` entry --
+/// its *real* originating register, independent of whatever name
+/// materialization gave it).
+///
+/// Returns an empty map on any missing piece (no load spec, no `.dwarf` file
+/// for this architecture, no register-resident locals) -- best-effort, same
+/// posture as the rest of this file's debug-info handling.
+fn register_local_names_from_debug_function(
+    debug: &fission_loader::loader::types::DwarfFunctionInfo,
+    binary: &LoadedBinary,
+) -> HashMap<u64, String> {
+    let mut result = HashMap::new();
+    let register_locals = debug
+        .local_vars
+        .iter()
+        .filter(|local| {
+            !local.name.trim().is_empty() && matches!(local.location, DwarfLocation::Register(_))
+        })
+        .collect::<Vec<_>>();
+    if register_locals.is_empty() {
+        return result;
+    }
+    let Some(load_spec) = binary.load_spec() else {
+        return result;
+    };
+    let language_id = load_spec.pair.language_id.as_str();
+    let compiler_spec_id = load_spec.pair.compiler_spec_id.as_str();
+
+    let languages_root = fission_sleigh::compiler::sleigh_languages_root();
+    let Some(dwarf_map) = fission_pcode::midend::cspec::dwarf_regs::load_dwarf_regs_for_pair(
+        &languages_root,
+        language_id,
+        compiler_spec_id,
+    ) else {
+        return result;
+    };
+    let Some(model) = fission_pcode::midend::cspec::register_model_for_language(language_id)
+    else {
+        return result;
+    };
+
+    for local in register_locals {
+        let DwarfLocation::Register(reg_str) = &local.location else {
+            continue;
+        };
+        let Some(dwarf_num) = reg_str
+            .strip_prefix("reg")
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Some(ghidra_name) = dwarf_map.ghidra_name_for(dwarf_num) else {
+            continue;
+        };
+        let Some((offset, _size)) = model.lookup_name(ghidra_name) else {
+            continue;
+        };
+        result
+            .entry(offset)
+            .or_insert_with(|| local.name.trim().to_string());
+    }
+    result
 }
 
 fn nir_hints_from_debug_function(
     debug: &fission_loader::loader::types::DwarfFunctionInfo,
+    binary: &LoadedBinary,
 ) -> Option<NirFunctionHints> {
     let param_names = debug
         .params
@@ -810,12 +894,14 @@ fn nir_hints_from_debug_function(
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned);
+    let register_local_names = register_local_names_from_debug_function(debug, binary);
 
     if param_names.is_empty()
         && param_type_names.is_empty()
         && stack_local_names.is_empty()
         && stack_local_type_names.is_empty()
         && return_type_name.is_none()
+        && register_local_names.is_empty()
     {
         None
     } else {
@@ -825,6 +911,7 @@ fn nir_hints_from_debug_function(
             stack_local_names,
             stack_local_type_names,
             return_type_name,
+            register_local_names,
         })
     }
 }
@@ -871,6 +958,12 @@ fn merge_nir_function_hints(
             .return_type_name
             .clone_from(&structural.return_type_name);
     }
+    for (reg_name, var_name) in &structural.register_local_names {
+        merged
+            .register_local_names
+            .entry(reg_name.clone())
+            .or_insert_with(|| var_name.clone());
+    }
 
     (!nir_function_hints_are_empty(&merged)).then_some(merged)
 }
@@ -881,6 +974,7 @@ fn nir_function_hints_are_empty(hints: &NirFunctionHints) -> bool {
         && hints.stack_local_names.is_empty()
         && hints.stack_local_type_names.is_empty()
         && hints.return_type_name.is_none()
+        && hints.register_local_names.is_empty()
 }
 
 pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
