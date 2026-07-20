@@ -229,12 +229,51 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             members,
         }))
     }
+
+    /// Read each `DW_TAG_subrange_type` child of a `DW_TAG_array_type` DIE
+    /// (one per array dimension, in declaration order -- `int[3][4]` has
+    /// two) into an element count: `DW_AT_count` if present, else
+    /// `DW_AT_upper_bound + 1` (DWARF's upper bound is inclusive and
+    /// zero-based), else `None` for an unbounded/flexible dimension
+    /// (`int[]`).
+    pub(super) fn array_subrange_dimensions(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+    ) -> Result<Vec<Option<u64>>, gimli::Error> {
+        let mut dimensions = Vec::new();
+        let mut tree = unit.entries_tree(Some(entry.offset()))?;
+        let root = tree.root()?;
+        let mut children = root.children();
+        while let Some(child) = children.next()? {
+            let child_entry = child.entry();
+            if child_entry.tag() != DwTag(0x21) {
+                // DW_TAG_subrange_type
+                continue;
+            }
+            let count = match self.get_attr_u64(child_entry, DwAt(0x37))? {
+                // DW_AT_count
+                Some(count) => Some(count),
+                None => self
+                    .get_attr_u64(child_entry, DwAt(0x2f))? // DW_AT_upper_bound
+                    .map(|upper_bound| upper_bound + 1),
+            };
+            dimensions.push(count);
+        }
+        Ok(dimensions)
+    }
 }
 
 struct TypeDieInfo {
     tag: DwTag,
     name: Option<String>,
     type_ref: Option<UnitOffset<usize>>,
+    /// One entry per `DW_TAG_subrange_type` child, populated only for
+    /// `DW_TAG_array_type` (empty for every other tag). `Some(n)` when the
+    /// dimension's element count is known (`DW_AT_count`, or
+    /// `DW_AT_upper_bound + 1`), `None` for an unbounded/flexible dimension
+    /// (renders as `[]`).
+    array_dimensions: Vec<Option<u64>>,
 }
 
 fn resolve_type_name(
@@ -281,6 +320,30 @@ fn resolve_type_name(
             };
             base.map(|b| format!("volatile {}", b))
         }
+        DwTag(0x01) => {
+            // DW_TAG_array_type: DW_AT_type is the *element* type; each
+            // DW_TAG_subrange_type child is one dimension (multiple
+            // children for a multi-dimensional array, e.g. `int[3][4]`).
+            let base = if let Some(ref_offset) = die_info.type_ref {
+                resolve_type_name(ref_offset, all_types, resolved, visiting)
+                    .unwrap_or_else(|| format!("elem_0x{:x}", ref_offset.0))
+            } else {
+                "void".to_string()
+            };
+            let dims: String = if die_info.array_dimensions.is_empty() {
+                "[]".to_string()
+            } else {
+                die_info
+                    .array_dimensions
+                    .iter()
+                    .map(|d| match d {
+                        Some(n) => format!("[{n}]"),
+                        None => "[]".to_string(),
+                    })
+                    .collect()
+            };
+            Some(format!("{base}{dims}"))
+        }
         _ => {
             // typedef, base_type, struct, class, union, enum
             die_info.name.clone()
@@ -305,11 +368,17 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         while let Some((_, entry)) = entries.next_dfs()? {
             match entry.tag() {
                 DwTag(0x13) | DwTag(0x02) | DwTag(0x17) | DwTag(0x04) | DwTag(0x16)
-                | DwTag(0x24) | DwTag(0x0f) | DwTag(0x26) | DwTag(0x35) => {
+                | DwTag(0x24) | DwTag(0x0f) | DwTag(0x26) | DwTag(0x35) | DwTag(0x01) => {
                     let name = self.get_attr_string(entry, DwAt(0x03), unit, dwarf)?;
                     let type_ref = match entry.attr_value(DwAt(0x49))? {
                         Some(AttributeValue::UnitRef(ref_offset)) => Some(ref_offset),
                         _ => None,
+                    };
+                    let array_dimensions = if entry.tag() == DwTag(0x01) {
+                        // DW_TAG_array_type
+                        self.array_subrange_dimensions(entry, unit)?
+                    } else {
+                        Vec::new()
                     };
                     all_types.insert(
                         entry.offset(),
@@ -317,6 +386,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                             tag: entry.tag(),
                             name,
                             type_ref,
+                            array_dimensions,
                         },
                     );
                 }

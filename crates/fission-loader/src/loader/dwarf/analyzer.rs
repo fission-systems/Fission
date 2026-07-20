@@ -262,4 +262,47 @@ mod tests {
         assert_eq!(value_of("BLUE"), 5);
         assert_eq!(value_of("NEGATIVE_ONE"), -1);
     }
+
+    /// `testdata/x64_dyn_array_test.elf`: GCC-compiled from a source with
+    /// `struct WithArrays { int arr[10]; int matrix[3][4]; char name[16]; };`,
+    /// cross-checked against `objdump --dwarf=info` first: each array
+    /// member's `DW_TAG_array_type` has one `DW_TAG_subrange_type` child per
+    /// dimension, each carrying `DW_AT_upper_bound` (not `DW_AT_count`) --
+    /// `9`/`{2,3}`/`15` for `arr`/`matrix`/`name` respectively, i.e. this
+    /// compiler always emits the "inclusive upper bound" form, exercising
+    /// `array_subrange_dimensions`' `+ 1` fallback path, not its
+    /// `DW_AT_count` branch.
+    #[test]
+    fn analyze_types_resolves_array_member_type_names() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_array_test.elf");
+        assert!(
+            path.is_file(),
+            "missing fixture {} (rebuild: gcc -g -O0 -o x64_dyn_array_test.elf array_test.c)",
+            path.display()
+        );
+        let binary = LoadedBinary::from_file(&path).expect("load array test ELF");
+        let analyzer = DwarfAnalyzer::new(&binary);
+        assert!(analyzer.has_debug_info());
+
+        let types = analyzer.analyze_types();
+        let with_arrays = types
+            .iter()
+            .find(|t| t.name == "WithArrays")
+            .unwrap_or_else(|| panic!("expected a \"WithArrays\" struct in {types:?}"));
+        assert_eq!(with_arrays.kind, "struct");
+
+        let type_name_of = |field: &str| -> &str {
+            with_arrays
+                .members
+                .iter()
+                .find(|m| m.name == field)
+                .unwrap_or_else(|| panic!("expected field {field} in {:?}", with_arrays.members))
+                .type_name
+                .as_str()
+        };
+        assert_eq!(type_name_of("arr"), "int[10]");
+        assert_eq!(type_name_of("matrix"), "int[3][4]");
+        assert_eq!(type_name_of("name"), "char[16]");
+    }
 }
