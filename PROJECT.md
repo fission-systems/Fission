@@ -1666,6 +1666,90 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           `golden_corpus_check.py` clean.
         - Remaining metadata gaps, unchanged: `DW_TAG_lexical_block` PC
           ranges, `.debug_line` parsing, PDB struct/location extraction.
+      - **Update — PDB struct/variable location extraction (metadata gap
+        6)** (commit `f771cc80`). Offered as an `AskUserQuestion` among the
+        3 remaining gaps; user picked this one as "권장" (recommended).
+        - Struct/class layouts: every named `TypeData::Class` in the type
+          stream (skipping anonymous classes and forward declarations with
+          `fields: None`) is walked through its `FieldList` — following the
+          `continuation` chain PDB uses to split large field lists across
+          multiple linked records — to pull real member name/type/offset,
+          pushed straight into the same `InferredTypeInfo` structure DWARF's
+          own struct extraction already populates (no new PDB-specific
+          struct type needed).
+        - Variable locations were the harder half. `S_LOCAL` carries an
+          `isparam` flag but the `pdb` crate's `SymbolData::Local` has no
+          location field at all (real location lives in separate
+          `S_DEFRANGE_*` records this crate version doesn't parse);
+          `S_REGREL32`/`SymbolData::RegisterRelative` is self-contained
+          (register + offset) but has **no param/local flag whatsoever** —
+          confirmed via `llvm-pdbutil dump --symbols` against the real,
+          locally-present `vendor/binaries/tests/x86_64/windows/
+          fauxware.pdb`, where `printf`'s wrapper has `_Format` (a real
+          parameter) and `_Result` (a real local) as plain, indistinguishable
+          `S_REGREL32` records. Presented as an `AskUserQuestion` (simple
+          "treat all as locals" vs. a proper param/local classifier); user's
+          answer was **"use all your low-level knowledge to solve it
+          properly, fall back to option 1 only if it doesn't work"**, which
+          ruled out the simpler approximation.
+        - The only record that disambiguates is `S_FRAMEPROC` (frame size +
+          param/local frame-pointer register), and the `pdb` crate doesn't
+          parse it at all — `symbol.parse()` returns `Err` for this kind, so
+          the original loop's `Err(_) => continue` silently skipped every
+          one. Manually decoded from `symbol.raw_bytes()` per LLVM's
+          `FrameProcSym`/`SymbolRecordMapping.cpp` layout (`TotalFrameBytes:
+          u32 @[2..6)`, `Flags:u32 @[24..28)`, bits 14-15/16-17 =
+          local/param `EncodedFramePtrReg`), cross-checked against real
+          bytes captured from `printf`'s own `S_FRAMEPROC` before trusting
+          it (`total_frame_bytes=80`, both registers decode to `rsp`,
+          matching `llvm-pdbutil`'s own decode of the same bytes).
+        - Register numbers resolve through a Ghidra-ported name table
+          (`pdb_registers.rs`, `regX86`/`regAmd64` verbatim from
+          `RegisterName.java`) rather than the CodeView spec by hand — a
+          first hand-transcription was wrong (142/363 entries vs. the
+          correct 145/368), caught by a length-verification script before
+          it shipped and now pinned by a permanent regression test.
+        - `classify_register_relative`: when `S_FRAMEPROC`'s param/local
+          frame-pointer registers differ, classify by which register the
+          symbol references; when they're the same (the common x64
+          RSP-relative, no-frame-pointer case), fall back to `offset >=
+          total_frame_bytes + pointer_size` — mirrors Ghidra's own
+          frame-offset-based approach in
+          `RegisterRelativeSymbolApplier.java` rather than replicating its
+          full prologue-analysis machinery. Validated byte-for-byte against
+          `printf`'s real classification: `_Format@96` → Param,
+          `_ArgList@56`/`_Result@32` → Local.
+        - New committed fixture (`testdata/x64_pdb_struct_test.exe`/`.pdb`,
+          built with `clang-cl`+`lld-link` via Homebrew LLVM — no MSVC or
+          Windows SDK needed) validates struct/field extraction
+          (`analyze_pdb_extracts_real_struct_layout`, a `Point{x,y,z}`
+          struct at real offsets 0/4/8). Note: clang-cl's CodeView backend
+          emits `S_LOCAL`+`S_DEFRANGE_FRAMEPOINTER_REL`, never
+          `S_REGREL32`, so this fixture doesn't exercise
+          `classify_register_relative` — that path is covered instead by
+          unit tests built from real bytes captured out of `fauxware.pdb`.
+          `vendor/binaries/...fauxware.pdb` itself stayed uncommitted
+          (`vendor/` is gitignored) but was used for an end-to-end proof
+          before being removed from the working tree: 102 struct types
+          extracted (e.g. `IMAGE_DOS_HEADER`, 19 fields) and 80/154 (52%) of
+          all parameters across the binary gained a real stack location
+          where previously every one was `Unknown`.
+        - Documented simplifications: `S_REGISTER`/`RegisterVariable` (no
+          frame-relative offset to classify against) always treated as a
+          local — never observed even once in the real test PDB.
+          `S_DEFRANGE_*` records remain unparsed (the `pdb` crate doesn't
+          support them); affected `S_LOCAL` locals get name+type with
+          location left `Unknown`, still strictly better than before.
+          Per-field size for PDB struct members left at `0`, matching
+          DWARF's own existing behavior for non-bitfield members.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run -p fission-loader` 108/108, release build +
+          `golden_corpus_check.py` clean, `cargo nextest run --workspace
+          --no-fail-fast` 2103/2110 (7 pre-existing, unrelated
+          `fission-emulator` failures, confirmed via `git stash` earlier
+          this session to fail identically on unmodified `main`).
+        - Remaining metadata gaps, unchanged: `DW_TAG_lexical_block` PC
+          ranges, `.debug_line` parsing.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
