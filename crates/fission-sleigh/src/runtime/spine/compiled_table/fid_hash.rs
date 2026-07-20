@@ -10,37 +10,124 @@
 //! scalar operand values and relocation-awareness -- see
 //! `MessageDigestFidHasher.java`'s `hasRelocation`/`OperandType.isAddress`
 //! handling, which Fission's flat `BoundOperand` model doesn't currently
-//! distinguish) and SIB-style memory operands (`[base+index*scale+disp]`
-//! -- `trace_simple_memory_address` bails on anything beyond a bare
-//! register or register+constant `IntAdd`). A wrong operand mix would make
-//! the hash wrong in a way nothing could ever detect (unlike an incomplete
-//! extent, which just produces `None`), so unhandled shapes fail the whole
-//! function's hash rather than silently mixing a placeholder for something
-//! that isn't actually a scalar or omitting an operand Ghidra wouldn't.
+//! distinguish). A wrong operand mix would make the hash wrong in a way
+//! nothing could ever detect (unlike an incomplete extent, which just
+//! produces `None`), so unhandled shapes (e.g. RIP-relative addressing
+//! folded through an op `trace_simple_memory_address` doesn't recognize)
+//! fail the whole function's hash rather than silently mixing a placeholder
+//! for something that isn't actually a scalar or omitting an operand
+//! Ghidra wouldn't.
 
 use super::*;
 use crate::compiler::CompiledDisplayPiece;
 
 /// Ghidra's `getOpObjects(ii)` returns multiple sub-objects for one display
-/// operand (e.g. a memory reference is `[Register(base), Scalar(disp)]`);
-/// this is the address-shape Fission recovers for the "ram"-space handles
-/// that `RuntimeConstructState` doesn't otherwise carry a `BoundOperand`
-/// for, by tracing backward through this instruction's own p-code from the
-/// handle's `(offset_space, offset_offset, offset_size)` triple to whichever
-/// earlier op computed it.
+/// operand (e.g. a memory reference is `[Register(base), Scalar(disp)]`, or
+/// for SIB addressing `[Register(base), Register(index), Scalar(scale),
+/// Scalar(disp)]` -- cross-checked against real Ghidra 12.0.4, which prints
+/// a `Scalar(scale)` object even when `scale == 1` and omits the
+/// displacement `Scalar` entirely when `disp == 0`, see
+/// `fid_full_hash_matches_ghidra_exactly_for_sib_addressing` below); this is
+/// the address-shape Fission recovers for the "ram"-space handles that
+/// `RuntimeConstructState` doesn't otherwise carry a `BoundOperand` for, by
+/// tracing backward through this instruction's own p-code from the handle's
+/// `(offset_space, offset_offset, offset_size)` triple to whichever earlier
+/// op computed it.
 enum MemoryAddressShape {
     /// `[reg]` -- SLEIGH register-space offset of the base register.
     Register(u64),
     /// `[reg+disp]` / `[reg-disp]` -- base register offset, signed displacement.
     RegisterPlusConstant(u64, i64),
+    /// `[base+index*scale]` / `[base+index*scale+disp]` -- SIB addressing.
+    /// The scale value itself isn't tracked: only its *presence* (always
+    /// true for SIB, per the Ghidra cross-check above) matters for the full
+    /// hash, which never mixes in actual scalar values.
+    BaseIndexScale {
+        base: u64,
+        index: u64,
+        has_displacement: bool,
+    },
+}
+
+/// If `varnode` is itself a register (not produced by any op -- e.g. a raw
+/// input to this instruction's p-code), returns its register-space offset.
+fn as_register_offset(v: &fission_pcode::Varnode, register_space_index: u64) -> Option<u64> {
+    (!v.is_constant && u64::from(v.space_id) == register_space_index).then_some(v.offset)
+}
+
+/// If `varnode` was computed by an `IntAdd(register, constant)` op earlier
+/// in `ops` (either input order), returns the register's offset. Used both
+/// directly (`[reg+disp]`) and as a sub-match inside SIB base+disp folding.
+fn producer_reg_plus_const(
+    ops: &[fission_pcode::PcodeOp],
+    v: &fission_pcode::Varnode,
+    register_space_index: u64,
+) -> Option<u64> {
+    let producer = ops
+        .iter()
+        .find(|op| op.output.as_ref().is_some_and(|out| out == v))?;
+    if producer.opcode != fission_pcode::PcodeOpcode::IntAdd {
+        return None;
+    }
+    let [a, b] = producer.inputs.as_slice() else {
+        return None;
+    };
+    if let Some(offset) = as_register_offset(a, register_space_index) {
+        if b.is_constant {
+            return Some(offset);
+        }
+    }
+    if let Some(offset) = as_register_offset(b, register_space_index) {
+        if a.is_constant {
+            return Some(offset);
+        }
+    }
+    None
+}
+
+/// If `varnode` was computed by an `IntMult(register, constant)` op earlier
+/// in `ops` (either input order) -- SLEIGH's encoding of `index*scale` --
+/// returns the index register's offset.
+fn producer_scaled_index(
+    ops: &[fission_pcode::PcodeOp],
+    v: &fission_pcode::Varnode,
+    register_space_index: u64,
+) -> Option<u64> {
+    let producer = ops
+        .iter()
+        .find(|op| op.output.as_ref().is_some_and(|out| out == v))?;
+    if producer.opcode != fission_pcode::PcodeOpcode::IntMult {
+        return None;
+    }
+    let [a, b] = producer.inputs.as_slice() else {
+        return None;
+    };
+    if let Some(offset) = as_register_offset(a, register_space_index) {
+        if b.is_constant {
+            return Some(offset);
+        }
+    }
+    if let Some(offset) = as_register_offset(b, register_space_index) {
+        if a.is_constant {
+            return Some(offset);
+        }
+    }
+    None
 }
 
 /// Trace a memory operand's address computation backward through `ops`
 /// (this instruction's own p-code) to recover a [`MemoryAddressShape`].
 /// `target` identifies the address-holding varnode via the owning handle's
 /// `RuntimeFixedHandle::{offset_space, offset_offset, offset_size}`.
-/// Returns `None` for anything beyond a bare register or register+constant
-/// `IntAdd` (e.g. SIB addressing with an index register) rather than guess.
+///
+/// Handles a bare register, register+constant `IntAdd` (simple displacement),
+/// and SIB addressing (`base + index*scale` optionally folded with a
+/// displacement, observed as either `IntAdd(base,disp) -> IntMult(index,scale)
+/// -> IntAdd(combine)` when `disp != 0`, or directly `IntMult(index,scale) ->
+/// IntAdd(base,combine)` when `disp == 0` -- both cross-checked against
+/// Fission's own p-code output for real SIB instructions). Returns `None`
+/// for anything else (e.g. RIP-relative folded through a different op)
+/// rather than guess.
 fn trace_simple_memory_address(
     ops: &[fission_pcode::PcodeOp],
     register_space_index: u64,
@@ -48,9 +135,6 @@ fn trace_simple_memory_address(
     target_offset: u64,
     target_size: u32,
 ) -> Option<MemoryAddressShape> {
-    let is_register = |v: &fission_pcode::Varnode| -> bool {
-        !v.is_constant && u64::from(v.space_id) == register_space_index
-    };
     let matches_target = |v: &fission_pcode::Varnode| -> bool {
         v.space_id == target_space_id && v.offset == target_offset && v.size == target_size
     };
@@ -64,48 +148,102 @@ fn trace_simple_memory_address(
             let [a, b] = producer.inputs.as_slice() else {
                 return None;
             };
-            let (reg, scalar) = if is_register(a) && b.is_constant {
-                (a, b)
-            } else if is_register(b) && a.is_constant {
-                (b, a)
-            } else {
-                // e.g. base+index (SIB addressing) -- not handled yet.
-                return None;
-            };
-            let displacement = scalar.constant_val as i64;
-            Some(MemoryAddressShape::RegisterPlusConstant(
-                reg.offset,
-                displacement,
-            ))
+            // Simple `[reg+disp]`: reg + const directly.
+            if let Some(offset) = as_register_offset(a, register_space_index) {
+                if b.is_constant {
+                    return Some(MemoryAddressShape::RegisterPlusConstant(
+                        offset,
+                        b.constant_val as i64,
+                    ));
+                }
+            }
+            if let Some(offset) = as_register_offset(b, register_space_index) {
+                if a.is_constant {
+                    return Some(MemoryAddressShape::RegisterPlusConstant(
+                        offset,
+                        a.constant_val as i64,
+                    ));
+                }
+            }
+            // SIB: one side is `index*scale` (an IntMult producer); the
+            // other is either a bare base register (no displacement) or
+            // itself an `IntAdd(base,disp)` producer (folded displacement).
+            for (base_side, index_side) in [(a, b), (b, a)] {
+                let Some(index_offset) =
+                    producer_scaled_index(ops, index_side, register_space_index)
+                else {
+                    continue;
+                };
+                if let Some(base_offset) = as_register_offset(base_side, register_space_index) {
+                    return Some(MemoryAddressShape::BaseIndexScale {
+                        base: base_offset,
+                        index: index_offset,
+                        has_displacement: false,
+                    });
+                }
+                if let Some(base_offset) =
+                    producer_reg_plus_const(ops, base_side, register_space_index)
+                {
+                    return Some(MemoryAddressShape::BaseIndexScale {
+                        base: base_offset,
+                        index: index_offset,
+                        has_displacement: true,
+                    });
+                }
+            }
+            None
         }
         fission_pcode::PcodeOpcode::Copy => {
             let input = producer.inputs.first()?;
-            is_register(input).then(|| MemoryAddressShape::Register(input.offset))
+            as_register_offset(input, register_space_index).map(MemoryAddressShape::Register)
         }
         _ => None,
     }
 }
 
-/// Mixing for a memory operand's `[Register(base), Scalar(disp)]` object
-/// list -- both objects accumulate into *one* `fullUpdate` before a single
-/// digest update, mirroring `MessageDigestFidHasher.java`'s per-operand loop
-/// (the outer `for (Object obj : opObjects)` accumulates before
-/// `fullDigest.update(fullUpdate)`, not once per object).
+/// Mixing for a memory operand's object list (`[Register(base)]`,
+/// `[Register(base), Scalar(disp)]`, or SIB's
+/// `[Register(base), Register(index), Scalar(scale), Scalar(disp)?]`) --
+/// every object accumulates into *one* `fullUpdate` before a single digest
+/// update, mirroring `MessageDigestFidHasher.java`'s per-operand loop (the
+/// outer `for (Object obj : opObjects)` accumulates before
+/// `fullDigest.update(fullUpdate)`, not once per object). A `Scalar` object
+/// always contributes the same flat `0xfeeddead` placeholder to the full
+/// hash regardless of its actual value (`fullUpdate += 0xfeeddead` in the
+/// Java source, unconditionally) -- so SIB's scale-always-present +
+/// disp-if-nonzero shape can contribute the placeholder once or twice.
 fn mix_memory_operand_full(operand_index: usize, shape: &MemoryAddressShape) -> Option<i32> {
     let mut full_update = i32::try_from(operand_index)
         .ok()?
         .wrapping_add(1)
         .wrapping_mul(7777);
-    let base_offset = match shape {
-        MemoryAddressShape::Register(offset) | MemoryAddressShape::RegisterPlusConstant(offset, _) => {
-            *offset
-        }
+    let reg_mix = |offset: u64| -> Option<i32> {
+        let offset = i32::try_from(offset).ok()?;
+        Some(offset.wrapping_add(7_654_321).wrapping_mul(98_777))
     };
-    let base_offset = i32::try_from(base_offset).ok()?;
-    let reg_mix = base_offset.wrapping_add(7_654_321).wrapping_mul(98_777);
-    full_update = full_update.wrapping_add(reg_mix);
-    if matches!(shape, MemoryAddressShape::RegisterPlusConstant(..)) {
-        full_update = full_update.wrapping_add(0xfeed_dead_u32 as i32);
+    const SCALAR_PLACEHOLDER: i32 = 0xfeed_dead_u32 as i32;
+    match shape {
+        MemoryAddressShape::Register(offset) => {
+            full_update = full_update.wrapping_add(reg_mix(*offset)?);
+        }
+        MemoryAddressShape::RegisterPlusConstant(offset, _) => {
+            full_update = full_update.wrapping_add(reg_mix(*offset)?);
+            full_update = full_update.wrapping_add(SCALAR_PLACEHOLDER);
+        }
+        MemoryAddressShape::BaseIndexScale {
+            base,
+            index,
+            has_displacement,
+        } => {
+            full_update = full_update.wrapping_add(reg_mix(*base)?);
+            full_update = full_update.wrapping_add(reg_mix(*index)?);
+            // The scale factor is always present as its own Scalar object
+            // for SIB addressing, even when scale == 1.
+            full_update = full_update.wrapping_add(SCALAR_PLACEHOLDER);
+            if *has_displacement {
+                full_update = full_update.wrapping_add(SCALAR_PLACEHOLDER);
+            }
+        }
     }
     Some(full_update)
 }
@@ -209,9 +347,9 @@ fn mix_operand_full(
         // Memory/relative operands: no reliable base-register/displacement
         // decomposition available from RuntimeConstructState today (see
         // module doc comment). Bail rather than mix a wrong value in.
-        BoundOperand::Memory { .. } | BoundOperand::Relative { .. } | BoundOperand::Register { .. } => {
-            None
-        }
+        BoundOperand::Memory { .. }
+        | BoundOperand::Relative { .. }
+        | BoundOperand::Register { .. } => None,
     }
 }
 

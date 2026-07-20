@@ -174,11 +174,11 @@ fn fid_mask_matches_ghidra_exactly_for_operand_size_prefix() {
 fn fid_full_hash_matches_ghidra_exactly_for_register_only_function() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let instruction_bytes: [&[u8]; 5] = [
-        &[0x55],                   // push rbp
-        &[0x48, 0x89, 0xE5],       // mov rbp, rsp
+        &[0x55],                         // push rbp
+        &[0x48, 0x89, 0xE5],             // mov rbp, rsp
         &[0xB8, 0x2A, 0x00, 0x00, 0x00], // mov eax, 0x2a
-        &[0x5D],                   // pop rbp
-        &[0xC3],                   // ret
+        &[0x5D],                         // pop rbp
+        &[0xC3],                         // ret
     ];
     let mut address = 0x1000u64;
     let mut extent = Vec::new();
@@ -197,8 +197,9 @@ fn fid_full_hash_matches_ghidra_exactly_for_register_only_function() {
         }
     };
 
-    let (count, hash) = fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-        .expect("function has enough code units to hash");
+    let (count, hash) =
+        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+            .expect("function has enough code units to hash");
     assert_eq!(count, 5);
     assert_eq!(hash, 0x37783a7364fbdfe5);
 }
@@ -217,11 +218,11 @@ fn fid_full_hash_matches_ghidra_exactly_for_register_only_function() {
 fn fid_full_hash_matches_ghidra_exactly_for_function_with_memory_operand() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let instruction_bytes: [&[u8]; 5] = [
-        &[0x55],                   // push rbp
-        &[0x48, 0x89, 0xE5],       // mov rbp, rsp
-        &[0x8B, 0x45, 0x08],       // mov eax, [rbp+8]
-        &[0x5D],                   // pop rbp
-        &[0xC3],                   // ret
+        &[0x55],             // push rbp
+        &[0x48, 0x89, 0xE5], // mov rbp, rsp
+        &[0x8B, 0x45, 0x08], // mov eax, [rbp+8]
+        &[0x5D],             // pop rbp
+        &[0xC3],             // ret
     ];
     let mut address = 0x1000u64;
     let mut extent = Vec::new();
@@ -240,10 +241,94 @@ fn fid_full_hash_matches_ghidra_exactly_for_function_with_memory_operand() {
         }
     };
 
-    let (count, hash) = fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
-        .expect("function has enough code units to hash");
+    let (count, hash) =
+        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+            .expect("function has enough code units to hash");
     assert_eq!(count, 5);
     assert_eq!(hash, 0x82d2e963fd88461b);
+}
+
+/// Cross-checked against real Ghidra 12.0.4 (headless, `FidService.hashFunction`,
+/// plus `Instruction.getOpObjects(ii)` printed directly) for three SIB-addressed
+/// (`base+index*scale[+disp]`) variants of `xor edx,edx; mov eax,[SIB]; add
+/// eax,edx; ret`, GCC-assembled so the byte encoding matches a real compiler's
+/// SIB byte choices:
+///
+/// - `31 d2 8b 44 88 10 01 d0 c3` (`[rax+rcx*4+0x10]`, disp present):
+///   `getOpObjects` prints `Register(RAX) Register(RCX) Scalar(0x4) Scalar(0x10)`
+///   (scale *and* displacement both present as separate `Scalar` objects) --
+///   `FID full hash: 45285b0d87470466`, `FID code unit size: 4`.
+/// - `31 d2 8b 04 08 01 d0 c3` (`[rax+rcx*1]`, disp == 0, scale == 1):
+///   `getOpObjects` prints `Register(RAX) Register(RCX) Scalar(0x1)` -- the
+///   scale `Scalar` is present *even at scale == 1*, but the displacement
+///   `Scalar` is omitted entirely when disp == 0 -- `FID full hash:
+///   71e530ce7190c262`, `FID code unit size: 4`.
+/// - `31 d2 8b 84 c8 00 01 00 00 01 d0 c3` (`[rax+rcx*8+0x100]`, disp present,
+///   32-bit displacement encoding): `FID full hash: f66301fb4931933a`,
+///   `FID code unit size: 4`.
+///
+/// Fission's own p-code for these three (inspected via `fission_cli
+/// raw-pcode`) confirmed the two backward-trace shapes
+/// `trace_simple_memory_address` needs to recognize: `IntAdd(base,disp) ->
+/// IntMult(index,scale) -> IntAdd(combine)` when disp != 0, and directly
+/// `IntMult(index,scale) -> IntAdd(base,combine)` when disp == 0 (no
+/// intermediate base+disp op at all).
+#[test]
+fn fid_full_hash_matches_ghidra_exactly_for_sib_addressing() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let resolve_register_offset = |name: &str| -> Option<i64> {
+        match name.to_ascii_uppercase().as_str() {
+            "RAX" | "EAX" => Some(0x0),
+            "RCX" | "ECX" => Some(0x8),
+            "RDX" | "EDX" => Some(0x10),
+            _ => None,
+        }
+    };
+    let decode_extent = |instruction_bytes: &[&[u8]]| -> Vec<crate::runtime::DecodedInstruction> {
+        let mut address = 0x1000u64;
+        let mut extent = Vec::new();
+        for bytes in instruction_bytes {
+            let decoded =
+                decode_instruction(&compiled, bytes, address).expect("decode instruction");
+            address += decoded.length as u64;
+            extent.push(decoded);
+        }
+        extent
+    };
+
+    // xor edx,edx; mov eax,[rax+rcx*4+0x10]; add eax,edx; ret
+    let extent = decode_extent(&[
+        &[0x31, 0xD2],
+        &[0x8B, 0x44, 0x88, 0x10],
+        &[0x01, 0xD0],
+        &[0xC3],
+    ]);
+    let (count, hash) =
+        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+            .expect("SIB with scale+disp hashes");
+    assert_eq!(count, 4);
+    assert_eq!(hash, 0x45285b0d87470466);
+
+    // xor edx,edx; mov eax,[rax+rcx*1]; add eax,edx; ret
+    let extent = decode_extent(&[&[0x31, 0xD2], &[0x8B, 0x04, 0x08], &[0x01, 0xD0], &[0xC3]]);
+    let (count, hash) =
+        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+            .expect("SIB with scale==1, disp==0 hashes");
+    assert_eq!(count, 4);
+    assert_eq!(hash, 0x71e530ce7190c262);
+
+    // xor edx,edx; mov eax,[rax+rcx*8+0x100]; add eax,edx; ret
+    let extent = decode_extent(&[
+        &[0x31, 0xD2],
+        &[0x8B, 0x84, 0xC8, 0x00, 0x01, 0x00, 0x00],
+        &[0x01, 0xD0],
+        &[0xC3],
+    ]);
+    let (count, hash) =
+        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+            .expect("SIB with scale+32-bit disp hashes");
+    assert_eq!(count, 4);
+    assert_eq!(hash, 0xf66301fb4931933a);
 }
 
 #[test]
@@ -1597,7 +1682,12 @@ fn rip_relative_trailing_imm_inst_next_targets() {
                 .as_ref()
                 .filter(|o| o.space_id == 3)
                 .map(|o| o.offset)
-                .or_else(|| op.inputs.iter().find(|vn| vn.space_id == 3).map(|vn| vn.offset))
+                .or_else(|| {
+                    op.inputs
+                        .iter()
+                        .find(|vn| vn.space_id == 3)
+                        .map(|vn| vn.offset)
+                })
         })
     };
 
@@ -1622,6 +1712,3 @@ fn rip_relative_trailing_imm_inst_next_targets() {
     assert_eq!(len as usize, 10);
     assert_eq!(ram_off(&ops), Some(0x1007F20));
 }
-
-
-
