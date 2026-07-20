@@ -744,14 +744,124 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   hit this new path, confirming zero regression risk), 6-function
   hand-curated regression byte-identical, `state_machine_score` 20/20
   uniform, release/quick-release byte-identical.
-  **Follow-up candidates, not done here**: (a) extend
-  `nir_hints_from_debug_function` to cover `DwarfLocation::Register`
-  locals, not just `StackOffset`; (b) investigate why
-  `aggregate_fields.rs`'s promotion heuristic doesn't fire for the
-  simple `-O0` `ptr->field` pcode shape found during manual testing —
-  that's likely a bigger and more broadly valuable fix than this one,
-  since it gates whether *any* of this new field-naming machinery ever
-  gets exercised in practice.
+- **Follow-up (b) done: the aggregate promotion gate widened for
+  debug-info-backed pointers, 2026-07-20** (commit `ffe5b987`) —
+  but a real correctness bug in the field-naming overlay above was
+  found and fixed on the way there first:
+  1. **Bug found and fixed (commit `f40f6af6`), predating the widening
+     work**: the field-naming overlay from the previous entry renamed
+     `StructField.name` in the binding's type annotation, but
+     `render/printer.rs` never reads that annotation for
+     `HirExpr::FieldAccess`/`HirLValue::FieldAccess` rendering — it
+     prints `field_name` straight off the AST node. That string is
+     baked into the node once, by normalize's `ptr_arith.rs` (which
+     runs a *second* time specifically to convert `PtrOffset` ->
+     `FieldAccess` once `aggregate_fields.rs` has populated a binding's
+     fields), long before `type_hints.rs` runs post-structuring.
+     Renaming the type-level annotation afterward changed nothing
+     visible — a gap the original unit tests missed because they used
+     trivial bodies with no `FieldAccess` node to actually render.
+     Fixed with `rewrite_field_access_names_in_stmts`
+     (`fission-midend-core::util::var_rename`, mirroring the existing
+     `rename_vars_in_stmts` it sits beside), which walks the body and
+     renames matching `FieldAccess` nodes directly, keyed by `(base
+     variable name, byte offset)`. A new unit test builds the actual
+     AST shape `ptr_arith.rs` would produce and asserts the *printed*
+     output changes, not just the type annotation — the test that
+     would have caught the original gap.
+  2. **Root cause of the "never fires" question**: traced with a real
+     `zig cc`-built `-O0` ELF (`struct Point { int x, y; }; int f(Point
+     *p) { return p->x + p->y; }`). `p`'s type lands on `Ptr(Int{32})`
+     from its first dereference and never advances, because
+     `aggregate_fields.rs`'s own `can_upgrade_binding_to_aggregate`
+     only promotes from `Ptr(Unknown | Int{8|16})` — deliberately
+     excluding wider integer pointers so a genuine `int*`/`long*` array
+     (`arr[0] + arr[1]`) doesn't get misclassified as a fake struct
+     when there's no other evidence. That exclusion is correct without
+     debug info, but it also means a struct whose first field is `int`
+     or wider — the common case — never gets promoted at all, so the
+     field-naming overlay (which only *renames* an already-populated
+     aggregate) had nothing to act on for the case it was built for.
+  3. **Fix**: with DWARF/PDB proof the type really is a struct, the
+     array/struct ambiguity that justifies the exclusion doesn't apply.
+     Added `apply_debug_struct_promotions`
+     (`fission-pcode::midend::builder::type_hints`), which promotes
+     debug-info-backed pointers directly — without touching
+     `aggregate_fields.rs`'s own heuristic (or its no-debug-info
+     correctness) at all. It rewrites two access shapes directly
+     against debug-info field offsets, same transformation
+     `ptr_arith.rs` does for the heuristic path:
+     `Load{ptr: Var(name)}`/`Deref{ptr: Var(name)}` (offset 0) and
+     `Load{ptr: PtrOffset{base: Var(name), offset}}` (nonzero constant
+     offset). A size-compatibility check (access width <= field size)
+     guards against misreading a wide access spanning multiple fields
+     as just the first one.
+  4. **Second empirical finding, discovered mid-implementation**: the
+     narrow version above (matching the param variable by name
+     directly) had *zero* effect on the real test binary — not even
+     the `offset == 0` case. Real -O0 output almost always spills a
+     parameter into a local "shadow" (`local_8 = p;`) before any
+     dereference, so the actual `Load` targets `local_8`, never `p`
+     itself. Extended `apply_debug_struct_promotions` to follow exactly
+     one level of single-assignment direct-copy alias
+     (`extend_with_copy_aliases`: a local assigned exactly once in the
+     whole function, whose sole assignment is a direct `Var`-to-`Var`
+     copy of an eligible binding). Confirmed via the real binary this
+     is not an edge case but the *dominant* shape — without it, the
+     whole feature would almost never fire on real compiler output.
+  5. **Confirmed remaining, deliberate limitation**: on the same test
+     binary, `p->x` (offset 0, reached via the copy alias) now recovers
+     correctly; `p->y` (offset 4, reached only via `t = local_8 + 1; *t
+     = ...`, a *non-copy* pointer-arithmetic intermediate) still
+     doesn't. Reaching that would need real cross-statement def-use /
+     reaching-definitions tracking this pass deliberately doesn't have
+     — documented in the function's own doc comment rather than
+     silently claimed as complete. A binding whose accesses are all
+     past this pass's reach just keeps its non-aggregate type; nothing
+     gets misrendered.
+  Validated: `cargo check --workspace` clean, 1967/1974 nextest passing
+  (1969 baseline + 5 new tests across both commits in this entry; same
+  7 pre-existing unrelated failures), `golden_corpus_check.py` clean
+  (160 functions byte-identical — this more aggressive AST rewrite
+  still touches none of the golden corpus's existing output),
+  6-function hand-curated regression byte-identical,
+  `state_machine_score` 20/20 uniform, struct test binary 5/5
+  deterministic, release/quick-release byte-identical.
+- **Follow-up (a), investigated but not implemented, 2026-07-20**:
+  extending `nir_hints_from_debug_function` to cover
+  `DwarfLocation::Register` locals (not just `StackOffset`) turns out
+  to be a substantially different and harder problem than either fix
+  above, not a small extension:
+  - DWARF register locations are encoded as a raw DWARF register
+    *number* (`format!("reg{}", register.0)` in
+    `fission-loader/src/loader/dwarf/functions.rs`), not an
+    architecture register name. Correlating it to a SLEIGH register
+    space offset needs a DWARF-register-number -> SLEIGH-offset table
+    *per architecture* (x86-64 SysV/Windows, x86-32, ARM, AArch64,
+    MIPS, PowerPC, LoongArch — every architecture this project
+    supports), which doesn't exist yet.
+  - More fundamentally: stack-slot locals have a stable identity (one
+    memory address) for their whole scope, so Fission's builder
+    naturally creates one binding per slot, matching DWARF's own
+    offset-keyed identity trivially. A register gets reused for many
+    different logical values over a function's lifetime, and Fission's
+    SSA-like temp-naming (`next_unused_temp_binding_name`) creates a
+    *new* binding every time the register is redefined — there is no
+    single persistent Fission binding that "is" a register-resident
+    DWARF local the way `NirBindingOrigin::StackOffset` already gives
+    one for stack locals. Correlating "DWARF says variable X lives in
+    register R for this address range" to "the specific Fission temp
+    binding live at that program point" needs real live-range-aware
+    matching (DWARF location *lists*, not just a single location, plus
+    Fission-side reaching-definitions info) — an order of magnitude
+    more machinery than the params/struct-field work in this entry,
+    which only ever needed positional or single-copy-alias identity.
+  - Given a wrong correlation would *actively misname* a Fission
+    binding (worse than the current silent gap, not just less
+    complete), this needs its own properly-scoped slice with its own
+    design and validation, not a rushed extension bolted onto this
+    session's struct-field work. Left undone, honestly, rather than
+    shipped half-correct.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
