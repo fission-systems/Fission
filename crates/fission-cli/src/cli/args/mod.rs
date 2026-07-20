@@ -550,7 +550,7 @@ struct CallgraphArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Identify functions against bundled Ghidra FID (Function ID) signature databases (`utils/signatures/fid/*.fidbf`).\n\nHashes each function's decoded instructions the same way Ghidra's FID service does (see MessageDigestFidHasher) and looks the hash up. x86-64 only; SIB (base+index*scale) memory operands and the specific-hash bonus aren't supported yet, so some functions won't hash at all -- that's a missed identification, not a wrong one.",
+    long_about = "Identify functions against bundled Ghidra FID (Function ID) signature databases (`utils/signatures/fid/*.fidbf`).\n\nHashes each function's decoded instructions the same way Ghidra's FID service does (see MessageDigestFidHasher) and looks the hash up. x86-64 only; the specific-hash bonus isn't supported yet, so short functions rarely clear the acceptance threshold on full hash alone -- that's a missed identification, not a wrong one.",
     after_help = "Examples:\n  fission_cli identify app.exe\n  fission_cli identify app.exe --json\n  fission_cli identify app.exe --function 0x140001000"
 )]
 struct IdentifyArgs {

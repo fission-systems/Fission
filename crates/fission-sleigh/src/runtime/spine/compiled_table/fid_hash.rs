@@ -6,17 +6,27 @@
 //! [`super::instruction_pattern_mask`]) plus a per-operand mixing step,
 //! now including simple memory operands (`[reg]`, `[reg+disp]`).
 //!
+//! RIP-relative operands (memory loads *and* `LEA`) need no special
+//! handling: Fission's runtime resolves them to a literal target address at
+//! decode time (`BoundOperand::Immediate`), and `MessageDigestFidHasher.java`
+//! mixes `Address` and `Scalar` objects identically for the *full* hash
+//! (`fullUpdate += 0xfeeddead` either way -- they only diverge for the
+//! *specific* hash) -- see
+//! `fid_full_hash_matches_ghidra_exactly_for_rip_relative_memory_load`/`_lea`
+//! in `tests.rs`, which exist specifically to prove that rather than assume
+//! it.
+//!
 //! Deliberately **not** implemented yet: the "specific hash" (needs actual
 //! scalar operand values and relocation-awareness -- see
 //! `MessageDigestFidHasher.java`'s `hasRelocation`/`OperandType.isAddress`
 //! handling, which Fission's flat `BoundOperand` model doesn't currently
 //! distinguish). A wrong operand mix would make the hash wrong in a way
 //! nothing could ever detect (unlike an incomplete extent, which just
-//! produces `None`), so unhandled shapes (e.g. RIP-relative addressing
-//! folded through an op `trace_simple_memory_address` doesn't recognize)
-//! fail the whole function's hash rather than silently mixing a placeholder
-//! for something that isn't actually a scalar or omitting an operand
-//! Ghidra wouldn't.
+//! produces `None`), so unhandled memory-address shapes (address computed
+//! through an op `trace_simple_memory_address` doesn't recognize) fail the
+//! whole function's hash rather than silently mixing a placeholder for
+//! something that isn't actually a scalar or omitting an operand Ghidra
+//! wouldn't.
 
 use super::*;
 use crate::compiler::CompiledDisplayPiece;
@@ -125,9 +135,11 @@ fn producer_scaled_index(
 /// displacement, observed as either `IntAdd(base,disp) -> IntMult(index,scale)
 /// -> IntAdd(combine)` when `disp != 0`, or directly `IntMult(index,scale) ->
 /// IntAdd(base,combine)` when `disp == 0` -- both cross-checked against
-/// Fission's own p-code output for real SIB instructions). Returns `None`
-/// for anything else (e.g. RIP-relative folded through a different op)
-/// rather than guess.
+/// Fission's own p-code output for real SIB instructions). Only reached for
+/// handles the runtime didn't already resolve to a `BoundOperand` directly
+/// (RIP-relative addressing, for instance, never reaches this function --
+/// see the module doc comment). Returns `None` for anything else rather
+/// than guess.
 fn trace_simple_memory_address(
     ops: &[fission_pcode::PcodeOp],
     register_space_index: u64,

@@ -4,10 +4,10 @@
 //!
 //! See `PROJECT.md`'s FID entry for the algorithm's provenance and
 //! validation history (byte-for-byte matched against real Ghidra 12.0.4 on
-//! register/immediate/simple-memory-operand instructions, then proven
-//! end-to-end against a real Ghidra-shipped database). Current scope:
-//! x86-64 only, simple `[reg]`/`[reg+disp]` memory operands only (SIB
-//! addressing bails), full hash only (no specific-hash bonus yet).
+//! register/immediate/simple-memory/SIB/RIP-relative operands, then proven
+//! end-to-end against a real Ghidra-shipped database). Current scope: x86-64
+//! only, full hash only (no specific-hash bonus yet, so short functions
+//! rarely clear the acceptance threshold on full hash alone).
 
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::midend::cspec::{RegisterModel, register_model_for_language};

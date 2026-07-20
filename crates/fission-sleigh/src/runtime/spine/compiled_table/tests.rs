@@ -1712,3 +1712,89 @@ fn rip_relative_trailing_imm_inst_next_targets() {
     assert_eq!(len as usize, 10);
     assert_eq!(ram_off(&ops), Some(0x1007F20));
 }
+
+/// Cross-checked against real Ghidra 12.0.4 for `31 d2 8b 05 00 01 00 00 01
+/// d0 c3` (`xor edx,edx; mov eax,[rip+0x100]; add eax,edx; ret`, GCC-assembled
+/// so the RIP-relative encoding matches a real compiler, at address `0x401702`
+/// so the resolved absolute target matches the real binary's `0x40180a`
+/// exactly): Ghidra's `getOpObjects` for the `mov`'s memory operand prints a
+/// single `GenericAddress(0040180a)` object -- Fission's own runtime
+/// independently classifies this same operand as `BoundOperand::Immediate`
+/// (RIP-relative displacement resolves to a literal target address at decode
+/// time, confirmed via `decode_instruction_raw_state` -- `debug_value:
+/// Some(Immediate { value: 0x40180a, .. })`), which `mix_operand_full`
+/// already handles. That turns out to be *correct*, not a coincidence that
+/// happens to cancel out: `MessageDigestFidHasher.java` treats `Address` and
+/// `Scalar` objects identically for the *full* hash (`fullUpdate +=
+/// 0xfeeddead` either way -- they only diverge for the *specific* hash,
+/// which isn't implemented here). No code change was needed for this case;
+/// this test exists to prove that rather than assume it.
+/// `FID full hash: 3768fc2909545fcc`, `FID code unit size: 4`.
+#[test]
+fn fid_full_hash_matches_ghidra_exactly_for_rip_relative_memory_load() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let resolve_register_offset = |name: &str| -> Option<i64> {
+        match name.to_ascii_uppercase().as_str() {
+            "RAX" | "EAX" => Some(0x0),
+            "RDX" | "EDX" => Some(0x10),
+            _ => None,
+        }
+    };
+    let instruction_bytes: [&[u8]; 4] = [
+        &[0x31, 0xD2],                         // xor edx,edx
+        &[0x8B, 0x05, 0x00, 0x01, 0x00, 0x00], // mov eax,[rip+0x100]
+        &[0x01, 0xD0],                         // add eax,edx
+        &[0xC3],                               // ret
+    ];
+    let mut address = 0x401702u64;
+    let mut extent = Vec::new();
+    for bytes in instruction_bytes {
+        let decoded = decode_instruction(&compiled, bytes, address).expect("decode instruction");
+        address += decoded.length as u64;
+        extent.push(decoded);
+    }
+    let (count, hash) =
+        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+            .expect("RIP-relative memory load hashes");
+    assert_eq!(count, 4);
+    assert_eq!(hash, 0x3768fc2909545fcc);
+}
+
+/// Cross-checked against real Ghidra 12.0.4 for `31 d2 48 8d 05 00 02 00 00
+/// 48 01 d0 c3` (`xor edx,edx; lea rax,[rip+0x200]; add rax,rdx; ret` at
+/// `0x40170d`, matching the real binary's resolved LEA target `0x401916`):
+/// `LEA` doesn't dereference memory, so Ghidra's `getOpObjects` for its
+/// RIP-relative operand prints `Scalar(0x401916)` instead of an `Address` --
+/// a different Java object type than the memory-load case above, but per
+/// the same full-hash-treats-them-identically fact, this needed no special
+/// handling either; Fission also classifies it as `BoundOperand::Immediate`.
+/// `FID full hash: ae465fd70004f692`, `FID code unit size: 4`.
+#[test]
+fn fid_full_hash_matches_ghidra_exactly_for_rip_relative_lea() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let resolve_register_offset = |name: &str| -> Option<i64> {
+        match name.to_ascii_uppercase().as_str() {
+            "RAX" | "EAX" => Some(0x0),
+            "RDX" | "EDX" => Some(0x10),
+            _ => None,
+        }
+    };
+    let instruction_bytes: [&[u8]; 4] = [
+        &[0x31, 0xD2],                               // xor edx,edx
+        &[0x48, 0x8D, 0x05, 0x00, 0x02, 0x00, 0x00], // lea rax,[rip+0x200]
+        &[0x48, 0x01, 0xD0],                         // add rax,rdx
+        &[0xC3],                                     // ret
+    ];
+    let mut address = 0x40170du64;
+    let mut extent = Vec::new();
+    for bytes in instruction_bytes {
+        let decoded = decode_instruction(&compiled, bytes, address).expect("decode instruction");
+        address += decoded.length as u64;
+        extent.push(decoded);
+    }
+    let (count, hash) =
+        fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+            .expect("RIP-relative LEA hashes");
+    assert_eq!(count, 4);
+    assert_eq!(hash, 0xae465fd70004f692);
+}
