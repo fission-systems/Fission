@@ -159,6 +159,26 @@ impl<'a> DwarfAnalyzer<'a> {
         }
     }
 
+    /// Get a signed i64 attribute value -- needed for `DW_AT_const_value` on
+    /// `DW_TAG_enumerator`, which producers encode as `Sdata` for negative
+    /// enumerator values (`get_attr_u64` doesn't handle `Sdata` at all, so
+    /// it can't be reused here without silently dropping negative values).
+    pub(super) fn get_attr_i64(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        attr_name: DwAt,
+    ) -> Result<Option<i64>, gimli::Error> {
+        match entry.attr_value(attr_name)? {
+            Some(AttributeValue::Sdata(v)) => Ok(Some(v)),
+            Some(AttributeValue::Udata(v)) => Ok(Some(v as i64)),
+            Some(AttributeValue::Data1(v)) => Ok(Some(v as i64)),
+            Some(AttributeValue::Data2(v)) => Ok(Some(v as i64)),
+            Some(AttributeValue::Data4(v)) => Ok(Some(v as i64)),
+            Some(AttributeValue::Data8(v)) => Ok(Some(v as i64)),
+            _ => Ok(None),
+        }
+    }
+
     /// Extract member offset from DW_AT_data_member_location
     pub(super) fn get_member_offset(
         &self,
@@ -182,7 +202,9 @@ impl<'a> DwarfAnalyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loader::LoadedBinary;
     use crate::loader::types::{DataBuffer, LoadedBinaryBuilder};
+    use std::path::PathBuf;
 
     #[test]
     fn test_analyzer_no_debug_info() {
@@ -199,5 +221,45 @@ mod tests {
         assert!(!analyzer.has_debug_info());
         assert!(analyzer.analyze_types().is_empty());
         assert!(analyzer.analyze_functions().is_empty());
+    }
+
+    /// `testdata/x64_dyn_enum_test.elf`: GCC-compiled from a source with
+    /// `enum Color { RED = 0, GREEN = 1, BLUE = 5, NEGATIVE_ONE = -1 };`,
+    /// cross-checked against `objdump --dwarf=info` (confirms
+    /// `DW_TAG_enumerator`'s `DW_AT_const_value` really is emitted as
+    /// negative for `NEGATIVE_ONE`, exercising `get_attr_i64`'s `Sdata`
+    /// handling, which `get_attr_u64` can't do at all).
+    #[test]
+    fn analyze_types_extracts_real_enum_values() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_enum_test.elf");
+        assert!(
+            path.is_file(),
+            "missing fixture {} (rebuild: gcc -g -O0 -o x64_dyn_enum_test.elf enum_test.c)",
+            path.display()
+        );
+        let binary = LoadedBinary::from_file(&path).expect("load enum test ELF");
+        let analyzer = DwarfAnalyzer::new(&binary);
+        assert!(analyzer.has_debug_info());
+
+        let types = analyzer.analyze_types();
+        let color = types
+            .iter()
+            .find(|t| t.name == "Color")
+            .unwrap_or_else(|| panic!("expected a \"Color\" enum in {types:?}"));
+        assert_eq!(color.kind, "enum");
+        assert_eq!(color.size, 4);
+
+        let value_of = |name: &str| -> i32 {
+            color
+                .members
+                .iter()
+                .find(|m| m.name == name)
+                .unwrap_or_else(|| panic!("expected enumerator {name} in {:?}", color.members))
+                .offset as i32
+        };
+        assert_eq!(value_of("RED"), 0);
+        assert_eq!(value_of("GREEN"), 1);
+        assert_eq!(value_of("BLUE"), 5);
+        assert_eq!(value_of("NEGATIVE_ONE"), -1);
     }
 }

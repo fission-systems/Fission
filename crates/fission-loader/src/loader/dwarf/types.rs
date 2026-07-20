@@ -76,6 +76,12 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                             types.push(ti);
                         }
                     }
+                    DwTag(0x04) => {
+                        // DW_TAG_enumeration_type
+                        if let Some(ti) = self.extract_enum_info(entry, &unit, &dwarf)? {
+                            types.push(ti);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -161,6 +167,66 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             type_name,
             offset,
             size,
+        }))
+    }
+
+    /// Extract enumerator name/value pairs from a `DW_TAG_enumeration_type` DIE.
+    ///
+    /// Reuses [`DwarfMemberInfo`] (a struct/class/union field's shape) rather
+    /// than adding a parallel type: `offset` holds the enumerator's constant
+    /// value (`DW_AT_const_value`, not a byte offset -- there's no
+    /// dedicated "value" slot in `InferredFieldInfo`, and adding one would
+    /// touch the ~10 other files across the workspace that construct it).
+    /// `DW_AT_const_value` on an enumerator is commonly encoded `Sdata` for
+    /// negative values, which `get_attr_u64` doesn't handle -- see
+    /// `get_attr_i64`.
+    pub(super) fn extract_enum_info(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
+    ) -> Result<Option<DwarfTypeInfo>, gimli::Error> {
+        let name = match self.get_attr_string(entry, DwAt(0x03), unit, dwarf)? {
+            Some(n) if !n.is_empty() => n,
+            _ => return Ok(None), // Skip anonymous enums
+        };
+
+        let size = self
+            .get_attr_u64(entry, DwAt(0x0b))? // DW_AT_byte_size
+            .unwrap_or(0) as u32;
+
+        let mut members = Vec::new();
+        let mut tree = unit.entries_tree(Some(entry.offset()))?;
+        let root = tree.root()?;
+        let mut children = root.children();
+        while let Some(child) = children.next()? {
+            let child_entry = child.entry();
+            if child_entry.tag() != DwTag(0x28) {
+                // DW_TAG_enumerator
+                continue;
+            }
+            let Some(enumerator_name) = self
+                .get_attr_string(child_entry, DwAt(0x03), unit, dwarf)?
+                .filter(|n| !n.is_empty())
+            else {
+                continue;
+            };
+            let value = self
+                .get_attr_i64(child_entry, DwAt(0x1c))? // DW_AT_const_value
+                .unwrap_or(0);
+            members.push(DwarfMemberInfo {
+                name: enumerator_name,
+                type_name: name.clone(),
+                offset: value as u32,
+                size,
+            });
+        }
+
+        Ok(Some(DwarfTypeInfo {
+            name,
+            kind: "enum".to_string(),
+            size,
+            members,
         }))
     }
 }

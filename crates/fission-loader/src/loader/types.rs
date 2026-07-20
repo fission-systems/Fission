@@ -146,13 +146,16 @@ pub struct ArcSymbolMapWrapper;
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 #[archive(check_bytes)]
 pub struct InferredFieldInfo {
-    /// Field name
+    /// Field name (or enumerator name, for `InferredTypeInfo::kind == "enum"`)
     pub name: String,
-    /// Field type (may be mangled or simplified)
+    /// Field type (may be mangled or simplified); for an enum entry, the
+    /// enclosing enum's own name
     pub type_name: String,
-    /// Offset from struct base
+    /// Offset from struct base; for an enum entry, the enumerator's
+    /// constant value instead (`i64::as u32`, so a negative value wraps --
+    /// there's no dedicated "value" slot, see `DwarfAnalyzer::extract_enum_info`)
     pub offset: u32,
-    /// Size in bytes (0 if unknown)
+    /// Size in bytes (0 if unknown); for an enum entry, the enum's own byte size
     pub size: u32,
 }
 
