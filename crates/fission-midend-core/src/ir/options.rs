@@ -265,6 +265,12 @@ pub struct NirHintStats {
     /// Aggregate fields whose synthetic `field_{offset:x}` name was
     /// overlaid with the real name from a debug-info struct/union layout.
     pub debug_struct_field_hits: usize,
+    /// Bindings promoted straight to `NirType::Ptr(Aggregate)` from a
+    /// debug-info struct/union layout, bypassing `aggregate_fields.rs`'s
+    /// own heuristic (which only promotes from `Ptr(Unknown | Int{8|16})`,
+    /// not wider integer pointer types -- the common case for a struct
+    /// whose first field is >= 32 bits).
+    pub debug_struct_promotions: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -37,6 +37,7 @@ pub(super) fn apply_preview_type_hints(
 ) -> PreviewHintStats {
     let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
     let mut stats = apply_function_name_hints(func, context);
+    apply_debug_struct_promotions(func, context, &mut stats);
     apply_debug_struct_field_names(func, context, &mut stats);
     let alias_collector = StackAliasCollector::new(func);
 
@@ -213,6 +214,403 @@ fn apply_function_name_hints(
 /// whose offset matches a field in a debug-info type named by the
 /// binding's `surface_type_name` -- from a synthetic `field_{offset:x}`
 /// to its real declared name.
+/// Promote a param/local straight to `NirType::Ptr(Aggregate)` from a
+/// debug-info struct/union layout, for bindings `aggregate_fields.rs`'s own
+/// heuristic never touches.
+///
+/// `aggregate_fields.rs` only promotes from `Ptr(Unknown | Int{8|16})` --
+/// deliberately excluding wider integer pointers (`Ptr(Int{32|64})`) to
+/// avoid misclassifying a genuine `int*`/`long*` array as a fake struct
+/// when there's no other evidence. That exclusion is exactly right without
+/// debug info, but it also means a struct whose first field is `int` or
+/// wider (the common case) never gets promoted at all -- confirmed with a
+/// real `-O0` build of `struct Point { int x, y; }; int f(Point *p) {
+/// return p->x + p->y; }`, where `p`'s type lands on `Ptr(Int{32})` (from
+/// the first dereference) and never advances. With DWARF/PDB proof that
+/// the type really is a struct, there's no more ambiguity, so this widens
+/// the promotion to any pointer type not already an aggregate.
+///
+/// Deliberately narrow in a different way instead: only rewrites the two
+/// simplest, single-expression access shapes --
+/// `Load{ptr: Var(name)}`/`Deref{ptr: Var(name)}` (field at offset 0) and
+/// `Load{ptr: PtrOffset{base: Var(name), offset}}`/matching `Deref` (field
+/// at a nonzero constant offset) -- plus one level of direct-copy alias
+/// (`local_8 = p;` where `local_8` is assigned exactly once in the whole
+/// function): real -O0 output confirmed this is not an edge case but the
+/// *dominant* shape, since compilers commonly spill a param into a local
+/// "shadow" before its first use, so without following it this pass would
+/// almost never fire in practice. Does not follow pointer values through
+/// non-copy intermediate assignments (`t = p + 1; ... *t ...`) or aliases
+/// assigned more than once; reaching those would need real cross-statement
+/// def-use/reaching-definitions tracking this pass doesn't have. A binding
+/// whose accesses are all past this pass's reach keeps its existing
+/// (non-aggregate) type -- silently doing less, never wrongly promoting a
+/// field access it can't actually verify the offset of.
+fn apply_debug_struct_promotions(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+    stats: &mut PreviewHintStats,
+) {
+    if context.struct_types.is_empty() {
+        return;
+    }
+    let mut eligible: HashMap<String, &NirStructTypeHint> = HashMap::default();
+    for binding in func.params.iter().chain(func.locals.iter()) {
+        let Some(surface_name) = binding.surface_type_name.as_deref() else {
+            continue;
+        };
+        let Some(struct_name) = struct_base_name_for_single_pointer(surface_name) else {
+            continue;
+        };
+        let Some(struct_hint) = context.struct_types.get(struct_name) else {
+            continue;
+        };
+        let already_aggregate = matches!(
+            &binding.ty,
+            NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Aggregate { .. })
+        );
+        if already_aggregate || struct_hint.fields.is_empty() {
+            continue;
+        }
+        eligible.insert(binding.name.clone(), struct_hint);
+    }
+    if eligible.is_empty() {
+        return;
+    }
+    extend_with_copy_aliases(&func.body, &mut eligible);
+
+    let mut promoted_names: HashSet<String> = HashSet::default();
+    promote_field_access_in_stmts(&mut func.body, &eligible, &mut promoted_names);
+    if promoted_names.is_empty() {
+        return;
+    }
+
+    for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
+        let Some(struct_hint) = promoted_names
+            .contains(&binding.name)
+            .then(|| eligible.get(&binding.name))
+            .flatten()
+        else {
+            continue;
+        };
+        binding.ty = NirType::Ptr(Box::new(NirType::Aggregate {
+            size: struct_hint.size,
+            fields: struct_hint
+                .fields
+                .iter()
+                .map(|f| StructField {
+                    offset: f.offset,
+                    ty: NirType::Unknown,
+                    name: f.name.clone(),
+                })
+                .collect(),
+        }));
+        stats.debug_struct_promotions += 1;
+    }
+}
+
+/// Extend `eligible` with locals that are direct, single-assignment copies
+/// of an already-eligible binding (`local_8 = p;`, where `local_8` is
+/// assigned exactly once in the whole function). One level only -- does
+/// not chase `local_9 = local_8;` chains.
+fn extend_with_copy_aliases<'a>(
+    body: &[HirStmt],
+    eligible: &mut HashMap<String, &'a NirStructTypeHint>,
+) {
+    let mut assign_counts: HashMap<String, u32> = HashMap::default();
+    let mut direct_copies: HashMap<String, String> = HashMap::default();
+    collect_assign_stats_in_stmts(body, &mut assign_counts, &mut direct_copies);
+
+    let new_entries: Vec<(String, &'a NirStructTypeHint)> = direct_copies
+        .into_iter()
+        .filter(|(name, _)| assign_counts.get(name).copied().unwrap_or(0) == 1)
+        .filter_map(|(name, source)| eligible.get(&source).map(|hint| (name, *hint)))
+        .collect();
+    for (name, hint) in new_entries {
+        eligible.entry(name).or_insert(hint);
+    }
+}
+
+fn collect_assign_stats_in_stmts(
+    body: &[HirStmt],
+    assign_counts: &mut HashMap<String, u32>,
+    direct_copies: &mut HashMap<String, String>,
+) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => {
+                *assign_counts.entry(name.clone()).or_insert(0) += 1;
+                if let HirExpr::Var(source) = rhs {
+                    direct_copies.insert(name.clone(), source.clone());
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::VaStart { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+            HirStmt::Block(stmts) => {
+                collect_assign_stats_in_stmts(stmts, assign_counts, direct_copies)
+            }
+            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_assign_stats_in_stmts(body, assign_counts, direct_copies)
+            }
+            HirStmt::For {
+                init,
+                update,
+                body,
+                ..
+            } => {
+                if let Some(init_stmt) = init {
+                    collect_assign_stats_in_stmts(
+                        std::slice::from_ref(init_stmt.as_ref()),
+                        assign_counts,
+                        direct_copies,
+                    );
+                }
+                if let Some(update_stmt) = update {
+                    collect_assign_stats_in_stmts(
+                        std::slice::from_ref(update_stmt.as_ref()),
+                        assign_counts,
+                        direct_copies,
+                    );
+                }
+                collect_assign_stats_in_stmts(body, assign_counts, direct_copies);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_assign_stats_in_stmts(&case.body, assign_counts, direct_copies);
+                }
+                collect_assign_stats_in_stmts(default, assign_counts, direct_copies);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_assign_stats_in_stmts(then_body, assign_counts, direct_copies);
+                collect_assign_stats_in_stmts(else_body, assign_counts, direct_copies);
+            }
+        }
+    }
+}
+
+fn promote_field_access_in_stmts(
+    body: &mut [HirStmt],
+    eligible: &HashMap<String, &NirStructTypeHint>,
+    promoted: &mut HashSet<String>,
+) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                promote_field_access_in_lvalue(lhs, eligible, promoted);
+                promote_field_access_in_expr(rhs, eligible, promoted);
+            }
+            HirStmt::VaStart { va_list, .. } => {
+                promote_field_access_in_expr(va_list, eligible, promoted)
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+                promote_field_access_in_expr(expr, eligible, promoted)
+            }
+            HirStmt::Block(stmts) => promote_field_access_in_stmts(stmts, eligible, promoted),
+            HirStmt::While { cond, body } => {
+                promote_field_access_in_expr(cond, eligible, promoted);
+                promote_field_access_in_stmts(body, eligible, promoted);
+            }
+            HirStmt::DoWhile { body, cond } => {
+                promote_field_access_in_stmts(body, eligible, promoted);
+                promote_field_access_in_expr(cond, eligible, promoted);
+            }
+            HirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init_stmt) = init {
+                    promote_field_access_in_stmts(
+                        std::slice::from_mut(init_stmt.as_mut()),
+                        eligible,
+                        promoted,
+                    );
+                }
+                if let Some(cond_expr) = cond {
+                    promote_field_access_in_expr(cond_expr, eligible, promoted);
+                }
+                if let Some(update_stmt) = update {
+                    promote_field_access_in_stmts(
+                        std::slice::from_mut(update_stmt.as_mut()),
+                        eligible,
+                        promoted,
+                    );
+                }
+                promote_field_access_in_stmts(body, eligible, promoted);
+            }
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                promote_field_access_in_expr(expr, eligible, promoted);
+                for case in cases {
+                    promote_field_access_in_stmts(&mut case.body, eligible, promoted);
+                }
+                promote_field_access_in_stmts(default, eligible, promoted);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                promote_field_access_in_expr(cond, eligible, promoted);
+                promote_field_access_in_stmts(then_body, eligible, promoted);
+                promote_field_access_in_stmts(else_body, eligible, promoted);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn promote_field_access_in_lvalue(
+    lvalue: &mut HirLValue,
+    eligible: &HashMap<String, &NirStructTypeHint>,
+    promoted: &mut HashSet<String>,
+) {
+    match lvalue {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, ty } => {
+            if let Some((base, field_name, offset)) = base_field_at_offset(ptr, ty, eligible) {
+                *lvalue = HirLValue::FieldAccess {
+                    base: Box::new(base),
+                    field_name: field_name.clone(),
+                    offset,
+                    ty: ty.clone(),
+                };
+                if let HirLValue::FieldAccess { base, .. } = lvalue
+                    && let HirExpr::Var(name) = base.as_ref()
+                {
+                    promoted.insert(name.clone());
+                }
+                return;
+            }
+            promote_field_access_in_expr(ptr, eligible, promoted);
+        }
+        HirLValue::Index { base, index, .. } => {
+            promote_field_access_in_expr(base, eligible, promoted);
+            promote_field_access_in_expr(index, eligible, promoted);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            promote_field_access_in_expr(base, eligible, promoted)
+        }
+    }
+}
+
+fn promote_field_access_in_expr(
+    expr: &mut HirExpr,
+    eligible: &HashMap<String, &NirStructTypeHint>,
+    promoted: &mut HashSet<String>,
+) {
+    match expr {
+        HirExpr::Load { ptr, ty } => {
+            if let Some((base, field_name, offset)) = base_field_at_offset(ptr, ty, eligible) {
+                if let HirExpr::Var(name) = &base {
+                    promoted.insert(name.clone());
+                }
+                *expr = HirExpr::FieldAccess {
+                    base: Box::new(base),
+                    field_name: field_name.clone(),
+                    offset,
+                    ty: ty.clone(),
+                };
+                return;
+            }
+            promote_field_access_in_expr(ptr, eligible, promoted);
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            promote_field_access_in_expr(expr, eligible, promoted)
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            promote_field_access_in_expr(lhs, eligible, promoted);
+            promote_field_access_in_expr(rhs, eligible, promoted);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            promote_field_access_in_expr(cond, eligible, promoted);
+            promote_field_access_in_expr(then_expr, eligible, promoted);
+            promote_field_access_in_expr(else_expr, eligible, promoted);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                promote_field_access_in_expr(arg, eligible, promoted);
+            }
+        }
+        HirExpr::PtrOffset { base, .. } => promote_field_access_in_expr(base, eligible, promoted),
+        HirExpr::Index { base, index, .. } => {
+            promote_field_access_in_expr(base, eligible, promoted);
+            promote_field_access_in_expr(index, eligible, promoted);
+        }
+        HirExpr::FieldAccess { base, .. } => {
+            promote_field_access_in_expr(base, eligible, promoted)
+        }
+    }
+}
+
+/// If `ptr` is `Var(name)` (offset 0) or `PtrOffset{base: Var(name),
+/// offset}`, `name` is in `eligible`, there's a debug-info field at that
+/// exact offset, and `access_ty`'s byte size does not exceed that field's
+/// declared size, return `(base_expr, field_name, offset)`.
+///
+/// The size check matters: without it, a wider read starting at a field's
+/// offset (e.g. an 8-byte read of a `long` that actually spans two 4-byte
+/// `int` fields packed together) would get mis-rendered as reading just
+/// the first field. Unknown sizes (either side) are treated as
+/// incompatible -- safer to under-promote than to guess.
+fn base_field_at_offset<'a>(
+    ptr: &HirExpr,
+    access_ty: &NirType,
+    eligible: &'a HashMap<String, &'a NirStructTypeHint>,
+) -> Option<(HirExpr, &'a String, u32)> {
+    let (base, offset) = match ptr {
+        HirExpr::Var(_) => (ptr.clone(), 0i64),
+        HirExpr::PtrOffset { base, offset } => (base.as_ref().clone(), *offset),
+        _ => return None,
+    };
+    let HirExpr::Var(name) = &base else {
+        return None;
+    };
+    let struct_hint = eligible.get(name)?;
+    if offset < 0 {
+        return None;
+    }
+    let offset = offset as u32;
+    let field = struct_hint.fields.iter().find(|f| f.offset == offset)?;
+    if field.name.is_empty() {
+        return None;
+    }
+    let access_size = binding_byte_size(access_ty)?;
+    if field.size != 0 && access_size > field.size {
+        return None;
+    }
+    Some((base, &field.name, offset))
+}
+
 fn apply_debug_struct_field_names(
     func: &mut HirFunction,
     context: &PreviewTypeContext,

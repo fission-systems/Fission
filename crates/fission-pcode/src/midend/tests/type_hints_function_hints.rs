@@ -753,3 +753,141 @@ fn preview_type_hints_overlay_debug_struct_field_names_rewrites_body_field_acces
     assert!(!rendered.contains("field_0"), "rendered: {rendered}");
     assert!(!rendered.contains("field_4"), "rendered: {rendered}");
 }
+
+fn int_ty() -> NirType {
+    NirType::Int {
+        bits: 32,
+        signed: true,
+    }
+}
+
+/// Param not yet an aggregate (aggregate_fields.rs's own heuristic refuses
+/// to promote from `Ptr(Int{32})`) -- the exact case a real -O0 build of
+/// `struct Point { int x, y; }; int f(Point *p) { return p->x + p->y; }`
+/// hits, confirmed empirically: `p`'s type lands on `Ptr(Int{32})` from the
+/// first dereference and `aggregate_fields.rs` never advances it further.
+#[test]
+fn preview_type_hints_promotes_pointer_to_aggregate_from_debug_struct() {
+    let mut func = HirFunction {
+        name: "sum_point".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(int_ty())),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        locals: vec![],
+        return_type: int_ty(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("p".to_string())),
+                ty: int_ty(),
+            }),
+            rhs: Box::new(HirExpr::Load {
+                ptr: Box::new(HirExpr::PtrOffset {
+                    base: Box::new(HirExpr::Var("p".to_string())),
+                    offset: 4,
+                }),
+                ty: int_ty(),
+            }),
+            ty: int_ty(),
+        }))],
+        ..Default::default()
+    };
+    // Match `apply_function_name_hints` having already renamed param_1 -> p
+    // (this test targets the later promotion stage, so pre-rename the body
+    // to what it would look like at that point).
+    func.params[0].name = "p".to_string();
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .struct_types
+        .insert("Point".to_string(), point_struct_type_hint());
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec!["p".to_string()],
+        param_type_names: HashMap::from([(0, "Point*".to_string())]),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
+        return_type_name: None,
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context);
+    assert_eq!(stats.debug_struct_promotions, 1);
+
+    let NirType::Ptr(inner) = &func.params[0].ty else {
+        panic!("expected promotion to Ptr(Aggregate)");
+    };
+    assert!(matches!(inner.as_ref(), NirType::Aggregate { .. }));
+
+    let rendered = print_hir_function(&func);
+    assert!(rendered.contains("p->x"), "rendered: {rendered}");
+    assert!(rendered.contains("p->y"), "rendered: {rendered}");
+}
+
+/// The real-world dominant shape: the param gets copied into a local
+/// "shadow" (`local_8 = p;`) before any use, common at -O0. The promotion
+/// pass must follow this one level of single-assignment direct-copy alias,
+/// or it would almost never fire on real compiler output.
+#[test]
+fn preview_type_hints_promotes_through_single_assignment_copy_alias() {
+    let mut func = HirFunction {
+        name: "sum_point".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![NirBinding {
+            name: "p".to_string(),
+            ty: NirType::Ptr(Box::new(int_ty())),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        locals: vec![NirBinding {
+            name: "local_8".to_string(),
+            ty: NirType::Ptr(Box::new(int_ty())),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-0x8)),
+            initializer: None,
+        }],
+        return_type: int_ty(),
+        surface_return_type_name: None,
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("local_8".to_string()),
+                rhs: HirExpr::Var("p".to_string()),
+            },
+            HirStmt::Return(Some(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("local_8".to_string())),
+                ty: int_ty(),
+            })),
+        ],
+        ..Default::default()
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .struct_types
+        .insert("Point".to_string(), point_struct_type_hint());
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec!["p".to_string()],
+        param_type_names: HashMap::from([(0, "Point*".to_string())]),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
+        return_type_name: None,
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context);
+    assert_eq!(stats.debug_struct_promotions, 1);
+
+    let NirType::Ptr(inner) = &func.locals[0].ty else {
+        panic!("expected local_8 promoted to Ptr(Aggregate)");
+    };
+    assert!(matches!(inner.as_ref(), NirType::Aggregate { .. }));
+
+    let HirStmt::Return(Some(HirExpr::FieldAccess { field_name, .. })) = &func.body[1] else {
+        panic!("expected Return(FieldAccess), body: {:?}", func.body);
+    };
+    assert_eq!(field_name, "x");
+}
