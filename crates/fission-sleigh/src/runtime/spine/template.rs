@@ -70,6 +70,7 @@ mod tests {
             match_trace: empty_trace(),
             named_templates: Vec::new(),
             context_commits: Vec::new(),
+            replaced_wrapper_patterns: Vec::new(),
         };
 
         let details = RuntimeTemplateEvaluator::new(&mut NoopExecutor)

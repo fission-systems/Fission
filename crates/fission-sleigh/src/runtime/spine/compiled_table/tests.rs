@@ -105,42 +105,28 @@ fn generated_runtime_decodes_ret_with_spec_derived_lift() {
 
 /// Cross-checked against real Ghidra 12.0.4 (`InstructionPrototype.getInstructionMask()`,
 /// via a headless script printing `bytes`/`mask` for this exact instruction) for
-/// `48 b8 34 12 00 00 00 00 00 00` (`mov rax, 0x1234`):
+/// `48 b8 34 12 00 00 00 00 00 00` (`mov rax, 0x1234`): Ghidra prints
+/// `mask: f8 f8 00 00 00 00 00 00 00 00` -- exact match.
 ///
-/// ```text
-/// Ghidra:   bytes: 48 b8 34 12 00 00 00 00 00 00   mask: f8 f8 00 00 00 00 00 00 00 00
-/// Fission:  bytes: 48 b8 34 12 00 00 00 00 00 00   mask: 00 f8 00 00 00 00 00 00 00 00
-/// ```
-///
-/// Byte 1 (the `B8+r` opcode byte -- top 5 bits fixed, low 3 bits are the
-/// register-selection field, `0xf8`) and the 8-byte immediate (`0x00`,
-/// correctly unmasked) match exactly. Byte 0 (the REX.W prefix) does not:
-/// Fission's "instruction" root constructor's own `absolute_offset` is 1, not
-/// 0 -- the REX byte is consumed and folded into the context register by
-/// prefix handling *before* `select_constructor(..., "instruction", ...)`
-/// ever runs, so no `RuntimeConstructState` node in the walked tree ever
-/// covers it. Ghidra's mask includes it (`0xf8` -- prefix identity bits
-/// fixed, `WRXB` extension bits free), so `instruction_pattern_mask` is
-/// currently incomplete for any instruction with a legacy/REX prefix byte
-/// until prefix consumption is separately instrumented. Documented here
-/// rather than asserted as correct: this test locks in the *currently
-/// correct* portion (opcode + operand bytes) as a regression guard, not a
-/// claim that the whole mask matches Ghidra yet.
+/// The REX.W prefix byte (0) and the `B8+r` opcode byte (1) both come out
+/// `0xf8` (top 5 bits fixed identity, low 3 bits free -- REX's `WRXB`
+/// extension bits and the opcode's register-selection field, respectively);
+/// the 8-byte immediate is fully unmasked. Byte 0 only shows up because
+/// `replaced_wrapper_patterns` carries it forward: the REX byte's own
+/// constructor matches just that byte then hands off entirely to the
+/// constructor for the rest of the instruction (`constructor_replaces_current`
+/// in `walker.rs`), and without `replaced_wrapper_patterns` recording that
+/// wrapper's pattern before it gets discarded, this byte's mask silently
+/// comes out as `0x00`.
 #[test]
-fn fid_mask_matches_ghidra_for_opcode_and_operand_bytes_not_yet_prefix() {
+fn fid_mask_matches_ghidra_exactly_for_mov_imm64_including_rex_prefix() {
     let compiled = compile_x86_64_frontend().expect("compile frontend");
     let bytes = [0x48, 0xB8, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
     let state = decode_instruction_raw_state(&compiled, &bytes, 0x1000).expect("decode raw state");
     let mask = instruction_pattern_mask(&state, state.length);
-    assert_eq!(mask.len(), bytes.len());
-    assert_eq!(mask[1], 0xf8, "opcode+reg byte should match Ghidra's mask");
-    for (i, byte) in mask.iter().enumerate().skip(2) {
-        assert_eq!(*byte, 0x00, "immediate byte {i} should be fully unmasked");
-    }
-    // Known gap (see doc comment above): prefix byte isn't captured yet.
     assert_eq!(
-        mask[0], 0x00,
-        "REX prefix byte -- currently unmasked; Ghidra's real value is 0xf8"
+        mask,
+        vec![0xf8, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
     );
 }
 
@@ -155,6 +141,21 @@ fn fid_mask_matches_ghidra_exactly_for_prefix_free_jnz_rel8() {
     let state = decode_instruction_raw_state(&compiled, &bytes, 0x1000).expect("decode raw state");
     let mask = instruction_pattern_mask(&state, state.length);
     assert_eq!(mask, vec![0xff, 0x00]);
+}
+
+/// Cross-checked against real Ghidra for `66 b8 34 12` (`mov ax, 0x1234`,
+/// operand-size-override prefix rather than REX): Ghidra prints
+/// `mask: ff f8 00 00` -- exact match. A second, independent prefix-wrapper
+/// case (0x66 is a single fixed-value byte, unlike REX's `WRXB` extension
+/// bits, so its mask is `0xff` not `0xf8`) confirming `replaced_wrapper_patterns`
+/// isn't a REX-specific fix.
+#[test]
+fn fid_mask_matches_ghidra_exactly_for_operand_size_prefix() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let bytes = [0x66, 0xB8, 0x34, 0x12];
+    let state = decode_instruction_raw_state(&compiled, &bytes, 0x1000).expect("decode raw state");
+    let mask = instruction_pattern_mask(&state, state.length);
+    assert_eq!(mask, vec![0xff, 0xf8, 0x00, 0x00]);
 }
 
 #[test]

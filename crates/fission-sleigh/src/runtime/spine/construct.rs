@@ -1,8 +1,8 @@
 use super::RuntimeMatchTrace;
 use crate::compiler::{
     CompiledConstructTpl, CompiledConstructTplKind, CompiledConstructorTemplate,
-    CompiledContextCommit, CompiledDisplayOperand, CompiledDisplayTemplate, CompiledOperandSpec,
-    CompiledSpaceRef,
+    CompiledContextCommit, CompiledDisjointPattern, CompiledDisplayOperand,
+    CompiledDisplayTemplate, CompiledOperandSpec, CompiledSpaceRef,
 };
 
 #[derive(Debug, Clone)]
@@ -38,6 +38,18 @@ pub struct RuntimeConstructState {
     /// callers use this as the instruction length for the root state.
     pub length: usize,
     pub match_trace: RuntimeMatchTrace,
+    /// Instruction-relative patterns from "replaces current" wrapper
+    /// constructors discarded on the path to this state (e.g. an x86 legacy
+    /// prefix byte's own constructor, which matches just that byte then
+    /// hands off entirely to the constructor for the rest of the
+    /// instruction -- see `constructor_replaces_current` in `walker.rs`).
+    /// `(absolute_offset, pattern)`: the wrapper's own `ctx.cursor` at match
+    /// time, paired with its `match_trace.matched_leaf_pattern`. Populated
+    /// only by the "replaces current" path -- everything else's pattern
+    /// info lives in `match_trace` directly. Consumed by
+    /// `instruction_pattern_mask` (FID hashing) to recover pattern bits that
+    /// would otherwise be silently lost when a wrapper is replaced.
+    pub replaced_wrapper_patterns: Vec<(usize, CompiledDisjointPattern)>,
 }
 
 #[derive(Debug, Clone)]

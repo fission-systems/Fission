@@ -1711,6 +1711,7 @@ mod tests {
                 leaf_constructor_indexes: Vec::new(),
                 matched_leaf_pattern: None,
             },
+            replaced_wrapper_patterns: Vec::new(),
         }
     }
 

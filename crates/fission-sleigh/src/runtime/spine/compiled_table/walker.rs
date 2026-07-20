@@ -609,13 +609,28 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                         }
                     }
                     let (reloffset, offsetbase, operand_absolute_offset) = subtable_offset;
-                    let sub_state = self.decode_subtable(
+                    // Capture this wrapper's own instruction-relative pattern before
+                    // `decode_subtable` potentially replaces it entirely -- e.g. an x86
+                    // legacy prefix byte's constructor matches only that byte, then
+                    // (replace_current) hands off completely to the constructor for the
+                    // rest of the instruction. Ghidra's own InstructionPrototype still
+                    // folds the wrapper's pattern into the final instruction mask (see
+                    // `instruction_pattern_mask`'s doc comment), so it can't just be
+                    // dropped here even though the wrapper's identity otherwise is.
+                    let wrapper_absolute_offset = self.ctx.cursor;
+                    let wrapper_pattern = self.selection.trace.matched_leaf_pattern.clone();
+                    let mut sub_state = self.decode_subtable(
                         &table_name,
                         reloffset,
                         offsetbase,
                         operand_absolute_offset,
                     )?;
                     if replace_current {
+                        if let Some(pattern) = wrapper_pattern {
+                            sub_state
+                                .replaced_wrapper_patterns
+                                .push((wrapper_absolute_offset, pattern));
+                        }
                         return Ok(sub_state);
                     }
                 }
@@ -666,6 +681,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             relative_length,
             length,
             match_trace: self.selection.trace,
+            replaced_wrapper_patterns: Vec::new(),
         })
     }
 

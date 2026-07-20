@@ -251,6 +251,14 @@ fn accumulate_pattern_mask(state: &RuntimeConstructState, mask: &mut [u8]) {
     if let Some(pattern) = &state.match_trace.matched_leaf_pattern {
         apply_disjoint_pattern_mask(pattern, state.absolute_offset, mask);
     }
+    // "Replaces current" wrapper constructors (e.g. an x86 legacy prefix
+    // byte) that this state discarded on the way here -- see
+    // `replaced_wrapper_patterns`'s doc comment. Without this, any
+    // prefix-byte-consuming instruction's mask would be missing exactly
+    // that byte's pattern bits.
+    for (wrapper_offset, pattern) in &state.replaced_wrapper_patterns {
+        apply_disjoint_pattern_mask(pattern, *wrapper_offset, mask);
+    }
     for handle in &state.handles {
         if let Some(sub) = &handle.subtable_state {
             accumulate_pattern_mask(sub, mask);
