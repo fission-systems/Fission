@@ -1249,7 +1249,8 @@ not block once that SHA already has a green push Heavy).</p>
 </ul>
 <h2 id="resource-bundle-utils-assets">Resource bundle (<code>utils/</code>) assets<a class="headerlink" href="#resource-bundle-utils-assets" title="Permanent link">&para;</a></h2>
 <p>Runtime data lives under <a href="../utils/"><code>utils/</code></a> (Sleigh specs, signatures, ghidra-data).
-It is <strong>not</strong> pure Rust source — many files are Git LFS.</p>
+It is <strong>not</strong> checked into git at all — <code>.gitignore</code> excludes <code>utils/</code>, and the tree is
+populated from the <code>fission-utils.tar.gz</code> release asset (see table below), not Git LFS.</p>
 <table>
 <thead>
 <tr>
