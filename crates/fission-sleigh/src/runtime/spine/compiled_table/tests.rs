@@ -159,6 +159,72 @@ fn fid_mask_matches_ghidra_exactly_for_operand_size_prefix() {
 }
 
 #[test]
+fn fid_operand_explore_mov_mem_disp8() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    // mov eax, [rbp+8]
+    let bytes = [0x8B, 0x45, 0x08];
+    let state = decode_instruction_raw_state(&compiled, &bytes, 0x1000).expect("decode raw state");
+    eprintln!("mnemonic={} handles.len()={}", state.mnemonic, state.handles.len());
+    for h in &state.handles {
+        eprintln!(
+            "  op_index={} space={:?} size={} offset_space={:?} offset_offset={:#x} debug_value={:?}",
+            h.operand_index,
+            h.fixed.space.as_ref().map(|s| &s.name),
+            h.fixed.size,
+            h.fixed.offset_space.as_ref().map(|s| &s.name),
+            h.fixed.offset_offset,
+            h.debug_value
+        );
+    }
+    eprintln!("operands (display order) = {:?}", state.operands);
+}
+
+/// Cross-checked against real Ghidra 12.0.4 (headless, `FidService.hashFunction`)
+/// for `55 48 89 e5 b8 2a 00 00 00 5d c3` (`push rbp; mov rbp,rsp; mov eax,0x2a;
+/// pop rbp; ret`, no memory operands -- the shape this increment supports):
+/// Ghidra prints `FID full hash: 37783a7364fbdfe5`, `FID code unit size: 5`.
+///
+/// Register offsets (RAX=0x0, RSP=0x20, RBP=0x28 -- the standard Ghidra
+/// x86-64 SLEIGH register-space layout, independently confirmed earlier this
+/// session via the register-locals feature work, e.g. RDX resolving to
+/// 0x10) are hardcoded here rather than resolved through
+/// `fission_pcode::midend::cspec::RegisterModel`, since that would require
+/// a `fission-pcode` dependency this crate deliberately doesn't have (see
+/// `fid_full_hash`'s doc comment).
+#[test]
+fn fid_full_hash_matches_ghidra_exactly_for_register_only_function() {
+    let compiled = compile_x86_64_frontend().expect("compile frontend");
+    let instruction_bytes: [&[u8]; 5] = [
+        &[0x55],                   // push rbp
+        &[0x48, 0x89, 0xE5],       // mov rbp, rsp
+        &[0xB8, 0x2A, 0x00, 0x00, 0x00], // mov eax, 0x2a
+        &[0x5D],                   // pop rbp
+        &[0xC3],                   // ret
+    ];
+    let mut address = 0x1000u64;
+    let mut extent = Vec::new();
+    for bytes in instruction_bytes {
+        let decoded = decode_instruction(&compiled, bytes, address).expect("decode instruction");
+        address += decoded.length as u64;
+        extent.push(decoded);
+    }
+
+    let resolve_register_offset = |name: &str| -> Option<i64> {
+        match name.to_ascii_uppercase().as_str() {
+            "RAX" | "EAX" => Some(0x0),
+            "RSP" | "ESP" => Some(0x20),
+            "RBP" | "EBP" => Some(0x28),
+            _ => None,
+        }
+    };
+
+    let (count, hash) = fid_hash::compute_fid_full_hash(&compiled, &extent, &resolve_register_offset)
+        .expect("function has enough code units to hash");
+    assert_eq!(count, 5);
+    assert_eq!(hash, 0x37783a7364fbdfe5);
+}
+
+#[test]
 fn generated_runtime_decodes_mov_imm64_without_compatibility_lift() {
     require_packaged_ghidra_sla!();
     let compiled = compile_x86_64_frontend().expect("compile frontend");

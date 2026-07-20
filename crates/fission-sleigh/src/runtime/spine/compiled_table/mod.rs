@@ -26,6 +26,7 @@ use crate::runtime::{
 mod context;
 mod display;
 mod feature_audit;
+pub(crate) mod fid_hash;
 mod handles;
 mod runtime_index;
 mod selection;
