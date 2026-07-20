@@ -15,6 +15,7 @@ pub mod formats;
 pub mod function_view;
 pub mod identity;
 pub mod macho;
+pub mod pdb_registers;
 pub mod pdb_sidecar;
 pub mod pe;
 pub mod pipeline;
