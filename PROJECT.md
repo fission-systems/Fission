@@ -1594,6 +1594,43 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           the same way AArch64 did), and wiring a match into `list`'s own
           output (currently `decomp`'s call-target renaming and the
           standalone `identify` report command, not `list`).
+      - **Update — moved to metadata gap (2), DWARF enum values** (commit
+        `fc64285b`). With the FID series' scope closed, user asked what's
+        still missing vs. Ghidra and picked enum values (gap 2 from the
+        original audit list above) to pursue next.
+        - Added `DwarfAnalyzer::extract_enum_info`, dispatched from
+          `analyze_types_inner` alongside the existing struct/class/union
+          path (`DW_TAG_enumeration_type`, 0x04, was already cached by name
+          in `collect_type_names` but never routed to an extractor).
+          Reuses `DwarfMemberInfo` rather than adding a parallel type:
+          `offset` holds the enumerator's `DW_AT_const_value` instead of a
+          byte offset — a dedicated field would have touched the ~10 other
+          files across the workspace that construct `InferredFieldInfo`
+          plus its rkyv archive format, so this is documented dual-use
+          instead (on both the DWARF-side struct and `InferredFieldInfo`
+          itself).
+        - `DW_AT_const_value` on an enumerator is commonly `Sdata`-encoded
+          for negative values, which the existing `get_attr_u64` doesn't
+          handle at all (would've silently produced `0` for e.g. `enum {
+          NEGATIVE_ONE = -1 }` rather than erroring or bailing). Added
+          `get_attr_i64` alongside it rather than overloading `get_attr_u64`.
+        - Added a real GCC-compiled test fixture
+          (`testdata/x64_dyn_enum_test.elf`, 16KB dynamically-linked —
+          `enum Color { RED=0, GREEN=1, BLUE=5, NEGATIVE_ONE=-1 }`) and
+          `analyze_types_extracts_real_enum_values`. Cross-checked against
+          `objdump --dwarf=info` first to confirm the negative enumerator
+          really is `Sdata`-encoded (not just assumed from the DWARF spec)
+          before writing the extraction code, matching this session's
+          established "verify the real encoding before trusting a
+          spec-level assumption" discipline from the FID work.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run -p fission-loader` 100/100, release build +
+          `golden_corpus_check.py` clean (additive — doesn't touch existing
+          decompile output).
+        - Remaining metadata gaps from the original audit, unchanged: array
+          types (still resolve to `"unknown"`), `DW_TAG_lexical_block` PC
+          ranges (untracked), `.debug_line` (loaded, never parsed), PDB
+          struct/location extraction (both still missing).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
