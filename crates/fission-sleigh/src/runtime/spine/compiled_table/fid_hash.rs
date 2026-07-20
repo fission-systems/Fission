@@ -223,10 +223,57 @@ fn trace_simple_memory_address(
         }
         fission_pcode::PcodeOpcode::Copy => {
             let input = producer.inputs.first()?;
-            as_register_offset(input, register_space_index).map(MemoryAddressShape::Register)
+            let offset = as_register_offset(input, register_space_index)?;
+            // AArch64 post-index writeback (`ldp x29,x30,[sp],#0x10`): the
+            // *address* used for this access is a bare register copy (a
+            // snapshot taken before the writeback below applies -- the base
+            // register itself is mutated separately, for the *next*
+            // instruction to see), but Ghidra's `getOpObjects` still
+            // includes the writeback displacement as part of this display
+            // operand's object list. Look for a self-referential
+            // `IntAdd(reg, const) -> reg` elsewhere in this instruction's
+            // p-code (the writeback op -- it never feeds this Copy at all).
+            if let Some(disp) = find_self_writeback_displacement(ops, register_space_index, offset)
+            {
+                return Some(MemoryAddressShape::RegisterPlusConstant(offset, disp));
+            }
+            Some(MemoryAddressShape::Register(offset))
         }
         _ => None,
     }
+}
+
+/// Finds a `reg = reg + const` (or `const + reg`) op elsewhere in `ops`
+/// whose output writes back into the exact same register-space varnode as
+/// `base_offset` -- AArch64 post-index addressing's writeback, which
+/// doesn't feed the access's own address computation (see
+/// `trace_simple_memory_address`'s `Copy` arm) but still needs to be mixed
+/// into the specific hash as this operand's displacement.
+fn find_self_writeback_displacement(
+    ops: &[fission_pcode::PcodeOp],
+    register_space_index: u64,
+    base_offset: u64,
+) -> Option<i64> {
+    ops.iter().find_map(|op| {
+        if op.opcode != fission_pcode::PcodeOpcode::IntAdd {
+            return None;
+        }
+        let out = op.output.as_ref()?;
+        if !(!out.is_constant && out.space_id == register_space_index && out.offset == base_offset)
+        {
+            return None;
+        }
+        let [a, b] = op.inputs.as_slice() else {
+            return None;
+        };
+        if as_register_offset(a, register_space_index) == Some(base_offset) && b.is_constant {
+            return Some(b.constant_val as i64);
+        }
+        if as_register_offset(b, register_space_index) == Some(base_offset) && a.is_constant {
+            return Some(a.constant_val as i64);
+        }
+        None
+    })
 }
 
 /// One display operand's contribution to both digests, plus whether it
@@ -426,18 +473,21 @@ pub(crate) fn x86_skip_instruction(arch: &str, bytes: &[u8]) -> bool {
 /// `OperandType.isScalar(operandType) == true` branch: the real value is
 /// used unconditionally (no magnitude cap, unlike the compound-operand
 /// branch) *unless* Ghidra would also flag `isAddress` -- which,
-/// empirically (`fid_full_hash_matches_ghidra_exactly_for_specific_hash_*`
-/// in `tests.rs`), is exactly when this handle's `RuntimeFixedHandle::space`
-/// is `"ram"`: true for a dereferenced memory load (`mov eax,[rip+0x100]`)
-/// and, surprisingly, a direct `CALL`/`JMP` target too (both resolve
-/// through the ram/code address space), but **false** for `LEA` (its
+/// empirically (`fid_full_hash_matches_ghidra_exactly_for_specific_hash_*`/
+/// `_aarch64_*` in `tests.rs`), is true for a dereferenced memory load
+/// (`RuntimeFixedHandle::space == "ram"`, e.g. `mov eax,[rip+0x100]`) and
+/// for a direct `CALL`/`JMP`/branch target (a *different* signal --
+/// x86's `CALL rel32` also happens to resolve through `"ram"` space, but
+/// AArch64's `bl` resolves through `"const"` space instead, so callers
+/// derive this from `DecodedInstruction::flow_kind`/`direct_target`
+/// instead of `RuntimeFixedHandle::space`), but **false** for `LEA` (its
 /// computed value lands in `"const"` space, since it's a value, not a
 /// dereference) and plain immediates (`mov eax,0x2a`, also `"const"`) --
 /// both of which use their real value in the specific hash.
 fn mix_operand(
     operand_index: usize,
     operand: &BoundOperand,
-    handle_space_is_ram: bool,
+    handle_is_address: bool,
     resolve_register_offset: &dyn Fn(&str) -> Option<i64>,
 ) -> Option<OperandContribution> {
     let index_term = i32::try_from(operand_index)
@@ -447,7 +497,7 @@ fn mix_operand(
     match operand {
         BoundOperand::Immediate { value, .. } => {
             let full = index_term.wrapping_add(SCALAR_PLACEHOLDER);
-            let (used, counted) = if handle_space_is_ram {
+            let (used, counted) = if handle_is_address {
                 (SCALAR_PLACEHOLDER as i64, false)
             } else {
                 (*value as i64, true)
@@ -564,29 +614,88 @@ pub(crate) fn compute_fid_hashes(
                 .iter()
                 .find(|h| h.operand_index == handle_index)?;
             let handle_space_is_ram = handle.fixed.space.as_ref().is_some_and(|s| s.name == "ram");
+            // A memory-dereference address always lands in "ram" space (see
+            // below) -- true across architectures, since it's the space the
+            // *value* is read from/written to, not an addressing-mode
+            // detail. A branch/call target is architecture-dependent,
+            // though: x86's CALL rel32 happens to *also* resolve through
+            // "ram" space, but AArch64's `bl` resolves its immediate target
+            // through "const" space instead (confirmed via
+            // decode_instruction_raw_state) -- so flow targets need their
+            // own, architecture-agnostic signal. `direct_target` isn't
+            // reliably populated for a bare `decode_instruction` call (only
+            // through the full lift path), so this uses the coarser but
+            // still accurate-in-practice rule: a Call/Jump/ConditionalJump
+            // instruction's Immediate operand(s) *are* the target -- true
+            // for every ISA's unconditional/conditional branch and call
+            // encoding this hasher has seen. A wrong classification here
+            // only affects the specific hash's real-value-vs-placeholder
+            // choice for an edge case neither x86 nor AArch64 exhibit, not
+            // the full hash (which never branches on this at all) or any
+            // other architecture's coverage already validated.
+            let is_flow_target =
+                matches!(
+                    instr.flow_kind,
+                    crate::runtime::DecodedFlowKind::Call
+                        | crate::runtime::DecodedFlowKind::Jump
+                        | crate::runtime::DecodedFlowKind::ConditionalJump
+                ) && matches!(&handle.debug_value, Some(BoundOperand::Immediate { .. }));
+            let handle_is_address = handle_space_is_ram || is_flow_target;
             let contribution = if let Some(operand) = &handle.debug_value {
                 mix_operand(
                     operand_index,
                     operand,
-                    handle_space_is_ram,
+                    handle_is_address,
                     resolve_register_offset,
                 )?
-            } else if handle_space_is_ram {
-                let shape = trace_simple_memory_address(
-                    &decode_and_lift_with_details(compiled, &instr.bytes, instr.address)
-                        .ok()?
-                        .0,
-                    compiled.sla_register_space_index,
-                    compiled.sla_unique_space_index,
-                    handle.fixed.offset_offset,
-                    handle.fixed.offset_size,
-                )?;
-                mix_memory_operand(operand_index, &shape)?
             } else {
-                // An operand shape this doesn't understand -- fail the whole
-                // function's hash rather than silently mix a wrong or
-                // missing contribution in (see module doc comment).
-                return None;
+                // No resolved BoundOperand: a memory reference whose address
+                // this runtime computes rather than resolves directly.
+                // x86 always computes the address into a unique-space temp
+                // (`fixed.space` itself says "ram", the *value*'s space --
+                // see the module doc comment); AArch64 pre/post-index
+                // addressing (`stp`/`ldp`) instead leaves it directly in a
+                // register-space or unique-space varnode depending on
+                // whether writeback happens before or after the access, with
+                // `fixed.space` mirroring whichever one it is. Rather than
+                // hardcode one target space, try register space first (the
+                // pre-index/no-writeback shape), then unique space (x86's
+                // shape, and AArch64 post-index's pre-writeback snapshot).
+                let ops = &decode_and_lift_with_details(compiled, &instr.bytes, instr.address)
+                    .ok()?
+                    .0;
+                // `offset_size == 0` shows up for AArch64's register-space-
+                // direct handles (unlike x86's, which populate it); fall
+                // back to the handle's own overall size in that case.
+                let target_size = if handle.fixed.offset_size != 0 {
+                    handle.fixed.offset_size
+                } else {
+                    handle.fixed.size
+                };
+                let shape = trace_simple_memory_address(
+                    ops,
+                    compiled.sla_register_space_index,
+                    compiled.sla_register_space_index,
+                    handle.fixed.offset_offset,
+                    target_size,
+                )
+                .or_else(|| {
+                    trace_simple_memory_address(
+                        ops,
+                        compiled.sla_register_space_index,
+                        compiled.sla_unique_space_index,
+                        handle.fixed.offset_offset,
+                        target_size,
+                    )
+                });
+                let Some(shape) = shape else {
+                    // An operand shape this doesn't understand -- fail the
+                    // whole function's hash rather than silently mix a
+                    // wrong or missing contribution in (see module doc
+                    // comment).
+                    return None;
+                };
+                mix_memory_operand(operand_index, &shape)?
             };
             full_digest.update_i32(contribution.full);
             specific_digest.update_i32(contribution.specific);

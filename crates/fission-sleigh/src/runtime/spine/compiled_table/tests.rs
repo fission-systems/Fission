@@ -1962,3 +1962,80 @@ fn fid_x86_skip_patterns_gated_by_architecture() {
     assert!(!fid_hash::x86_skip_instruction("ARM", &[0x8b, 0xc0]));
     assert!(!fid_hash::x86_skip_instruction("MIPS", &[0x90]));
 }
+/// Cross-checked against real Ghidra 12.0.4 (`FidService.hashFunction`,
+/// `Instruction.getOpObjects`/`getOperandType`) for a real GCC-compiled
+/// AArch64 `atoi` (`paciasp; stp x29,x30,[sp,#-0x10]!; mov w2,#0xa; mov
+/// x1,#0x0; mov x29,sp; bl <strtol>; ldp x29,x30,[sp],#0x10; autiasp; ret`
+/// at `0x4011c0` in a real statically-linked GCC/glibc AArch64 binary)
+/// -- the first non-x86 validation this session, and specifically the case
+/// that found `trace_simple_memory_address`/`mix_operand`'s x86-only
+/// assumptions (hardcoded unique-space target, the `"ram"`-space dispatch
+/// gate, the x86 alignment-NOP skip list applied unconditionally -- see
+/// `fid_x86_skip_patterns_gated_by_architecture`): AArch64's `stp`/`ldp`
+/// register-pair-with-writeback addressing needed two new shapes
+/// `trace_simple_memory_address` didn't recognize:
+/// - Pre-index writeback (`stp ...,[sp,#-0x10]!`): the address is computed
+///   with a self-referential `IntAdd(sp, disp) -> sp` writing back directly
+///   into the **register space** (not a unique-space temp like x86) --
+///   already matched by the existing `IntAdd(reg,const)` shape once the
+///   caller also tries `register_space_index` as a candidate target space,
+///   not just `unique_space_index`.
+/// - Post-index writeback (`ldp ...,[sp],#0x10`): the address used for the
+///   access is a bare `Copy(sp)` into a **unique-space** temp (a snapshot
+///   taken *before* the writeback, which happens in a separate,
+///   unconnected `IntAdd` targeting the register directly) -- Ghidra's
+///   `getOpObjects` still includes the writeback displacement as this
+///   operand's `Scalar`, so `trace_simple_memory_address`'s `Copy` arm
+///   additionally searches for a self-referential `IntAdd` writeback
+///   elsewhere in the instruction's p-code (`find_self_writeback_displacement`).
+///
+/// Register offsets (`x0=0x4000, x1=0x4008, ..., x29=0x40e8, x30=0x40f0`,
+/// `sp=0x8`) read directly from `AARCH64instructions.sinc`'s `define
+/// register` blocks, not hand-derived.
+/// `FID full hash: 4a06046bdb27e6a8`, `FID code unit size: 8` (9 code units,
+/// 1 `bl` excluded from the count), `specific hash: 40e0a873f2f711d3`,
+/// `specific additional size: 4` (stp's -0x10 disp, both `mov` immediates,
+/// ldp's +0x10 writeback disp -- `bl`'s target is `isAddress=true`,
+/// placeholder, uncounted).
+#[test]
+fn fid_hashes_match_ghidra_exactly_for_aarch64_stp_ldp_prologue_epilogue() {
+    let compiled = crate::compiler::compile_frontends_for_arch("AARCH64")
+        .expect("compile aarch64 frontends")
+        .into_iter()
+        .next()
+        .expect("at least one aarch64 frontend");
+    let resolve_register_offset = |name: &str| -> Option<i64> {
+        match name.to_ascii_lowercase().as_str() {
+            "sp" => Some(0x8),
+            "x1" => Some(0x4008),
+            "w2" | "x2" => Some(0x4010),
+            "x29" => Some(0x40e8),
+            "x30" => Some(0x40f0),
+            _ => None,
+        }
+    };
+    let instruction_bytes: [&[u8]; 9] = [
+        &[0x3f, 0x23, 0x03, 0xd5], // paciasp
+        &[0xfd, 0x7b, 0xbf, 0xa9], // stp x29,x30,[sp,#-0x10]!
+        &[0x42, 0x01, 0x80, 0x52], // mov w2,#0xa
+        &[0x01, 0x00, 0x80, 0xd2], // mov x1,#0x0
+        &[0xfd, 0x03, 0x00, 0x91], // mov x29,sp
+        &[0x83, 0x03, 0x00, 0x94], // bl 0x401fe0
+        &[0xfd, 0x7b, 0xc1, 0xa8], // ldp x29,x30,[sp],#0x10
+        &[0xbf, 0x23, 0x03, 0xd5], // autiasp
+        &[0xc0, 0x03, 0x5f, 0xd6], // ret
+    ];
+    let mut address = 0x4011c0u64;
+    let mut extent = Vec::new();
+    for bytes in instruction_bytes {
+        let decoded = decode_instruction(&compiled, bytes, address).expect("decode instruction");
+        address += decoded.length as u64;
+        extent.push(decoded);
+    }
+    let hashes = fid_hash::compute_fid_hashes(&compiled, &extent, &resolve_register_offset)
+        .expect("aarch64 stp/ldp prologue/epilogue hashes");
+    assert_eq!(hashes.full_count, 8);
+    assert_eq!(hashes.full_hash, 0x4a06046bdb27e6a8);
+    assert_eq!(hashes.specific_count, 4);
+    assert_eq!(hashes.specific_hash, 0x40e0a873f2f711d3);
+}
