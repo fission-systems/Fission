@@ -1,6 +1,6 @@
 use super::*;
 use crate::midend::abstract_location::AbstractStackSlot;
-use crate::midend::var_rename::rename_vars_in_stmts;
+use crate::midend::var_rename::{rename_vars_in_stmts, rewrite_field_access_names_in_stmts};
 use tracing::trace_span;
 
 pub(super) struct StackAliasCollector {
@@ -221,6 +221,16 @@ fn apply_debug_struct_field_names(
     if context.struct_types.is_empty() {
         return;
     }
+    // (base binding name, byte offset) -> real field name, collected while
+    // overlaying the type-level `StructField`s below. Applied to the body
+    // afterward: `FieldAccess` AST nodes carry their own `field_name`
+    // string, baked in once by normalize's pointer-arithmetic recovery
+    // (`ptr_arith.rs`) -- renaming only the `StructField` annotation here
+    // would be invisible to the printer, which reads `field_name` straight
+    // off the AST node, not the binding's type.
+    let mut ast_renames: std::collections::HashMap<(String, u32), String> =
+        std::collections::HashMap::new();
+
     for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
         let Some(surface_name) = binding.surface_type_name.as_deref() else {
             continue;
@@ -248,9 +258,17 @@ fn apply_debug_struct_field_names(
             if hint_field.name.is_empty() || hint_field.name == field.name {
                 continue;
             }
+            ast_renames.insert(
+                (binding.name.clone(), field.offset),
+                hint_field.name.clone(),
+            );
             field.name = hint_field.name.clone();
             stats.debug_struct_field_hits += 1;
         }
+    }
+
+    if !ast_renames.is_empty() {
+        rewrite_field_access_names_in_stmts(&mut func.body, &ast_renames);
     }
 }
 

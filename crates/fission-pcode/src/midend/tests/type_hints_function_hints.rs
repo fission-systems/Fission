@@ -685,3 +685,71 @@ fn preview_type_hints_debug_struct_field_names_reject_multi_level_pointer() {
     assert_eq!(fields[0].name, "field_0");
     assert_eq!(fields[1].name, "field_4");
 }
+
+#[test]
+fn preview_type_hints_overlay_debug_struct_field_names_rewrites_body_field_access() {
+    // `FieldAccess` AST nodes (as normalize's ptr_arith recovery would have
+    // already built them, synthetic-named) referencing the same binding
+    // this session's field-name overlay renames. The printer reads
+    // `field_name` straight off these nodes, not off the binding's
+    // `StructField` annotation -- so the overlay must rewrite them too, or
+    // renaming the type-level annotation alone has zero visible effect.
+    let field_access = |offset: u32, field_name: &str, ty: NirType| HirExpr::FieldAccess {
+        base: Box::new(HirExpr::Var("param_1".to_string())),
+        field_name: field_name.to_string(),
+        offset,
+        ty,
+    };
+    let int_ty = NirType::Int {
+        bits: 32,
+        signed: true,
+    };
+    let mut func = HirFunction {
+        name: "sum_point".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![point_aggregate_binding()],
+        locals: vec![],
+        return_type: int_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(field_access(0, "field_0", int_ty.clone())),
+            rhs: Box::new(field_access(4, "field_4", int_ty.clone())),
+            ty: int_ty,
+        }))],
+        ..Default::default()
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .struct_types
+        .insert("Point".to_string(), point_struct_type_hint());
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec!["p".to_string()],
+        param_type_names: HashMap::from([(0, "Point*".to_string())]),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
+        return_type_name: None,
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context);
+    assert_eq!(stats.debug_struct_field_hits, 2);
+
+    let HirStmt::Return(Some(HirExpr::Binary { lhs, rhs, .. })) = &func.body[0] else {
+        panic!("expected Return(Binary)");
+    };
+    let HirExpr::FieldAccess { field_name, .. } = lhs.as_ref() else {
+        panic!("expected FieldAccess lhs");
+    };
+    assert_eq!(field_name, "x");
+    let HirExpr::FieldAccess { field_name, .. } = rhs.as_ref() else {
+        panic!("expected FieldAccess rhs");
+    };
+    assert_eq!(field_name, "y");
+
+    let rendered = print_hir_function(&func);
+    assert!(rendered.contains("p->x"), "rendered: {rendered}");
+    assert!(rendered.contains("p->y"), "rendered: {rendered}");
+    assert!(!rendered.contains("field_0"), "rendered: {rendered}");
+    assert!(!rendered.contains("field_4"), "rendered: {rendered}");
+}
