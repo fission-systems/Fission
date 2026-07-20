@@ -1631,6 +1631,41 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           types (still resolve to `"unknown"`), `DW_TAG_lexical_block` PC
           ranges (untracked), `.debug_line` (loaded, never parsed), PDB
           struct/location extraction (both still missing).
+      - **Update — DWARF array types (metadata gap 3)** (commit `65606a55`).
+        Next pick after enum values.
+        - `DW_TAG_array_type`/`DW_TAG_subrange_type` weren't in
+          `resolve_type_name`'s match arms or `collect_type_names`'s tag
+          list at all, so any array-typed struct field (a common pattern —
+          fixed buffers, matrices) resolved to the literal string
+          `"unknown"`.
+        - Extended `TypeDieInfo` with `array_dimensions: Vec<Option<u64>>`
+          (one entry per `DW_TAG_subrange_type` child — multi-dimensional
+          arrays have multiple), populated by a new
+          `array_subrange_dimensions` helper only for `DW_TAG_array_type`
+          DIEs. Each dimension resolves `DW_AT_count` directly if present,
+          else `DW_AT_upper_bound + 1` (DWARF's bound is inclusive/
+          zero-based), else `None` for unbounded. `resolve_type_name`
+          gained a `DW_TAG_array_type` arm: resolve the element type
+          (`DW_AT_type`) recursively, append bracketed dimensions —
+          `"int[3][4]"`. Flows through to struct member resolution
+          automatically via the existing `type_cache`/`resolve_type_ref`
+          machinery already used for pointer/const/volatile — no changes
+          needed there, mirroring how cleanly the enum-value work slotted
+          into the existing struct/class/union extraction path.
+        - Real GCC-compiled fixture (`testdata/x64_dyn_array_test.elf` —
+          `struct WithArrays { int arr[10]; int matrix[3][4]; char
+          name[16]; }`) and `analyze_types_resolves_array_member_type_names`,
+          matching `"int[10]"`/`"int[3][4]"`/`"char[16]"` exactly. Checked
+          `objdump --dwarf=info` first (established discipline this
+          session): this compiler always emits the inclusive-upper-bound
+          form, never `DW_AT_count` directly, so the test exercises the
+          `+ 1` fallback path specifically, and `matrix`'s 2D case exercises
+          multiple subrange children under one `array_type` DIE.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run -p fission-loader` 101/101, release build +
+          `golden_corpus_check.py` clean.
+        - Remaining metadata gaps, unchanged: `DW_TAG_lexical_block` PC
+          ranges, `.debug_line` parsing, PDB struct/location extraction.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
