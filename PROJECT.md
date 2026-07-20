@@ -1193,6 +1193,48 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
         decompiler-facing "identified function" fact (rename the function,
         surface the match in `fission_cli list`/`info`, etc.), and non-x86
         architectures (only x86-64 validated so far).
+      - **Update — wired into `fission_cli` as a real, user-facing
+        `identify` subcommand** (commit `8734c19b`). New
+        `fission-decompiler::fid` module: `FidIdentifier::new(binary,
+        &databases)` builds a per-binary lifter + `RegisterModel` once;
+        `.identify(address)` decodes the function via
+        `lift_raw_pcode_function_with_context_and_memory_context` (proper,
+        `DecodedPcodeFunction.instructions`-based extent — not the
+        throwaway linear sweep from the E2E test above), calls
+        `fid_full_hash`, and looks the hash up across every loaded
+        `.fidbf` database via `identify_by_hashes`, keeping the
+        highest-scoring hit. `load_fid_databases(binary)` loads every
+        `.fidbf` matching the binary's pointer width once per binary (not
+        per function — parsing isn't free).
+        - CLI wiring follows the existing `Xrefs`/`Callgraph` canonical-subcommand
+          pattern exactly: `IdentifyArgs{binary, function: Option<u64>, common}`
+          → `CliCommand::Identify` → `"identify"` in `CANONICAL_SUBCOMMANDS`
+          → `normalize_canonical` sets `identify_cmd`/`identify_function` on
+          `OneShotArgs` → dispatch in `oneshot/mod.rs` → `run_identify` in
+          the new `oneshot/identify.rs`, mirroring `run_callgraph`'s
+          dual text/JSON output shape. `legacy.rs`'s `normalize_legacy`
+          also needed the two new `OneShotArgs` fields defaulted (the
+          struct has no `Default` shortcut there — every field is listed).
+        - `fission_cli identify <bin>` runs against every non-import
+          function; `--function <addr>` narrows to one. Both modes support
+          `--json`.
+        - Validated: `cargo check --workspace --all-targets` clean,
+          `cargo nextest run` 378/378 across
+          fission-cli/fission-decompiler/fission-sleigh, release build,
+          and a manual smoke test against a fresh Docker-built (`gcc:latest`)
+          statically linked x86-64 ELF — `identify` considered 2181
+          functions and correctly reported zero matches (same
+          version-mismatch behavior as the E2E test above: this build's
+          toolchain isn't one of the bundled `.fidbf` databases' covered
+          builds), both `--json` and text, both whole-binary and
+          `--function` modes, no crashes.
+          `golden_corpus_check.py` still passes (FID is a fully separate,
+          opt-in code path — zero impact on existing decompile output).
+        - Deliberately still not done, same list as above: SIB addressing,
+          specific hash, non-x86 architectures, and folding a match into
+          the decompiler's own naming/rendering (`identify` is a
+          standalone report command for now, not yet consulted by
+          `decomp`/`list` to rename functions).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
