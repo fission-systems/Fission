@@ -900,6 +900,98 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     publish together with whatever code change first consumes them
     (the register-locals feature above), timed for the v0.1.6 release,
     rather than publishing inert data now.
+  - **Update, 2026-07-20 (implemented, commit `d8ea98c6`)**: item 1
+    (register-resident DWARF locals) is done — both blockers from the
+    original assessment above turned out tractable, plus two unrelated
+    pre-existing DWARF bugs surfaced and got fixed along the way (found
+    only because this was the first real end-to-end test against actual
+    GCC -O1 output, not clang/zig-cc-only fixtures).
+    - **`.dwarf` register-mapping data**: `fission-pcode/cspec/dwarf_regs.rs`
+      parses `utils/sleigh-specs/languages/<Arch>/*.dwarf` (DWARF-regnum
+      → Ghidra-regname, with `auto_count` expansion). The file isn't
+      named by any convention — Ghidra resolves it via `<external_name
+      tool="DWARF.register.mapping.file" name="..."/>` nested inside
+      `<language>`, declared *after* the `<compiler>` children in real
+      `.ldefs` files — `ldefs.rs`'s parser now buffers `<compiler>`
+      entries per `<language>` block and backfills at `</language>`
+      instead of inserting inline at `<compiler>` time. Also found (and
+      fixed) that its tag-name scanner read a leading `/` as a
+      name-terminator, so `</language>` was *always* read as `""` —
+      `"/language"` never matched, silently no-op before (state was
+      always freshly overwritten by the next `<language>` tag) but this
+      new backfill logic actually depends on it firing.
+    - **Live-range correlation, narrower than feared**: the original
+      assessment worried about needing DWARF location *lists* +
+      Fission-side reaching-definitions to match a register's live range
+      to a binding. Turned out unnecessary for the common case: DWARF's
+      own location-list-agreement (see below) already vouches for "this
+      register is this one variable for its whole declared scope" — no
+      separate live-range analysis needed on Fission's side.
+    - **`.debug_loc`/`.debug_loclists` were never read at all**:
+      `fission-loader`'s DWARF section loader hardcoded these (plus
+      `.debug_addr`) to empty slices, unrelated to this feature —
+      location lists (as opposed to a bare `Exprloc`) silently always
+      resolved to `Unknown`. Wired real section bytes in
+      `sections.rs`/`analyzer.rs`. `extract_location`/
+      `parse_location_list` (`functions.rs`) now resolve a location list
+      to a register only when *every* range agrees on the same DWARF
+      register number — real compilers routinely split a variable's
+      location list for reasons unrelated to the variable moving (an
+      `entry_value`-computed trailing range once the register might get
+      reused, a "known constant" range before first write); any
+      disagreement, or any non-register range, falls back to `Unknown`.
+    - **Two pre-existing DWARF bugs, both invisible to prior test
+      coverage** (clang/zig-cc fixtures only) and both blocked verifying
+      this feature until fixed:
+      1. `DW_AT_high_pc` is either an absolute address or an *offset
+         from* `low_pc` (DWARF spec, compiler's choice) — reading it as
+         a raw `u64` without checking the form (GCC 16 uses the offset
+         form) collapsed every such function's `size` to 0
+         (`subprogram_size` in `functions.rs`).
+      2. `analyze_functions_inner`'s DFS depth threshold was off by one:
+         `func_depth` is set to 1 *at* the subprogram's own tag, so a
+         sibling (same depth — e.g. a trailing type DIE GCC emits after
+         a function's last real child) also computes to `func_depth==1`,
+         but the code used `<= 0` as "exited the subprogram". The next
+         function's own `DW_TAG_subprogram` tag, encountered while still
+         wrongly "inside" the previous one and unmatched by any case in
+         the children match, was silently swallowed — folding its
+         name/params/locals into the *previous* function's
+         `DwarfFunctionInfo` entirely. Fixed threshold: `<= 1`.
+    - **Materialization side channel, not a `NirBinding` field**: most
+      register-resident values get a generic `uVarN`/`iVarN` name, not
+      their raw hw register name (only call-result registers reliably
+      keep it via `ensure_live_register_binding`) — so matching DWARF
+      hints by binding *name* alone (the original plan) missed most real
+      cases, confirmed empirically: a loop accumulator materialized as
+      `uVar0`, not `RDX`, despite DWARF saying `total` lives in `RDX` for
+      its whole scope. `record_register_origin`/`take_register_origins`
+      (thread-local in `builder/mod.rs`, mirrors `orchestrate.rs`'s
+      existing `LAST_LAYERED_PSEUDOCODE` pattern) record each binding's
+      real originating `(offset, size)` at the four sites that create
+      register-space bindings, letting `type_hints.rs` match by identity
+      instead of name. Deliberately not a new `NirBinding` field —
+      `NirBinding` is constructed at ~300 call sites across the
+      workspace; a thread-local drained once per function build (via
+      explicit `take` + pass-as-parameter into
+      `apply_preview_type_hints`, not a thread-local *read* inside
+      `type_hints.rs` — keeps that function's tests deterministic) is far
+      lower-risk.
+    - **No per-function assign-count safety gate** (unlike the earlier
+      struct-field promotion work's `extend_with_copy_aliases`): DWARF's
+      own location-list agreement is the safety net here, and an
+      assign-count gate would reject the *dominant* real case — a loop
+      accumulator (`total = 0; ... total += x;`) is written more than
+      once by construction. Materialization already gives every write to
+      the same physical register the same one binding for the whole
+      function, so multiple assignments are normal read-modify-write on
+      that one variable, not evidence of reuse.
+    - Verified end-to-end against real GCC 16 `-O1` output (Docker,
+      native x86-64, not cross-compiled): a loop accumulator whose
+      `DW_AT_location` is `DW_OP_reg1` for its whole declared scope
+      renames correctly (`uVar0` → `total`); a genuinely multi-register
+      loclist (RAX → RBP → RAX across ranges, real register churn around
+      a call) correctly does *not* rename.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
