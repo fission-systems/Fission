@@ -1811,6 +1811,70 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           parsing are all implemented; `DW_TAG_lexical_block` PC ranges
           (variable scoping/shadowing) is the one item from the original
           list that was never picked up.
+      - **Update — `DW_TAG_lexical_block` PC ranges, last remaining gap**
+        (commit `b496b382`). `functions.rs`'s function-extraction DFS
+        already visited `DW_TAG_lexical_block` DIEs but just fell through
+        them ("just continue DFS") — every nested `DW_TAG_variable` landed
+        in `local_vars` flat, indistinguishable from a function-level one.
+        Concretely: shadowed C locals (same name redeclared in a nested
+        block — legal in C, not rare) all merged into separate
+        `DwarfLocalVar` entries with identical names and zero way to tell
+        which one is live at a given address.
+        - `DwarfLocalVar` gained `scope: Option<(u64, u64)>` — the
+          innermost enclosing lexical_block's `(low_pc, high_pc)`, `None`
+          for a variable declared directly under the function.
+        - The existing flat-DFS depth-tracking loop already tracks
+          `func_depth` (used to detect exiting the subprogram itself) — a
+          `scope_stack: Vec<(isize, u64, u64)>` of `(push_depth, low_pc,
+          high_pc)` reuses that exact same depth-comparison machinery:
+          `DW_TAG_lexical_block` pushes its range (via a new
+          `lexical_block_range` helper, reusing `subprogram_size`'s
+          offset-vs-absolute `high_pc` form handling — confirmed via
+          `llvm-dwarfdump -v` that GCC emits the identical `DW_FORM_data8`
+          offset form for `lexical_block`'s `high_pc`, not just
+          `subprogram`'s), and it's popped by the same "depth at or past
+          where we pushed it" check the subprogram-exit logic already used.
+          A `DW_TAG_variable`'s scope is whatever's on top of the stack at
+          the moment it's visited — automatically the *innermost* enclosing
+          block when blocks nest, not the outer one.
+        - **Empirical validation requested explicitly** (실측): built a
+          fresh GCC (Docker, x86-64 target) fixture
+          (`x64_dyn_lexblock_test.elf`) — `compute(x)` with three nested `{
+          int total = ...; }` blocks, each shadowing the outer `total`,
+          compiled with `-Wshadow` first to confirm GCC really treats them
+          as three distinct variables (not one reused slot silently). Ran
+          `llvm-dwarfdump -v --debug-info` *before* writing any extraction
+          code to read the raw DIE tree: both nested `lexical_block`s use
+          `DW_AT_high_pc [DW_FORM_data8]`, resolving to
+          `[0x401113, 0x40113e)` and `[0x401125, 0x401138)`. A throwaway
+          scratch test then dumped the extractor's actual output side by
+          side with these numbers — exact match, including which of the
+          three `total`s got `scope: None` (the function-level one) — before
+          the scratch test was deleted and a permanent one pinning these
+          exact addresses took its place.
+        - `DwarfLocalVar`'s new field required touching every struct-literal
+          construction site workspace-wide (`pdb_sidecar.rs`'s three sites,
+          all `scope: None` since PDB carries no lexical-block concept in
+          this crate's coverage; two `#[cfg(test)]`-only sites in
+          `fission-decompiler/orchestration/engine.rs` and
+          `fission-static/analysis/decomp/facts.rs`).
+        - Deliberately not attempted: `DW_AT_ranges`-based non-contiguous
+          lexical_block PCs (GCC only emits these under heavier
+          optimization when a block's code gets split; `-O0` fixtures don't
+          exercise it) — `lexical_block_range` returns `None` for that case,
+          degrading the variable to unscoped rather than computing a wrong
+          range.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run -p fission-loader -p fission-decompiler -p
+          fission-static` 220/220 (1 skipped, pre-existing/unrelated),
+          release build + `golden_corpus_check.py` clean, `cargo nextest
+          run --workspace --no-fail-fast` 2107/2114 (same 7 pre-existing,
+          unrelated `fission-emulator` failures as every check this
+          session).
+        - **This closes the last of the original 6 audited metadata gaps**
+          (FID, enum values, array types, PDB struct/location, `.debug_line`
+          parsing, lexical_block scoping) — Fission's DWARF/PDB extraction
+          coverage now matches Ghidra's on every item that audit surfaced.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
