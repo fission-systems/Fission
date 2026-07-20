@@ -1372,6 +1372,58 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           repo's `identify` subcommand from the previous slice already
           covers that as a standalone report), specific hash, non-x86
           architectures, and RIP-relative addressing.
+      - **Update — confirmed the `NameFact` → decompiled-output path with a
+        live before/after, then closed the RIP-relative gap** (commit
+        `5680a752`). User asked directly whether the fix actually reaches
+        decompiler output, not just the `FactStore` layer.
+        - Traced `CallTargetIndex`/`NirTypeContext.call_targets` forward
+          from `fission-decompiler/src/facts/facts.rs` into
+          `fission-pcode/src/midend/builder/expr/lower_expr.rs` (30+
+          consult sites — this is the NIR call-lowering code that names
+          `CALL` p-code ops in rendered pseudocode), confirming the wiring
+          is real, not just a `FactStore`-internal data structure nobody
+          reads.
+        - Then proved it directly rather than trusting the trace: built a
+          throwaway two-function synthetic binary (`callee: ret`;
+          `caller: call callee; ret`) and called
+          `decompile_with_rust_sleigh_with_facts` (the same entrypoint
+          `fission_cli decomp` uses) twice — once against a plain
+          `FactStore::from_binary`, once after manually calling
+          `ingest_name_fact(callee_addr, "memcpy", FactProvenance::StrongFid)`
+          (the exact same call `ingest_signature_matches_with_databases`
+          makes on a real match). Output before: `sub_401000();`. After:
+          `memcpy();`. Not committed (throwaway demo, matches this
+          session's established pattern for local-only proofs) — the
+          permanent regression coverage for the hash-to-`NameFact` half
+          already exists in `fid_signature_match_ingests_strong_fid_name_fact`.
+        - User then asked to continue with the remaining 3 gaps (specific
+          hash, non-x86, RIP-relative) and picked RIP-relative first.
+          Investigating it (headless Ghidra `getOpObjects()` inspection +
+          `decode_instruction_raw_state` on the same instruction) found the
+          "gap" was already closed by construction, needing zero code
+          changes: Ghidra's `getOpObjects()` returns a single `Address`
+          object for a RIP-relative memory load (`mov eax,[rip+0x100]` →
+          `GenericAddress(0x40180a)`) and a `Scalar` object for `LEA`
+          (`lea rax,[rip+0x200]` → `Scalar(0x401916)`, since `LEA` computes
+          rather than dereferences) — different Java object types, but
+          `MessageDigestFidHasher.java` mixes both identically for the
+          *full* hash (`fullUpdate += 0xfeeddead` either way — only the
+          *specific* hash, not implemented, distinguishes them). Fission's
+          own runtime independently resolves both cases to
+          `BoundOperand::Immediate` at decode time (confirmed via
+          `decode_instruction_raw_state`), which `mix_operand_full`'s
+          existing `Immediate` branch already handles correctly — proven,
+          not assumed, via
+          `fid_full_hash_matches_ghidra_exactly_for_rip_relative_memory_load`/
+          `_lea`, both matching real Ghidra 12.0.4 on the first attempt.
+          Fixed stale doc comments elsewhere that still listed RIP-relative
+          (and, in `fid.rs`, SIB — predating that fix) as open gaps.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run` 381/381 (+2) across
+          fission-sleigh/fission-decompiler/fission-cli, release build,
+          `golden_corpus_check.py` clean.
+        - Remaining open items, unchanged: specific hash, non-x86
+          architectures. RIP-relative is no longer on this list.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
