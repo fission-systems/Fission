@@ -104,7 +104,7 @@ jobs:
 
       - name: Upload Binary Artifact
         if: ${{ inputs.upload_artifact }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fission-cli-${{ inputs.os }}-${{ inputs.profile }}-${{ github.sha }}
           path: ${{ steps.locate.outputs.binary_path }}
