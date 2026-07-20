@@ -1875,6 +1875,108 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           (FID, enum values, array types, PDB struct/location, `.debug_line`
           parsing, lexical_block scoping) — Fission's DWARF/PDB extraction
           coverage now matches Ghidra's on every item that audit surfaced.
+      - **Update, 2026-07-21 (broader Ghidra-parity audit)**: with the
+        DWARF/PDB metadata series closed, user asked what else is missing
+        vs. Ghidra, this time outside that specific area. A `general-purpose`
+        agent surveyed Ghidra's Auto-Analysis analyzer roster (`vendor/
+        ghidra/.../Ghidra/Features/{Base,Decompiler,FunctionID,PDB}`) against
+        the Rust workspace; findings verified by hand (file:line citations
+        checked, not taken on faith), ranked most-impactful first:
+        1. Windows exception handling: `.pdata`/`.xdata`/SEH/
+           `__CxxFrameHandler` — Fission's `pe/pdata.rs` only extracts
+           function begin/end RVAs from `RUNTIME_FUNCTION`, never reads the
+           pointed-to `UNWIND_INFO`. Ghidra's `PEExceptionAnalyzer` builds
+           real try/catch scope data from it. **Not started.**
+        2. GCC/Itanium LSDA (`.gcc_except_table`) — `elf/eh_frame.rs` only
+           extracts function boundaries from FDEs, never follows the LSDA
+           pointer `Fde::lsda()` already resolves. Ghidra's
+           `GccExceptionAnalyzer` parses call-site/action/type tables from
+           it. **Done, see below.**
+        3. No Call-Fixup mechanism — Ghidra's `CallFixupAnalyzer` replaces
+           calls to compiler helper stubs (`__x86.get_pc_thunk.*`,
+           `__chkstk`) with their true semantic effect at lift time; Fission
+           has zero equivalent (`__chkstk` is only an import-name label, no
+           p-code substitution). **Not started.**
+        4. Itanium RTTI multi/virtual inheritance
+           (`__vmi_class_type_info`) — `analyzers/cpp.rs`'s
+           `parse_itanium_type_info` only handles `__si_class_type_info`
+           (single inheritance); MSVC's `parse_msvc_col_info` in the same
+           file already walks full base-class arrays, so only the Itanium
+           side lags. **Not started.**
+        - Non-findings (already at parity, don't re-investigate): switch/
+          jump-table recovery (`fission-pcode`), non-returning-function
+          detection (`fission-core`, consumes Ghidra's own
+          `noReturnFunctionConstraints.xml` directly), demangling (real
+          crates for Rust/Itanium/MSVC; only Swift shells out to an external
+          binary, a portability wrinkle not a capability gap).
+        - User picked (2), LSDA parsing, next.
+      - **Update — GCC/Itanium LSDA parsing (broader-audit item 2)** (commit
+        `6c8d5aee`). `gimli` parses `.eh_frame`'s CIE/FDE structure and
+        already resolves each FDE's LSDA *pointer* via `Fde::lsda()`, but
+        has no knowledge of `.gcc_except_table`'s own contents — an ad hoc,
+        GCC-specific format documented informally in libgcc's `unwind-c.c`/
+        `unwind-pe.h`, not the DWARF spec itself. Nothing in the loader
+        read past the pointer.
+        - New `elf/lsda.rs` hand-parses the LSDA header (`LPStart`/`TType`
+          encodings), call-site table (instruction ranges → landing pad +
+          type-filter action chain), action table (a linked list of SLEB128
+          `(filter, next-offset)` records, chained per libgcc's
+          `PERSONALITY_FUNCTION` convention — next offset relative to where
+          *this* record started, not where the offset field itself is
+          stored), and type table (`std::type_info` addresses, indexed
+          *backward* from a computed base). `analyze_eh_lsda` walks
+          `.eh_frame`'s FDEs independently of `eh_frame.rs`'s early-pipeline
+          function-boundary extraction (needs `LoadedBinary::get_bytes` for
+          indirect pointers, which needs the full section table, so this
+          runs post-load) into a new `LoadedBinary::eh_lsda: HashMap<u64,
+          LsdaInfo>`, gated on ELF format.
+        - **실측 (explicit empirical-validation request)**: built two fresh
+          `g++`-compiled fixtures via Docker (x86-64 target) from identical
+          try/catch source — a static/non-PIE build and a `-fPIE` build —
+          both committed (`x64_dyn_lsda_test.elf`/`x64_dyn_lsda_pie_test.elf`).
+          Dumped both via `readelf --debug-dump=frames` (CIE/FDE
+          augmentation, confirming the LSDA pointer's encoding byte-by-byte)
+          and `objdump -s -j .gcc_except_table` (raw LSDA bytes), then
+          hand-decoded the entire header/call-site/action/type-table chain
+          against libgcc's own `parse_lsda_header` logic *before* writing
+          any Rust. Cross-referenced the type table's resolved address
+          against `readelf -r`'s relocation listing to confirm it named
+          exactly `_ZTISt13runtime_error@GLIBCXX_3.4` (the caught type),
+          catching one real hand-arithmetic mistake (misreading a 4-byte LE
+          pcrel offset as a single byte) before it reached code.
+        - **The PIE fixture surfaced a design gap the static-only case
+          couldn't have**: its type-table entry uses `DW_EH_PE_indirect` (a
+          GOT-style slot the dynamic linker only populates at process load
+          time), so the raw address read from the file is a meaningless
+          placeholder (`0`) even though the LSDA correctly identifies which
+          type is caught. `readelf -r` showed the GOT slot's own *address*
+          carries a relocation naming the real symbol. `LsdaTypeEntry`
+          therefore carries both a best-effort `address` and a `symbol`
+          resolved independently via `LoadedBinary::relocation_symbols` —
+          confirmed both fixtures resolve to the same human-readable
+          `"typeinfo for std::runtime_error"` (Fission's own demangled
+          symbol form) via two structurally different relocation mechanisms
+          (`R_X86_64_COPY` direct vs. `R_X86_64_64` on a GOT slot).
+        - Deliberately unsupported: `DW_EH_PE_textrel`/`datarel`/`funcrel`/
+          `aligned` application modes (only `absptr`/`pcrel` appeared in
+          either fixture; returns `None` rather than guess a base) and
+          uleb128/sleb128-encoded type-table entries (would break the
+          fixed-size backward indexing the scheme depends on; no real
+          producer does this).
+        - No CFG/decompiler consumer wired yet — matches how `.debug_line`
+          parsing landed earlier in this series (pure extraction first);
+          propagating exception edges into the CFG is a separate, larger
+          slice, same conclusion the original audit reached.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run -p fission-loader` 116/116 (4 new: 2 pure-parser unit
+          tests against hand-verified byte arrays, 2 end-to-end against the
+          real committed fixtures), release build + `golden_corpus_check.py`
+          clean, `cargo nextest run --workspace --no-fail-fast` 2111/2118
+          (same 7 pre-existing, unrelated `fission-emulator` failures as
+          every check this session).
+        - Remaining broader-audit items, unchanged: Windows `.xdata`/SEH
+          exception handling, Call-Fixup mechanism, Itanium
+          multi/virtual-inheritance RTTI.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
