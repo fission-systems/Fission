@@ -168,6 +168,7 @@ mod tests {
                     pointee_sizes: vec![2],
                 }],
                 function_hints: None,
+                struct_types: std::collections::HashMap::new(),
             },
         };
 
@@ -540,6 +541,7 @@ mod tests {
                 pointee_sizes: vec![2],
             }],
             function_hints: None,
+            struct_types: std::collections::HashMap::new(),
         };
 
         let request = make_nir_request(

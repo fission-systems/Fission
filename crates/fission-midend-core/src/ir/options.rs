@@ -245,6 +245,11 @@ pub struct NirTypeContext {
     pub call_prototype_summaries: HashMap<String, NirCallPrototypeSummary>,
     pub call_param_rules: Vec<NirCallParamRule>,
     pub function_hints: Option<NirFunctionHints>,
+    /// Struct/union/class layouts known from debug info (DWARF/PDB),
+    /// keyed by type name. Used to name-overlay heuristically-recovered
+    /// aggregate fields; see `NirStructTypeHint`.
+    #[serde(default)]
+    pub struct_types: HashMap<String, NirStructTypeHint>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -257,6 +262,9 @@ pub struct NirHintStats {
     pub pointer_alias_hits: usize,
     pub local_surface_hits: usize,
     pub derived_origin_type_hits: usize,
+    /// Aggregate fields whose synthetic `field_{offset:x}` name was
+    /// overlaid with the real name from a debug-info struct/union layout.
+    pub debug_struct_field_hits: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -277,6 +285,33 @@ pub struct NirFunctionHints {
     pub stack_local_names: HashMap<i64, String>,
     pub stack_local_type_names: HashMap<i64, String>,
     pub return_type_name: Option<String>,
+}
+
+/// One field of a struct/union/class type known from debug info (DWARF or
+/// PDB), keyed by byte offset from the aggregate's base.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NirStructFieldHint {
+    pub name: String,
+    pub type_name: String,
+    pub offset: u32,
+    pub size: u32,
+}
+
+/// A struct/union/class layout known from debug info, used to give
+/// heuristically-recovered `NirType::Aggregate` fields (see
+/// `fission-midend-normalize::memory::aggregate_fields`) their real
+/// declared names instead of synthetic `field_{offset:x}` ones.
+///
+/// Deliberately holds only `name`/`type_name` strings, not a resolved
+/// `NirType`: the aggregate-field-recovery pass already derives each
+/// field's `NirType` from the actual observed load/store access width,
+/// which is grounded in real pcode and safer to trust for cast/size
+/// correctness than a naively re-parsed debug-info type string.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NirStructTypeHint {
+    pub name: String,
+    pub size: u32,
+    pub fields: Vec<NirStructFieldHint>,
 }
 
 impl NirRenderOptions {

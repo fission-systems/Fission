@@ -3,8 +3,8 @@ use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPrototypeSummary, NirFunctionHints,
-    NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer,
-    infer_entry_register_param_arity,
+    NirStructFieldHint, NirStructTypeHint, NirTypeContext, PcodeFunction, PcodeOpcode,
+    RegisterNamer, infer_entry_register_param_arity,
 };
 use fission_analysis_db::SymbolKind;
 use fission_core::PATHS;
@@ -186,7 +186,39 @@ pub(crate) fn build_nir_type_context(
         call_prototype_summaries: HashMap::new(),
         call_param_rules: build_nir_call_param_rules(&all_target_refs),
         function_hints,
+        struct_types: build_nir_struct_type_hints(binary),
     }
+}
+
+/// Struct/union/class layouts known from debug info (DWARF `DW_TAG_structure_
+/// type`/`DW_TAG_union_type`/`DW_TAG_class_type`), keyed by type name.
+///
+/// Used only to overlay real field names onto heuristically-recovered
+/// `NirType::Aggregate` fields in `type_hints.rs` -- see `NirStructTypeHint`.
+fn build_nir_struct_type_hints(binary: &LoadedBinary) -> HashMap<String, NirStructTypeHint> {
+    let mut struct_types = HashMap::default();
+    for ty in &binary.inferred_types {
+        if ty.name.is_empty() || ty.fields.is_empty() {
+            continue;
+        }
+        struct_types
+            .entry(ty.name.clone())
+            .or_insert_with(|| NirStructTypeHint {
+                name: ty.name.clone(),
+                size: ty.size,
+                fields: ty
+                    .fields
+                    .iter()
+                    .map(|field| NirStructFieldHint {
+                        name: field.name.clone(),
+                        type_name: field.type_name.clone(),
+                        offset: field.offset,
+                        size: field.size,
+                    })
+                    .collect(),
+            });
+    }
+    struct_types
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

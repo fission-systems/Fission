@@ -37,6 +37,7 @@ pub(super) fn apply_preview_type_hints(
 ) -> PreviewHintStats {
     let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
     let mut stats = apply_function_name_hints(func, context);
+    apply_debug_struct_field_names(func, context, &mut stats);
     let alias_collector = StackAliasCollector::new(func);
 
     let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::default();
@@ -199,6 +200,90 @@ fn apply_function_name_hints(
     }
 
     stats
+}
+
+/// Overlay real field names from debug-info struct/union layouts onto
+/// already-recovered `NirType::Aggregate` fields.
+///
+/// Does not decide which variables become aggregates, and does not touch
+/// field offsets or types: `aggregate_fields.rs` (an earlier normalize
+/// pass) already derived those from actual observed load/store access
+/// widths, which is grounded in real pcode and safer to trust than a
+/// naively re-parsed debug-info type string. This only renames a field
+/// whose offset matches a field in a debug-info type named by the
+/// binding's `surface_type_name` -- from a synthetic `field_{offset:x}`
+/// to its real declared name.
+fn apply_debug_struct_field_names(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+    stats: &mut PreviewHintStats,
+) {
+    if context.struct_types.is_empty() {
+        return;
+    }
+    for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
+        let Some(surface_name) = binding.surface_type_name.as_deref() else {
+            continue;
+        };
+        let Some(struct_name) = struct_base_name_for_single_pointer(surface_name) else {
+            continue;
+        };
+        let Some(struct_hint) = context.struct_types.get(struct_name) else {
+            continue;
+        };
+        let NirType::Ptr(inner) = &mut binding.ty else {
+            continue;
+        };
+        let NirType::Aggregate { fields, .. } = inner.as_mut() else {
+            continue;
+        };
+        for field in fields.iter_mut() {
+            let Some(hint_field) = struct_hint
+                .fields
+                .iter()
+                .find(|candidate| candidate.offset == field.offset)
+            else {
+                continue;
+            };
+            if hint_field.name.is_empty() || hint_field.name == field.name {
+                continue;
+            }
+            field.name = hint_field.name.clone();
+            stats.debug_struct_field_hits += 1;
+        }
+    }
+}
+
+/// Strip a debug-info type name down to a bare struct/union/class base name,
+/// for exactly one level of pointer indirection (`Foo*`, `const Foo*`).
+///
+/// Multi-level pointers (`Foo**`) are deliberately rejected: the aggregate
+/// whose fields we'd be naming belongs to `**binding`, not `*binding`, so
+/// applying the struct's field layout at this binding's own offset set
+/// would be a semantic mismatch.
+fn struct_base_name_for_single_pointer(type_name: &str) -> Option<&str> {
+    let mut name = type_name.trim();
+    loop {
+        if let Some(rest) = name.strip_prefix("const ") {
+            name = rest.trim_start();
+        } else if let Some(rest) = name.strip_prefix("volatile ") {
+            name = rest.trim_start();
+        } else {
+            break;
+        }
+    }
+    let inner = name.strip_suffix('*')?;
+    if inner.is_empty() || inner.ends_with('*') {
+        return None;
+    }
+    let inner = inner.trim();
+    let inner = inner
+        .strip_prefix("struct ")
+        .or_else(|| inner.strip_prefix("union "))
+        .or_else(|| inner.strip_prefix("class "))
+        .unwrap_or(inner)
+        .trim();
+    if inner.is_empty() { None } else { Some(inner) }
 }
 
 fn surface_integer_return_bits(type_name: &str) -> Option<u32> {

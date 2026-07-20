@@ -43,6 +43,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
+        struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["hwnd".to_string(), "lpRect".to_string()],
             param_type_names: HashMap::default(),
@@ -104,6 +105,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
+        struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -163,6 +165,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
+        struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::from([(0, "HWND".to_string()), (1, "LPRECT".to_string())]),
@@ -214,6 +217,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
+        struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -252,6 +256,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
+        struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: HashMap::default(),
@@ -324,6 +329,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
+        struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["a".to_string(), "b".to_string()],
             param_type_names: HashMap::from([(0, "int".to_string()), (1, "int".to_string())]),
@@ -361,6 +367,7 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
         call_param_rules: Vec::new(),
+        struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
             param_names: vec!["param_1".to_string()],
             param_type_names: HashMap::from([(0, "_func_5014 *".to_string())]),
@@ -542,4 +549,139 @@ fn preview_type_hints_collect_hint_stats() {
     assert_eq!(stats.explicit_return_type_hit, 1);
     // derived-origin tracker remains separate from explicit facts
     assert_eq!(stats.derived_origin_type_hits, 1);
+}
+
+fn point_aggregate_binding() -> NirBinding {
+    NirBinding {
+        name: "param_1".to_string(),
+        ty: NirType::Ptr(Box::new(NirType::Aggregate {
+            size: 8,
+            fields: vec![
+                fission_midend_core::StructField {
+                    offset: 0,
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                    name: "field_0".to_string(),
+                },
+                fission_midend_core::StructField {
+                    offset: 4,
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                    name: "field_4".to_string(),
+                },
+            ],
+        })),
+        surface_type_name: None,
+        origin: Some(NirBindingOrigin::ParamIndex(0)),
+        initializer: None,
+    }
+}
+
+fn point_struct_type_hint() -> fission_midend_core::NirStructTypeHint {
+    fission_midend_core::NirStructTypeHint {
+        name: "Point".to_string(),
+        size: 8,
+        fields: vec![
+            fission_midend_core::NirStructFieldHint {
+                name: "x".to_string(),
+                type_name: "int".to_string(),
+                offset: 0,
+                size: 4,
+            },
+            fission_midend_core::NirStructFieldHint {
+                name: "y".to_string(),
+                type_name: "int".to_string(),
+                offset: 4,
+                size: 4,
+            },
+        ],
+    }
+}
+
+#[test]
+fn preview_type_hints_overlay_debug_struct_field_names_onto_recovered_aggregate() {
+    let mut func = HirFunction {
+        name: "sum_point".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![point_aggregate_binding()],
+        locals: vec![],
+        return_type: NirType::Int {
+            bits: 32,
+            signed: true,
+        },
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_string())))],
+        ..Default::default()
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .struct_types
+        .insert("Point".to_string(), point_struct_type_hint());
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec![],
+        param_type_names: HashMap::from([(0, "Point*".to_string())]),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
+        return_type_name: None,
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context);
+
+    assert_eq!(stats.debug_struct_field_hits, 2);
+    let NirType::Ptr(inner) = &func.params[0].ty else {
+        panic!("expected Ptr(Aggregate)");
+    };
+    let NirType::Aggregate { fields, .. } = inner.as_ref() else {
+        panic!("expected Aggregate");
+    };
+    assert_eq!(fields[0].name, "x");
+    assert_eq!(fields[1].name, "y");
+}
+
+#[test]
+fn preview_type_hints_debug_struct_field_names_reject_multi_level_pointer() {
+    let mut func = HirFunction {
+        name: "sum_point".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![point_aggregate_binding()],
+        locals: vec![],
+        return_type: NirType::Int {
+            bits: 32,
+            signed: true,
+        },
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_string())))],
+        ..Default::default()
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .struct_types
+        .insert("Point".to_string(), point_struct_type_hint());
+    // Double pointer: the aggregate at *this* binding's offsets belongs to
+    // `**param_1`, not `*param_1`, so the overlay must not apply.
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec![],
+        param_type_names: HashMap::from([(0, "Point**".to_string())]),
+        stack_local_names: HashMap::default(),
+        stack_local_type_names: HashMap::default(),
+        return_type_name: None,
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context);
+
+    assert_eq!(stats.debug_struct_field_hits, 0);
+    let NirType::Ptr(inner) = &func.params[0].ty else {
+        panic!("expected Ptr(Aggregate)");
+    };
+    let NirType::Aggregate { fields, .. } = inner.as_ref() else {
+        panic!("expected Aggregate");
+    };
+    assert_eq!(fields[0].name, "field_0");
+    assert_eq!(fields[1].name, "field_4");
 }
