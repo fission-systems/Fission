@@ -884,6 +884,22 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     the DWARF register number, and the harder live-range-correlation
     half of this problem (previous bullet) is completely unaffected —
     this only removes one of the two blockers, not both.
+  - **Update, 2026-07-20 (later same day)**: while migrating the 19
+    `.dwarf` files, noticed `.gitattributes`/README/CI docs still
+    described a Git LFS distribution model for `utils/` that no longer
+    applies — the last commit to touch `utils/` (`a854c218 "chore:
+    remove utils/ from GitHub entirely"`) removed it from git tracking
+    altogether, superseded by the `fission-utils.tar.gz` GitHub Release
+    asset (`assets-v1`) that `.github/actions/setup-utils` actually
+    downloads. Removed the stale LFS filter rules from `.gitattributes`,
+    the dead `lfs: true`/`git lfs pull` steps in `cd.yml` and
+    `publish-utils-assets.yml`, and rewrote the README/
+    `docs/CI_RELEASE_GATES.md` guidance to describe the tarball flow
+    (commit `539adffb`). **Decision**: hold off on running "Publish
+    Utils Assets" for the `.dwarf` files themselves — bundle that
+    publish together with whatever code change first consumes them
+    (the register-locals feature above), timed for the v0.1.6 release,
+    rather than publishing inert data now.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
