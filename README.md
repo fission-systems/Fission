@@ -27,7 +27,7 @@ This README is intentionally long. It is a practical orientation document for co
 - [Core Pipeline](#core-pipeline)
 - [Crate Guide](#crate-guide)
 - [CLI Guide](#cli-guide)
-- [Resource Bundle and Git LFS](#resource-bundle-and-git-lfs)
+- [Resource Bundle](#resource-bundle)
 - [Decompiler Quality Loop](#decompiler-quality-loop)
 - [NIR and HIR Policy](#nir-and-hir-policy)
 - [Sleigh Runtime](#sleigh-runtime)
@@ -80,23 +80,24 @@ cd Fission
 ### Install Requirements
 
 - Rust 1.85 or newer.
-- Git LFS for large utility resources.
 - `cargo-nextest` for the preferred local test runner.
 - A modern C toolchain if local fixtures or corpus binaries need to be rebuilt.
 
 ```bash
 rustup update
 cargo install cargo-nextest --locked
-git lfs install
 ```
 
 ### Pull Required Runtime Assets
 
-The Rust workspace can build without every large resource, but real decompilation needs Sleigh specifications and some quality lanes need signature or support data.
+The Rust workspace can build without every large resource, but real decompilation needs Sleigh specifications and some quality lanes need signature or support data. `utils/` is not checked into git; pull the bundled release asset instead:
 
 ```bash
-git lfs pull --include="utils/sleigh-specs/**"
-git lfs pull --include="utils/signatures/**"
+mkdir -p utils
+curl -L --fail --show-error \
+  "https://github.com/sjkim1127/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
+  -o /tmp/fission-utils.tar.gz
+tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1
 ```
 
 ### Build the CLI
@@ -387,20 +388,23 @@ fission_cli decomp <binary> --all --json
 - Use JSON output when comparing rows, caches, or automation artifacts.
 - Keep command-line compatibility shims separate from semantic behavior.
 
-## Resource Bundle and Git LFS
+## Resource Bundle
 
-Fission uses checked-in resource trees and Git LFS for data that is too large or too operationally specific for normal Rust source files.
+Fission keeps large or operationally specific data out of git and ships it as a standalone `utils/` resource bundle (`fission-utils.tar.gz`) attached to the `assets-v1` GitHub Release.
 
 - `utils/sleigh-specs/` contains Sleigh language resources and manifests.
 - `utils/ghidra-data/` contains reference data and provenance notes.
 - `utils/MANIFEST.md` documents utility resources.
 - Runtime code should use `PathConfig`, `PATHS`, `resource_roots`, or existing loaders.
 - Production code must not hardcode `/Users/sjkim1127/Fission/utils`.
-- CI should pull only the LFS resources each job needs.
+- CI fetches the bundle via `.github/actions/setup-utils` (cached by `assets_tag`); `.github/workflows/publish-utils-assets.yml` regenerates it from a given ref.
 
 ```bash
-git lfs pull --include="utils/sleigh-specs/**"
-git lfs pull --include="utils/signatures/**"
+mkdir -p utils
+curl -L --fail --show-error \
+  "https://github.com/sjkim1127/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
+  -o /tmp/fission-utils.tar.gz
+tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1
 fission_cli resources status
 ```
 
@@ -864,7 +868,7 @@ Reverse-engineering repositories often touch untrusted binaries. Treat samples a
 
 | Symptom | First check |
 |---|---|
-| Missing Sleigh specs | Run `git lfs pull --include="utils/sleigh-specs/**"` and check resource status. |
+| Missing Sleigh specs | Pull `fission-utils.tar.gz` from the `assets-v1` release (see [Resource Bundle](#resource-bundle)) and check resource status. |
 | CLI cannot find resources | Check `FISSION_RESOURCE_ROOT`, `--resource-root`, and `PathConfig::detect` behavior. |
 | Raw p-code mismatch | Start in `fission-sleigh` before interpreting NIR output. |
 | NIR is wrong but p-code is right | Investigate NIR materialization, normalization, or type hint application. |
@@ -946,8 +950,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 ### Resources
 
 ```bash
-git lfs pull --include="utils/sleigh-specs/**"
-git lfs pull --include="utils/signatures/**"
+mkdir -p utils
+curl -L --fail --show-error \
+  "https://github.com/sjkim1127/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
+  -o /tmp/fission-utils.tar.gz
+tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1
 fission_cli resources status
 ```
 

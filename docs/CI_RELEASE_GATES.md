@@ -147,7 +147,8 @@ not block once that SHA already has a green push Heavy).
 ## Resource bundle (`utils/`) assets
 
 Runtime data lives under [`utils/`](../utils/) (Sleigh specs, signatures, ghidra-data).
-It is **not** pure Rust source — many files are Git LFS.
+It is **not** checked into git at all — `.gitignore` excludes `utils/`, and the tree is
+populated from the `fission-utils.tar.gz` release asset (see table below), not Git LFS.
 
 | Asset | How it is published | Who uses it |
 |-------|---------------------|-------------|

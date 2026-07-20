@@ -35,14 +35,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-          lfs: true
           fetch-depth: 1
-
-      - name: Pull LFS objects for utils
-        shell: bash
-        run: |
-          set -euo pipefail
-          git lfs pull --include="utils/**" || true
 
       - name: Setup Utils (fill gaps from existing assets pin if needed)
         uses: ./.github/actions/setup-utils

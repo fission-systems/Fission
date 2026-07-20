@@ -76,7 +76,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ steps.tag.outputs.tag }}
-          lfs: true
           submodules: recursive
 
       - name: Setup Utils
@@ -234,7 +233,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ steps.tag.outputs.tag }}
-          lfs: true
           submodules: recursive
 
       - name: Setup Utils

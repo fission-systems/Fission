@@ -1,35 +1,3 @@
-# ─── Git LFS ──────────────────────────────────────────────────────────────────
-# Large binary/data resources tracked with Git LFS.
-# Goal: `git clone` delivers only Rust source + CI config (no LFS download).
-#
-# Selective CI pull strategy:
-#   git lfs pull --include="utils/sleigh-specs/**"  # ~25 MB (Sleigh specs + language files)
-#   git lfs pull --include="utils/signatures/**"    # 482 MB (corpus jobs)
-#   git lfs pull                                     # everything
-#
-# Adopted: 2026-06-30
-
-# Function signature databases (482 MB) — FID/FIDB/type info/patterns
-utils/signatures/**            filter=lfs diff=lfs merge=lfs -text
-
-# Ghidra data files (28 MB)
-utils/ghidra-data/**           filter=lfs diff=lfs merge=lfs -text
-
-# Compiled Sleigh specs (.sla binaries, 11 MB)
-utils/sleigh-specs/compiled/** filter=lfs diff=lfs merge=lfs -text
-
-# Sleigh language source files (14 MB) — .sinc/.slaspec/.cspec/.pspec etc.
-# Text files but stored in LFS for a single clean policy: no utils/** in basic clone.
-utils/sleigh-specs/languages/** filter=lfs diff=lfs merge=lfs -text
-
-# ─── GitHub Linguist overrides ────────────────────────────────────────────────
-utils/ghidra-data/**/*.exports   linguist-generated=true
-utils/ghidra-data/**/*.gdt       linguist-generated=true
-utils/sleigh-specs/**            linguist-language=Sleigh
-utils/signatures/die/**/*.js     linguist-vendored=true
-utils/signatures/die/**/*.lua    linguist-vendored=true
-benchmark/binary/**/source/**    linguist-generated=true
-
 # ─── Line-ending normalization ────────────────────────────────────────────────
 *.rs    text eol=lf
 *.toml  text eol=lf
