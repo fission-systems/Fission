@@ -1498,6 +1498,102 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           matches, not just synthetic test coverage.
         - Remaining open item: non-x86 architectures (only x86-64 validated
           all series).
+      - **Update — non-x86 (AArch64) validation, found and fixed a big gap**
+        (commits `745576ac`, `6cf9fcf2`). User picked non-x86 as the last
+        remaining item and confirmed "implement it properly" once the scope
+        turned out much larger than a quick check.
+        - Built a real AArch64 static binary (Docker `gcc:latest --platform
+          linux/arm64`, native — no QEMU emulation needed on this arm64
+          host) and ran `fission_cli identify` against it: no crash, but a
+          quick source read surfaced a real, independent bug first:
+          `X86InstructionSkipper` (the alignment-NOP skip list ported
+          earlier this session) is the *only* `InstructionSkipper` anywhere
+          in Ghidra (`Ghidra/Processors/x86/`) — non-x86 architectures get
+          *zero* skippers in real Ghidra, but Fission was applying the x86
+          list unconditionally. Fixed by gating on `CompiledFrontend::arch`
+          (commit `745576ac`) — low risk in practice for fixed-4-byte ISAs
+          (AArch64/MIPS: length-sensitive slice equality can never match a
+          1-2 byte pattern) but a real risk for variable-length ones (ARM
+          Thumb, 68k).
+        - Then the big one: cross-checking a real GCC-compiled AArch64
+          `atoi` against a headless Ghidra script found `stp`/`ldp`
+          (register-pair save/restore with pre/post-index writeback —
+          present in *almost every* non-leaf function's prologue/epilogue)
+          fell through `compute_fid_hashes`' fail-closed "unhandled shape"
+          branch every time, meaning essentially no realistic AArch64
+          function could be hashed at all. `decode_instruction_raw_state`
+          on the raw `stp`/`ldp` instructions found two shapes
+          `trace_simple_memory_address` didn't recognize:
+          - Pre-index (`stp x29,x30,[sp,#-0x10]!`): self-referential
+            `IntAdd(sp,disp)` writing back directly into **register**
+            space, not a unique-space temp like every x86 shape validated
+            so far. Fixed by having the caller try
+            `register_space_index` as a target-space candidate too, not
+            just the hardcoded `unique_space_index` — the underlying
+            `IntAdd(reg,const)` matcher didn't need to change at all.
+          - Post-index (`ldp x29,x30,[sp],#0x10`): the address used for the
+            access is a bare `Copy(sp)` into **unique** space (a snapshot
+            taken *before* the writeback, which happens via a separate,
+            unconnected `IntAdd` mutating the register directly for the
+            *next* instruction to see) — but Ghidra's `getOpObjects` still
+            lists the writeback displacement as this operand's `Scalar`.
+            Fixed by having the `Copy` arm additionally search the
+            instruction's p-code for a self-referential
+            `IntAdd(reg,const) -> reg` writeback elsewhere
+            (`find_self_writeback_displacement`) and fold it in as a
+            displacement even though it doesn't feed the traced address at
+            all.
+        - A second, independent gap surfaced while validating the specific
+          hash on the same function: the `isAddress` classification (real
+          value vs. specific-hash placeholder) that worked for x86 — "does
+          `RuntimeFixedHandle::space == \"ram\"\"" — doesn't generalize.
+          x86's `CALL rel32` happens to *also* resolve through `"ram"`
+          space (confirmed earlier this session), but AArch64's `bl`
+          resolves its immediate target through `"const"` space instead
+          (confirmed via `decode_instruction_raw_state`) — the first case
+          this session where two architectures' Ghidra-matching behavior
+          for the *same semantic operand kind* required *different*
+          Fission-side signals. Replaced the ram-space-only check with an
+          OR: ram space (memory dereferences — architecture-independent)
+          or `flow_kind` is `Call`/`Jump`/`ConditionalJump` with an
+          `Immediate` operand (branch/call targets, using
+          `DecodedFlowKind` — already relied on elsewhere in this file for
+          `call_count` — instead of the architecture-specific space
+          check). `direct_target` turned out not to be reliably populated
+          outside the full lift path, so the check is the coarser but
+          still universally-true-in-practice "a Call/Jump/ConditionalJump
+          instruction's Immediate operand(s) are the target," documented
+          as only affecting the specific hash's real-vs-placeholder choice
+          for an edge case neither x86 nor AArch64 exhibit.
+        - Added `fid_hashes_match_ghidra_exactly_for_aarch64_stp_ldp_prologue_epilogue`
+          (the real `atoi`'s full 9-instruction prologue/epilogue —
+          `paciasp; stp...!; mov w2,#0xa; mov x1,#0x0; mov x29,sp; bl
+          ...; ldp...,#0x10; autiasp; ret`), matching real Ghidra 12.0.4 on
+          full hash, full count, specific hash, *and* specific count in one
+          test. Register offsets (`x0=0x4000`, `x29=0x40e8`, `sp=0x8`, ...)
+          read directly from `AARCH64instructions.sinc`'s `define register`
+          blocks rather than hand-derived from decode output, to avoid
+          compounding two independent sources of possible error.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run` 450/450 across
+          fission-sleigh/fission-decompiler/fission-cli/fission-static,
+          release build, `golden_corpus_check.py` clean. Live smoke test
+          against the real AArch64 binary: **2 real confident matches**
+          (`_Unwind_GetIPInfo`, `__deregister_frame`, both from
+          `libgcc-7-dev-arm64`, both `specific_matched: true`), both
+          reproducing the binary's own already-correct unstripped symbol
+          table names — the second non-synthetic, live confirmation this
+          session (after the el7 x86-64 `__register_frame_table` match),
+          and the first on a non-x86 architecture.
+        - This closes the FID feature series' last open item from this
+          session's scope. Remaining known gaps, all previously documented
+          and still standing: relocation-awareness for the specific hash,
+          other non-x86 architectures beyond AArch64 (only AArch64 itself
+          was validated — MIPS/PowerPC/ARM32/68k etc. are unvalidated and
+          likely have their own architecture-specific addressing-mode gaps
+          the same way AArch64 did), and wiring a match into `list`'s own
+          output (currently `decomp`'s call-target renaming and the
+          standalone `identify` report command, not `list`).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
