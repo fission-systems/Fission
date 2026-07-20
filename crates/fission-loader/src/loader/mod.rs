@@ -85,7 +85,7 @@ impl LoadedBinary {
             (
                 (apple_funcs_res, swift_types_res, objc_classes_res, objc_selectors_res),
                 (
-                    (dwarf_types_res, dwarf_funcs_res),
+                    (dwarf_types_res, dwarf_funcs_res, dwarf_lines_res),
                     (rust_vtables_res, (cpp_types_res, cpp_vtable_funcs_res)),
                 ),
             ),
@@ -128,9 +128,10 @@ impl LoadedBinary {
                                 if dwarf_analyzer.has_debug_info() {
                                     let types = dwarf_analyzer.analyze_types();
                                     let funcs = dwarf_analyzer.analyze_functions();
-                                    (types, funcs)
+                                    let lines = dwarf_analyzer.analyze_lines();
+                                    (types, funcs, lines)
                                 } else {
-                                    (Vec::new(), Vec::new())
+                                    (Vec::new(), Vec::new(), Vec::new())
                                 }
                             },
                             || {
@@ -313,6 +314,11 @@ impl LoadedBinary {
                 binary.dwarf_functions.insert(func_info.address, func_info);
             }
         }
+
+        // dwarf_lines_res is already sorted ascending by address (see
+        // DwarfAnalyzer::analyze_lines) -- required by line_for_address's
+        // binary search.
+        binary.dwarf_lines = dwarf_lines_res;
 
         // 5. Merge C++ Results
         for ty in cpp_types_res {

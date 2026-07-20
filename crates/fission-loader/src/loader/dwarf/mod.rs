@@ -11,10 +11,12 @@
 //! - [`analyzer`] - Main coordinator (DwarfAnalyzer public API)
 //! - [`types`] - Type information extraction (structs, classes, unions)
 //! - [`functions`] - Function information extraction (params, locals)
+//! - [`lines`] - `.debug_line` address-to-source-line matrix extraction
 //! - [`sections`] - Section data loading helper
 
 pub mod analyzer;
 mod functions;
+mod lines;
 mod sections;
 mod types;
 

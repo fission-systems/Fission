@@ -235,6 +235,21 @@ pub type PdbParamInfo = DwarfParamInfo;
 pub type PdbLocalVar = DwarfLocalVar;
 pub type PdbFunctionInfo = DwarfFunctionInfo;
 
+/// One row of the `.debug_line` line-number matrix: the source file/line
+/// that a machine address maps to. Rows mark the *start* of a run of
+/// instructions attributed to that line — see [`LoadedBinary::line_for_address`]
+/// for the "nearest preceding row" lookup convention this implies.
+#[derive(Debug, Clone)]
+pub struct DwarfLineRow {
+    /// Machine address this row begins at.
+    pub address: u64,
+    /// Source file name (leaf name only, not joined with its DWARF
+    /// include-directory entry).
+    pub file: String,
+    /// 1-based source line number.
+    pub line: u32,
+}
+
 /// Loader evidence for an address that may be a function entry but still
 /// requires instruction-level validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -360,6 +375,10 @@ pub struct LoadedBinary {
     /// Ambiguous loader-derived function entries awaiting SLEIGH/static proof.
     /// Not serialized because they are inexpensive format facts rebuilt on load.
     pub function_candidates: Vec<FunctionCandidateInfo>,
+    /// `.debug_line` address-to-source-line matrix, sorted ascending by
+    /// `address` (required by [`LoadedBinary::line_for_address`]'s binary
+    /// search). Not serialized — rebuilt on each load from debug sections.
+    pub dwarf_lines: Vec<DwarfLineRow>,
 }
 
 impl LoadedBinary {
@@ -372,6 +391,24 @@ impl LoadedBinary {
             identity_report: None,
             go_version: None,
             function_candidates: Vec::new(),
+            dwarf_lines: Vec::new(),
+        }
+    }
+
+    /// Resolve an address to the source file/line it maps to, per the
+    /// `.debug_line` matrix: the row with the greatest `address <= address`
+    /// (a line's row marks where its instructions *begin*; anything up to
+    /// the next row's address is still attributed to that line). Requires
+    /// `dwarf_lines` sorted ascending by `address`, which is how
+    /// `DwarfAnalyzer::analyze_lines` always produces it.
+    pub fn line_for_address(&self, address: u64) -> Option<&DwarfLineRow> {
+        match self
+            .dwarf_lines
+            .binary_search_by_key(&address, |row| row.address)
+        {
+            Ok(idx) => Some(&self.dwarf_lines[idx]),
+            Err(0) => None,
+            Err(idx) => Some(&self.dwarf_lines[idx - 1]),
         }
     }
 
