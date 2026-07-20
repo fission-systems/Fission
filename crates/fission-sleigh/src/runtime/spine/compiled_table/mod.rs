@@ -184,6 +184,148 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
 /// `context_override` applies packed context bits over the default context before matching.
 /// Used by multi-instruction loops to propagate `ContextCommit` / `globalset` effects across
 /// instruction boundaries.
+/// Decode `bytes` at `address` and return the raw constructor-resolution
+/// tree (`RuntimeConstructState`) instead of the flattened `DecodedInstruction`.
+///
+/// Mirrors the candidate-selection + `bind_instruction` steps of
+/// `decode_instruction_and_lift_with_context_override` but skips p-code
+/// emission -- callers that need the raw tree (e.g. `instruction_pattern_mask`
+/// for FID hashing) don't need a successful lift, only a successful bind.
+pub(crate) fn decode_instruction_raw_state(
+    compiled: &CompiledFrontend,
+    bytes: &[u8],
+    address: u64,
+) -> Result<RuntimeConstructState> {
+    clear_bind_cache();
+    let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
+    ctx.context_register = compiled.default_context;
+    ctx.context_known_mask = compiled.default_context_known_mask;
+
+    let candidates = candidate_selections(compiled, &ctx, address)?;
+    let mut first_error: Option<anyhow::Error> = None;
+    for selection in candidates {
+        if !selection.constructor.runtime_ready {
+            continue;
+        }
+        let strategy = RuntimeDecodeStrategy::for_table();
+        match bind_instruction(compiled, strategy, &ctx, selection) {
+            Ok(decoded) => return Ok(decoded),
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| {
+        RuntimeSleighError::DecodeNoMatch {
+            language: compiled.entry_id.clone(),
+            address,
+        }
+        .into()
+    }))
+}
+
+/// Compute the FID-style "instruction mask" for a decoded instruction: 0xFF
+/// on bytes (bits, but SLEIGH pattern blocks are byte-granular in practice)
+/// that constructor pattern matching actually constrained to select this
+/// specific decode -- opcode/discriminating bytes -- and 0x00 on bytes that
+/// are pure operand-field data never checked during constructor selection.
+///
+/// Mirrors Ghidra's `InstructionPrototype.getInstructionMask()` (consumed by
+/// `MessageDigestFidHasher.hash()` to mask operand bytes out of the FID
+/// "full hash"): the union, across every constructor in the decode tree
+/// (root plus every operand that resolved through a subtable), of that
+/// constructor's *instruction*-relative `CompiledPatternBlock` -- never the
+/// context-register pattern, which FID's instruction mask excludes.
+///
+/// `length` is the decoded instruction's total byte length (`state.length`
+/// on the root node); the returned `Vec<u8>` has exactly that many entries.
+pub(crate) fn instruction_pattern_mask(root: &RuntimeConstructState, length: usize) -> Vec<u8> {
+    let mut mask = vec![0u8; length];
+    accumulate_pattern_mask(root, &mut mask);
+    mask
+}
+
+fn accumulate_pattern_mask(state: &RuntimeConstructState, mask: &mut [u8]) {
+    if let Some(pattern) = &state.match_trace.matched_leaf_pattern {
+        apply_disjoint_pattern_mask(pattern, state.absolute_offset, mask);
+    }
+    for handle in &state.handles {
+        if let Some(sub) = &handle.subtable_state {
+            accumulate_pattern_mask(sub, mask);
+        }
+    }
+}
+
+fn apply_disjoint_pattern_mask(
+    pattern: &CompiledDisjointPattern,
+    base_offset: usize,
+    mask: &mut [u8],
+) {
+    match pattern {
+        CompiledDisjointPattern::Instruction(block) => {
+            apply_pattern_block_mask(block, base_offset, mask)
+        }
+        // FID's instruction mask is instruction-bytes only -- a context
+        // register pattern (e.g. an addressing-mode bit set by a prior
+        // instruction) never lives in these bytes at all.
+        CompiledDisjointPattern::Context(_) => {}
+        CompiledDisjointPattern::Combine { instruction, .. } => {
+            apply_pattern_block_mask(instruction, base_offset, mask)
+        }
+        CompiledDisjointPattern::Or(patterns) => {
+            // A constructor's own pattern statement can itself be an OR of
+            // several alternatives (`pattern: cond1 | cond2`); only one
+            // alternative is actually why *this* decode matched, but that
+            // information doesn't survive into `matched_leaf_pattern`.
+            // Intersect (AND) every alternative's mask instead of unioning:
+            // a bit only safely counts as "this constructor's opcode
+            // identity" if *every* alternative pattern also constrains it,
+            // otherwise this errs toward under-masking (a missed hash match)
+            // rather than over-masking (a wrong one).
+            let Some((first, rest)) = patterns.split_first() else {
+                return;
+            };
+            let mut branch_mask = vec![0u8; mask.len()];
+            apply_disjoint_pattern_mask(first, base_offset, &mut branch_mask);
+            for alt in rest {
+                let mut alt_mask = vec![0u8; mask.len()];
+                apply_disjoint_pattern_mask(alt, base_offset, &mut alt_mask);
+                for (b, a) in branch_mask.iter_mut().zip(alt_mask.iter()) {
+                    *b &= a;
+                }
+            }
+            for (m, b) in mask.iter_mut().zip(branch_mask.iter()) {
+                *m |= b;
+            }
+        }
+    }
+}
+
+fn apply_pattern_block_mask(block: &CompiledPatternBlock, base_offset: usize, mask: &mut [u8]) {
+    if block.nonzero_size <= 0 {
+        return;
+    }
+    let Ok(block_offset) = usize::try_from(block.offset.max(0)) else {
+        return;
+    };
+    for (word_index, &mask_word) in block.mask_words.iter().enumerate() {
+        let word_byte_offset = block_offset + word_index * 4;
+        for (byte_index, &byte_mask) in mask_word.to_be_bytes().iter().enumerate() {
+            let Some(abs) = base_offset
+                .checked_add(word_byte_offset)
+                .and_then(|v| v.checked_add(byte_index))
+            else {
+                continue;
+            };
+            if let Some(slot) = mask.get_mut(abs) {
+                *slot |= byte_mask;
+            }
+        }
+    }
+}
+
 pub(crate) fn decode_instruction_with_context(
     compiled: &CompiledFrontend,
     bytes: &[u8],
