@@ -305,4 +305,45 @@ mod tests {
         assert_eq!(type_name_of("matrix"), "int[3][4]");
         assert_eq!(type_name_of("name"), "char[16]");
     }
+
+    /// `testdata/x64_dyn_lexblock_test.elf`: GCC-compiled from a source with
+    /// three nested `{ int total = ...; ... }` blocks, each shadowing the
+    /// outer `total` (compiled with `-Wshadow` to confirm GCC actually
+    /// treats them as three distinct variables, not one reused slot).
+    /// Cross-checked against `llvm-dwarfdump -v --debug-info`: the two
+    /// nested `DW_TAG_lexical_block`s use `DW_AT_high_pc [DW_FORM_data8]`
+    /// (the offset-from-low_pc form, same as `DW_TAG_subprogram`'s
+    /// `high_pc` -- confirming `lexical_block_range` needs the identical
+    /// form handling `subprogram_size` already has), resolving to
+    /// `[0x401113, 0x40113e)` for the outer block and `[0x401125, 0x401138)`
+    /// for the inner one.
+    #[test]
+    fn analyze_functions_scopes_shadowed_locals_to_their_lexical_block() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_dyn_lexblock_test.elf");
+        let binary = LoadedBinary::from_file(&path).expect("load lexblock test ELF");
+        let analyzer = DwarfAnalyzer::new(&binary);
+        let functions = analyzer.analyze_functions();
+        let compute = functions
+            .iter()
+            .find(|f| f.name == "compute")
+            .unwrap_or_else(|| panic!("expected a \"compute\" function in {functions:?}"));
+
+        assert_eq!(compute.local_vars.len(), 3, "{:?}", compute.local_vars);
+        let by_offset = |offset: i64| {
+            compute
+                .local_vars
+                .iter()
+                .find(|v| matches!(v.location, crate::loader::types::DwarfLocation::StackOffset(o) if o == offset))
+                .unwrap_or_else(|| panic!("expected a local at fbreg {offset} in {:?}", compute.local_vars))
+        };
+
+        // Function-level `total` (line 2): not nested in any block.
+        assert_eq!(by_offset(-20).scope, None);
+        // Outer block's `total` (line 4).
+        assert_eq!(by_offset(-24).scope, Some((0x401113, 0x40113e)));
+        // Inner (if-body) block's `total` (line 7) -- the innermost
+        // enclosing block wins, not the outer one it's also nested in.
+        assert_eq!(by_offset(-28).scope, Some((0x401125, 0x401138)));
+    }
 }

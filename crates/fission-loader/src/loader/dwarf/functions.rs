@@ -50,6 +50,13 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             let mut entries = unit.entries();
             let mut current_func: Option<FuncBuilder> = None;
             let mut func_depth: isize = 0;
+            // Stack of enclosing `DW_TAG_lexical_block` PC ranges, each tagged
+            // with the `func_depth` value *at that block's own DIE* (mirrors
+            // how `func_depth == 1` marks the subprogram's own depth below).
+            // A variable's scope is the top of this stack at the moment it's
+            // visited -- the innermost block it's nested in, or `None` when
+            // the stack is empty (declared directly under the function).
+            let mut scope_stack: Vec<(isize, u64, u64)> = Vec::new();
 
             while let Some((delta_depth, entry)) = entries.next_dfs()? {
                 if current_func.is_some() {
@@ -72,8 +79,15 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                                 functions.push(fi);
                             }
                         }
+                        scope_stack.clear();
                         // Fall through to check if this entry is another subprogram
                     } else {
+                        // Pop any lexical_block scopes whose own depth is at or
+                        // past the depth we've DFS'd back to -- we've exited them.
+                        while scope_stack.last().is_some_and(|&(d, _, _)| d >= func_depth) {
+                            scope_stack.pop();
+                        }
+
                         // Process children of the current subprogram
                         // Note: func_depth > 1 guarantees current_func is Some
                         let Some(func) = current_func.as_mut() else {
@@ -92,13 +106,20 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                             }
                             DwTag(0x34) => {
                                 // DW_TAG_variable (top-level or in lexical block)
-                                if let Some(var) =
+                                if let Some(mut var) =
                                     self.extract_local_var_info(entry, &unit, &dwarf, &type_cache)?
                                 {
+                                    var.scope = scope_stack.last().map(|&(_, lo, hi)| (lo, hi));
                                     func.local_vars.push(var);
                                 }
                             }
-                            _ => {} // DW_TAG_lexical_block, etc. — just continue DFS
+                            DwTag(0x0b) => {
+                                // DW_TAG_lexical_block
+                                if let Some((lo, hi)) = self.lexical_block_range(entry)? {
+                                    scope_stack.push((func_depth, lo, hi));
+                                }
+                            }
+                            _ => {}
                         }
                         continue;
                     }
@@ -177,6 +198,35 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         Ok(end.saturating_sub(low_pc))
     }
 
+    /// Resolve a `DW_TAG_lexical_block`'s PC range from `DW_AT_low_pc`/
+    /// `DW_AT_high_pc`, applying the same offset-vs-absolute `high_pc` form
+    /// handling as `subprogram_size` -- confirmed via `llvm-dwarfdump -v`
+    /// that GCC emits the offset form (`DW_FORM_data8`) here too, not just
+    /// on `DW_TAG_subprogram`. Returns `None` for a block with no low_pc, or
+    /// one using `DW_AT_ranges` for non-contiguous PCs instead of a single
+    /// low/high pair (GCC does this under heavier optimization when a
+    /// block's code gets split; not attempted here -- such a variable's
+    /// scope degrades to `None`, same as being unscoped, rather than a
+    /// wrong range).
+    fn lexical_block_range(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+    ) -> Result<Option<(u64, u64)>, gimli::Error> {
+        let Some(low_pc) = self.get_attr_u64(entry, DwAt(0x11))? else {
+            return Ok(None);
+        };
+        let high_pc = match entry.attr_value(DwAt(0x12))? {
+            Some(gimli::AttributeValue::Addr(v)) => v,
+            Some(gimli::AttributeValue::Udata(v)) => low_pc.saturating_add(v),
+            Some(gimli::AttributeValue::Data1(v)) => low_pc.saturating_add(u64::from(v)),
+            Some(gimli::AttributeValue::Data2(v)) => low_pc.saturating_add(u64::from(v)),
+            Some(gimli::AttributeValue::Data4(v)) => low_pc.saturating_add(u64::from(v)),
+            Some(gimli::AttributeValue::Data8(v)) => low_pc.saturating_add(v),
+            _ => return Ok(None),
+        };
+        Ok(Some((low_pc, high_pc)))
+    }
+
     /// Extract parameter information from a DW_TAG_formal_parameter DIE
     pub(super) fn extract_param_info(
         &self,
@@ -230,6 +280,9 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             name,
             type_name,
             location,
+            // Filled in by the caller, which knows the current scope_stack;
+            // this function only has the DIE, not the DFS traversal state.
+            scope: None,
         }))
     }
 
@@ -256,10 +309,10 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
     ) -> Result<DwarfLocation, gimli::Error> {
         match entry.attr_value(DwAt(0x02))? {
             Some(gimli::AttributeValue::Exprloc(expr)) => self.parse_location_expr(expr, unit),
-            Some(attr @ (gimli::AttributeValue::LocationListsRef(_)
-            | gimli::AttributeValue::DebugLocListsIndex(_))) => {
-                self.parse_location_list(attr, unit, dwarf)
-            }
+            Some(
+                attr @ (gimli::AttributeValue::LocationListsRef(_)
+                | gimli::AttributeValue::DebugLocListsIndex(_)),
+            ) => self.parse_location_list(attr, unit, dwarf),
             _ => Ok(DwarfLocation::Unknown),
         }
     }
@@ -286,7 +339,9 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             let DwarfLocation::Register(reg_str) = parsed else {
                 return Ok(DwarfLocation::Unknown);
             };
-            let Some(reg_num) = reg_str.strip_prefix("reg").and_then(|n| n.parse::<u64>().ok())
+            let Some(reg_num) = reg_str
+                .strip_prefix("reg")
+                .and_then(|n| n.parse::<u64>().ok())
             else {
                 return Ok(DwarfLocation::Unknown);
             };

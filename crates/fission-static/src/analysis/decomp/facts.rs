@@ -862,6 +862,7 @@ mod tests {
                     name: "tmp".into(),
                     type_name: "int".into(),
                     location: DwarfLocation::Unknown,
+                    scope: None,
                 }],
                 size: 0,
             },

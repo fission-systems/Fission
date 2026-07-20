@@ -696,6 +696,7 @@ mod tests {
                     name: "rect".to_string(),
                     type_name: "RECT".to_string(),
                     location: DwarfLocation::StackOffset(-0x20),
+                    scope: None,
                 }],
                 size: 0,
             },

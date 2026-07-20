@@ -465,6 +465,9 @@ impl PendingFunction {
                         name,
                         type_name,
                         location: DwarfLocation::Unknown,
+                        // PDB carries no lexical-block PC-range scoping in
+                        // this crate's coverage.
+                        scope: None,
                     });
                 }
             }
@@ -513,6 +516,7 @@ impl PendingFunction {
                             name,
                             type_name,
                             location,
+                            scope: None,
                         });
                     }
                 }
@@ -545,6 +549,7 @@ impl PendingFunction {
                     name,
                     type_name,
                     location,
+                    scope: None,
                 });
             }
             _ => {}

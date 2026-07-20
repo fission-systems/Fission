@@ -212,6 +212,14 @@ pub struct DwarfLocalVar {
     pub type_name: String,
     /// Variable location
     pub location: DwarfLocation,
+    /// PC range `(low_pc, high_pc)` of the innermost `DW_TAG_lexical_block`
+    /// this variable is declared in, or `None` when it's declared directly
+    /// under the function (not nested in any block). Distinguishes shadowed
+    /// same-named locals in sibling/nested blocks -- without it, e.g. three
+    /// C variables all named `total` in three nested blocks collapse into
+    /// three indistinguishable `DwarfLocalVar` entries with no way to tell
+    /// which one is live at a given address.
+    pub scope: Option<(u64, u64)>,
 }
 
 /// Function information extracted from DWARF DW_TAG_subprogram
