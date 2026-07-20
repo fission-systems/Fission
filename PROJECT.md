@@ -1750,6 +1750,67 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           this session to fail identically on unmodified `main`).
         - Remaining metadata gaps, unchanged: `DW_TAG_lexical_block` PC
           ranges, `.debug_line` parsing.
+      - **Update — `.debug_line` parsing (metadata gap 5, last one)** (commit
+        `23478bee`). `.debug_line` was already loaded into `gimli::Dwarf`
+        (`analyzer::build_dwarf`) but its `line_program`/row iterator was
+        never run anywhere — every compilation unit's line-number program
+        existed only as unread bytes, so there was no way to answer "what
+        source line does address X map to" at all.
+        - New `dwarf/lines.rs`: `DwarfAnalyzer::analyze_lines` runs each
+          unit's line-number program (the byte-coded state machine DWARF
+          section 6.2 describes) and flattens every row into a
+          `DwarfLineRow{address, file, line}`. Skips `end_sequence` rows
+          (boundary markers just past the last real instruction, not
+          themselves attributable to a line) and line-0 rows (producers'
+          explicit marker for code that can't be attributed to any source
+          line, e.g. compiler-generated padding). File names are resolved
+          once per distinct file index per unit rather than once per row —
+          the same file repeats across nearly every row of a real program.
+        - Landed in a new `LoadedBinary::dwarf_lines: Vec<DwarfLineRow>`
+          field (sorted ascending by address, not serialized — same
+          "rebuilt on each load" convention as `dwarf_functions`/
+          `pdb_functions`), wired into the same `rayon::join`/merge phase in
+          `loader/mod.rs` as `analyze_types`/`analyze_functions`.
+          `LoadedBinary::line_for_address(addr)` binary-searches it for the
+          nearest preceding row, matching the DWARF convention that a row's
+          line covers every address up to the next row.
+        - Validated by cross-checking byte-for-byte against `llvm-dwarfdump
+          --debug-line` (Homebrew LLVM) on the already-committed
+          `x64_dyn_enum_test.elf` fixture *before* writing the permanent
+          test — a throwaway scratch test dumped the extractor's rows
+          side-by-side with the dwarfdump output first (`pick()`'s body,
+          0x401106..0x40111f, lines 8/9/9/10/11), confirming an exact match
+          including which address dwarfdump reports as `end_sequence`
+          (0x401131) before pinning that address as the one intentionally
+          absent from the table. The permanent test asserts these exact
+          rows, not just "some non-empty result."
+        - **Deliberately no consumer wired yet** — HIR/NIR statements carry
+          no per-instruction `address: u64` field to join a line lookup
+          against today (only `NirFunction` has a function-level address),
+          and the CLI's non-JSON decompile header is duplicated across ~6
+          near-identical rendering sites in `decompile_exec/run.rs` (a
+          `--json`/text x single/batch x rust-sleigh/sequential/parallel
+          matrix); wiring display there is a separate, larger, riskier
+          slice than this one. An initial attempt wired `source_line` into
+          `decompile_exec/output.rs`'s JSON/text output, but that function
+          turned out to only be reachable via one rarely-hit fallback path
+          (`--addr` with no function found) — the real `--addr`/`--all`
+          paths go through `run.rs` entirely, so the wiring would have
+          silently done nothing for normal usage. Reverted rather than ship
+          a half-connected display path; the extraction capability itself
+          (this commit) is what closes the audit gap, matching how enum
+          values and array types landed as pure extraction before anything
+          displayed them.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run -p fission-loader` 111/111, release build +
+          `golden_corpus_check.py` clean, `cargo nextest run --workspace
+          --no-fail-fast` 2106/2113 (same 7 pre-existing, unrelated
+          `fission-emulator` failures as every other check this session).
+        - **All 5 gaps from the original audit are now closed**: enum
+          values, array types, PDB struct/location, and `.debug_line`
+          parsing are all implemented; `DW_TAG_lexical_block` PC ranges
+          (variable scoping/shadowing) is the one item from the original
+          list that was never picked up.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
