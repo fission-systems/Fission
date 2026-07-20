@@ -1,24 +1,6 @@
-use super::hash::{FidHashError, FidHashQuad, FidHashUnit, FidHasher};
-use crate::fidbf::{FidbfDatabase, FidbfMatch, FidbfParseError, parse_fidbf};
+use crate::fidbf::{FidbfDatabase, FidbfParseError, parse_fidbf};
 use fission_core::resources::ResourceProvider;
 use std::path::PathBuf;
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum FidMatchError {
-    #[error(transparent)]
-    Hash(#[from] FidHashError),
-    #[error(transparent)]
-    Database(#[from] FidbfParseError),
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct FidFunctionView {
-    pub units: Vec<FidHashUnit>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct FidRelocationView;
 
 #[derive(Debug, Default)]
 pub struct FidDatabaseSet {
@@ -57,37 +39,5 @@ impl FidDatabaseSet {
             }
         }
         Self { databases, errors }
-    }
-}
-
-#[derive(Debug)]
-pub struct FidMatcher {
-    hasher: FidHasher,
-    databases: FidDatabaseSet,
-}
-
-impl FidMatcher {
-    pub fn new(databases: FidDatabaseSet) -> Self {
-        Self {
-            hasher: FidHasher::default(),
-            databases,
-        }
-    }
-
-    pub fn identify_function(
-        &self,
-        function: &FidFunctionView,
-        _relocations: &FidRelocationView,
-    ) -> Result<Vec<FidbfMatch>, FidMatchError> {
-        let FidHashQuad {
-            full_hash,
-            specific_hash,
-            ..
-        } = self.hasher.hash(&function.units)?;
-        let mut matches = Vec::new();
-        for database in &self.databases.databases {
-            matches.extend(database.identify_by_hashes(full_hash, specific_hash));
-        }
-        Ok(matches)
     }
 }

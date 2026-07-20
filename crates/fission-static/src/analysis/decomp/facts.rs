@@ -1,14 +1,19 @@
+use crate::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use fission_analysis_db::{FactSource, ProgramSnapshot, SymbolKind};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
     DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
-use fission_signatures::{
-    FidDatabaseSet, FidFunctionView, FidMatcher, FidRelocationView,
-    dissect_x86_function_to_fid_units,
-};
+use fission_pcode::midend::cspec::register_model_for_language;
+use fission_signatures::FidDatabaseSet;
+use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Generous upper bound on a single function's instruction count for FID
+/// hashing -- mirrors `fission_decompiler::fid`'s decode safety valve, not a
+/// tuning knob.
+const FID_INSTRUCTION_LIMIT: usize = 4000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactProvenance {
@@ -232,7 +237,17 @@ impl FactStore {
     /// metadata is available.
     ///
     /// The previous prologue byte-pattern matcher is intentionally not used here:
-    /// approximate pattern hits must not be promoted to `StrongFid`.
+    /// approximate pattern hits must not be promoted to `StrongFid`. Nor is
+    /// the older `fission_signatures::fid` hash/decoder pipeline -- it
+    /// computed a non-standard digest (byte-order and extra-mixing
+    /// deviations from Ghidra's real `FNV1a64MessageDigest`) over a
+    /// hand-rolled x86 decoder that never captured register operands at
+    /// all, so it could never actually match a real `.fidbf` database's
+    /// hashes. Hashing here instead goes through
+    /// `fission_sleigh::runtime::RuntimeSleighFrontend::fid_full_hash`,
+    /// validated byte-for-byte against real Ghidra 12.0.4 output (see
+    /// `PROJECT.md`'s FID entries) -- the same primitive `fission_cli
+    /// identify` uses.
     fn ingest_signature_matches(&mut self, binary: &LoadedBinary) {
         // Only support PE/ELF/Mach-O or format specification with x86 architecture for FID matching
         let is_x86 = binary.arch_spec.to_lowercase().contains("x86")
@@ -254,8 +269,36 @@ impl FactStore {
             return;
         }
 
-        let matcher = FidMatcher::new(db_set);
-        let binary_data = binary.data.as_slice();
+        self.ingest_signature_matches_with_databases(binary, &db_set.databases);
+    }
+
+    /// The per-function decode/hash/lookup loop, split out from
+    /// [`Self::ingest_signature_matches`] so tests can exercise it against a
+    /// synthetic, in-memory [`FidbfDatabase`] instead of needing a real
+    /// bundled `.fidbf` file whose exact hash happens to match a real
+    /// compiled binary (FID hashes are extremely build-specific -- see
+    /// `PROJECT.md`'s FID entries for how brittle a real end-to-end match
+    /// is to prove without knowing a database's exact source toolchain).
+    fn ingest_signature_matches_with_databases(
+        &mut self,
+        binary: &LoadedBinary,
+        databases: &[fission_signatures::fidbf::FidbfDatabase],
+    ) {
+        let Some(load_spec) = binary.load_spec() else {
+            return;
+        };
+        let Ok(frontend) = RuntimeSleighFrontend::new_for_load_spec(load_spec) else {
+            return;
+        };
+        let Some(register_model) = register_model_for_language(load_spec.pair.language_id.as_str())
+        else {
+            return;
+        };
+        let resolve_register_offset = |name: &str| -> Option<i64> {
+            register_model
+                .lookup_name(name)
+                .map(|(offset, _size)| offset as i64)
+        };
 
         for func in &binary.functions {
             // Skip imports/exports and already resolved PDB/Dwarf metadata
@@ -265,44 +308,39 @@ impl FactStore {
                 continue;
             }
 
-            // Calculate offset into the file
-            let offset = if func.address >= binary.image_base {
-                (func.address - binary.image_base) as usize
-            } else {
+            let max_bytes = function_max_bytes(binary, func.address, 4096);
+            let Some(bytes) = binary.view_bytes(func.address, max_bytes) else {
                 continue;
             };
-
-            if offset >= binary_data.len() {
-                continue;
-            }
-
-            // Determine size: use func.size or fallback to 512 bytes limit
-            let size = if func.size > 0 {
-                (func.size as usize).min(1024)
-            } else {
-                512
-            };
-            let end_offset = (offset + size).min(binary_data.len());
-            let func_bytes = &binary_data[offset..end_offset];
-
-            // Dissect instructions into FidHashUnits
-            let units = dissect_x86_function_to_fid_units(
-                func_bytes,
+            let memory_context = decode_memory_context_for(binary, func.address, max_bytes);
+            let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
+            let Ok(decoded) = frontend.lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
                 func.address,
-                &binary.relocation_symbols,
-            );
-            let view = FidFunctionView { units };
+                contract,
+                &memory_context,
+                None,
+            ) else {
+                continue;
+            };
 
-            // Attempt matching
-            if let Ok(matches) = matcher.identify_function(&view, &FidRelocationView) {
-                if let Some(best_match) = matches.first() {
-                    // Ingest matched name fact with tiered priority: FactProvenance::StrongFid
-                    self.ingest_name_fact(
-                        func.address,
-                        best_match.name.clone(),
-                        FactProvenance::StrongFid,
-                    );
-                }
+            let Some((_code_unit_count, full_hash)) =
+                frontend.fid_full_hash(&decoded.instructions, &resolve_register_offset)
+            else {
+                continue;
+            };
+
+            // No specific hash yet -- pass 0, so a match only survives
+            // identify_by_hashes' acceptance threshold on full-hash
+            // code-unit-size alone (no specific-hash bonus).
+            let best_match = databases
+                .iter()
+                .flat_map(|db| db.identify_by_hashes(full_hash, 0))
+                .max_by(|a, b| a.score.total_cmp(&b.score));
+
+            if let Some(best_match) = best_match {
+                // Ingest matched name fact with tiered priority: FactProvenance::StrongFid
+                self.ingest_name_fact(func.address, best_match.name, FactProvenance::StrongFid);
             }
         }
     }
@@ -411,7 +449,10 @@ impl FactStore {
             .or_insert(hints);
     }
 
-    pub fn structuring_hints(&self, address: u64) -> Option<&fission_midend_core::NirFunctionHints> {
+    pub fn structuring_hints(
+        &self,
+        address: u64,
+    ) -> Option<&fission_midend_core::NirFunctionHints> {
         self.structuring_hints.get(&address)
     }
 
@@ -599,6 +640,116 @@ fn merge_type_fact_layers(
 mod tests {
     use super::*;
     use fission_loader::loader::types::{DwarfLocalVar, DwarfLocation, DwarfParamInfo};
+    use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo};
+    use fission_signatures::fidbf::{FidbfDatabase, FidbfFunction, FidbfLibrary};
+
+    /// Serialize tests that construct a `RuntimeSleighFrontend` -- mirrors
+    /// `function_discovery::tests::sleigh_runtime_discovery_lock`, whose doc
+    /// comment notes parallel-harness flakes from concurrent x86-64 decode
+    /// init.
+    fn sleigh_runtime_facts_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// End-to-end proof that `ingest_signature_matches_with_databases` --
+    /// the SLEIGH-based FID replacement for the old, broken
+    /// `fission_signatures::fid` hash/decoder pipeline -- actually turns a
+    /// hash match into a `StrongFid` name fact. A real bundled `.fidbf`
+    /// database's hashes are far too build-specific to reliably reproduce
+    /// from a freshly compiled test binary (every attempt this session
+    /// against real databases came back "no match", expected per FID's own
+    /// design -- see `PROJECT.md`), so this uses a synthetic in-memory
+    /// database instead, seeded with the exact full hash
+    /// (`0x37783a7364fbdfe5`) already validated byte-for-byte against real
+    /// Ghidra 12.0.4 for `55 48 89 e5 b8 2a 00 00 00 5d c3` (`push rbp; mov
+    /// rbp,rsp; mov eax,0x2a; pop rbp; ret`) in
+    /// `fission-sleigh`'s `fid_full_hash_matches_ghidra_exactly_for_register_only_function`.
+    #[test]
+    fn fid_signature_match_ingests_strong_fid_name_fact() {
+        let _lock = sleigh_runtime_facts_lock();
+
+        let func_bytes: [u8; 11] = [
+            0x55, 0x48, 0x89, 0xE5, 0xB8, 0x2A, 0x00, 0x00, 0x00, 0x5D, 0xC3,
+        ];
+        let mut bytes = vec![0xCCu8; 0x1000];
+        bytes[0x100..0x100 + func_bytes.len()].copy_from_slice(&func_bytes);
+
+        let mut binary =
+            LoadedBinaryBuilder::new("fid_test.bin".to_string(), DataBuffer::Heap(bytes))
+                .format("ELF")
+                .image_base(0x400000)
+                .entry_point(0x401100)
+                .arch_spec("x86:LE:64:default")
+                .is_64bit(true)
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x401000,
+                    virtual_size: 0x1000,
+                    file_offset: 0,
+                    file_size: 0x1000,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .build()
+                .expect("synthetic binary");
+        binary.functions = vec![FunctionInfo {
+            address: 0x401100,
+            name: "sub_401100".to_string(),
+            size: func_bytes.len() as u64,
+            is_import: false,
+            is_export: false,
+            ..Default::default()
+        }];
+
+        // specific_hash deliberately doesn't match the query's (always 0,
+        // since the specific hash isn't implemented yet) -- proves the
+        // realistic no-bonus path, not an accidental 0==0 coincidence.
+        let database = FidbfDatabase::new(
+            "synthetic".to_string(),
+            vec![FidbfLibrary {
+                key: 1,
+                family_name: "synthetic_libc".to_string(),
+                version: "1.0".to_string(),
+                variant: String::new(),
+                ghidra_version: "12.0.4".to_string(),
+                language_id: "x86:LE:64:default".to_string(),
+                language_version: 1,
+                language_minor_version: 0,
+                compiler_spec_id: "gcc".to_string(),
+            }],
+            vec![FidbfFunction {
+                key: 1,
+                library_id: 1,
+                name: "known_prologue".to_string(),
+                full_hash: 0x37783a7364fbdfe5,
+                specific_hash: 0xdead_beef,
+                code_unit_size: 20, // clears FID_ACCEPT_THRESHOLD on its own
+                entry_point: 0,
+                has_terminator: true,
+                specific_hash_additional_size: 0,
+                domain_path: String::new(),
+                flags: 0,
+                auto_pass: false,
+                auto_fail: false,
+                force_specific: false,
+                force_relation: false,
+            }],
+            vec![],
+        );
+
+        let mut store = FactStore::default();
+        store.ingest_signature_matches_with_databases(&binary, std::slice::from_ref(&database));
+
+        assert_eq!(store.resolved_name(0x401100), Some("known_prologue"));
+        assert_eq!(
+            store.chosen_name_fact(0x401100).map(|f| f.provenance),
+            Some(FactProvenance::StrongFid)
+        );
+    }
 
     fn inferred_type(
         name: &str,
