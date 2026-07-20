@@ -862,6 +862,28 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     design and validation, not a rushed extension bolted onto this
     session's struct-field work. Left undone, honestly, rather than
     shipped half-correct.
+  - **Update, 2026-07-20**: the per-architecture DWARF-register-number
+    table gap above is now closed at the *data* level. Ghidra ships
+    exactly this as checked-in XML (`Ghidra/Processors/<Arch>/data/
+    languages/*.dwarf`, e.g. `x86-64.dwarf`'s `<register_mapping
+    dwarf="5" ghidra="RDI"/>`) — found by re-auditing `vendor/ghidra/`
+    against `utils/` for anything not yet mirrored (also confirmed
+    `.pspec`/`.cspec`/`.ldefs`/`.opinion`/`.slaspec` counts match
+    exactly; `.dwarf` was the only gap). Copied all 19 files (~76K)
+    into `utils/sleigh-specs/languages/<Arch>/`, matching the existing
+    per-architecture layout; provenance recorded in `THIRD_PARTY.md`.
+    **No LoongArch mapping exists in Ghidra 12.0.4** — would need the
+    LoongArch psABI spec directly if ever needed. `utils/` is entirely
+    gitignored (published as `fission-utils.tar.gz` via the "Publish
+    Utils Assets" Action, not committed to this repo), so this
+    addition is local-only until that Action is run — deliberately not
+    triggered yet, since nothing consumes these files: chaining
+    Ghidra-register-name -> SLEIGH `(offset, size)` still needs
+    `RegisterModel::lookup_name()` (already exists, from this
+    session's earlier `cspec` work) wired to a name lookup keyed by
+    the DWARF register number, and the harder live-range-correlation
+    half of this problem (previous bullet) is completely unaffected —
+    this only removes one of the two blockers, not both.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
