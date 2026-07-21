@@ -1,13 +1,17 @@
+use super::utils::{collect_referenced_labels, *};
+use crate::pipeline::PROTECTED_LSDA_LABELS;
 use crate::prelude::{
     HashMap, HashSet, HirBinaryOp, HirExpr, HirStmt, fold_logical_chain, negate_expr,
     simplify_logical_expr,
 };
 use fission_midend_core::util::label_cleanup::cleanup_redundant_labels;
-use super::utils::{collect_referenced_labels, *};
 
 pub fn prune_unreachable_after_terminal(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
-    let referenced_labels = collect_referenced_labels(stmts);
+    let mut referenced_labels = collect_referenced_labels(stmts);
+    PROTECTED_LSDA_LABELS.with(|protected| {
+        referenced_labels.extend(protected.borrow().iter().cloned());
+    });
     let mut idx = 0usize;
     while idx < stmts.len() {
         if !is_unconditional_terminal(&stmts[idx]) {
@@ -669,8 +673,17 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
 
             let segment = &stmts[i + 1..j];
             let segment_label_refs = collect_referenced_label_counts(segment);
+            // A label with zero textual Goto references anywhere still must
+            // not be silently drained here if it's an LSDA landing pad (see
+            // PROTECTED_LSDA_LABELS) -- it's a real entry point the
+            // personality routine unwinds into at runtime, just one
+            // `ref_counts`/`collect_referenced_label_counts` (both purely
+            // Goto-based) have no way to see.
             let external_ref_found = segment.iter().any(|s| {
                 if let HirStmt::Label(l) = s {
+                    if PROTECTED_LSDA_LABELS.with(|protected| protected.borrow().contains(l)) {
+                        return true;
+                    }
                     let total_refs = ref_counts.get(l).copied().unwrap_or(0);
                     let internal_refs = segment_label_refs.get(l).copied().unwrap_or(0);
                     total_refs > internal_refs

@@ -6,7 +6,7 @@ mod run;
 mod stages;
 
 pub use groups::{build_normalize_pipeline, run_normalize_pipeline};
-pub use run::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext};
+pub use run::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext, PROTECTED_LSDA_LABELS};
 pub use run::{
     is_large_hir_function, normalize_expr, normalize_function_body, normalize_hir_function,
     normalize_stmt,

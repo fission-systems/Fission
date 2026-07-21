@@ -152,7 +152,10 @@ pub fn cleanup_func_stmt_list(func: &mut HirFunction) {
     // fewer useful rounds; extra iterations mostly rescan unchanged trees.
     let stmt_count = count_hir_stmts(&func.body);
     let round_limit = if stmt_count > 500 { 6 } else { 16 };
-    let global_refs = crate::cleanup::utils::collect_referenced_labels(&func.body);
+    let mut global_refs = crate::cleanup::utils::collect_referenced_labels(&func.body);
+    PROTECTED_LSDA_LABELS.with(|protected| {
+        global_refs.extend(protected.borrow().iter().cloned());
+    });
     cleanup_stmt_list_with_options_and_preserved(
         &mut func.body,
         &func.name,
@@ -348,11 +351,29 @@ pub fn contains_call_stmts(stmts: &[HirStmt]) -> bool {
     stmts.iter().any(contains_call_stmt)
 }
 
-use std::cell::RefCell;
 use crate::HashMap;
+use std::cell::RefCell;
 
 thread_local! {
     pub static GLOBAL_SYMBOL_CONTEXT: RefCell<Option<GlobalSymbolContext>> = RefCell::new(None);
+    /// Labels reachable only via an out-of-band edge with no textual `Goto`
+    /// anywhere -- currently just C++ exception landing pads (see
+    /// `fission_loader::loader::elf::lsda`, and `StructuringHost::
+    /// lsda_landing_pad_labels` in `fission-midend-structuring`, which this
+    /// mirrors on the normalize side of the same problem). Same
+    /// thread-local-side-channel shape as `GLOBAL_SYMBOL_CONTEXT` above --
+    /// used instead of threading a parameter through every
+    /// `cleanup_func_stmt_list` call site (~30, all internal to this
+    /// crate's `pipeline/stages.rs`) for the same reason: this is
+    /// per-function context a handful of leaf passes need, not something
+    /// every pass in the pipeline should have to carry. Kept std-based
+    /// (not this crate's `HashSet` FxBuildHasher alias) to match
+    /// `GLOBAL_SYMBOL_CONTEXT`'s own precedent for a cross-crate boundary
+    /// value. Empty for every function in every binary without C++
+    /// exception handling -- the overwhelming majority of all decompiled
+    /// code -- so leaving it unset is always safe.
+    pub static PROTECTED_LSDA_LABELS: RefCell<std::collections::HashSet<String>> =
+        RefCell::new(std::collections::HashSet::new());
 }
 
 // Cross-crate DTO populated from fission-pcode's `NirRenderOptions::
@@ -901,6 +922,48 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn cleanup_func_stmt_list_keeps_protected_lsda_landing_pad() {
+        let mut func = empty_func();
+        func.body = vec![
+            HirStmt::Return(Some(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ))),
+            HirStmt::Label("landing_pad".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cleanup".to_string()),
+                rhs: HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+            HirStmt::Return(None),
+        ];
+
+        PROTECTED_LSDA_LABELS.with(|protected| {
+            protected.borrow_mut().insert("landing_pad".to_string());
+        });
+        cleanup_func_stmt_list(&mut func);
+        PROTECTED_LSDA_LABELS.with(|protected| {
+            protected.borrow_mut().clear();
+        });
+
+        assert!(
+            func.body
+                .iter()
+                .any(|s| matches!(s, HirStmt::Label(l) if l == "landing_pad")),
+            "protected LSDA landing pad label was dropped by cleanup_func_stmt_list: {:#?}",
+            func.body
+        );
+    }
 }
 
 pub fn run_cleanup_block<F>(
@@ -1000,7 +1063,10 @@ pub fn run_cleanup_family_passes(
                 &format!("cleanup_boundary_label_{stage}"),
                 perf,
                 |f| {
-                    let global_refs = crate::cleanup::utils::collect_referenced_labels(&f.body);
+                    let mut global_refs = crate::cleanup::utils::collect_referenced_labels(&f.body);
+                    PROTECTED_LSDA_LABELS.with(|protected| {
+                        global_refs.extend(protected.borrow().iter().cloned());
+                    });
                     cleanup_boundary_labels_recursive(&mut f.body, &global_refs)
                 },
             );
@@ -1452,7 +1518,11 @@ struct CleanupStmtOptions {
 fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
     let preserved_temps = HashSet::default();
     let global_refs = if depth == 0 {
-        Some(crate::cleanup::utils::collect_referenced_labels(stmts))
+        let mut refs = crate::cleanup::utils::collect_referenced_labels(stmts);
+        PROTECTED_LSDA_LABELS.with(|protected| {
+            refs.extend(protected.borrow().iter().cloned());
+        });
+        Some(refs)
     } else {
         None
     };
@@ -1477,7 +1547,11 @@ fn cleanup_stmt_list_with_options(
 ) {
     let preserved_temps = HashSet::default();
     let global_refs = if depth == 0 {
-        Some(crate::cleanup::utils::collect_referenced_labels(stmts))
+        let mut refs = crate::cleanup::utils::collect_referenced_labels(stmts);
+        PROTECTED_LSDA_LABELS.with(|protected| {
+            refs.extend(protected.borrow().iter().cloned());
+        });
+        Some(refs)
     } else {
         None
     };
@@ -1688,7 +1762,11 @@ fn cleanup_stmt_list_with_options_and_preserved(
             last_changed_pass = Some("promote_guarded_jump_target_tail");
         }
         let current_refs = if depth == 0 {
-            Some(crate::cleanup::utils::collect_referenced_labels(stmts))
+            let mut refs = crate::cleanup::utils::collect_referenced_labels(stmts);
+            PROTECTED_LSDA_LABELS.with(|protected| {
+                refs.extend(protected.borrow().iter().cloned());
+            });
+            Some(refs)
         } else {
             None
         };

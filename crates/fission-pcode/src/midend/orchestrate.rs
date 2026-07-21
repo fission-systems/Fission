@@ -18,6 +18,7 @@ use super::{
 };
 use crate::pcode::PcodeFunction;
 use fission_loader::loader::LoadedBinary;
+use fission_midend_structuring::StructuringHost;
 // Owner crate (not pcode re-export path) — keeps orchestrate boundary explicit.
 use fission_midend_normalize::{
     normalize_hir_function, pipeline as normalize_pipeline, take_normalize_wave_stats,
@@ -167,6 +168,9 @@ pub fn render_mlil_preview_with_binary_and_context(
     normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = Some(context);
     });
+    normalize_pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
+        *protected.borrow_mut() = builder.lsda_landing_pad_labels().into_iter().collect();
+    });
     // Stage: midend-normalize (owner crate).
     normalize_hir_function(&mut hir);
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
@@ -181,6 +185,9 @@ pub fn render_mlil_preview_with_binary_and_context(
     let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut hir.body);
     normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = None;
+    });
+    normalize_pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
+        protected.borrow_mut().clear();
     });
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);

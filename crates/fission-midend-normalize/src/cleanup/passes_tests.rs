@@ -1,8 +1,8 @@
 use super::utils::*;
 use super::*;
 // prelude via parent
-use fission_midend_core::*;
 use crate::HashSet;
+use fission_midend_core::*;
 
 fn int(bits: u32) -> NirType {
     NirType::Int {
@@ -662,7 +662,10 @@ fn eliminate_dead_temp_assigns_keeps_used_reg_flag_artifact() {
         },
     ];
 
-    assert!(!eliminate_dead_temp_assigns(&mut stmts, &HashSet::default()));
+    assert!(!eliminate_dead_temp_assigns(
+        &mut stmts,
+        &HashSet::default()
+    ));
     assert_eq!(stmts.len(), 2);
     assert!(matches!(
         &stmts[0],
@@ -692,6 +695,84 @@ fn prune_unreachable_after_return_stops_at_label_boundary() {
         vec![
             HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
             HirStmt::Label("kept".to_string()),
+            HirStmt::Return(None),
+        ]
+    );
+}
+
+#[test]
+fn prune_unreachable_after_terminal_keeps_protected_lsda_landing_pad() {
+    let mut stmts = vec![
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        HirStmt::Label("landing_pad".to_string()),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("cleanup".to_string()),
+            rhs: HirExpr::Const(1, int(32)),
+        },
+    ];
+
+    crate::pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
+        protected.borrow_mut().insert("landing_pad".to_string());
+    });
+    let changed = prune_unreachable_after_terminal(&mut stmts);
+    crate::pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
+        protected.borrow_mut().clear();
+    });
+
+    assert!(!changed);
+    assert_eq!(stmts.len(), 3);
+    assert_eq!(stmts[1], HirStmt::Label("landing_pad".to_string()));
+}
+
+#[test]
+fn single_pred_label_inline_drains_unprotected_dead_zone() {
+    let mut stmts = vec![
+        HirStmt::Goto("a".to_string()),
+        HirStmt::Label("dead".to_string()),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("unreached".to_string()),
+            rhs: HirExpr::Const(1, int(32)),
+        },
+        HirStmt::Label("a".to_string()),
+        HirStmt::Return(None),
+    ];
+
+    assert!(single_pred_label_inline(&mut stmts));
+    assert_eq!(stmts, vec![HirStmt::Return(None)]);
+}
+
+#[test]
+fn single_pred_label_inline_keeps_protected_lsda_landing_pad_in_dead_zone() {
+    let mut stmts = vec![
+        HirStmt::Goto("a".to_string()),
+        HirStmt::Label("landing_pad".to_string()),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("cleanup".to_string()),
+            rhs: HirExpr::Const(1, int(32)),
+        },
+        HirStmt::Label("a".to_string()),
+        HirStmt::Return(None),
+    ];
+
+    crate::pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
+        protected.borrow_mut().insert("landing_pad".to_string());
+    });
+    let changed = single_pred_label_inline(&mut stmts);
+    crate::pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
+        protected.borrow_mut().clear();
+    });
+
+    assert!(!changed);
+    assert_eq!(
+        stmts,
+        vec![
+            HirStmt::Goto("a".to_string()),
+            HirStmt::Label("landing_pad".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("cleanup".to_string()),
+                rhs: HirExpr::Const(1, int(32)),
+            },
+            HirStmt::Label("a".to_string()),
             HirStmt::Return(None),
         ]
     );
@@ -1812,7 +1893,10 @@ fn collapse_trivial_assign_returns_folds_eax_const() {
         },
         HirStmt::Return(Some(HirExpr::Var("eax".to_string()))),
     ];
-    assert!(collapse_trivial_assign_returns(&mut stmts, &HashSet::default()));
+    assert!(collapse_trivial_assign_returns(
+        &mut stmts,
+        &HashSet::default()
+    ));
     assert_eq!(stmts.len(), 1);
     assert!(matches!(
         &stmts[0],
