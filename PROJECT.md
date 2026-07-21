@@ -2268,6 +2268,92 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           format) are genuinely different, unrelated encodings this doesn't
           attempt — narrower scope than "any PE personality routine",
           matching only the one this session has a real fixture for.
+      - **Update — Call-Fixup mechanism (broader-audit item 3): found the
+        real bug wasn't what the audit described** (commit `1a7c85f8`).
+        User picked the next broader-audit item. Ghidra's `CallFixupAnalyzer`
+        substitutes a known compiler-helper-stub call (`__chkstk`,
+        `__x86.get_pc_thunk.*`) with its true semantic effect at lift time.
+        Built a real `x86_64-w64-mingw32-gcc`-compiled fixture with an 8KB
+        local array specifically to force a Windows/mingw stack probe, then
+        checked the raw p-code by hand before assuming the audit's framing
+        was still accurate for x64: it wasn't. `___chkstk_ms`'s own `Call`
+        op has no output and never touches `rsp` — the real `sub rsp, rax`
+        is ordinary, already-lifted caller code emitted right after the
+        call. No call-fixup substitution is needed for chkstk on x64 at
+        all (this differs from the historical 32-bit `_chkstk`/
+        `_alloca_probe` convention, where the callee itself adjusted
+        `esp`).
+        - What actually corrupted the decompiled output were two separate,
+          more fundamental stack-address-resolution gaps, both real
+          regardless of chkstk:
+          1. `resolve_stack_address_inner`'s `IntAdd`/`IntSub`/`PtrAdd`
+             handling only resolved a delta operand via `const_offset`
+             (requires a literal `const(...)` varnode) — so `sub rsp, rax`
+             (`rax` holding a compile-time-constant probe size from an
+             earlier `mov eax, IMM`) resolved to `None`, and everything
+             downstream depending on `rsp`'s value past that point failed
+             to resolve to a `(StackBase, offset)` pair at all. Fixed with
+             `resolve_constant_operand`, falling back to a short
+             `Copy`/`Cast`/`IntZExt`/`IntSExt` def-chain walk when the
+             operand isn't itself a literal (mirrors the existing
+             pointer-side recursion already in the same function).
+          2. A second, independent bug surfaced only once (1) was fixed:
+             functions establishing `rbp` via `lea rbp, [rsp+K]` for a
+             nonzero `K` (MSVC/mingw position the frame pointer partway
+             into a large frame, not at its base, so both locals and
+             incoming-argument home slots stay within signed-displacement
+             reach) got every `rbp`-relative local misclassified —
+             `resolve_stack_address_inner`'s bare-`rbp` shortcut always
+             treated `rbp` as "canonical frame base, offset 0" regardless
+             of `K`, so a local at a small *positive* `rbp`-relative
+             offset (still well short of the true caller-stack boundary)
+             read as an incoming parameter via
+             `classify_stack_slot_origin`'s positive-offset heuristic.
+             Fixed by having `infer_entry_stack_layout` track `rsp`'s
+             cumulative displacement from entry (`rsp_delta`) alongside
+             `K`, threading the resulting bias (`rsp_delta + K +
+             pointer_size`) through a new `rbp_frame_bias` field into the
+             shortcut. The `+ pointer_size` term keeps the formula
+             consistent with the pre-existing hardcoded `bias = 0` for the
+             textbook `push rbp; mov rbp, rsp` case (`rsp_delta ==
+             -pointer_size` right then). Also discovered zero-displacement
+             `lea rbp, [rsp+0]` lifts as a plain register `Copy` (SLEIGH
+             collapses the `+0` case) rather than through an
+             `IntAdd`-into-temp step, so that path needed the same
+             bias-aware treatment as the direct `mov rbp, rsp` copy, not
+             just the nonzero-`K` `lea` path.
+        - Caught one regression while iterating: an existing x86-32
+          `CallInd` staged-args test used a synthetic `mov ebp, esp`
+          prologue with no preceding push, which the new formula
+          (correctly) treats differently from the standard `push ebp; mov
+          ebp, esp` shape. The test's own doc comment says it's modeling
+          real "m32-O0" codegen, which always pushes `ebp` first — so the
+          fix was adding the missing `push ebp` op to the test's synthetic
+          pcode sequence to match what it claims to represent, not
+          weakening the assertion.
+        - Validated against real corpus functions, not just synthetic
+          ones: this also silently fixed two functions already in the
+          golden corpus snapshot (`fibonacci` in `math_gcc_O0.exe`, and
+          `rc4_init` in `crypto_gcc_O2.exe` — both use `lea rbp,[rsp+K]`
+          independent of any chkstk call) whose XMM register-spill /
+          parameter home-slot locals were previously misclassified the
+          same way; snapshot updated to the now-correct output.
+        - Validated: full workspace check clean, 1031/1031 in the 3
+          touched/adjacent crates (+3 new regression tests for
+          `infer_entry_stack_layout` covering the chkstk-adjacent `lea`
+          case, the standard push+mov case, and the no-push `mov` edge
+          case), `golden_corpus_check.py` clean against the corrected
+          160-function snapshot, full `cargo nextest run --workspace`
+          shows only the same 7 pre-existing unrelated `fission-emulator`
+          failures this session has confirmed unrelated at every prior
+          checkpoint.
+        - **Not attempted**: `__x86.get_pc_thunk.*` (32-bit PIC GOT-base
+          helper — genuinely needs call-fixup-style substitution, since it
+          returns the caller's own post-call address in an arbitrary
+          register, not through any standard ABI return-value convention)
+          — out of scope for this update, which focused on the concrete,
+          now-empirically-confirmed corruption rather than the audit's
+          original (partially inaccurate, for x64) framing.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
