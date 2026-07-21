@@ -9,6 +9,7 @@ mod coff;
 mod imports;
 mod mingw_pseudo_reloc;
 mod pdata;
+pub mod seh;
 
 pub struct PeLoader;
 

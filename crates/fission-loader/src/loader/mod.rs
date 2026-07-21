@@ -13,6 +13,7 @@ pub mod dwarf;
 pub mod elf;
 pub mod formats;
 pub mod function_view;
+pub mod gcc_lsda;
 pub mod identity;
 pub mod macho;
 pub mod pdb_registers;
@@ -65,6 +66,9 @@ impl LoadedBinary {
         }
         if format.starts_with("ELF") {
             binary.eh_lsda = elf::lsda::analyze_eh_lsda(&binary);
+        }
+        if format.starts_with("PE") {
+            binary.eh_lsda = pe::seh::analyze_seh_lsda(&binary);
         }
         merge_debug_function_sizes(&mut binary);
 

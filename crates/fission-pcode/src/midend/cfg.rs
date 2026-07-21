@@ -116,7 +116,7 @@ pub(super) fn build_successor_index_map(
 }
 
 /// Extra `(from_block_idx, to_block_idx)` edges for C++ exception-handling
-/// landing pads (see `fission_loader::loader::elf::lsda`) that
+/// landing pads (see `fission_loader::loader::gcc_lsda`) that
 /// `build_successor_index_map`'s terminator-op-based derivation can never
 /// discover on its own: a landing pad is reachable only via the personality
 /// routine unwinding into it at runtime, not any `Branch`/`CBranch`/
@@ -629,7 +629,7 @@ mod same_block_forward_tests {
 mod lsda_extra_edges_tests {
     use super::*;
     use crate::pcode::PcodeBasicBlock;
-    use fission_loader::loader::elf::lsda::{LsdaCallSite, LsdaInfo};
+    use fission_loader::loader::gcc_lsda::{LsdaCallSite, LsdaInfo};
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
 
     fn empty_block(start_address: u64) -> PcodeBasicBlock {
@@ -654,7 +654,7 @@ mod lsda_extra_edges_tests {
     /// 0) whose only edge to the landing-pad block (index 2) comes from
     /// `binary.eh_lsda`, not from any p-code branch/call/fallthrough
     /// `build_successor_index_map` could derive on its own -- see
-    /// `crates/fission-loader/src/loader/elf/lsda.rs` and the real
+    /// `crates/fission-loader/src/loader/gcc_lsda.rs` and the real
     /// `guarded()`/`x64_dyn_lsda_test.elf` case this mirrors.
     #[test]
     fn resolves_landing_pad_edge_from_binary_eh_lsda() {

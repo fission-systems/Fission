@@ -254,7 +254,7 @@ fn collect_label_leaders(binary: &LoadedBinary) -> BTreeSet<u64> {
     leaders
 }
 
-/// LSDA landing pads (see `fission_loader::loader::elf::lsda`) are only
+/// LSDA landing pads (see `fission_loader::loader::gcc_lsda`) are only
 /// reachable via the C++ personality routine unwinding into them when a
 /// `throw` propagates through a covered call site -- no ordinary jump/call
 /// instruction targets them, so without this they're invisible to both the
@@ -550,7 +550,7 @@ mod tests {
     }
 
     /// An LSDA landing pad has no ordinary jump/call predecessor -- see
-    /// `fission_loader::loader::elf::lsda` -- so `ControlFlowFacts::assemble`
+    /// `fission_loader::loader::gcc_lsda` -- so `ControlFlowFacts::assemble`
     /// must surface it through both `label_leaders` (so the decoder actually
     /// disassembles it) and `flow_edges` (so reachability propagation keeps
     /// it, rather than pruning it as dead code), and `decode_context_for`
@@ -584,9 +584,9 @@ mod tests {
                 .expect("build");
         binary.eh_lsda.insert(
             0x1000,
-            fission_loader::loader::elf::lsda::LsdaInfo {
+            fission_loader::loader::gcc_lsda::LsdaInfo {
                 lp_start: 0x1000,
-                call_sites: vec![fission_loader::loader::elf::lsda::LsdaCallSite {
+                call_sites: vec![fission_loader::loader::gcc_lsda::LsdaCallSite {
                     start: 0x1020,
                     end: 0x1030,
                     landing_pad: Some(0x1050),

@@ -358,7 +358,7 @@ thread_local! {
     pub static GLOBAL_SYMBOL_CONTEXT: RefCell<Option<GlobalSymbolContext>> = RefCell::new(None);
     /// Labels reachable only via an out-of-band edge with no textual `Goto`
     /// anywhere -- currently just C++ exception landing pads (see
-    /// `fission_loader::loader::elf::lsda`, and `StructuringHost::
+    /// `fission_loader::loader::gcc_lsda`, and `StructuringHost::
     /// lsda_landing_pad_labels` in `fission-midend-structuring`, which this
     /// mirrors on the normalize side of the same problem). Same
     /// thread-local-side-channel shape as `GLOBAL_SYMBOL_CONTEXT` above --
