@@ -2984,6 +2984,84 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           pattern — a separate, larger, genuinely not-yet-attempted gap,
           clearly distinct from (and much bigger than) the crash fixed
           here.
+      - **Implement — `FormatStringAnalyzer`** (commit `fc4b88d8`). The
+        #1-ranked candidate from the earlier scorecard re-derive, deferred
+        at the time for the smaller `X86FunctionPurgeAnalyzer`. Types
+        printf-family variadic call arguments from their own format
+        string's `%`-conversion specifiers: `printf("%d %s", x, y)` now
+        types `x` as `int` and `y` as `char*`, instead of leaving both as
+        generic register-width defaults (`uint`/`ulonglong`) the way
+        every variadic call did before.
+        - Spent real investigation confirming the format string's *text*
+          was already available before writing any code (a prior attempt
+          this same session to trace this manually failed and needed a
+          research agent): `NirRenderOptions::from_loaded_binary`
+          (`fission-midend-core/src/ir/options.rs`) pre-populates
+          `global_names` with every extracted `.rdata` string, already
+          quoted and escaped; `lower_varnode_inner` (`fission-pcode`)
+          resolves a constant matching `global_names` to `HirExpr::
+          AddressOfGlobal("\"...\"")`; and `arg_var_name` (already used
+          by this file's existing per-parameter typing) already captures
+          `AddressOfGlobal` names verbatim into the existing call-site
+          collection. The quoted text was already sitting in `arg_vars`
+          — no new binary access or HIR traversal needed.
+        - **Two real, pre-existing problems found and fixed along the
+          way**, both via testing against real fixtures rather than
+          assuming the naive implementation would work:
+          1. `tighten_binding_ty` (already used by this file's main
+             WinAPI-signature typing) only allows `Unknown → concrete` or
+             `Ptr(Unknown) → Ptr(concrete)`. Confirmed a call-argument
+             binding is essentially never still `Unknown` by the time
+             this pass runs on real compiled code — `fission-pcode`'s HIR
+             builder always assigns a generic *unsigned*-int default from
+             raw register width at materialization time — and confirmed
+             this SAME limitation already silently affects the existing
+             WinAPI-signature typing too (a real `GetWindowRect` call's
+             own `HWND`/`RECT*` params stayed `ulonglong` end-to-end,
+             unrelated to anything touched this round). Rather than
+             loosen the shared `tighten_binding_ty` (broad blast radius,
+             many other callers whose conservatism is appropriate), added
+             a narrowly-scoped `apply_variadic_printf_arg_ty` that
+             additionally allows overriding a generic unsigned-int
+             default specifically — a format specifier is strong,
+             authoritative evidence (the actual API contract), unlike raw
+             register width.
+          2. Even with that fix, a `%s` argument's refined type still
+             didn't survive to the real source parameter in the final
+             output — the immediate call-site temp refined correctly on
+             every fixed-point iteration, but the type never reached the
+             `char*` parameter it was copied from (`argN = param_2;
+             printf(fmt, argN)`; depending on copy-propagation/renaming
+             timing elsewhere in the fixed-point loop, the refinement
+             doesn't reliably survive). Fixed by having this pass trace
+             the copy chain itself (`collect_copy_sources` +
+             `apply_variadic_printf_arg_ty_transitively`) rather than
+             depending on later passes to carry it through.
+        - Deliberately scoped to the unambiguous ANSI narrow-string
+          printf family (`printf`/`fprintf`/`sprintf`/`snprintf`/their
+          `_s` secure-CRT variants). scanf-family (variadic args are
+          *pointers* to write into, a different typing rule) and
+          wprintf-family (`%s` means narrow `char*`, not `wchar_t*`, per
+          the ANSI convention — a correctness trap without a fixture to
+          validate against) are intentionally excluded, not overlooked.
+        - Validated against two real `x86_64-w64-mingw32-gcc` fixtures:
+          `printf("%s %d", ...)` end-to-end (both the immediate call-site
+          temp and the real source parameter correctly typed
+          `int`/`char*`), and a `GetWindowRect` call confirming the
+          pre-existing WinAPI-signature-typing limitation this round
+          discovered is unchanged (properly scoped — not fixed, not
+          regressed by this work). New unit test models the real-world
+          starting condition (generic unsigned-int default, not
+          `Unknown`) rather than the idealized `Unknown`-starting-point
+          every other test in this file uses, specifically to catch a
+          regression back to `tighten_binding_ty`-only behavior.
+        - Validated: `fission-midend-normalize` 268/268 (+1),
+          `fission-pcode`/`-decompiler`/`-static`/`-midend-normalize`
+          1306/1306, `golden_corpus_check.py` clean (no `printf` calls in
+          the corpus, confirmed — unaffected by construction, not a
+          meaningful regression signal either way), full `cargo nextest
+          run --workspace` 2146/2146 minus the same 7 pre-existing
+          unrelated `fission-emulator` failures.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
