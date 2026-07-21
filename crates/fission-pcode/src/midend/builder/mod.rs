@@ -157,9 +157,8 @@ impl<'a> PreviewBuilder<'a> {
             let candidate = next_temp_name(ty, &mut self.temp_next_id);
             if !self.binding_name_exists(&candidate) {
                 if temp_name_trace_enabled() {
-                    TEMP_NAME_TRACE.with(|t| {
-                        t.borrow_mut().push(format!("{before_id}->{candidate}"))
-                    });
+                    TEMP_NAME_TRACE
+                        .with(|t| t.borrow_mut().push(format!("{before_id}->{candidate}")));
                 }
                 return candidate;
             }
@@ -552,10 +551,21 @@ impl<'a> PreviewBuilder<'a> {
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
         ) && let Some(HirExpr::Call { .. }) = target_expr.as_ref()
         {
-            if evidence.opcode == "BranchInd" {
-                return HirStmt::Return(target_expr);
-            }
-            return HirStmt::Expr(target_expr.expect("call target expression exists after guard"));
+            // Every site that reaches here (`recover_known_external_tail_call_expr`,
+            // `recover_tail_call_expr_from_target_expr`,
+            // `recover_tail_call_expr_from_branchind_target`) only produces a
+            // `Call` target_expr when it has recovered a genuine tail call --
+            // control permanently leaves this function via an unconditional
+            // jump into the callee, so the callee's return *is* this
+            // function's return. That holds regardless of whether the
+            // underlying p-code opcode was a real `BranchInd` (register-
+            // indirect jump) or a direct `Branch` to a statically-known
+            // address (`evidence.opcode` used to gate on the literal string
+            // `"BranchInd"` here, which silently dropped the `return` for
+            // every direct-address tail call -- `jmp known_func` rendered as
+            // a bare `known_func();` statement with fallthrough implied,
+            // instead of `return known_func();`).
+            return HirStmt::Return(target_expr);
         }
 
         if matches!(

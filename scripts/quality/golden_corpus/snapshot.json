@@ -9,8 +9,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -51,8 +51,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -93,8 +93,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -135,8 +135,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -177,8 +177,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -219,8 +219,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -261,8 +261,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -303,8 +303,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -345,8 +345,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -387,8 +387,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -429,8 +429,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -471,8 +471,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -513,8 +513,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -555,8 +555,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -597,8 +597,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",
@@ -639,8 +639,8 @@
    "code_nir": "void __gcc_deregister_frame(void)\n{\n    ulonglong home_0;\n\n    return;\n}\n"
   },
   "__gcc_register_frame@0x140001510": {
-   "code_hir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n",
-   "code_nir": "undefined __gcc_register_frame(void)\n{\n    atexit();\n}\n"
+   "code_hir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n",
+   "code_nir": "ulonglong __gcc_register_frame(void)\n{\n    return atexit();\n}\n"
   },
   "__mingw_invalidParameterHandler@0x140001000": {
    "code_hir": "void __mingw_invalidParameterHandler(void)\n{\n    return;\n}\n",

@@ -269,8 +269,7 @@ fn preview_x64_ret_prefers_abi_return_register_over_stack_target() {
     let code = render_mlil_preview(&func, "x64_value_ret", 0x140002100, &preview_options())
         .expect("preview render");
     assert!(
-        code.contains("return 42;")
-            || (code.contains("= 42;") && code.contains("return ")),
+        code.contains("return 42;") || (code.contains("= 42;") && code.contains("return ")),
         "{code}"
     );
     assert!(!code.contains("return *"), "{code}");
@@ -338,8 +337,7 @@ fn preview_x64_ret_recovers_single_predecessor_return_register() {
     )
     .expect("preview render");
     assert!(
-        code.contains("return 7;")
-            || (code.contains("= 7;") && code.contains("return ")),
+        code.contains("return 7;") || (code.contains("= 7;") && code.contains("return ")),
         "{code}"
     );
     assert!(!code.contains("return;"), "{code}");
@@ -405,7 +403,8 @@ fn preview_x64_ret_recovers_predecessor_computed_return_register() {
         "x64_predecessor_computed_value_ret",
         0x140002300,
         &preview_options_win64(),
-    ).expect("preview render");
+    )
+    .expect("preview render");
     let code = crate::midend::orchestrate::take_last_layered_pseudocode()
         .expect("layered pseudocode")
         .hir;
@@ -563,7 +562,8 @@ fn preview_inlines_lea_register_return() {
         }],
     };
 
-    let _nir = render_mlil_preview(&func, "lea_add", 0x140001450, &options).expect("preview render");
+    let _nir =
+        render_mlil_preview(&func, "lea_add", 0x140001450, &options).expect("preview render");
     let code = crate::midend::orchestrate::take_last_layered_pseudocode()
         .expect("layered pseudocode")
         .hir;
@@ -799,8 +799,7 @@ fn preview_projects_narrow_read_from_wide_register_write() {
     let code = render_mlil_preview(&func, "wide_to_narrow", 0x140001900, &options)
         .expect("preview render");
     assert!(
-        code.contains("return 0;")
-            || (code.contains("= 0;") && code.contains("return ")),
+        code.contains("return 0;") || (code.contains("= 0;") && code.contains("return ")),
         "{code}"
     );
     assert!(!code.contains("param_2"), "{code}");
@@ -977,8 +976,7 @@ fn preview_lowers_register_xor_self_to_zero() {
     let code =
         render_mlil_preview(&func, "xor_self_zero", 0x140001960, &options).expect("preview render");
     assert!(
-        code.contains("return 0;")
-            || (code.contains("= 0;") && code.contains("return ")),
+        code.contains("return 0;") || (code.contains("= 0;") && code.contains("return ")),
         "{code}"
     );
     assert!(!code.contains("r12"), "{code}");
@@ -1562,7 +1560,11 @@ fn preview_known_forward_external_direct_branch_becomes_tail_call() {
         Some(&context),
     )
     .expect("preview render");
-    assert!(code.contains("external_tail();"), "{code}");
+    assert!(
+        code.contains("return external_tail();"),
+        "direct-address tail call must render with `return` -- control leaves the \
+         function permanently, it doesn't fall through:\n{code}"
+    );
     assert!(!code.contains("__fission_branchind("), "{code}");
     assert!(!code.contains("goto block_406000;"), "{code}");
 }
@@ -1624,7 +1626,11 @@ fn preview_known_external_tail_call_recovers_same_block_register_arg() {
         Some(&context),
     )
     .expect("preview render");
-    assert!(code.contains("external_tail(callback);"), "{code}");
+    assert!(
+        code.contains("return external_tail(callback);"),
+        "direct-address tail call with a recovered argument must still render \
+         with `return`:\n{code}"
+    );
     assert!(!code.contains("__fission_branchind("), "{code}");
 }
 
@@ -2029,7 +2035,8 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
         0x140006300,
         &preview_options_win64(),
         Some(&context),
-    ).expect("preview render");
+    )
+    .expect("preview render");
     let code = crate::midend::orchestrate::take_last_layered_pseudocode()
         .expect("layered pseudocode")
         .hir;
@@ -2040,7 +2047,9 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
     assert!(code.contains("printf("), "{code}");
     assert!(
         code.contains("printf(5368725504, 15, 10, (ulonglong)fibonacci(10), 15, 20);")
-            || (code.contains("rax = fibonacci(") && code.contains("printf(") && code.contains("rax")),
+            || (code.contains("rax = fibonacci(")
+                && code.contains("printf(")
+                && code.contains("rax")),
         "{code}"
     );
     assert!(!code.contains("FUN_"), "{code}");
@@ -3228,5 +3237,3 @@ fn preview_leaves_non_exact_branch_shape_as_generic_value() {
     // register-space flag bits must still keep distinct SLA names.
     assert_eq!(print_expr(&cond), "zf ^ sf");
 }
-
-
