@@ -580,6 +580,115 @@ impl<'a> PreviewBuilder<'a> {
         resolved
     }
 
+    /// Resolves a pointer to a byte offset from the x86 `FS_OFFSET`/
+    /// `GS_OFFSET` pseudo-register -- the Windows Thread Environment
+    /// Block (TEB) segment base (`fs:` on 32-bit, `gs:` on 64-bit) --
+    /// when it's computed as `(FS_OFFSET|GS_OFFSET) + K` for a compile-
+    /// time-constant `K`, mirroring `resolve_stack_address_inner`'s own
+    /// recursive `Copy`/`Cast`/`IntZExt`/`IntSExt`/`IntAdd`/`PtrAdd`
+    /// structure (reusing `resolve_constant_operand` for the delta) but
+    /// against a single fixed base register instead of a
+    /// calling-convention-specific table, since there's exactly one
+    /// segment-base register that matters here regardless of `x86_32`
+    /// vs `WindowsX64`. Confirmed via a real `x86_64-w64-mingw32-gcc`
+    /// build (`movq %gs:0x60, %rax`) that SLEIGH lifts this exactly as
+    /// `IntAdd(GS_OFFSET, const(0x60))` -- `FS_OFFSET`/`GS_OFFSET` are
+    /// real named registers in `utils/sleigh-specs/languages/x86/
+    /// ia.sinc`, both at register-space offset `0x110` (the applicable
+    /// one selected by bitness at assemble time, so no separate 32-
+    /// vs-64-bit branch is needed here).
+    pub(in crate::midend::builder) fn resolve_teb_field_offset(
+        &self,
+        ptr: &Varnode,
+    ) -> Option<i64> {
+        self.resolve_teb_field_offset_inner(ptr, &mut HashSet::default())
+    }
+
+    /// [`resolve_teb_field_offset`] plus [`teb_field_name`]'s lookup, for
+    /// the direct "does this pointer resolve to a *known, named* TEB
+    /// field" query the `Load`-lowering path needs. Returns the name
+    /// wrapped in a `Cast` to the field's real type -- a bare, type-less
+    /// `HirExpr::Var` (matching the untyped `DAT_XXXXXXXX` convention)
+    /// left downstream return-type inference with nothing to work with
+    /// (`undefined is_debugged(void)` on a real fixture); registering a
+    /// full `self.temps`/`self.locals` binding instead (mirroring how a
+    /// stack slot's `Var` is backed by one) was tried and rejected -- it
+    /// makes the renderer treat the name as a genuine local needing a
+    /// declaration + initializer, which it isn't (there's no assigning
+    /// `HirStmt` for it anywhere in the body, since it's a read from a
+    /// fixed location, not a computed value), producing a *worse*,
+    /// uninitialized-looking declaration. A `Cast` gives the use site a
+    /// real type without implying local storage that needs to exist.
+    pub(in crate::midend::builder) fn try_teb_field_var(&self, ptr: &Varnode) -> Option<HirExpr> {
+        let offset = self.resolve_teb_field_offset(ptr)?;
+        let (name, is_pointer) = teb_field_name(offset, self.options.is_64bit)?;
+        let ty = if is_pointer {
+            type_from_size(self.options.pointer_size, false)
+        } else {
+            type_from_size(4, false)
+        };
+        Some(HirExpr::Cast {
+            ty,
+            expr: Box::new(HirExpr::Var(name.to_string())),
+        })
+    }
+
+    fn resolve_teb_field_offset_inner(
+        &self,
+        ptr: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Option<i64> {
+        // `FS_OFFSET`/`GS_OFFSET` are declared as a 2-entry register array
+        // starting at 0x110 (`ia.sinc`: `define register offset=0x110
+        // size=$(SIZE) [ FS_OFFSET GS_OFFSET ]`) -- `FS_OFFSET` occupies
+        // `[0x110, 0x110+size)`, `GS_OFFSET` immediately follows at
+        // `0x110+size`. Confirmed empirically: a real 64-bit build's
+        // `gs:0x60` access lifts with base register offset `0x118`
+        // (`0x110 + 8`), not `0x110` itself -- checking only the literal
+        // `0x110` (which would only ever match a 32-bit `fs:` access)
+        // silently failed to recognize the far more common 64-bit `gs:`
+        // case entirely.
+        if is_register_space_id(ptr.space_id) && matches!(ptr.offset, 0x110 | 0x114 | 0x118) {
+            return Some(0);
+        }
+
+        let key = VarnodeKey::from(ptr);
+        if !visiting.insert(key.clone()) {
+            return None;
+        }
+        let resolved = match self.lookup_def_site(ptr).map(|(_, op)| op) {
+            Some(op) => match op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt => {
+                    self.resolve_teb_field_offset_inner(&op.inputs[0], visiting)
+                }
+                PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd => {
+                    if op.inputs.len() < 2 {
+                        None
+                    } else if let Some(offset) =
+                        self.resolve_teb_field_offset_inner(&op.inputs[0], visiting)
+                    {
+                        self.resolve_constant_operand(&op.inputs[1])
+                            .map(|delta| offset + delta)
+                    } else if let Some(offset) =
+                        self.resolve_teb_field_offset_inner(&op.inputs[1], visiting)
+                    {
+                        self.resolve_constant_operand(&op.inputs[0])
+                            .map(|delta| offset + delta)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            None => None,
+        };
+        visiting.remove(&key);
+        resolved
+    }
+
     /// Resolves a p-code operand to a compile-time-known constant, either
     /// directly (a literal `const(...)` varnode) or by walking a short
     /// `Copy`/`Cast`/`IntZExt`/`IntSExt` def chain back to one -- e.g. a
@@ -794,6 +903,55 @@ fn parse_stack_displacement(text: &str) -> Option<i64> {
         return parse_stack_immediate(rest).map(|val| -val);
     }
     None
+}
+
+/// Name for a well-known Windows TEB field at the given `FS_OFFSET`/
+/// `GS_OFFSET`-relative byte offset, if any -- `None` for anything else
+/// (still renders as a plain, correct `HirExpr::Load`, just without a
+/// descriptive name; this table isn't meant to be exhaustive, only to
+/// cover the handful of fields that come up often enough in practice to
+/// be worth naming, especially the classic `PEB.BeingDebugged` anti-debug
+/// check chain: `TEB.ProcessEnvironmentBlock` then `+0x2`). Offsets are
+/// part of the stable, publicly-documented (if unofficial) portion of the
+/// TEB/TIB layout that hasn't changed across Windows versions; x86 and
+/// x64 have different offsets for the same field throughout, purely from
+/// every preceding pointer-sized field differing in size.
+fn teb_field_name(offset: i64, is_64bit: bool) -> Option<(&'static str, bool)> {
+    // (name, is_pointer) -- `is_pointer` picks the `Cast` type
+    // `try_teb_field_var` wraps the name in: most TEB fields worth
+    // naming are themselves pointers (`ExceptionList`,
+    // `StackBase`/`StackLimit`, `Self`, `ThreadLocalStoragePointer`,
+    // `ProcessEnvironmentBlock`); `ClientId`'s two fields are `HANDLE`s
+    // (pointer-sized but not really pointers) and `LastErrorValue` is a
+    // plain `DWORD` -- both rendered as a 4-byte unsigned int rather than
+    // a pointer type.
+    Some(if is_64bit {
+        match offset {
+            0x00 => ("teb_ExceptionList", true),
+            0x08 => ("teb_StackBase", true),
+            0x10 => ("teb_StackLimit", true),
+            0x30 => ("teb_Self", true),
+            0x40 => ("teb_ClientId_ProcessId", false),
+            0x48 => ("teb_ClientId_ThreadId", false),
+            0x58 => ("teb_ThreadLocalStoragePointer", true),
+            0x60 => ("teb_ProcessEnvironmentBlock", true),
+            0x68 => ("teb_LastErrorValue", false),
+            _ => return None,
+        }
+    } else {
+        match offset {
+            0x00 => ("teb_ExceptionList", true),
+            0x04 => ("teb_StackBase", true),
+            0x08 => ("teb_StackLimit", true),
+            0x18 => ("teb_Self", true),
+            0x20 => ("teb_ClientId_ProcessId", false),
+            0x24 => ("teb_ClientId_ThreadId", false),
+            0x2c => ("teb_ThreadLocalStoragePointer", true),
+            0x30 => ("teb_ProcessEnvironmentBlock", true),
+            0x34 => ("teb_LastErrorValue", false),
+            _ => return None,
+        }
+    })
 }
 
 fn parse_stack_immediate(text: &str) -> Option<i64> {

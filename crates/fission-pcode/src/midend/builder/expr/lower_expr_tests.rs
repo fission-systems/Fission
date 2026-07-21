@@ -1961,3 +1961,53 @@ fn cdq_or_via_copy_of_wide_still_collapses_srem() {
         "Copy-of-wide CDQ dividend must collapse:\n{code}"
     );
 }
+
+/// Windows TEB access via the `gs:` segment (x64): `mov reg, gs:0x60` lifts
+/// as `IntAdd(GS_OFFSET, const(0x60))` then `Load` of that address --
+/// confirmed against a real `x86_64-w64-mingw32-gcc` build compiling
+/// `movq %gs:0x60, %rax` (the classic `TEB.ProcessEnvironmentBlock`
+/// access, the first hop of the `PEB.BeingDebugged` anti-debug check).
+/// `GS_OFFSET` is a real SLEIGH register at register-space offset `0x118`
+/// (`utils/sleigh-specs/languages/x86/ia.sinc`: `FS_OFFSET`/`GS_OFFSET`
+/// declared as a 2-entry array starting at `0x110`, `GS_OFFSET` = second
+/// entry = `0x110 + 8` on a 64-bit build).
+#[test]
+fn gs_relative_teb_field_gets_descriptive_name() {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+
+    let gs_offset = register(0x118, 8);
+    let teb_field_addr = varnode(0x9200);
+    let loaded = varnode(0x9300);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(teb_field_addr.clone()),
+                vec![gs_offset, constant_sized(0x60, 8)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Load,
+                Some(loaded.clone()),
+                vec![constant_sized(3, 8), teb_field_addr],
+            ),
+            op(2, PcodeOpcode::Return, None, vec![constant(0), loaded]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "gs_teb_access", 0x1000, &options).expect("render");
+    eprintln!("gs_teb_access:\n{code}");
+    assert!(
+        code.contains("teb_ProcessEnvironmentBlock"),
+        "expected a descriptive TEB field name, not raw gs_offset arithmetic:\n{code}"
+    );
+    assert!(
+        !code.contains("undefined"),
+        "TEB field access must not degrade return-type inference to `undefined`:\n{code}"
+    );
+}
