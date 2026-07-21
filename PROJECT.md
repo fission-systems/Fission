@@ -2839,6 +2839,74 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           hidden functions; the synthetic unit tests are the primary
           regression guard, matching how Ghidra's own AIF is inherently
           hard to validate against "normal" binaries by design).
+      - **Implement — `X86FunctionPurgeAnalyzer`, found via a fresh
+        re-survey of the scorecard's leftover items** (commit `387c2feb`).
+        The original 15-item "zero corresponding code" list only had its
+        top 4 individually named; the other ~11 were never recorded, so
+        rather than trust a stale/incomplete memory, re-derived them from
+        scratch against the current codebase. Most turned out to already
+        be covered and needed no further work: FID/library-function
+        identification (`fission-decompiler/src/fid.rs` +
+        `fission-signatures/src/fidbf/*`), C++/Rust/MSVC demangling
+        (`fission-loader/src/loader/demangle.rs`), PDB consumption
+        (`pdb_sidecar.rs`), PE SEH/exception handling (`pe/pdata.rs`,
+        `pe/seh.rs`), RTTI (`loader/analyzers/cpp.rs`), DWARF
+        (`loader/dwarf/*`), Golang symbol/string recovery
+        (`golang_typeinfo.rs`), no-return-function detection
+        (`fission-core/core/ghidra_no_return.rs`), import-thunk
+        classification (`function_provenance/mod.rs`), and mingw pseudo-
+        relocation (`pe/mingw_pseudo_reloc.rs`) — confirmed via grep+read
+        against real files, not re-implemented.
+        - The one genuine gap: Ghidra's own `x86win.cspec` declares
+          `__stdcall`'s `extrapop` as literally `"unknown"` — must be
+          resolved per-function from the callee's own `RET imm16`, the
+          ground-truth stack-argument byte count for callee-cleanup
+          conventions (stdcall/fastcall/thiscall). Fission's cspec parser
+          (`cspec/mod.rs`) silently `.unwrap_or(0)`s any non-numeric
+          `extrapop` string, but this barely mattered in practice — x86-32
+          parameter recovery goes through a separate, purely usage-driven
+          path (`incoming_stack_argument_index`/
+          `ensure_incoming_stack_param_binding`) that only ever
+          materializes a parameter slot once something in the body reads
+          it, so a stdcall function's trailing *unused* parameter (dead in
+          the body, but still part of the real signature and still purged
+          by the callee at `ret`) was silently dropped from the recovered
+          signature.
+        - Needed no cross-crate plumbing: the purge amount is entirely a
+          property of the callee's own epilogue, already visible in its
+          own lifted p-code — confirmed via raw p-code dump of a real
+          `ret $0xc` that it lifts as an extra `IntAdd(ESP, imm16)`
+          sharing the *same originating-instruction address* as the
+          return-address-pop `IntAdd(ESP, pointer_size)` and the `Return`
+          op itself. New `apply_x86_32_stack_purge_arity_floor`
+          (`stack_slots.rs`) sums same-address ESP adjustments at every
+          `Return` site, subtracts the pointer-size pop baseline, and if
+          positive, forces `ensure_incoming_stack_param_binding` up to the
+          implied minimum arity. Restricting to same-address ops (rather
+          than summing every ESP adjustment in the block) means an
+          unrelated `add esp,N` used for local-variable cleanup elsewhere
+          in the same epilogue can't throw it off.
+        - Validated against a real `i686-w64-mingw32-gcc`-compiled
+          `__stdcall` fixture with an unused third parameter: before,
+          `int example@12(int param_1, int param_2)`; after, `int
+          example@12(int param_1, int param_2, uint param_3)`. Also built
+          and checked a cdecl counterpart (no `RET imm16` → correctly
+          unaffected, no false parameter forced — matches Ghidra's own
+          scope, since caller-cleanup conventions have no epilogue signal
+          at all) and a fully-used-stdcall counterpart (purge matches
+          usage-derived arity exactly → idempotent, no duplication).
+        - Validated: full workspace check clean,
+          `fission-pcode`/`-decompiler`/`-static`/`-midend-normalize`
+          1304/1304 (+1 new test, isolated to just the arity-floor
+          mechanism since ebp-relative param-read recognition is a
+          separate, already-covered code path with its own prologue-
+          detection preconditions unrelated to this fix — the mixed used/
+          unused case was validated manually via the CLI against the real
+          fixture instead), `golden_corpus_check.py` clean (all 16
+          binaries are x64, so this x86-32-gated change can't touch them
+          by construction), full `cargo nextest run --workspace`
+          2144/2144 minus the same 7 pre-existing unrelated
+          `fission-emulator` failures.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
