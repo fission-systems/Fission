@@ -2574,6 +2574,67 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           `fission-emulator` failures this session has confirmed
           unrelated at every prior checkpoint. The x64 mingw chkstk
           fixture re-verified unaffected (change is `is_64bit`-gated).
+      - **Update — `TEBAnalyzer` (Windows TEB/PEB `fs:`/`gs:` field
+        recognition), the second-tier scorecard item** (commit
+        `255e1ef4`). User asked to keep finding gaps and make sure each
+        one integrates cleanly into the actual decompiler output, not
+        just gets detected internally. Ghidra's `TEBAnalyzer` builds a
+        synthetic TEB memory block and points `fs:`/`gs:` at it so its
+        generic segment-relative resolution can name accesses; Fission
+        has no segment/memory-block model to match that architecture
+        1:1, so this ports the underlying *value* instead — recognize
+        `fs:[K]`/`gs:[K]` directly during HIR lowering and name them,
+        covering the same real case (most notably the classic
+        `PEB.BeingDebugged` anti-debug check) through a mechanism that
+        fits Fission's own p-code/HIR pipeline.
+        - Built a real `x86_64-w64-mingw32-gcc` fixture (`movq %gs:0x60,
+          %rax`, reading `TEB.ProcessEnvironmentBlock`) and confirmed via
+          raw p-code dump that SLEIGH lifts this as `IntAdd(GS_OFFSET,
+          const(0x60))` then `Load` — `GS_OFFSET` is a real named SLEIGH
+          register (`ia.sinc`: `FS_OFFSET`/`GS_OFFSET` declared as a
+          2-entry array starting at `0x110`; confirmed `GS_OFFSET` lands
+          at `0x118` on a 64-bit build, not `0x110` as the bare
+          declaration alone would suggest — the first offset-matching
+          attempt used `0x110` and silently matched nothing).
+        - New `resolve_teb_field_offset` (`stack_slots.rs`) mirrors
+          `resolve_stack_address_inner`'s own recursive `Copy`/`Cast`/
+          `IntZExt`/`IntSExt`/`IntAdd`/`PtrAdd` structure (reusing the
+          existing `resolve_constant_operand` for the delta) against the
+          single fixed `FS_OFFSET`/`GS_OFFSET` base. A small offset→name
+          table (`teb_field_name`) covers the handful of well-known,
+          stable TEB fields worth naming for both 32- and 64-bit layouts.
+        - Iterated on how to surface the name without regressing anything
+          — the "잘 녹여내야 합니다" (integrate it well) part. A bare
+          untyped `HirExpr::Var` left return-type inference nothing to
+          work with (`undefined is_debugged(void)` on the real fixture);
+          registering a full `self.temps` binding (mirroring how a stack
+          slot's `Var` is backed by one) made it *worse* — no assigning
+          `HirStmt` exists anywhere in the body for it (it's a read from
+          a fixed location, not a computed value), so the renderer
+          declared it uninitialized-looking. Settled on wrapping the name
+          in an `HirExpr::Cast` to the field's real type instead: a real
+          type at the use site without implying local storage that needs
+          to exist. Final rendered output: `return *(uchar *)
+          (teb_ProcessEnvironmentBlock + 2);` — the classic
+          `BeingDebugged` check, immediately recognizable, correct types
+          throughout, no misleading declaration.
+        - Validated: full workspace check clean,
+          `fission-pcode`/`-decompiler`/`-static` 1033/1033 (+1 new
+          synthetic-pcode test matching the exact confirmed real p-code
+          shape), `golden_corpus_check.py` clean, full `cargo nextest run
+          --workspace` shows only the same 7 pre-existing unrelated
+          `fission-emulator` failures this session has confirmed
+          unrelated at every prior checkpoint. Manually re-verified
+          end-to-end against the real mingw fixture through the actual
+          CLI after every change in this commit.
+        - **Not attempted**: the second hop (naming `PEB.BeingDebugged`
+          specifically, rather than showing the raw `+2` byte offset
+          after the named `ProcessEnvironmentBlock`) — would need a
+          general symbolic base-register tracker beyond this single-hop
+          field table; the current single-hop naming already makes the
+          pattern immediately recognizable without it. 32-bit `fs:`
+          convention only unit-tested, not verified against a real
+          32-bit binary the way the 64-bit `gs:` case was.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
