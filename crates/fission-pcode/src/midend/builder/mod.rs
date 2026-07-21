@@ -415,6 +415,8 @@ impl<'a> PreviewBuilder<'a> {
             });
         }
 
+        self.apply_x86_32_stack_purge_arity_floor();
+
         let callee_summaries = self
             .type_context
             .map(seed_callee_summaries_from_type_context)

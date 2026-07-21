@@ -262,6 +262,76 @@ fn x86_32_stack_pushes_become_call_arguments() {
     assert!(!code.contains("local_"), "{code}");
 }
 
+/// Ghidra `X86FunctionPurgeAnalyzer` scorecard item, isolated to just the
+/// arity-floor mechanism (no ebp-relative reads modeled -- that's a
+/// separate, already-covered code path with its own prologue-detection
+/// preconditions; this test is only about what the purge signal itself
+/// forces). A `ret $0xc` (callee pops the return address, then purges
+/// 0xc more bytes -- three 4-byte stack params) lifts as two same-address
+/// `IntAdd(ESP, ...)` ops immediately before `Return`, mirroring a real
+/// `i686-w64-mingw32-gcc` `__stdcall` fixture confirmed via raw p-code
+/// dump. The body never reads any of its own stack parameters, matching a
+/// (deliberately extreme) function that ignores every argument -- usage-
+/// based stack-slot recovery alone would recover zero parameters here;
+/// the purge-derived arity floor should still force all three into the
+/// signature. (A real end-to-end fixture with a genuinely mixed used/
+/// unused parameter set, `example(a, b, /*unused*/ c)`, was validated
+/// manually via the CLI against the actual mingw-compiled binary --
+/// `int example(int param_1, int param_2, uint param_3)` -- confirming
+/// this also works correctly when combined with real ebp-relative param
+/// reads, not just in this isolated synthetic shape.)
+#[test]
+fn x86_32_stdcall_purge_forces_full_unused_arity() {
+    let mut options = preview_options_x86();
+    options.calling_convention = CallingConvention::X86_32;
+
+    let esp = reg(0x10, 4);
+
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401000,
+            successors: vec![],
+            ops: vec![
+                // `ret $0xc`: pop return address (+4), then purge (+0xc),
+                // both attributed to the same instruction address.
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x401000,
+                    output: Some(esp.clone()),
+                    inputs: vec![esp.clone(), cst(4, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x401000,
+                    output: Some(esp.clone()),
+                    inputs: vec![esp, cst(0xc, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401000,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "example", 0x401000, &options).expect("preview render");
+    eprintln!("example:\n{code}");
+    assert!(
+        code.contains("param_1") && code.contains("param_2") && code.contains("param_3"),
+        "ret $0xc purges three stack slots; the recovered signature should \
+         show all three even though none are read in the body:\n{code}"
+    );
+}
+
 // ── System V AMD64 ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -361,7 +431,8 @@ fn aarch64_big_endian_w_register_halves_are_params() {
         constant_val: 0,
     };
     assert!(
-        crate::midend::cspec::RegisterNamer::from_options(&options).is_primary_return_register(&ret)
+        crate::midend::cspec::RegisterNamer::from_options(&options)
+            .is_primary_return_register(&ret)
     );
 }
 

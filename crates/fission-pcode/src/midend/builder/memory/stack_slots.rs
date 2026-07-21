@@ -925,6 +925,44 @@ impl<'a> PreviewBuilder<'a> {
         (binding.name.clone(), binding.ty.clone())
     }
 
+    /// Ghidra's `X86FunctionPurgeAnalyzer` scorecard item: recovers the
+    /// exact stack-argument byte count a callee-cleanup x86-32 function
+    /// (stdcall/fastcall/thiscall) purges via its own `RET imm16`, directly
+    /// from the function's already-lifted p-code -- no cross-crate
+    /// plumbing needed, since the purge amount is entirely a property of
+    /// the callee's own epilogue. Used to force a minimum incoming-
+    /// parameter count on the final signature: usage-based stack-slot
+    /// recovery only ever sees a parameter that's actually *read*
+    /// somewhere in the body, so a trailing stdcall parameter the callee
+    /// never touches (dead but still part of the real signature, and
+    /// still purged by the callee at return) would otherwise be silently
+    /// dropped. Confirmed against a real `i686-w64-mingw32-gcc`-compiled
+    /// `__stdcall` fixture with an unused third parameter (`ret $0xc`,
+    /// only params 1-2 read in the body): before this, the recovered
+    /// signature silently dropped to two parameters; after, it correctly
+    /// shows three.
+    pub(in crate::midend::builder) fn apply_x86_32_stack_purge_arity_floor(&mut self) {
+        if self.options.is_64bit || self.options.calling_convention != CallingConvention::X86_32 {
+            return;
+        }
+        let pointer_size = self.options.pointer_size;
+        if pointer_size == 0 {
+            return;
+        }
+        let purge = (0..self.pcode.blocks.len())
+            .filter_map(|idx| x86_32_stack_purge_for_block(self.pcode, idx, pointer_size))
+            .max();
+        let Some(purge) = purge else {
+            return;
+        };
+        let min_stack_params = (purge as u64 / u64::from(pointer_size)) as usize;
+        if min_stack_params == 0 {
+            return;
+        }
+        let placeholder_ty = type_from_size(pointer_size, false);
+        self.ensure_incoming_stack_param_binding(min_stack_params - 1, placeholder_ty);
+    }
+
     pub(in crate::midend::builder) fn unique_stack_slot_binding_name(
         &self,
         base_name: &str,
@@ -1064,4 +1102,54 @@ fn parse_stack_immediate(text: &str) -> Option<i64> {
     } else {
         text.parse().ok()
     }
+}
+
+/// [`PreviewBuilder::apply_x86_32_stack_purge_arity_floor`]'s per-block
+/// scan: `ret imm16` lifts as an extra `IntAdd(ESP, imm16)` sharing the
+/// same originating-instruction address as the return-address-pop
+/// `IntAdd(ESP, pointer_size)` and the `Return` op itself (confirmed via
+/// raw p-code dump of a real `ret $0xc`: two same-address `IntAdd
+/// v(ESP)` ops immediately before `Return`). Summing every constant ESP
+/// adjustment that shares the `Return` op's address and subtracting the
+/// pointer-size pop baseline isolates just the `RET` instruction's own
+/// effect -- a plain `ret` (cdecl, caller cleanup) has only the pop, so
+/// this returns `None` for it, correctly contributing no forced minimum
+/// arity. Restricting to same-address ops (rather than summing every
+/// ESP adjustment in the block) also means this can't be thrown off by
+/// an unrelated, differently-addressed `add esp,N` used elsewhere in the
+/// same block for local-variable stack cleanup.
+fn x86_32_stack_purge_for_block(
+    pcode: &PcodeFunction,
+    block_idx: usize,
+    pointer_size: u32,
+) -> Option<i64> {
+    let block = pcode.blocks.get(block_idx)?;
+    let ret_addr = block
+        .ops
+        .iter()
+        .find(|op| op.opcode == PcodeOpcode::Return)?
+        .address;
+    let mut total: i64 = 0;
+    for op in &block.ops {
+        if op.address != ret_addr || !matches!(op.opcode, PcodeOpcode::IntAdd | PcodeOpcode::IntSub)
+        {
+            continue;
+        }
+        let Some(out) = op.output.as_ref() else {
+            continue;
+        };
+        if !(is_register_space_id(out.space_id) && out.offset == 0x10) {
+            continue;
+        }
+        let Some(delta) = op.inputs.get(1).and_then(const_offset) else {
+            continue;
+        };
+        total += if op.opcode == PcodeOpcode::IntAdd {
+            delta
+        } else {
+            -delta
+        };
+    }
+    let purge = total - i64::from(pointer_size);
+    (purge > 0).then_some(purge)
 }
