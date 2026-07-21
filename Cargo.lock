@@ -2412,6 +2412,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-dir"
+version = "0.1.6"
+dependencies = [
+ "anyhow",
+ "fission-core",
+ "fission-decompiler",
+ "fission-emulator",
+ "fission-loader",
+ "fission-midend-core",
+ "fission-pcode",
+ "fission-solver",
+ "tracing",
+]
+
+[[package]]
 name = "fission-dynamic"
 version = "0.1.6"
 dependencies = [

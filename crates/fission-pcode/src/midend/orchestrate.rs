@@ -173,6 +173,12 @@ pub fn render_mlil_preview_with_binary_and_context(
     });
     // Stage: midend-normalize (owner crate).
     normalize_hir_function(&mut hir);
+    // Observation side channel (mirrors `take_last_layered_pseudocode`
+    // below): the flattened, goto/label-based body structuring is about to
+    // consume, captured before any structuring rewrite touches it. Zero
+    // effect on `hir` itself -- purely a clone for whoever reads it back via
+    // `take_last_dir_snapshot`.
+    store_last_dir_snapshot(hir.body.clone());
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
     structuring::passes::pipeline::run_structuring_pipeline(
@@ -273,6 +279,30 @@ fn store_last_layered_pseudocode(layered: LayeredPseudocode) {
 /// on this thread (observation / CLI layer selection).
 pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
     LAST_LAYERED_PSEUDOCODE.with(|slot| slot.borrow_mut().take())
+}
+
+thread_local! {
+    static LAST_DIR_SNAPSHOT: std::cell::RefCell<Option<Vec<super::HirStmt>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn store_last_dir_snapshot(body: Vec<super::HirStmt>) {
+    LAST_DIR_SNAPSHOT.with(|slot| {
+        *slot.borrow_mut() = Some(body);
+    });
+}
+
+/// Take the flattened, goto/label-based HIR body ("DIR") that structuring
+/// consumed as input on the most recent `render_mlil_preview*`/`render_nir*`
+/// call on this thread -- i.e. the same `Vec<HirStmt>`/`HirExpr` types as the
+/// final structured HIR, just captured immediately before structuring's
+/// CFG-to-AST rewrite runs. Pairing this with the structured HIR the normal
+/// call already returns lets an external verifier (e.g. `fission-dir`)
+/// interpret both and diff results for the same concrete inputs, without any
+/// change to what structuring itself computes -- purely observational, same
+/// pattern as `take_last_layered_pseudocode` above.
+pub fn take_last_dir_snapshot() -> Option<Vec<super::HirStmt>> {
+    LAST_DIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
 }
 
 #[derive(Debug, Clone, Copy)]

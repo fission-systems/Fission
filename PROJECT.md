@@ -3611,3 +3611,81 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
   `if run_pass_logged(...) { ...cleanup... }`.
 - `ActionGroup` supports `Repeat::{Once, UntilStable{max_rounds}}` and a
   `Gate` (admission check before the group runs at all).
+- **New crate `fission-dir`: DIR/HIR differential structuring verifier,
+  Phase 1 landed, 2026-07-22.** User's direction: structuring
+  (`crates/fission-pcode/src/midend/structuring/`) is purely heuristic
+  CFG→AST reconstruction with nothing checking that the *structured*
+  output still computes what the *unstructured* input did — the exact gap
+  behind the AArch64 if/else-collapse bug found earlier this session (only
+  caught by manual Ghidra diffing). User explicitly reframed "verify HIR"
+  as splitting NIR's output into two siblings — **HIR** (today's
+  structured output) and **DIR** ("동적으로 일치한 IR", dynamically-verified
+  IR) — and asked for a new crate with `fission-emulator`/`fission-solver`
+  wired in aggressively from the start so the emulator, solver, and this
+  verifier can all keep advancing together.
+  - **Key simplification found during design**: DIR is not a new IR type.
+    `run_structuring_pipeline(func: &mut HirFunction, ..)`
+    (`crates/fission-pcode/src/midend/structuring/passes/pipeline.rs:75`)
+    mutates `HirFunction.body: Vec<HirStmt>` in place, and `HirStmt`
+    already has `Goto`/`Label`/`Break`/`Continue` variants for exactly the
+    pre-structuring flattened form (builder emits p-code→HIR using them
+    directly, per `midend/builder/AGENTS.md`). So DIR = a clone of `body`
+    taken immediately before structuring runs; HIR = the same clone taken
+    immediately after. Same Rust type, same variable namespace
+    (`HirFunction::params`/`locals`) — one shared interpreter, fed the
+    same concrete arguments, can evaluate both and diff results with
+    **zero ABI/register modeling and no real machine execution needed** to
+    catch structuring bugs specifically. Real-execution/solver validation
+    (the part that actually needs the emulator/solver) is scoped as
+    Phase 2, since it targets a different bug class (builder/normalize
+    lifting bugs, since DIR/HIR are both downstream of that stage and
+    would agree with each other even if both were wrong relative to real
+    execution).
+  - **Capture hook** (`crates/fission-pcode/src/midend/orchestrate.rs`):
+    added `take_last_dir_snapshot()` / `store_last_dir_snapshot()`,
+    mirroring the pre-existing `take_last_layered_pseudocode()` thread-local
+    side-channel pattern exactly (same file already does this for
+    dual-layer NIR/HIR text and register-origin extraction) — a clone of
+    `hir.body` stashed right before `run_structuring_pipeline` runs, read
+    back by an external caller after the normal decompile call returns.
+    Pure observation, zero change to what structuring computes — confirmed
+    by `golden_corpus_check.py check` staying byte-identical (160/160
+    functions, determinism holds) after the change. Re-exported through
+    `fission-pcode`'s and (transitively) `fission-decompiler`'s public
+    surface.
+  - **`crates/fission-dir` crate** (new): `interp.rs` — a real
+    tree-walking `HirStmt`/`HirExpr` interpreter (`Var`/`Const`/`Cast`/
+    `Unary`/`Binary`/`Select` expressions; `Assign`/`Block`/`Switch`/`If`/
+    `While`/`DoWhile`/`For`/`Label`/`Goto`/`Return`/`Break`/`Continue`
+    statements, including a real goto/label resolution mechanism —
+    `exec_block` searches its own statement list for a target `Label` and
+    moves an index cursor there, bubbling an unresolved `Goto` up to the
+    enclosing block otherwise). Deliberately out of scope for Phase 1 (bails
+    with `Err`, never silently wrong): `Load`/`Store`/`Deref`/`Index`/
+    `FieldAccess`/`Call`/`AggregateCopy` — no memory model yet, so
+    verification is scoped to pure/arithmetic functions. `diff.rs` — the
+    differential harness (`diff_dir_hir`, `default_samples`) that runs
+    both snapshots through the interpreter over a boundary-heavy set of
+    concrete integer tuples and reports `Equivalent`/`Diverged`/
+    `Unsupported`, treating a same-input error on *both* sides as
+    inconclusive (shared UB, e.g. div-by-zero) but an error on only one
+    side as a reportable asymmetry.
+  - Validated with real, evaluated-result tests (not just "it compiles"):
+    a hand-built `max(a,b)` pair — HIR as a structured `If`, DIR as the
+    flattened goto/label form a p-code `CBranch` would naturally produce
+    — proven `Equivalent` across `default_samples(2)`; a deliberately
+    buggy DIR (`return a;` unconditionally) proven caught as `Diverged`
+    with the exact reproducing input, not just "equivalent" trivially
+    always passing; a `while`-loop accumulator (`sum(n)`) test proving
+    `Assign`/loop-carried state interpret correctly. 3/3 new tests pass,
+    full `cargo build --workspace` clean, `golden_corpus_check.py check`
+    clean.
+  - **Not yet done**: no real-corpus end-to-end run yet (hooking
+    `take_last_dir_snapshot` up to an actual `decompile_with_rust_sleigh`
+    call on a real compiled binary and running `diff_dir_hir` on the
+    result) — everything validated so far is hand-built fixtures. That's
+    the immediate next step before this tool can report real findings.
+    Phase 2 (solver-backed equivalence proof instead of sampling,
+    real-execution fidelity check for DIR itself via the emulator) is
+    unstarted; `fission-emulator`/`fission-solver` are wired into
+    `fission-dir`'s `Cargo.toml` but not yet imported by any code.
