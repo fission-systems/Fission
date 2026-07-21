@@ -40,7 +40,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 crossbeam-channel = { version = "0.5", optional = true }
 rkyv = { version = "0.7", features = ["validation"] }
-bytecheck = "0.6"
+bytecheck = "0.8"
 regex = "1.12"
 lru = "0.16"
 dirs = "6.0"
