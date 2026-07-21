@@ -214,6 +214,17 @@ pub struct DecodeMemoryContext {
     pub flow_edges: Vec<(u64, u64)>,
     /// Call instruction addresses whose callee is known to never return.
     pub noreturn_callsites: Vec<u64>,
+    /// Extra addresses to actively decode from, even when nothing in the
+    /// naturally-decoded flow (`Branch`/`CBranch`/`Call` targets) ever
+    /// reaches them -- e.g. a C++ exception-handling landing pad, which the
+    /// personality routine unwinds into directly at runtime, never via an
+    /// ordinary jump/call instruction the decode worklist would otherwise
+    /// discover. Unlike `block_entry_hints`/`flow_leaders` (which only
+    /// affect how *already-decoded* instructions get grouped into blocks),
+    /// these seed the decode worklist itself, and the separate reachability
+    /// pass that runs after it -- both are required for a block to survive
+    /// into the final `PcodeFunction`.
+    pub additional_decode_entries: Vec<u64>,
 }
 
 /// Merged instruction-level CFG hints consumed by `build_instruction_cfg_snapshot`.

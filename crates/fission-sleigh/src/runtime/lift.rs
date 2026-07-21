@@ -689,6 +689,7 @@ impl RuntimeSleighFrontend {
             context_overrides.insert(entry_address, override_bits);
         }
         let mut queue = VecDeque::from([entry_address]);
+        queue.extend(memory_context.additional_decode_entries.iter().copied());
         let mut stop_reason = DecodeStopReason::InputExhausted;
 
         while let Some(current) = queue.pop_front() {
@@ -858,6 +859,7 @@ impl RuntimeSleighFrontend {
 
         let mut reachable = BTreeSet::new();
         let mut reach_queue = VecDeque::from([entry_address]);
+        reach_queue.extend(memory_context.additional_decode_entries.iter().copied());
         while let Some(addr) = reach_queue.pop_front() {
             if reachable.contains(&addr) {
                 continue;

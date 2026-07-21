@@ -31,6 +31,11 @@ pub struct ControlFlowFacts {
     pub indirect_targets: Vec<u64>,
     pub noreturn_callsites: Vec<u64>,
     pub function_extents: HashMap<u64, u64>,
+    /// LSDA landing pads (see `collect_lsda_landing_pads`) -- unlike
+    /// `label_leaders`, these need to seed `DecodeMemoryContext::
+    /// additional_decode_entries` too, so kept as a distinct set rather
+    /// than only merged into `label_leaders`.
+    pub lsda_landing_pads: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,11 +79,13 @@ pub fn control_flow_facts_for(binary: &LoadedBinary) -> ControlFlowFacts {
 
 impl ControlFlowFacts {
     pub fn assemble(binary: &LoadedBinary, frontend: Option<&RuntimeSleighFrontend>) -> Self {
-        let label_leaders = collect_label_leaders(binary);
+        let lsda_landing_pads = collect_lsda_landing_pads(binary);
+        let mut label_leaders = collect_label_leaders(binary);
+        label_leaders.extend(lsda_landing_pads.iter().copied());
         let function_extents = collect_function_extents(binary);
         let indirect_targets = collect_indirect_targets(binary);
 
-        let mut flow_edges = Vec::new();
+        let mut flow_edges = collect_lsda_edges(binary);
         let mut noreturn_callsites = BTreeSet::new();
 
         if let Some(frontend) = frontend {
@@ -117,6 +124,7 @@ impl ControlFlowFacts {
             indirect_targets: indirect_targets.into_iter().collect(),
             noreturn_callsites: noreturn_callsites.into_iter().collect(),
             function_extents,
+            lsda_landing_pads: lsda_landing_pads.into_iter().collect(),
         }
     }
 
@@ -184,6 +192,13 @@ impl ControlFlowFacts {
         jump_table_targets.sort_unstable();
         jump_table_targets.dedup();
 
+        let additional_decode_entries: Vec<u64> = self
+            .lsda_landing_pads
+            .iter()
+            .copied()
+            .filter(|addr| (entry_address..limit_addr).contains(addr))
+            .collect();
+
         let noreturn_callsites: Vec<u64> = self
             .noreturn_callsites
             .iter()
@@ -198,6 +213,7 @@ impl ControlFlowFacts {
             flow_leaders: flow_leaders.into_iter().collect(),
             flow_edges,
             noreturn_callsites,
+            additional_decode_entries,
         }
     }
 
@@ -236,6 +252,39 @@ fn collect_label_leaders(binary: &LoadedBinary) -> BTreeSet<u64> {
         }
     }
     leaders
+}
+
+/// LSDA landing pads (see `fission_loader::loader::elf::lsda`) are only
+/// reachable via the C++ personality routine unwinding into them when a
+/// `throw` propagates through a covered call site -- no ordinary jump/call
+/// instruction targets them, so without this they're invisible to both the
+/// decoder (never disassembled as a block leader) and structuring (treated
+/// as unreachable dead code and dropped). Confirmed on a real `try`/`catch`
+/// fixture: the `catch` body was silently missing from decompiled output
+/// entirely before this, `guarded()` in `x64_dyn_lsda_test.elf` showing only
+/// the non-throwing path.
+fn collect_lsda_landing_pads(binary: &LoadedBinary) -> BTreeSet<u64> {
+    binary
+        .eh_lsda
+        .values()
+        .flat_map(|info| info.call_sites.iter())
+        .filter_map(|call_site| call_site.landing_pad)
+        .filter(|addr| is_executable_address(binary, *addr))
+        .collect()
+}
+
+/// One edge per LSDA call site with a landing pad, from the start of the
+/// covered instruction range to the landing pad -- not tied to the exact
+/// throwing instruction (the LSDA doesn't identify one specifically within
+/// the range), just enough for reachability propagation to keep the landing
+/// pad's block alive instead of pruning it as dead code.
+fn collect_lsda_edges(binary: &LoadedBinary) -> Vec<(u64, u64)> {
+    binary
+        .eh_lsda
+        .values()
+        .flat_map(|info| info.call_sites.iter())
+        .filter_map(|call_site| call_site.landing_pad.map(|lp| (call_site.start, lp)))
+        .collect()
 }
 
 fn is_executable_address(binary: &LoadedBinary, address: u64) -> bool {
@@ -500,6 +549,63 @@ mod tests {
         assert_eq!(facts.function_extents.get(&0x1000).copied(), Some(0x1020));
     }
 
+    /// An LSDA landing pad has no ordinary jump/call predecessor -- see
+    /// `fission_loader::loader::elf::lsda` -- so `ControlFlowFacts::assemble`
+    /// must surface it through both `label_leaders` (so the decoder actually
+    /// disassembles it) and `flow_edges` (so reachability propagation keeps
+    /// it, rather than pruning it as dead code), and `decode_context_for`
+    /// must further expose it via `additional_decode_entries` -- the field
+    /// that actually seeds the decode worklist (see `fission-sleigh`'s
+    /// `lift_raw_pcode_function_with_context_and_memory_context`).
+    #[test]
+    fn assemble_surfaces_lsda_landing_pads_as_leaders_and_edges() {
+        let mut binary =
+            LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![0; 0x1000]))
+                .format("ELF64")
+                .is_64bit(true)
+                .image_base(0x1000)
+                .add_section(fission_loader::loader::SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: 0x1000,
+                    file_offset: 0,
+                    file_size: 0x1000,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_function(FunctionInfo {
+                    name: "guarded".to_string(),
+                    address: 0x1000,
+                    size: 0x100,
+                    ..Default::default()
+                })
+                .build()
+                .expect("build");
+        binary.eh_lsda.insert(
+            0x1000,
+            fission_loader::loader::elf::lsda::LsdaInfo {
+                lp_start: 0x1000,
+                call_sites: vec![fission_loader::loader::elf::lsda::LsdaCallSite {
+                    start: 0x1020,
+                    end: 0x1030,
+                    landing_pad: Some(0x1050),
+                    action_chain: vec![1],
+                }],
+                type_table: vec![],
+            },
+        );
+
+        let facts = ControlFlowFacts::assemble(&binary, None);
+        assert!(facts.label_leaders.contains(&0x1050));
+        assert!(facts.flow_edges.contains(&(0x1020, 0x1050)));
+        assert_eq!(facts.lsda_landing_pads, vec![0x1050]);
+
+        let ctx = facts.decode_context_for(&binary, 0x1000, 0x100);
+        assert_eq!(ctx.additional_decode_entries, vec![0x1050]);
+        assert!(ctx.block_entry_hints.contains(&0x1050));
+    }
+
     #[test]
     fn decode_context_slices_labels_and_flow_edges() {
         let facts = ControlFlowFacts {
@@ -508,6 +614,7 @@ mod tests {
             indirect_targets: vec![0x1020],
             noreturn_callsites: vec![0x1008],
             function_extents: HashMap::from([(0x1000, 0x1100)]),
+            lsda_landing_pads: Vec::new(),
         };
 
         let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))

@@ -47,6 +47,14 @@ impl<'a> PreviewBuilder<'a> {
         let layout_fallthrough = build_layout_fallthrough_map(pcode);
         let mut successors =
             build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
+        for (from, to) in lsda_extra_edges(pcode, &address_to_index, binary) {
+            if let Some(succs) = successors.get_mut(from) {
+                if !succs.contains(&to) {
+                    succs.push(to);
+                    succs.sort_unstable();
+                }
+            }
+        }
         let mut predecessors = build_predecessor_index_map(&successors);
 
         let mut dom_tree = crate::midend::structuring::DomTree::analyze(&successors, &predecessors);

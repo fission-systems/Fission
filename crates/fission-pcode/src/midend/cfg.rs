@@ -1,4 +1,5 @@
 use super::*;
+use fission_loader::loader::LoadedBinary;
 
 pub(super) fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, usize> {
     let mut address_to_index = HashMap::default();
@@ -110,6 +111,46 @@ pub(super) fn build_successor_index_map(
             succs.sort_unstable();
             succs.dedup();
             succs
+        })
+        .collect()
+}
+
+/// Extra `(from_block_idx, to_block_idx)` edges for C++ exception-handling
+/// landing pads (see `fission_loader::loader::elf::lsda`) that
+/// `build_successor_index_map`'s terminator-op-based derivation can never
+/// discover on its own: a landing pad is reachable only via the personality
+/// routine unwinding into it at runtime, not any `Branch`/`CBranch`/
+/// `BranchInd`/`Return`/fallthrough in the function's own p-code -- so
+/// without this, it ends up with an empty predecessor list and gets treated
+/// as dead code by structuring's orphan-block elimination.
+///
+/// Scoped strictly to `binary.eh_lsda`, keyed by this p-code's own function
+/// entry address (the lowest-addressed block, which is always the decode
+/// entry point -- see `build_cfg_blocks_with_hints`'s address-sorted block
+/// ordering in `fission-sleigh`). A function with no LSDA entry -- which is
+/// every function in every binary without C++ exception handling -- gets
+/// zero edges here, so this can't change behavior for anything else.
+pub(super) fn lsda_extra_edges(
+    pcode: &PcodeFunction,
+    address_to_index: &HashMap<u64, usize>,
+    binary: Option<&LoadedBinary>,
+) -> Vec<(usize, usize)> {
+    let Some(binary) = binary else {
+        return Vec::new();
+    };
+    let Some(entry_address) = pcode.blocks.first().map(|block| block.start_address) else {
+        return Vec::new();
+    };
+    let Some(info) = binary.eh_lsda.get(&entry_address) else {
+        return Vec::new();
+    };
+    info.call_sites
+        .iter()
+        .filter_map(|call_site| {
+            let landing_pad = call_site.landing_pad?;
+            let from = canonical_block_index_for_address(pcode, address_to_index, call_site.start)?;
+            let to = canonical_block_index_for_address(pcode, address_to_index, landing_pad)?;
+            Some((from, to))
         })
         .collect()
 }
@@ -581,5 +622,109 @@ mod same_block_forward_tests {
             Some(block.ops.len()),
             "tail cmov should skip remaining ops through block end"
         );
+    }
+}
+
+#[cfg(test)]
+mod lsda_extra_edges_tests {
+    use super::*;
+    use crate::pcode::PcodeBasicBlock;
+    use fission_loader::loader::elf::lsda::{LsdaCallSite, LsdaInfo};
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+
+    fn empty_block(start_address: u64) -> PcodeBasicBlock {
+        PcodeBasicBlock {
+            index: 0,
+            start_address,
+            successors: vec![],
+            ops: vec![],
+        }
+    }
+
+    fn test_binary() -> fission_loader::loader::LoadedBinary {
+        LoadedBinaryBuilder::new("lsda_test".to_string(), DataBuffer::Heap(vec![]))
+            .format("ELF64")
+            .arch_spec("x86:LE:64:default")
+            .is_64bit(true)
+            .build()
+            .expect("build test LoadedBinary")
+    }
+
+    /// The scenario that motivated this function: a call-site block (index
+    /// 0) whose only edge to the landing-pad block (index 2) comes from
+    /// `binary.eh_lsda`, not from any p-code branch/call/fallthrough
+    /// `build_successor_index_map` could derive on its own -- see
+    /// `crates/fission-loader/src/loader/elf/lsda.rs` and the real
+    /// `guarded()`/`x64_dyn_lsda_test.elf` case this mirrors.
+    #[test]
+    fn resolves_landing_pad_edge_from_binary_eh_lsda() {
+        let pcode = PcodeFunction {
+            blocks: vec![
+                empty_block(0x1000),
+                empty_block(0x1010),
+                empty_block(0x1020),
+            ],
+        };
+        let address_to_index = build_address_to_index_map(&pcode);
+
+        let mut binary = test_binary();
+        binary.eh_lsda.insert(
+            0x1000,
+            LsdaInfo {
+                lp_start: 0x1000,
+                call_sites: vec![
+                    LsdaCallSite {
+                        start: 0x1000,
+                        end: 0x1010,
+                        landing_pad: Some(0x1020),
+                        action_chain: vec![1],
+                    },
+                    LsdaCallSite {
+                        start: 0x1010,
+                        end: 0x1020,
+                        landing_pad: None, // no edge: must be skipped, not (idx, None)
+                        action_chain: vec![],
+                    },
+                ],
+                type_table: vec![],
+            },
+        );
+
+        let edges = lsda_extra_edges(&pcode, &address_to_index, Some(&binary));
+        assert_eq!(edges, vec![(0, 2)]);
+    }
+
+    #[test]
+    fn returns_empty_without_a_binary() {
+        let pcode = PcodeFunction {
+            blocks: vec![empty_block(0x1000)],
+        };
+        let address_to_index = build_address_to_index_map(&pcode);
+        assert!(lsda_extra_edges(&pcode, &address_to_index, None).is_empty());
+    }
+
+    #[test]
+    fn returns_empty_when_function_has_no_lsda_entry() {
+        let pcode = PcodeFunction {
+            blocks: vec![empty_block(0x1000)],
+        };
+        let address_to_index = build_address_to_index_map(&pcode);
+        let binary = test_binary(); // eh_lsda left empty
+        assert!(lsda_extra_edges(&pcode, &address_to_index, Some(&binary)).is_empty());
+    }
+
+    /// `build_successor_index_map`'s own instruction-derived edges must
+    /// stay untouched when there's no LSDA data for the function -- the
+    /// merge in `builder/init.rs` only ever *adds* edges, on top of
+    /// whatever this already computes.
+    #[test]
+    fn build_successor_index_map_unaffected_by_absent_lsda_data() {
+        let pcode = PcodeFunction {
+            blocks: vec![empty_block(0x1000), empty_block(0x1010)],
+        };
+        let address_to_index = build_address_to_index_map(&pcode);
+        let layout_fallthrough = build_layout_fallthrough_map(&pcode);
+        let successors = build_successor_index_map(&pcode, &address_to_index, &layout_fallthrough);
+        assert_eq!(successors, vec![vec![1], vec![]]);
     }
 }
