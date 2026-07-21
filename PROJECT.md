@@ -3208,6 +3208,74 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     --version` still reports `0.1.6`, `golden_corpus_check.py` clean (160
     functions across 16 binaries + determinism) — this was a structural
     removal with no decompiled-output-affecting code deleted.
+- **Fix — float/double return-register recognition, the x87 known-issue
+  investigated further, 2026-07-21** (commit `81c5c364`). User asked to
+  keep closing Ghidra-parity gaps; picked the x87 return-value bug
+  (recorded as a known issue in the v0.1.6 changelog) since it already had
+  a real fixture and a specific root-cause hypothesis ("return-value
+  recovery is built around general-purpose 'primary return registers'
+  only"). Confirmed via a real `i686-w64-mingw32-gcc -mno-sse -mno-sse2`
+  `double compute(double,double,double)` fixture: return type `uint`,
+  `return uVar17;` returning `param_6` — a completely unrelated leftover
+  value, not the computed result at all.
+  - Root cause, traced to `resolve_prototype` in
+    `fission-pcode/src/midend/cspec/mod.rs`: Ghidra's own cspecs
+    (`x86gcc.cspec`, `x86-64-gcc.cspec`, `x86-64-win.cspec`) declare a
+    *separate* `metatype="float"` `<output>` pentry (ST0 on x86-32, XMM0_Qa
+    on x86-64) alongside the integer one (EAX/RAX) — a function returns
+    through one or the other depending on its return type. Fission's
+    parser explicitly *skipped* the float pentry when resolving
+    `return_offset`, so `is_primary_return_register` never recognized a
+    write to the float return register as the function's return value at
+    all — the actual x87 computation happened in the p-code, correctly
+    materialized as a `float80` value, but nothing downstream identified
+    it as *the returned* value, so the return-statement lowering fell back
+    to whatever the (wrong) `EAX`-family search last saw.
+  - Added `ResolvedPrototype::float_return_offset`, parsed the same way as
+    the existing `return_offset` but selecting the float pentry instead of
+    skipping it, threaded through `NirRenderOptions::cspec_float_return_
+    offset` → `RegisterNamer::float_return_offset` → a new, independent
+    check in `is_primary_return_register`. Purely additive — only fires
+    when a varnode's offset matches the float return register; the
+    existing integer-register path is untouched.
+  - **Also tested x86-64 (SSE2, default codegen) with the same fixture,
+    since x86-64's cspec has the identical float/int `<output>` split** —
+    found it was *more broken* than x87, just never flagged as a known
+    issue: before this fix, `void compute(void) { ...; return; }` — the
+    return statement dropped the value entirely, not just mistyped it.
+    After: returns the correct computed value, though still mistyped
+    (`ulonglong` instead of `double`) — traced to a **separate, deeper
+    gap**: x86-64's `<input>` pentries have the same float/int split, and
+    `int_param_offsets` skips the float ones the same way `return_offset`
+    used to, so XMM-passed float *parameters* aren't recognized either,
+    keeping the whole value chain untyped end-to-end (visible as
+    `param_10 = xmm0_qa; xVar8 = param_10; xVar8 *= param_18;` — plain
+    integer ops, not `FloatMult`). Confirmed this is pre-existing, not a
+    regression, by reproducing on the unpatched tree first (`git stash`).
+    Fixing float-parameter recognition is real follow-up work, out of
+    scope for this return-side fix — flagged here rather than silently
+    left for a future session to rediscover.
+  - Golden corpus: one cosmetic diff (`crypto_gcc_O2.exe::rc4_init`, an
+    SSE2 memset-style init loop with no real return value at all — XMM0 is
+    used purely as scratch there) — confirmed via an identifier-normalized
+    diff (strip numeric suffixes, e.g. `uVar201` → `uVar`) that NIR/HIR
+    are byte-for-byte structurally identical before and after, just
+    renumbered temp names from the shifted materialization order now that
+    XMM0 writes are also recognized as return-register writes. Snapshot
+    updated to match; same rename-only pattern the v0.1.6 changelog
+    already accepted once for `__gcc_register_frame`.
+  - Validated: `cargo test --lib` clean across
+    `fission-pcode`/`-midend-normalize`/`-midend-structuring`/
+    `-decompiler`/`-static`, `golden_corpus_check.py` clean (160 functions
+    + determinism), full `cargo nextest run --workspace` 2141/2148 — same
+    7 pre-existing unrelated `fission-emulator` failures this session has
+    confirmed unrelated at every prior checkpoint.
+  - **Scope note**: the x87 8-register-stack-rotation noise
+    (`st0`/`st6`/`st7`-named temporaries cluttering the output) and the
+    32-bit stack-passed `double`/`int64` parameter-splitting bug are both
+    still open — this fix closed specifically the "wrong/missing return
+    value" half of the x87 known issue, not the full x87 output-quality
+    gap.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
