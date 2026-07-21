@@ -2280,7 +2280,7 @@ checksum = "9844ddc3a6e533d62bba727eb6c28b5d360921d5175e9ff0f1e621a5c590a4d5"
 
 [[package]]
 name = "fission-ai"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2300,7 +2300,7 @@ dependencies = [
 
 [[package]]
 name = "fission-analysis-db"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fission-loader",
  "serde",
@@ -2309,7 +2309,7 @@ dependencies = [
 
 [[package]]
 name = "fission-automation"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -2327,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "fission-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -2356,7 +2356,7 @@ dependencies = [
 
 [[package]]
 name = "fission-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bitflags 2.13.0",
@@ -2376,7 +2376,7 @@ dependencies = [
 
 [[package]]
 name = "fission-decompiler"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fission-analysis-db",
  "fission-core",
@@ -2398,7 +2398,7 @@ dependencies = [
 
 [[package]]
 name = "fission-dioxus"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "dioxus",
  "dioxus-logger",
@@ -2413,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "fission-dynamic"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bytecheck",
@@ -2445,7 +2445,7 @@ dependencies = [
 
 [[package]]
 name = "fission-emulator"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2472,7 +2472,7 @@ dependencies = [
 
 [[package]]
 name = "fission-loader"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2497,7 +2497,7 @@ dependencies = [
 
 [[package]]
 name = "fission-midend-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fission-core",
  "fission-loader",
@@ -2512,7 +2512,7 @@ dependencies = [
 
 [[package]]
 name = "fission-midend-normalize"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fission-core",
  "fission-midend-core",
@@ -2526,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "fission-midend-structuring"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fission-core",
  "fission-midend-core",
@@ -2537,7 +2537,7 @@ dependencies = [
 
 [[package]]
 name = "fission-pcode"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bytecheck",
@@ -2567,7 +2567,7 @@ dependencies = [
 
 [[package]]
 name = "fission-plugin"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2577,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "fission-script"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fission-core",
  "fission-decompiler",
@@ -2591,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "fission-signatures"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2608,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "fission-sleigh"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2628,7 +2628,7 @@ dependencies = [
 
 [[package]]
 name = "fission-solver"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "tracing",
@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "fission-static"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2668,14 +2668,14 @@ dependencies = [
 
 [[package]]
 name = "fission-ttd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fission-core",
 ]
 
 [[package]]
 name = "fission-tui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
