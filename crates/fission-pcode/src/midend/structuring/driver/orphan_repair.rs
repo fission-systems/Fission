@@ -33,6 +33,7 @@ mod tests {
             cspec_extrapop: None,
             sla_register_map: None,
             cspec_return_offset: None,
+            cspec_float_return_offset: None,
             cspec_return_target: None,
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),

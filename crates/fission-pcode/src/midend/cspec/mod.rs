@@ -95,6 +95,13 @@ pub struct ResolvedPrototype {
     pub int_param_offsets: Vec<u64>,
     /// Integer return register offset in REGISTER space (primary slot).
     pub return_offset: Option<u64>,
+    /// Float/double return register offset in REGISTER space (e.g. x86's
+    /// `ST0`), from the `<output>` prototype's `metatype="float"` pentry.
+    /// Distinct from `return_offset` -- a function can return through either
+    /// depending on its return type, and both can be live in the same
+    /// prototype (x86's own `x86gcc.cspec` lists ST0 *and* EAX as separate
+    /// `<output>` pentries for exactly this reason).
+    pub float_return_offset: Option<u64>,
     /// Stack pointer offset in REGISTER space.
     pub stack_pointer_offset: Option<u64>,
     /// Byte offset where stack parameters begin (from stack `<pentry>`).
@@ -217,6 +224,17 @@ fn resolve_prototype(
         }
     });
 
+    let float_return_offset = proto.output.iter().find_map(|pentry| {
+        if let CspecPentry::Register { name, metatype, .. } = pentry {
+            if metatype.as_deref() != Some("float") {
+                return None;
+            }
+            resolve_reg_offset(name, reg_map)
+        } else {
+            None
+        }
+    });
+
     let unaffected_offsets = proto
         .unaffected
         .iter()
@@ -233,6 +251,7 @@ fn resolve_prototype(
         name: proto.name.clone(),
         int_param_offsets,
         return_offset,
+        float_return_offset,
         stack_pointer_offset: sp_offset,
         stack_arg_base,
         extrapop: proto.extrapop,

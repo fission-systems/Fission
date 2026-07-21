@@ -247,6 +247,7 @@ pub fn register_namer_for_abi(abi: CallingConvention) -> RegisterNamer {
         sla_map_by_offset,
         int_param_offsets: Vec::new(),
         return_offset: model.as_ref().and_then(|m| m.return_offset()),
+        float_return_offset: None,
         return_target: model.as_ref().and_then(|m| m.return_target_offset()),
         model,
         pointer_size: minimal_options_for_abi(abi).pointer_size,
@@ -291,6 +292,11 @@ pub struct RegisterNamer {
     sla_map_by_offset: Option<HashMap<u64, Vec<(u32, String)>>>,
     pub int_param_offsets: Vec<u64>,
     pub return_offset: Option<u64>,
+    /// Float/double return register offset (e.g. x86's `ST0`) from `.cspec`,
+    /// when the active prototype declares one. See
+    /// `ResolvedPrototype::float_return_offset` for why this is distinct
+    /// from `return_offset`.
+    pub float_return_offset: Option<u64>,
     pub return_target: Option<(u64, u32)>,
     pub model: Option<Arc<RegisterModel>>,
     pub pointer_size: u32,
@@ -311,6 +317,7 @@ impl RegisterNamer {
             sla_map_by_offset,
             int_param_offsets: super::apply::int_param_offsets(options).to_vec(),
             return_offset: options.cspec_return_offset,
+            float_return_offset: options.cspec_float_return_offset,
             return_target: model
                 .as_ref()
                 .and_then(|m| m.return_target_offset())
@@ -530,6 +537,16 @@ impl RegisterNamer {
         }
         if !is_register_space_id(vn.space_id) {
             return false;
+        }
+        // Float/double-returning functions return through a *different*
+        // register than int/pointer-returning ones (e.g. x86's ST0 vs.
+        // EAX) -- checked independently of `return_offset` below, since a
+        // prototype can declare both and only one is actually live for any
+        // given function.
+        if let Some(float_ret_off) = self.float_return_offset {
+            if vn.offset == float_ret_off {
+                return true;
+            }
         }
         if let Some(ret_off) = self.return_offset {
             if vn.offset == ret_off {

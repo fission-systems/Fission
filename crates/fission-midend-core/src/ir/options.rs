@@ -64,6 +64,12 @@ pub struct NirRenderOptions {
     #[serde(default, skip)]
     pub cspec_return_offset: Option<u64>,
 
+    /// Ghidra `.cspec` float/double return register offset (REGISTER-space),
+    /// e.g. x86's `ST0`. Distinct from `cspec_return_offset` -- a function
+    /// returns through one or the other depending on its return type.
+    #[serde(default, skip)]
+    pub cspec_float_return_offset: Option<u64>,
+
     /// Ghidra `.cspec`/`.pspec` return-target (link register) offset when resolved.
     #[serde(default, skip)]
     pub cspec_return_target: Option<(u64, u32)>,
@@ -438,6 +444,7 @@ impl NirRenderOptions {
             cspec_extrapop: None,
             sla_register_map: None,
             cspec_return_offset: None,
+            cspec_float_return_offset: None,
             cspec_return_target: None,
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),

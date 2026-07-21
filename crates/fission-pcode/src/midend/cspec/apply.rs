@@ -78,6 +78,7 @@ pub fn apply_resolved_proto_to_options(options: &mut NirRenderOptions, proto: &R
     }
     options.cspec_extrapop = Some(proto.extrapop);
     options.cspec_return_offset = proto.return_offset;
+    options.cspec_float_return_offset = proto.float_return_offset;
 }
 
 /// Load `.cspec` for `options.calling_convention` and populate cspec override fields.
