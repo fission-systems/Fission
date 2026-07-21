@@ -80,7 +80,8 @@ impl<'a> PreviewBuilder<'a> {
         }
         // Downstream structuring uses the pruned CFG. Keep cached CFG facts
         // aligned with this final successor/predecessor topology.
-        let cfg_facts = crate::midend::structuring::CfgFactCache::analyze(&successors, &predecessors);
+        let cfg_facts =
+            crate::midend::structuring::CfgFactCache::analyze(&successors, &predecessors);
         dom_tree = cfg_facts.dominators().clone();
 
         let register_namer = RegisterNamer::from_options(options);
@@ -88,7 +89,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut register_param_aliases =
             entry_analysis::collect_entry_register_param_aliases(pcode, &register_namer);
         register_param_aliases.retain(|_, idx| *idx < entry_arity);
-        let (stack_frame_size, entry_frame_pointer_established) =
+        let (stack_frame_size, entry_frame_pointer_established, rbp_frame_bias) =
             entry_analysis::infer_entry_stack_layout(pcode, options);
         if preview_builder_diag_enabled() {
             let duplicate_starts = duplicate_block_start_count(pcode);
@@ -142,6 +143,7 @@ impl<'a> PreviewBuilder<'a> {
             suppress_entry_register_params: false,
             stack_frame_size,
             entry_frame_pointer_established,
+            rbp_frame_bias,
             linear_exit_cache: BuilderCacheMap::default(),
             linear_body_cache: BuilderCacheMap::default(),
             active_linear_body_keys: BuilderCacheSet::default(),

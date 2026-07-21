@@ -51,6 +51,11 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) suppress_entry_register_params: bool,
     pub(crate) stack_frame_size: i64,
     pub(crate) entry_frame_pointer_established: bool,
+    /// Constant `K` when the prologue establishes `rbp`/`ebp` via
+    /// `lea rbp, [rsp+K]` (`K != 0`) rather than plain `mov rbp, rsp`
+    /// (`K == 0`, the default). See `entry_analysis::infer_entry_stack_
+    /// layout` and its use in `resolve_stack_address_inner`.
+    pub(crate) rbp_frame_bias: i64,
     pub(crate) linear_exit_cache: BuilderCacheMap<usize, Option<LinearExit>>,
     pub(crate) linear_body_cache: BuilderCacheMap<LinearBodyCacheKey, LinearBodyCachedOutcome>,
     pub(crate) active_linear_body_keys: BuilderCacheSet<LinearBodyCacheKey>,
@@ -95,7 +100,10 @@ pub(crate) struct PreviewBuilder<'a> {
     /// caching the same (block, op, varnode) triple gets re-proven
     /// repeatedly. Keyed by (block_idx, op_idx, output key).
     pub(in crate::midend::builder) loop_carried_proof_cache: RefCell<
-        BuilderCacheMap<(usize, usize, VarnodeKey), Option<super::materialize::LoopCarriedDefinitionProof>>,
+        BuilderCacheMap<
+            (usize, usize, VarnodeKey),
+            Option<super::materialize::LoopCarriedDefinitionProof>,
+        >,
     >,
     /// Deterministic proxy for the old shared-5000ms `IfLoweringBudget`
     /// "total structuring" check and the matching inline wall-clock checks

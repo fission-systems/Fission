@@ -499,14 +499,14 @@ impl<'a> PreviewBuilder<'a> {
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => match ptr.offset
                 {
                     0x20 => Some((StackBase::Rsp, 0)),
-                    0x28 => Some((StackBase::Rbp, 0)),
+                    0x28 => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     0x10 if !self.options.is_64bit => Some((StackBase::Rsp, 0)),
-                    0x14 if !self.options.is_64bit => Some((StackBase::Rbp, 0)),
+                    0x14 if !self.options.is_64bit => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
                 },
                 CallingConvention::X86_32 => match ptr.offset {
                     0x10 => Some((StackBase::Rsp, 0)),
-                    0x14 => Some((StackBase::Rbp, 0)),
+                    0x14 => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
                 },
             };
@@ -537,11 +537,13 @@ impl<'a> PreviewBuilder<'a> {
                     } else if let Some((base, offset)) =
                         self.resolve_stack_address_inner(&op.inputs[0], visiting)
                     {
-                        const_offset(&op.inputs[1]).map(|delta| (base, offset + delta))
+                        self.resolve_constant_operand(&op.inputs[1])
+                            .map(|delta| (base, offset + delta))
                     } else if let Some((base, offset)) =
                         self.resolve_stack_address_inner(&op.inputs[1], visiting)
                     {
-                        const_offset(&op.inputs[0]).map(|delta| (base, offset + delta))
+                        self.resolve_constant_operand(&op.inputs[0])
+                            .map(|delta| (base, offset + delta))
                     } else {
                         None
                     }
@@ -552,7 +554,8 @@ impl<'a> PreviewBuilder<'a> {
                     } else if let Some((base, offset)) =
                         self.resolve_stack_address_inner(&op.inputs[0], visiting)
                     {
-                        const_offset(&op.inputs[1]).map(|delta| (base, offset - delta))
+                        self.resolve_constant_operand(&op.inputs[1])
+                            .map(|delta| (base, offset - delta))
                     } else {
                         None
                     }
@@ -563,11 +566,74 @@ impl<'a> PreviewBuilder<'a> {
                     } else if let Some((base, offset)) =
                         self.resolve_stack_address_inner(&op.inputs[0], visiting)
                     {
-                        const_offset(&op.inputs[1]).map(|delta| (base, offset + delta))
+                        self.resolve_constant_operand(&op.inputs[1])
+                            .map(|delta| (base, offset + delta))
                     } else {
                         None
                     }
                 }
+                _ => None,
+            },
+            None => None,
+        };
+        visiting.remove(&key);
+        resolved
+    }
+
+    /// Resolves a p-code operand to a compile-time-known constant, either
+    /// directly (a literal `const(...)` varnode) or by walking a short
+    /// `Copy`/`Cast`/`IntZExt`/`IntSExt` def chain back to one -- e.g. a
+    /// `mov eax, 0x2000` a few ops before a `sub rsp, rax`. Without this,
+    /// `IntAdd`/`IntSub`/`PtrAdd`/`PtrSub`'s delta operand only resolves via
+    /// [`const_offset`], which requires the operand to already be a literal
+    /// varnode -- so any stack adjustment computed through a register
+    /// (rather than encoded directly in the instruction) resolved to
+    /// `None`, and every later stack-relative access whose address depended
+    /// on it (transitively, since `resolve_stack_address_inner` recurses)
+    /// failed to resolve to a `(StackBase, offset)` pair at all.
+    ///
+    /// This is exactly the shape Windows/mingw's stack-probe idiom for a
+    /// large (>1 page) stack frame produces: `mov eax, SIZE` /
+    /// `call __chkstk`-or-`___chkstk_ms` / `sub rsp, rax` -- on x64, the
+    /// probe routine itself only touches guard pages, it does *not* adjust
+    /// `rsp` (confirmed against a real `x86_64-w64-mingw32-gcc`-compiled
+    /// fixture with an 8KB local array: the raw p-code `Call` op to
+    /// `___chkstk_ms` has no output at all, so it doesn't shadow `eax`'s
+    /// def in between); the actual subtraction is ordinary, already-lifted
+    /// caller code. Confirmed the corruption this fixes is real, not
+    /// theoretical: before this, every `rbp`-relative local *past* the
+    /// probe in that fixture misclassified as an incoming parameter
+    /// (`classify_stack_slot_origin`'s positive-rbp-offset heuristic) since
+    /// `rbp = rsp(after the unresolved sub) + 0x80` couldn't resolve to a
+    /// real offset at all.
+    fn resolve_constant_operand(&self, vn: &Varnode) -> Option<i64> {
+        self.resolve_constant_operand_inner(vn, &mut HashSet::default())
+    }
+
+    fn resolve_constant_operand_inner(
+        &self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Option<i64> {
+        if let Some(value) = const_offset(vn) {
+            return Some(value);
+        }
+        if !is_register_space_id(vn.space_id) && vn.space_id != UNIQUE_SPACE_ID {
+            return None;
+        }
+        let key = VarnodeKey::from(vn);
+        if !visiting.insert(key.clone()) {
+            return None;
+        }
+        let resolved = match self.lookup_def_site(vn).map(|(_, op)| op) {
+            Some(op) => match op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt => op
+                    .inputs
+                    .first()
+                    .and_then(|input| self.resolve_constant_operand_inner(input, visiting)),
                 _ => None,
             },
             None => None,

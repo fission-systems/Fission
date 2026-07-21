@@ -1523,9 +1523,29 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
     let space = constant_sized(3, 4);
 
     let ops = vec![
-        // prologue: mov ebp, esp → frame pointer established
+        // prologue: push ebp; mov ebp, esp → frame pointer established.
+        // The `push ebp` matters, not just cosmetically: `resolve_stack_
+        // address_inner`'s bare-`ebp` shortcut derives its bias from
+        // `infer_entry_stack_layout`'s tracked `rsp_delta` at the point
+        // `mov ebp, esp` runs, calibrated so the *real* x86-32 `push ebp;
+        // mov ebp, esp` idiom this test's own doc comment claims to model
+        // ("m32-O0 residual") reproduces `ebp+0x8`/`0xc`/`0x10` resolving
+        // to the same param indices as before that bias tracking existed.
+        // Omitting the push (rsp_delta==0 at the `mov`) shifts every
+        // offset below by one pointer-size and breaks the param_2/param_3
+        // assertions -- not a bug in the bias fix, just this test's
+        // synthetic prologue skipping a real instruction its own comment
+        // says it's modeling.
         PcodeOp {
             seq_num: 0,
+            opcode: PcodeOpcode::IntSub,
+            address: 0x0ffc,
+            output: Some(esp.clone()),
+            inputs: vec![esp.clone(), constant_sized(4, 4)],
+            asm_mnemonic: Some("PUSH EBP".into()),
+        },
+        PcodeOp {
+            seq_num: 1,
             opcode: PcodeOpcode::Copy,
             address: 0x1000,
             output: Some(ebp.clone()),
@@ -1534,7 +1554,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
         },
         // mov eax, [ebp+0x10] ; mov [esp+4], eax   → arg1 = param_3
         PcodeOp {
-            seq_num: 1,
+            seq_num: 2,
             opcode: PcodeOpcode::IntAdd,
             address: 0x1010,
             output: Some(tmp_addr.clone()),
@@ -1542,7 +1562,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 2,
+            seq_num: 3,
             opcode: PcodeOpcode::Load,
             address: 0x1010,
             output: Some(tmp_load.clone()),
@@ -1550,7 +1570,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 3,
+            seq_num: 4,
             opcode: PcodeOpcode::Copy,
             address: 0x1010,
             output: Some(eax.clone()),
@@ -1558,7 +1578,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 4,
+            seq_num: 5,
             opcode: PcodeOpcode::IntAdd,
             address: 0x1014,
             output: Some(tmp_ptr.clone()),
@@ -1566,7 +1586,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 5,
+            seq_num: 6,
             opcode: PcodeOpcode::Copy,
             address: 0x1014,
             output: Some(tmp_val.clone()),
@@ -1574,7 +1594,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 6,
+            seq_num: 7,
             opcode: PcodeOpcode::Store,
             address: 0x1014,
             output: None,
@@ -1583,7 +1603,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
         },
         // mov eax, [ebp+0xc] ; mov [esp], eax   → arg0 = param_2
         PcodeOp {
-            seq_num: 7,
+            seq_num: 8,
             opcode: PcodeOpcode::IntAdd,
             address: 0x1020,
             output: Some(tmp_addr.clone()),
@@ -1591,7 +1611,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 8,
+            seq_num: 9,
             opcode: PcodeOpcode::Load,
             address: 0x1020,
             output: Some(tmp_load.clone()),
@@ -1599,7 +1619,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 9,
+            seq_num: 10,
             opcode: PcodeOpcode::Copy,
             address: 0x1020,
             output: Some(eax.clone()),
@@ -1607,7 +1627,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 10,
+            seq_num: 11,
             opcode: PcodeOpcode::Copy,
             address: 0x1024,
             output: Some(tmp_val.clone()),
@@ -1615,7 +1635,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 11,
+            seq_num: 12,
             opcode: PcodeOpcode::Store,
             address: 0x1024,
             output: None,
@@ -1624,7 +1644,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
         },
         // mov eax, [ebp+8] ; call eax   → fp = param_1
         PcodeOp {
-            seq_num: 12,
+            seq_num: 13,
             opcode: PcodeOpcode::IntAdd,
             address: 0x1030,
             output: Some(tmp_addr.clone()),
@@ -1632,7 +1652,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 13,
+            seq_num: 14,
             opcode: PcodeOpcode::Load,
             address: 0x1030,
             output: Some(tmp_load.clone()),
@@ -1640,7 +1660,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 14,
+            seq_num: 15,
             opcode: PcodeOpcode::Copy,
             address: 0x1030,
             output: Some(eax.clone()),
@@ -1648,7 +1668,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 15,
+            seq_num: 16,
             opcode: PcodeOpcode::Copy,
             address: 0x1034,
             output: Some(target.clone()),
@@ -1656,7 +1676,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 16,
+            seq_num: 17,
             opcode: PcodeOpcode::CallInd,
             address: 0x1034,
             output: None,
@@ -1664,7 +1684,7 @@ fn x86_32_callind_staged_args_prefer_stack_param_not_live_eax() {
             asm_mnemonic: None,
         },
         PcodeOp {
-            seq_num: 17,
+            seq_num: 18,
             opcode: PcodeOpcode::Return,
             address: 0x1040,
             output: None,
