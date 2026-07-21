@@ -3062,6 +3062,68 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           meaningful regression signal either way), full `cargo nextest
           run --workspace` 2146/2146 minus the same 7 pre-existing
           unrelated `fission-emulator` failures.
+      - **Fix — dead-store elimination was dropping writes through
+        stack-spilled VLA pointers** (commit `53c931e5`). A real-fixture
+        probe of variable-length arrays (a classic tricky decompiler
+        case, picked up from the x87 scope note as the next well-known
+        pain point to spot-check). A real `x86_64-w64-mingw32-gcc`
+        fixture with a genuine VLA (`int arr[n]`, dynamic `n`) was
+        silently dropping `arr[i] = ...` from the decompiled output
+        entirely — not a rendering glitch, the whole assignment was
+        missing at both the NIR and HIR layers. A fixed-size array with
+        the identical loop shape (`int arr[16]`) was unaffected,
+        narrowing this to something VLA-specific rather than a general
+        array-write bug.
+        - Root cause: a VLA's base address is computed once and spilled
+          to an ordinary stack slot, named `local_18` by the same
+          general-purpose local-naming convention used for any other
+          spilled value. `classify_base_object`
+          (`fission-midend-normalize/src/memory/partition.rs`)
+          classifies a `Deref`'s base purely by *name prefix* — anything
+          starting with `local_`/`stack_`/etc is unconditionally
+          `MemoryAccessClass::Stack`. This conflates two shapes that
+          produce the identical `Deref(local_18 + i * stride)` pattern:
+          `local_18` genuinely *being* a fixed-size array's own storage
+          (safe) vs `local_18` merely *holding* a pointer value spilled
+          to a stack slot with that name (the VLA case — dereferencing
+          through it accesses a different, unbounded region that must
+          never be folded into "this function's own stack frame" for
+          alias-analysis purposes). With no type information available
+          at that layer, the wrong answer fed directly into
+          `apply_dead_store_elimination`'s "no-escape stack slot,
+          `use_count == 0` → safe to remove" rule — explicitly documented
+          as "conservative and sound," soundness that broke exactly here.
+        - Fixed at `partition_key()` (not `classify_base_object`'s own
+          signature, to avoid a much larger blast-radius refactor across
+          its 6 call sites in other files): whenever a runtime-scaled
+          `stride` is present alongside a name-based `Stack`
+          classification, downgrade to `Unknown`. Confirmed via the same
+          real fixture-pair that this doesn't cost real optimization
+          opportunities — when this pipeline recognizes a genuine
+          fixed-size local array, the address computation bottoms out at
+          a different, non-`local_`-prefixed expression (an
+          `rsp`-holding temp) instead, so the rule isn't observed to
+          regress the legitimate case.
+        - New unit tests directly exercise `apply_dead_store_elimination`:
+          one constructs the exact bug shape (stack-spilled pointer +
+          runtime stride, zero reads — the worst case, previously
+          guaranteed elimination) and confirms the write survives; a
+          second confirms a genuinely dead, ordinary local write (no
+          stride) is still correctly removed, guarding the existing
+          legitimate optimization the fix must not blunt.
+        - Validated: `fission-midend-normalize` 270/270 (+2),
+          `fission-pcode`/`-decompiler`/`-static`/`-midend-normalize`
+          1308/1308, `golden_corpus_check.py` clean (dead-store
+          elimination is a broadly-used general pass — a clean result
+          across all 160 golden functions is real evidence against a
+          regression, not just an unaffected-by-construction result),
+          full `cargo nextest run --workspace` 2148/2148 minus the same 7
+          pre-existing unrelated `fission-emulator` failures.
+        - **Scope note**: the x87 FPU register-stack reconciliation gap
+          (recorded two entries above) remains open and unattempted —
+          this entry closed a different, unrelated real bug found while
+          spot-checking the same general category of "classic tricky
+          decompiler cases."
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
