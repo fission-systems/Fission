@@ -1,4 +1,3 @@
-use crate::prelude::*;
 /// Dead store elimination using Memory SSA.
 ///
 /// Removes `HirStmt::Assign { lhs: Deref { .. } | Index { .. }, rhs }` nodes
@@ -20,6 +19,7 @@ use crate::prelude::*;
 /// - LLVM `DeadStoreElimination.cpp`
 /// - RetDec `reaching_definitions.h`: UD/DU chain based DSE
 use super::mem_ssa::{AliasKey, MemDef, build_mem_ssa};
+use crate::prelude::*;
 
 /// Apply dead store elimination and return `true` if any stores were removed.
 pub fn apply_dead_store_elimination(func: &mut HirFunction) -> bool {
@@ -291,5 +291,157 @@ fn remove_at_branch(body: &mut Vec<HirStmt>, paths: &[&StmtPath], depth: usize, 
     }
     for stmt in body.iter_mut() {
         recurse_remove(stmt, &relevant, next_depth);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ptr_binding(name: &str) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false,
+            })),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-0x18)),
+            initializer: None,
+        }
+    }
+
+    fn int_binding(name: &str) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
+            initializer: None,
+        }
+    }
+
+    fn base_func(body: Vec<HirStmt>, locals: Vec<NirBinding>) -> HirFunction {
+        HirFunction {
+            name: "f".to_string(),
+            int_param_offsets: Vec::new(),
+            params: Vec::new(),
+            locals,
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body,
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        }
+    }
+
+    /// A `local_XX`-named binding used as a Deref base plus a runtime-
+    /// scaled index (`local_18 + i * 4`) is exactly the shape a spilled
+    /// VLA base pointer produces -- confirmed via a real `int arr[n]`
+    /// (genuinely dynamic `n`) fixture where this pattern's write was
+    /// silently dropped as a "safely removable" write to "the stack slot
+    /// `local_18`", when `local_18` actually just *holds* a pointer to an
+    /// entirely different, unbounded region. With no read anywhere in the
+    /// function (the worst case for this bug -- previously guaranteed
+    /// elimination), the store must still survive.
+    #[test]
+    fn dead_store_elimination_keeps_write_through_stack_spilled_pointer_with_runtime_index() {
+        let index_expr = HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(HirExpr::Var("i".to_string())),
+            rhs: Box::new(HirExpr::Const(
+                4,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        };
+        let addr_expr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("local_18".to_string())),
+            rhs: Box::new(index_expr),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false,
+            })),
+        };
+        let mut func = base_func(
+            vec![HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(addr_expr),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+                rhs: HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            }],
+            vec![ptr_binding("local_18"), int_binding("i")],
+        );
+
+        let changed = apply_dead_store_elimination(&mut func);
+
+        assert!(
+            !changed,
+            "write through a stack-spilled pointer must never be treated \
+             as a removable dead store to its own stack slot"
+        );
+        assert_eq!(
+            func.body.len(),
+            1,
+            "the store must survive: {:?}",
+            func.body
+        );
+    }
+
+    /// Baseline: a genuine, provably-dead write to an *ordinary* stack
+    /// local (no runtime index at all) must still be eliminated -- the
+    /// fix above must not blunt this existing, legitimate optimization.
+    #[test]
+    fn dead_store_elimination_still_removes_genuinely_dead_local_write() {
+        let mut func = base_func(
+            vec![HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Var("local_10".to_string())),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+                rhs: HirExpr::Const(
+                    5,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            }],
+            vec![int_binding("local_10")],
+        );
+
+        let changed = apply_dead_store_elimination(&mut func);
+
+        assert!(
+            changed,
+            "a provably-dead, never-read local write should still be removed"
+        );
+        assert!(func.body.is_empty(), "{:?}", func.body);
     }
 }

@@ -63,18 +63,13 @@ struct AddressParts {
     scaled_index: Option<(HirExpr, i64)>,
 }
 
-pub fn collect_partitioned_memory_accesses(
-    stmts: &[HirStmt],
-) -> Vec<PartitionedMemoryAccess> {
+pub fn collect_partitioned_memory_accesses(stmts: &[HirStmt]) -> Vec<PartitionedMemoryAccess> {
     let mut accesses = Vec::new();
     collect_accesses_from_stmts(stmts, &mut accesses);
     accesses
 }
 
-pub fn partition_key_for_pointer_expr(
-    ptr: &HirExpr,
-    access_ty: &NirType,
-) -> Option<PartitionKey> {
+pub fn partition_key_for_pointer_expr(ptr: &HirExpr, access_ty: &NirType) -> Option<PartitionKey> {
     let access = parse_partitioned_access(ptr, access_ty, MemoryAccessKind::Load)?;
     Some(access.partition_key())
 }
@@ -93,12 +88,48 @@ pub(super) fn type_byte_size(ty: &NirType) -> Option<u32> {
 impl PartitionedMemoryAccess {
     pub fn partition_key(&self) -> PartitionKey {
         let width = i64::from(type_byte_size(&self.access_ty).unwrap_or(0));
+        let mut effect_class = classify_base_object(&self.base);
+        // `classify_base_object` classifies a `local_XX`/`stack_XX`-named
+        // base as `Stack` purely from its *name prefix* -- it has no
+        // access to the binding's declared type, so it can't tell apart
+        // two shapes that produce the exact same `Deref(local_XX + i *
+        // stride)` pattern: (a) `local_XX` genuinely *is* a fixed-size
+        // local array's own storage, safely indexed at runtime, vs (b)
+        // `local_XX` merely *holds* a pointer value that was spilled to a
+        // stack slot with that name (e.g. a VLA's dynamically-computed
+        // base address) -- dereferencing *through* a pointer value
+        // accesses whatever it points to, an entirely different,
+        // unbounded region that must never be folded into this
+        // function's own stack frame for alias-analysis purposes.
+        // Confirmed via a real fixture that this ambiguity is real, not
+        // theoretical: `int arr[n]` with a genuinely dynamic `n` spills
+        // its runtime-computed base pointer to a `local_XX`-named slot,
+        // and `arr[i] = ...` (a `stride`-carrying access through it) was
+        // silently misclassified as a safely-removable dead store to
+        // "the stack slot `local_XX`" by `apply_dead_store_elimination`
+        // -- dropping the whole assignment from the decompiled output.
+        // Downgrading to `Unknown` whenever a runtime `stride` is present
+        // is conservative -- it forfeits eliminating a genuinely-dead
+        // write to a real fixed-size local array (not observed in
+        // practice: when this pipeline recognizes a true fixed-size
+        // array, the address computation bottoms out at a different,
+        // non-`local_XX`-prefixed expression instead, so this rule
+        // shouldn't cost real optimization opportunities) in exchange for
+        // never risking silently dropping a real store.
+        if self.stride.is_some() && matches!(effect_class, MemoryAccessClass::Stack) {
+            effect_class = MemoryAccessClass::Unknown;
+        }
+        let escape_class = if matches!(effect_class, MemoryAccessClass::Unknown) {
+            MemoryEscapeClass::Escaped
+        } else {
+            classify_escape(&self.base)
+        };
         PartitionKey {
             base_object: self.base_repr.clone(),
             offset_interval: (self.const_offset, self.const_offset + width),
             stride: self.stride,
-            effect_class: classify_base_object(&self.base),
-            escape_class: classify_escape(&self.base),
+            effect_class,
+            escape_class,
         }
     }
 }
