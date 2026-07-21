@@ -689,6 +689,95 @@ impl<'a> PreviewBuilder<'a> {
         resolved
     }
 
+    /// Second hop past [`resolve_teb_field_offset`]/[`try_teb_field_var`]:
+    /// the classic anti-debug check doesn't stop at
+    /// `TEB.ProcessEnvironmentBlock` -- it dereferences that pointer and
+    /// reads `PEB.BeingDebugged` two bytes in. Recognizes a pointer built
+    /// as `Load(teb_ProcessEnvironmentBlock_address) + K` for a compile-
+    /// time-constant `K`, i.e. the *value* loaded from the TEB field
+    /// (not its address) used as a base for further arithmetic. Reuses
+    /// [`resolve_teb_field_offset_inner`] to identify the inner `Load`'s
+    /// address as specifically the `ProcessEnvironmentBlock` field
+    /// (rather than some other pointer-typed TEB field) so this doesn't
+    /// misfire on arithmetic over `teb_StackBase`/`teb_Self`/etc, which
+    /// have no well-known fields of their own worth naming here.
+    pub(in crate::midend::builder) fn resolve_peb_field_offset(
+        &self,
+        ptr: &Varnode,
+    ) -> Option<i64> {
+        self.resolve_peb_field_offset_inner(ptr, &mut HashSet::default())
+    }
+
+    /// [`resolve_peb_field_offset`] plus [`peb_field_name`]'s lookup,
+    /// mirroring [`try_teb_field_var`]'s `Cast`-wrapping approach (same
+    /// rationale: a real type at the use site without implying a local
+    /// declaration that doesn't exist).
+    pub(in crate::midend::builder) fn try_peb_field_var(&self, ptr: &Varnode) -> Option<HirExpr> {
+        let offset = self.resolve_peb_field_offset(ptr)?;
+        let (name, is_pointer) = peb_field_name(offset)?;
+        let ty = if is_pointer {
+            type_from_size(self.options.pointer_size, false)
+        } else {
+            type_from_size(1, false)
+        };
+        Some(HirExpr::Cast {
+            ty,
+            expr: Box::new(HirExpr::Var(name.to_string())),
+        })
+    }
+
+    fn resolve_peb_field_offset_inner(
+        &self,
+        ptr: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Option<i64> {
+        let key = VarnodeKey::from(ptr);
+        if !visiting.insert(key.clone()) {
+            return None;
+        }
+        let resolved = match self.lookup_def_site(ptr).map(|(_, op)| op) {
+            Some(op) => match op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt => {
+                    self.resolve_peb_field_offset_inner(&op.inputs[0], visiting)
+                }
+                PcodeOpcode::IntAdd | PcodeOpcode::PtrAdd => {
+                    if op.inputs.len() < 2 {
+                        None
+                    } else if let Some(offset) =
+                        self.resolve_peb_field_offset_inner(&op.inputs[0], visiting)
+                    {
+                        self.resolve_constant_operand(&op.inputs[1])
+                            .map(|delta| offset + delta)
+                    } else if let Some(offset) =
+                        self.resolve_peb_field_offset_inner(&op.inputs[1], visiting)
+                    {
+                        self.resolve_constant_operand(&op.inputs[0])
+                            .map(|delta| offset + delta)
+                    } else {
+                        None
+                    }
+                }
+                PcodeOpcode::Load if op.inputs.len() >= 2 => {
+                    let teb_offset = self
+                        .resolve_teb_field_offset_inner(&op.inputs[1], &mut HashSet::default())?;
+                    let (name, _) = teb_field_name(teb_offset, self.options.is_64bit)?;
+                    if name == "teb_ProcessEnvironmentBlock" {
+                        Some(0)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            None => None,
+        };
+        visiting.remove(&key);
+        resolved
+    }
+
     /// Resolves a p-code operand to a compile-time-known constant, either
     /// directly (a literal `const(...)` varnode) or by walking a short
     /// `Copy`/`Cast`/`IntZExt`/`IntSExt` def chain back to one -- e.g. a
@@ -952,6 +1041,21 @@ fn teb_field_name(offset: i64, is_64bit: bool) -> Option<(&'static str, bool)> {
             _ => return None,
         }
     })
+}
+
+/// Name for a well-known field of the Process Environment Block (PEB),
+/// reached via `TEB.ProcessEnvironmentBlock` (see [`teb_field_name`]), at
+/// the given byte offset -- currently just `BeingDebugged`, the field the
+/// classic `fs:/gs: -> TEB.ProcessEnvironmentBlock -> PEB+0x2` anti-debug
+/// check chain reads. Unlike [`teb_field_name`], the offset is the same
+/// on x86 and x64: `InheritedAddressSpace` and `ReadImageFileExecOptions`
+/// are both single bytes at offsets 0x0/0x1 ahead of it, and neither
+/// field's size depends on pointer width.
+fn peb_field_name(offset: i64) -> Option<(&'static str, bool)> {
+    match offset {
+        0x02 => Some(("peb_BeingDebugged", false)),
+        _ => None,
+    }
 }
 
 fn parse_stack_immediate(text: &str) -> Option<i64> {

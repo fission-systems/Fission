@@ -2011,3 +2011,64 @@ fn gs_relative_teb_field_gets_descriptive_name() {
         "TEB field access must not degrade return-type inference to `undefined`:\n{code}"
     );
 }
+
+/// The classic anti-debug check chain doesn't stop at
+/// `TEB.ProcessEnvironmentBlock` -- it dereferences that pointer and reads
+/// `PEB.BeingDebugged` two bytes in: `gs:0x60` (load the PEB pointer),
+/// `+ 0x2` (address of `BeingDebugged`), then a byte `Load`. Confirmed
+/// this is exactly how a real `x86_64-w64-mingw32-gcc`-compiled
+/// `NtCurrentTeb()->ProcessEnvironmentBlock->BeingDebugged` lowers.
+#[test]
+fn gs_relative_peb_being_debugged_gets_descriptive_name() {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+
+    let gs_offset = register(0x118, 8);
+    let teb_field_addr = varnode(0x9200);
+    let peb_ptr = varnode(0x9300);
+    let being_debugged_addr = varnode(0x9400);
+    let loaded = varnode(0x9500);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(teb_field_addr.clone()),
+                vec![gs_offset, constant_sized(0x60, 8)],
+            ),
+            op(
+                1,
+                PcodeOpcode::Load,
+                Some(peb_ptr.clone()),
+                vec![constant_sized(3, 8), teb_field_addr],
+            ),
+            op(
+                2,
+                PcodeOpcode::IntAdd,
+                Some(being_debugged_addr.clone()),
+                vec![peb_ptr, constant_sized(0x2, 8)],
+            ),
+            op(
+                3,
+                PcodeOpcode::Load,
+                Some(loaded.clone()),
+                vec![constant_sized(3, 8), being_debugged_addr],
+            ),
+            op(4, PcodeOpcode::Return, None, vec![constant(0), loaded]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "is_debugged", 0x1000, &options).expect("render");
+    eprintln!("is_debugged:\n{code}");
+    assert!(
+        code.contains("peb_BeingDebugged"),
+        "expected a descriptive PEB.BeingDebugged name, not raw pointer-chasing arithmetic:\n{code}"
+    );
+    assert!(
+        !code.contains("undefined"),
+        "PEB field access must not degrade return-type inference to `undefined`:\n{code}"
+    );
+}

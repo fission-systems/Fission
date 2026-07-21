@@ -638,7 +638,18 @@ impl SubvarFlowSolver {
         }
         let def_expr = match self.def_map.get(var_name) {
             Some(expr) => expr,
-            None => return true, // Leaf parameter / input boundary
+            // A name with no assignment anywhere in the function is only a
+            // safe leaf to narrow-and-rename if it's a genuinely declared
+            // local/param (`type_map` is seeded from exactly those, see
+            // `apply_subvar_flow_pass`) -- renaming it fabricates a new
+            // `func.locals` entry with no initializer (see the push loop in
+            // `apply_subvar_flow_pass`), which is fine for a real parameter
+            // but produces a bogus, uninitialized-looking declaration for a
+            // synthetic named value that isn't backed by any real storage
+            // (e.g. a fixed-address field read materialized as a bare,
+            // deliberately-unregistered `HirExpr::Var`, as in the Windows
+            // TEB/PEB field recognition in `fission-pcode`).
+            None => return self.type_map.contains_key(var_name),
         };
 
         match def_expr {
@@ -1131,7 +1142,7 @@ pub fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn u8_ty() -> NirType {
         NirType::Int {
@@ -1159,6 +1170,27 @@ mod tests {
         let mut func = HirFunction::default();
         func.name = "test_subflow".to_string();
 
+        // `a`/`b` are function parameters (real, declared storage feeding
+        // `x = a + b`) -- must be registered like any genuine binding, or
+        // the def-less leaf case in `trace_backward` now conservatively
+        // refuses to narrow them (an unregistered name reaching that path
+        // is treated as a synthetic value with no real storage to declare,
+        // not a parameter -- see the Windows TEB/PEB field regression this
+        // guarded against).
+        func.params.push(NirBinding {
+            name: "a".to_string(),
+            ty: u64_ty(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        });
+        func.params.push(NirBinding {
+            name: "b".to_string(),
+            ty: u64_ty(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(1)),
+            initializer: None,
+        });
         func.locals.push(NirBinding {
             name: "x".to_string(),
             ty: u64_ty(),
