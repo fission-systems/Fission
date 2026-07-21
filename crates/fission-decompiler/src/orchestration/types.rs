@@ -301,13 +301,6 @@ pub trait NirSource {
     fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String>;
 }
 
-#[cfg(feature = "native_decomp")]
-impl NirSource for fission_ffi::DecompilerNative {
-    fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String> {
-        self.get_pcode(address)
-    }
-}
-
 pub type PreviewEngineMode = NirEngineMode;
 pub type PreviewSelection = NirSelection;
 pub type PreviewRoutingDecision = NirRoutingDecision;

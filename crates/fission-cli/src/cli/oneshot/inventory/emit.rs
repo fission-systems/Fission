@@ -3,7 +3,6 @@ use super::provenance::{
 };
 use super::schema::{FunctionFactsInventorySummary, write_inventory_summary};
 use crate::cli::args::OneShotArgs;
-#[cfg(not(feature = "native_decomp"))]
 use crate::cli::oneshot::function_select::{
     BatchFunctionSelection, select_batch_functions, select_explicit_functions,
     select_function_by_address, select_functions_from_addresses_file,
@@ -16,174 +15,16 @@ use std::io::{self, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::cli::oneshot::assessment::canonical_indirect_classification;
-#[cfg(feature = "native_decomp")]
-use crate::cli::oneshot::common::{
-    apply_profile, init_decompiler, resolve_compiler_id, resolve_profile,
-};
-#[cfg(feature = "native_decomp")]
-use crate::cli::oneshot::decompile::{
-    preview_candidate_entry_with_recovery, select_candidate_functions,
-};
-#[cfg(feature = "native_decomp")]
-use crate::cli::output::OutputSilencer;
-#[cfg(feature = "native_decomp")]
-use fission_ffi::DecompilerNative;
-#[cfg(feature = "native_decomp")]
-use fission_static::analysis::decomp::{
-    PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
-    serialize_api_signatures_json,
-};
 
-#[cfg(not(feature = "native_decomp"))]
 use fission_decompiler::rust_sleigh::bounds::{
     clamp_to_available_execution, next_function_distance,
 };
-#[cfg(not(feature = "native_decomp"))]
 use fission_decompiler::{
     IndirectControlClassification, NirBuildStats, NirHintStats, PcodeFunction,
 };
-#[cfg(not(feature = "native_decomp"))]
 use fission_decompiler::{RustSleighDecompileConfig, select_nir_output_from_prebuilt_pcode};
-#[cfg(not(feature = "native_decomp"))]
 use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 
-#[cfg(feature = "native_decomp")]
-fn prepare_inventory_decompiler(
-    cli: &OneShotArgs,
-    binary: &LoadedBinary,
-    binary_data: &[u8],
-) -> io::Result<DecompilerNative> {
-    let mut decomp = init_decompiler(cli.verbose);
-    let (selected_profile, _) = resolve_profile(cli.profile.as_deref());
-    apply_profile(&mut decomp, selected_profile);
-    let (compiler_id, _) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
-    let gdt_path_owned = fission_core::PATHS
-        .get_gdt_path(binary.is_64bit)
-        .and_then(|p| p.to_str().map(String::from));
-    let signatures_json = serialize_api_signatures_json();
-    let mut prepare_timings = PrepareTimings::default();
-    let mut prepare_options = PrepareOptions {
-        compiler_id: compiler_id.as_deref(),
-        verbose: cli.verbose,
-        timings: Some(&mut prepare_timings),
-        gdt_path: gdt_path_owned.as_deref(),
-        signatures_json: signatures_json.as_deref(),
-        timeout_ms: cli.timeout_ms,
-    };
-    prepare_native_decompiler_for_binary(&mut decomp, binary, binary_data, &mut prepare_options)
-        .map_err(|e| io::Error::other(format!("prepare decompiler failed: {e}")))?;
-    Ok(decomp)
-}
-
-#[cfg(feature = "native_decomp")]
-fn try_ingest_native_inventory_facts(
-    decomp: &mut DecompilerNative,
-    fact_store: &mut FactStore,
-    address: u64,
-) {
-    let Ok(result) = decomp.decompile_with_metadata(address) else {
-        return;
-    };
-    if result.inferred_types.is_empty() {
-        return;
-    }
-    fact_store.ingest_native_function_types(address, result.inferred_types);
-}
-
-#[cfg(feature = "native_decomp")]
-pub(crate) fn emit_function_facts_inventory(
-    cli: &OneShotArgs,
-    binary: &LoadedBinary,
-    binary_data: &[u8],
-) -> io::Result<()> {
-    let output_jsonl = cli.output_jsonl.as_ref().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "--output-jsonl is required for --emit-function-facts-inventory",
-        )
-    })?;
-    let summary_json = cli.summary_json.as_ref().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "--summary-json is required for --emit-function-facts-inventory",
-        )
-    })?;
-    let chunk_size = cli.chunk_size.unwrap_or(100).max(1);
-    let quiet_batch_errors = cli.quiet_batch_errors || !cli.verbose;
-    let _silencer = OutputSilencer::new_if(quiet_batch_errors);
-
-    let mut decomp = prepare_inventory_decompiler(cli, binary, binary_data)?;
-    let mut fact_store = FactStore::from_binary(binary);
-    let pdb_source_present = detect_pdb_source_present(binary);
-    let binary_name = cli
-        .binary
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let functions = select_inventory_functions(cli, binary)?;
-    let selection_accounting = functions.accounting;
-    let functions = functions.functions;
-
-    if let Some(parent) = output_jsonl.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if let Some(parent) = summary_json.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(output_jsonl, b"")?;
-    let mut writer = OpenOptions::new().append(true).open(output_jsonl)?;
-
-    let mut summary = FunctionFactsInventorySummary {
-        binary: binary_name.clone(),
-        binary_path: cli.binary.display().to_string(),
-        format: binary.format.clone(),
-        arch_spec: binary.arch_spec.clone(),
-        functions_total: functions.len(),
-        functions_discovered_total: selection_accounting.functions_discovered_total,
-        functions_selected_total: selection_accounting.functions_selected_total,
-        functions_excluded_import_count: selection_accounting.functions_excluded_import_count,
-        functions_excluded_runtime_wrapper_count: selection_accounting
-            .functions_excluded_runtime_wrapper_count,
-        functions_excluded_provenance_count: selection_accounting
-            .functions_excluded_provenance_count,
-        include_nonuser_functions: selection_accounting.include_nonuser_functions,
-        chunk_size,
-        ..Default::default()
-    };
-
-    for chunk in functions.chunks(chunk_size) {
-        for func in chunk {
-            let candidate: InventoryCandidateEntry = preview_candidate_entry_with_recovery(
-                &mut decomp,
-                binary,
-                &fact_store,
-                &binary_name,
-                func,
-                cli.timeout_ms,
-            )
-            .into();
-            try_ingest_native_inventory_facts(&mut decomp, &mut fact_store, func.address);
-            let row = to_inventory_row(&cli.binary, pdb_source_present, &fact_store, candidate);
-            serde_json::to_writer(&mut writer, &row)
-                .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
-            writer.write_all(b"\n")?;
-            update_inventory_summary(&mut summary, &row);
-            if summary.rows_emitted % 10 == 0 {
-                writer.flush()?;
-                write_inventory_summary(summary_json, &summary)?;
-            }
-        }
-        writer.flush()?;
-        summary.chunks_completed += 1;
-        write_inventory_summary(summary_json, &summary)?;
-    }
-
-    write_inventory_summary(summary_json, &summary)?;
-    Ok(())
-}
-
-#[cfg(not(feature = "native_decomp"))]
 fn select_inventory_functions<'a>(
     cli: &OneShotArgs,
     binary: &'a LoadedBinary,
@@ -213,7 +54,6 @@ fn select_inventory_functions<'a>(
     ))
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn fact_density(
     has_dwarf_function: bool,
     dwarf_param_count: usize,
@@ -236,12 +76,10 @@ fn fact_density(
     score
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn preview_goto_count(code: &str) -> usize {
     code.matches("goto ").count()
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn explicit_hint_surface_count(stats: Option<NirHintStats>) -> usize {
     stats.map_or(0, |stats| {
         stats.explicit_param_name_hits
@@ -252,7 +90,6 @@ fn explicit_hint_surface_count(stats: Option<NirHintStats>) -> usize {
     })
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn preview_surface_kind_str(kind: Option<NirSurfaceKind>) -> Option<String> {
     match kind {
         Some(NirSurfaceKind::Structured) => Some("structured".to_string()),
@@ -261,7 +98,6 @@ fn preview_surface_kind_str(kind: Option<NirSurfaceKind>) -> Option<String> {
     }
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn classify_nir_output_class(
     direct_success: bool,
     surface_kind: Option<NirSurfaceKind>,
@@ -282,7 +118,6 @@ fn classify_nir_output_class(
     Some("partially_structured".to_string())
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn build_quality_tags_and_score(
     dwarf_param_count: usize,
     dwarf_local_count: usize,
@@ -360,7 +195,6 @@ fn build_quality_tags_and_score(
     (score, tags)
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn preview_block_signature(
     row_error_kind: Option<&str>,
     row_error_message: Option<&str>,
@@ -441,7 +275,6 @@ fn preview_block_signature(
     Some(signature.to_string())
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn preview_block_detail(
     row_error_message: Option<&str>,
     preview_fallback_reason: Option<&str>,
@@ -452,13 +285,11 @@ fn preview_block_detail(
         .filter(|detail| !detail.is_empty())
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn pcode_metrics(pcode: &PcodeFunction) -> (usize, usize) {
     let total_ops = pcode.blocks.iter().map(|block| block.ops.len()).sum();
     (pcode.blocks.len(), total_ops)
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usize> {
     let marker = "decode failed at 0x";
     let idx = err.find(marker)?;
@@ -472,7 +303,6 @@ fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usi
     if safe == 0 { None } else { Some(safe) }
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn decode_rust_sleigh_pcode(
     binary: &LoadedBinary,
     name: &str,
@@ -526,7 +356,6 @@ fn decode_rust_sleigh_pcode(
     }
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn decode_inventory_pcode(
     binary: &LoadedBinary,
     func: &FunctionInfo,
@@ -572,7 +401,6 @@ fn decode_inventory_pcode(
     )
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn classify_decode_error(err: &str) -> (&'static str, &'static str) {
     let lower = err.to_ascii_lowercase();
     if lower.contains("unsupported arch_spec") || lower.contains("missing ghidra load spec") {
@@ -584,7 +412,6 @@ fn classify_decode_error(err: &str) -> (&'static str, &'static str) {
     ("preview_unsupported", "preview_frontend_reject")
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn build_inventory_fallback_entry(
     fact_store: &FactStore,
     binary_name: &str,
@@ -686,7 +513,6 @@ fn build_inventory_fallback_entry(
     }
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn build_inventory_candidate_entry_rust(
     cli: &OneShotArgs,
     binary: &LoadedBinary,
@@ -931,7 +757,6 @@ fn build_inventory_candidate_entry_rust(
     }
 }
 
-#[cfg(not(feature = "native_decomp"))]
 fn rust_candidate_entry_with_recovery(
     cli: &OneShotArgs,
     binary: &LoadedBinary,
@@ -954,7 +779,6 @@ fn rust_candidate_entry_with_recovery(
     }
 }
 
-#[cfg(not(feature = "native_decomp"))]
 pub(crate) fn emit_function_facts_inventory(
     cli: &OneShotArgs,
     binary: &LoadedBinary,

@@ -9,11 +9,9 @@ license = "AGPL-3.0-or-later"
 readme = "../../README.md"
 keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
 categories = ["development-tools::debugging"]
-build = "build.rs"
 
 [features]
 default = []
-native_decomp = []
 
 [dependencies]
 fission-core = { path = "../fission-core" }

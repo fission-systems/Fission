@@ -15,7 +15,6 @@ name = "fission_decompiler"
 
 [features]
 default = []
-native_decomp = []
 
 [dependencies]
 fission-core = { path = "../fission-core" }

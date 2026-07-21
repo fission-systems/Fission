@@ -1,4 +1,4 @@
-//! Rust-only (`#[cfg(not(feature = "native_decomp"))]`) decompilation CLI path.
+//! Rust-only decompilation CLI path (the only decompiler pipeline Fission ships).
 
 mod debug_bundle;
 mod fallback;
@@ -238,7 +238,7 @@ pub(crate) fn run_decompilation_rust_sleigh(
     _binary_data: &[u8],
 ) -> io::Result<()> {
     if cli.verbose {
-        eprintln!("[*] native_decomp is disabled; using Rust-Sleigh pipeline");
+        eprintln!("[*] Using Rust-Sleigh pipeline");
     }
 
     let init_start = std::time::Instant::now();

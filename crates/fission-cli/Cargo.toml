@@ -2,7 +2,6 @@
 name = "fission-cli"
 version = "0.1.6"
 edition = "2024"
-build = "build.rs"
 authors = ["Fission Dev Team"]
 description = "Fission CLI and entrypoint"
 repository = "https://github.com/sjkim1127/Fission"
@@ -18,9 +17,6 @@ path = "src/lib.rs"
 
 [features]
 default = []
-native_decomp = [
-    "fission-static/native_decomp",
-]
 debugger = ["dep:fission-dynamic"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]
@@ -60,10 +56,8 @@ test = false
 name = "fission_preview_worker"
 path = "src/bin/fission_preview_worker.rs"
 test = false
-required-features = ["native_decomp"]
 
 [[bin]]
 name = "fission_nir_worker"
 path = "src/bin/fission_nir_worker.rs"
 test = false
-required-features = ["native_decomp"]

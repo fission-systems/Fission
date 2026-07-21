@@ -5,14 +5,10 @@
 mod assessment;
 mod binary_info;
 mod callgraph;
-#[cfg(feature = "native_decomp")]
-mod common;
 #[cfg(feature = "debugger")]
 mod debug;
 mod debug_bundle_extra;
 mod debug_decomp;
-#[cfg(feature = "native_decomp")]
-mod decompile;
 mod disasm;
 mod function_select;
 mod functions;
@@ -23,7 +19,6 @@ mod pcode_diagnostics;
 mod pcode_stages;
 mod pcode_topology;
 mod raw_pcode;
-#[cfg(not(feature = "native_decomp"))]
 mod rust_decomp;
 mod script;
 mod strings;
@@ -31,10 +26,6 @@ mod xrefs;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
 use callgraph::run_callgraph;
-#[cfg(feature = "native_decomp")]
-use decompile::{
-    emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation,
-};
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use identify::run_identify;
@@ -43,7 +34,6 @@ use nir_stats::emit_nir_stats;
 use pcode_stages::emit_pcode_stages;
 use pcode_topology::emit_pcode_topology;
 use raw_pcode::emit_raw_pcode;
-#[cfg(not(feature = "native_decomp"))]
 use rust_decomp::run_decompilation_rust_sleigh;
 use strings::print_strings;
 use xrefs::run_xrefs;
@@ -486,27 +476,11 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if cli.preview_candidate_inventory {
-        #[cfg(feature = "native_decomp")]
-        {
-            return emit_preview_candidate_inventory(cli, &binary, &binary_data);
-        }
-
-        #[cfg(not(feature = "native_decomp"))]
-        {
-            anyhow::bail!("preview candidate inventory is deprecated with native_decomp removal");
-        }
+        anyhow::bail!("preview candidate inventory is deprecated with native_decomp removal");
     }
 
     if cli.preview_candidate_scan_batch {
-        #[cfg(feature = "native_decomp")]
-        {
-            return emit_preview_candidate_scan_batch(cli, &binary, &binary_data);
-        }
-
-        #[cfg(not(feature = "native_decomp"))]
-        {
-            anyhow::bail!("preview candidate scan batch is deprecated with native_decomp removal");
-        }
+        anyhow::bail!("preview candidate scan batch is deprecated with native_decomp removal");
     }
 
     if cli.emit_function_facts_inventory {
@@ -586,17 +560,8 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             );
         }
 
-        #[cfg(feature = "native_decomp")]
-        {
-            run_decompilation(cli, &binary, &binary_data)?;
-            return Ok(());
-        }
-
-        #[cfg(not(feature = "native_decomp"))]
-        {
-            run_decompilation_rust_sleigh(cli, &binary, &binary_data)?;
-            return Ok(());
-        }
+        run_decompilation_rust_sleigh(cli, &binary, &binary_data)?;
+        return Ok(());
     }
 
     print_help();

@@ -57,61 +57,6 @@ pub(super) struct InventoryCandidateEntry {
     pub(super) reason_tags: Vec<String>,
 }
 
-#[cfg(feature = "native_decomp")]
-impl From<crate::cli::oneshot::decompile::PreviewCandidateEntry> for InventoryCandidateEntry {
-    fn from(entry: crate::cli::oneshot::decompile::PreviewCandidateEntry) -> Self {
-        Self {
-            binary: entry.binary,
-            address: entry.address,
-            name: entry.name,
-            row_status: entry.row_status,
-            row_error_kind: entry.row_error_kind,
-            row_error_message: entry.row_error_message,
-            has_dwarf_function: entry.has_dwarf_function,
-            dwarf_param_count: entry.dwarf_param_count,
-            dwarf_local_count: entry.dwarf_local_count,
-            has_dwarf_return_type: entry.has_dwarf_return_type,
-            loader_type_count: entry.loader_type_count,
-            fact_density_score: entry.fact_density_score,
-            preview_direct_success: entry.preview_direct_success,
-            nir_direct_success: entry.nir_direct_success,
-            nir_fallback_kind: entry.nir_fallback_kind,
-            nir_fallback_kind_refined: entry.nir_fallback_kind_refined,
-            nir_fallback_reason: entry.nir_fallback_reason,
-            nir_block_signature: entry.nir_block_signature,
-            nir_block_detail: entry.nir_block_detail,
-            preview_fallback_kind: entry.preview_fallback_kind,
-            preview_fallback_kind_refined: entry.preview_fallback_kind_refined,
-            preview_fallback_reason: entry.preview_fallback_reason,
-            preview_block_signature: entry.preview_block_signature,
-            preview_block_detail: entry.preview_block_detail,
-            recovery_strategy_attempted: entry.recovery_strategy_attempted,
-            recovery_strategy_applied: entry.recovery_strategy_applied,
-            recovery_outcome: entry.recovery_outcome,
-            recovery_source_signature: entry.recovery_source_signature,
-            recovery_structuring_mode: entry.recovery_structuring_mode,
-            recovery_goto_count_before: entry.recovery_goto_count_before,
-            recovery_goto_count_after: entry.recovery_goto_count_after,
-            recovery_hint_surface_before: entry.recovery_hint_surface_before,
-            recovery_hint_surface_after: entry.recovery_hint_surface_after,
-            recovery_quality_flags: entry.recovery_quality_flags,
-            nir_surface_kind: entry.nir_surface_kind,
-            preview_surface_kind: entry.preview_surface_kind,
-            pcode_block_count: entry.pcode_block_count,
-            pcode_op_count: entry.pcode_op_count,
-            has_indirect_control_flow: entry.has_indirect_control_flow,
-            has_preserved_indirect_surface: entry.has_preserved_indirect_surface,
-            has_unresolved_unsupported_indirect: entry.has_unresolved_unsupported_indirect,
-            has_dispatcher_recovery: entry.has_dispatcher_recovery,
-            auto_eligible: entry.auto_eligible,
-            nir_goto_count: entry.nir_goto_count,
-            nir_output_class: entry.nir_output_class,
-            nir_build_stats: entry.nir_build_stats,
-            reason_tags: entry.reason_tags,
-        }
-    }
-}
-
 fn entry_indirect_classification(
     entry: &InventoryCandidateEntry,
 ) -> fission_decompiler::IndirectControlClassification {
