@@ -51,6 +51,10 @@ pub enum Cond {
     Gt,
     /// Signed >=
     Ge,
+    /// Unsigned <=
+    Ls,
+    /// Unsigned >
+    Hi,
 }
 
 impl Cond {
@@ -64,6 +68,26 @@ impl Cond {
             Cond::Le => 0b1101,
             Cond::Gt => 0b1100,
             Cond::Ge => 0b1010,
+            Cond::Ls => 0b1001,
+            Cond::Hi => 0b1000,
+        }
+    }
+
+    /// The logical negation of this condition (A64 pairs conditions by
+    /// flipping the low bit of their 4-bit encoding, AL/NV excepted --
+    /// irrelevant here since neither is ever constructed).
+    pub fn invert(self) -> Cond {
+        match self {
+            Cond::Eq => Cond::Ne,
+            Cond::Ne => Cond::Eq,
+            Cond::Cs => Cond::Cc,
+            Cond::Cc => Cond::Cs,
+            Cond::Lt => Cond::Ge,
+            Cond::Ge => Cond::Lt,
+            Cond::Le => Cond::Gt,
+            Cond::Gt => Cond::Le,
+            Cond::Ls => Cond::Hi,
+            Cond::Hi => Cond::Ls,
         }
     }
 }
@@ -141,6 +165,51 @@ impl<'a> Asm<'a> {
 
     pub fn eor_reg(&mut self, rd: u32, rn: u32, rm: u32) {
         self.buf.emit_u32_le(0xCA000000 | (rm << 16) | (rn << 5) | rd);
+    }
+
+    /// `mul xd, xn, xm` (alias for `madd xd, xn, xm, xzr`).
+    pub fn mul_reg(&mut self, rd: u32, rn: u32, rm: u32) {
+        self.buf
+            .emit_u32_le(0x9B007C00 | (rm << 16) | (rn << 5) | rd);
+    }
+
+    /// `udiv xd, xn, xm` (unsigned integer division, truncating).
+    pub fn udiv_reg(&mut self, rd: u32, rn: u32, rm: u32) {
+        self.buf
+            .emit_u32_le(0x9AC00800 | (rm << 16) | (rn << 5) | rd);
+    }
+
+    /// `sdiv xd, xn, xm` (signed integer division, truncating toward 0).
+    pub fn sdiv_reg(&mut self, rd: u32, rn: u32, rm: u32) {
+        self.buf
+            .emit_u32_le(0x9AC00C00 | (rm << 16) | (rn << 5) | rd);
+    }
+
+    /// `msub xd, xn, xm, xa` (xd = xa - xn*xm) -- used to compute a
+    /// remainder as `a - (a/b)*b` after a preceding `udiv_reg`/`sdiv_reg`
+    /// (AArch64 has no direct remainder instruction).
+    pub fn msub_reg(&mut self, rd: u32, rn: u32, rm: u32, ra: u32) {
+        self.buf
+            .emit_u32_le(0x9B008000 | (rm << 16) | (ra << 10) | (rn << 5) | rd);
+    }
+
+    /// `lslv xd, xn, xm` (logical shift left by a register-held amount).
+    pub fn lsl_reg(&mut self, rd: u32, rn: u32, rm: u32) {
+        self.buf
+            .emit_u32_le(0x9AC02000 | (rm << 16) | (rn << 5) | rd);
+    }
+
+    /// `lsrv xd, xn, xm` (logical shift right by a register-held amount).
+    pub fn lsr_reg(&mut self, rd: u32, rn: u32, rm: u32) {
+        self.buf
+            .emit_u32_le(0x9AC02400 | (rm << 16) | (rn << 5) | rd);
+    }
+
+    /// `asrv xd, xn, xm` (arithmetic shift right by a register-held
+    /// amount).
+    pub fn asr_reg(&mut self, rd: u32, rn: u32, rm: u32) {
+        self.buf
+            .emit_u32_le(0x9AC02800 | (rm << 16) | (rn << 5) | rd);
     }
 
     /// `sub xd, xn, #imm12` (imm12 unsigned, 0..=4095, unscaled).

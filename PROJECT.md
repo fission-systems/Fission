@@ -3483,6 +3483,65 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     same 7 pre-existing failures (the separate memcpy/`.text`-overrun
     bug recorded above), no new regressions. clippy clean on every new
     file.
+- **Self-implemented JIT: opcode coverage expanded from ~10 to ~25,
+  including a real branch-and-set bug this expansion's own new tests
+  caught, 2026-07-22.** User's explicit direction: Cranelift is a
+  general-purpose JIT so `selfjit` doesn't need to match its generality —
+  fine to take Fission-specific shortcuts. Kept going down
+  `selfjit::mod`'s own priority list (integer arithmetic/shifts/
+  comparisons/extension next after the original Copy/Add/Sub/cmp subset).
+  - Added to `emit::aarch64`: `mul_reg`/`udiv_reg`/`sdiv_reg`/`msub_reg`
+    (MUL/UDIV/SDIV/MSUB — remainder is computed as `a - (a/b)*b`, since
+    AArch64 has no direct remainder instruction), `lsl_reg`/`lsr_reg`/
+    `asr_reg` (register-amount shifts), `Cond::Ls`/`Cond::Hi` (unsigned
+    <=/>), and `Cond::invert()`.
+  - Added to `compiler::compile_op`: `IntMult`, `IntDiv`/`IntSDiv`,
+    `IntRem`/`IntSRem`, `IntLeft`/`IntRight`/`IntSRight`, `Int2Comp`
+    (negate, via `sub xzr - x`), `IntNegate` (bitwise NOT, via `eor` with
+    an all-ones immediate — no `ORN`/`MVN` encoding implemented),
+    `BoolNegate`/`BoolAnd`/`BoolOr`/`BoolXor` (booleans reuse the same
+    `and`/`orr`/`eor` as their `Int*` counterparts, since p-code booleans
+    are already 0/1-valued), `IntZExt` (free — `jit_read_space` already
+    zero-extends on read, so it's byte-for-byte `Copy`'s body), `IntSExt`
+    (sign-fill via `lsl` into the top of the register then `asr` back
+    down, parameterized on the input varnode's declared byte size — no
+    `SXTB`/`SXTH`/`SXTW` encodings implemented), `IntSLessEqual`/
+    `IntLessEqual` (extends the existing comparison arm). Also fixed
+    `IntLess`, which had silently mapped to a *signed* `Cond::Lt` since
+    the original skeleton landed — corrected to `Cond::Cc` (unsigned <),
+    matching `IntLess`'s actual p-code semantics.
+  - **Real bug found and fixed by this batch's own new tests, not by
+    inspection**: the comparison-op "materialize `cond ? 1 : 0`"
+    branch-and-set sequence patched its placeholder branch instruction
+    with a target equal to that branch's own fallthrough address — a
+    branch that lands in the same place whether taken or not, i.e. a
+    no-op regardless of the condition. Every comparison op
+    (`IntEqual`/`IntNotEqual`/`IntSLess`/`IntLess`, and this batch's own
+    new `IntSLessEqual`/`IntLessEqual`) silently always produced `1`,
+    and nothing before this batch exercised a *false* outcome to catch
+    it — the original integration test only used `IntAdd`. Caught by
+    `unsigned_and_signed_less_equal_and_bool_ops` (a 6<=5 case
+    unexpectedly came back `1`). Fixed by switching to the same
+    branch-on-inverse-condition-to-the-false-arm shape
+    `emit::aarch64::tests::cmp_and_conditional_branch` already proved
+    correct (add `Cond::invert()`, branch past the true-arm on
+    `cond.invert()` instead of branching *to* a no-op target on `cond`
+    itself). Locked down with a dedicated regression test exercising
+    both the true and false side of all four original comparison ops.
+  - Documented, not fixed, two pre-existing correctness gaps uncovered
+    while writing this batch (see `compiler.rs`'s own doc comment):
+    arithmetic/shift results aren't truncated to the varnode's declared
+    bit width (everything runs in full 64-bit host registers), and shift
+    amounts aren't clamped to that width before shifting (AArch64 masks
+    shift-by-register mod 64, which only matches p-code's own
+    "shift >= width → 0" semantics for 64-bit operands).
+  - `IntCarry`/`IntSCarry`/`IntSBorrow` deliberately deferred (need
+    either ARM's own NZCV flag extraction or manual overflow arithmetic,
+    neither implemented in the emitter) — user confirmed leaving them for
+    a later batch.
+  - Validated: `fission-emulator --lib` 42/42 (5 new opcode-coverage
+    tests + the regression test above), full workspace `cargo build
+    --workspace` clean, clippy clean on every changed file.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are

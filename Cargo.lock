@@ -2464,6 +2464,7 @@ dependencies = [
  "fission-ttd",
  "hex",
  "im",
+ "libc",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

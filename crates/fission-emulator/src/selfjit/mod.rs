@@ -38,10 +38,11 @@
 //! `PcodeOpcode` surface, all host register allocation, and intra-
 //! instruction relative-branch loops (the TZCNT bug this session just
 //! fixed lives in exactly that machinery). `selfjit::compiler` covers
-//! ~10 integer/comparison opcodes, no register allocation (every operand
-//! round-trips through a host callback call -- correct, but slow), no
-//! loops, and one host architecture (AArch64; `emit::x86_64` is an
-//! unimplemented stub, see its module doc for why).
+//! ~25 integer/boolean/comparison opcodes (see that module's own doc for
+//! the exact list), no register allocation (every operand round-trips
+//! through a host callback call -- correct, but slow), no loops, and one
+//! host architecture (AArch64; `emit::x86_64` is an unimplemented stub,
+//! see its module doc for why).
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -64,9 +65,15 @@
 //!   register allocator or an instruction scheduler.
 //!
 //! Concretely, the remaining work (roughly the recommended order):
-//! 1. Add the ~55 missing `PcodeOpcode` variants to `compiler.rs`'s match
-//!    (multiplication/division/shifts are next most load-bearing after
-//!    what's covered; `Float*`/`Call*`/`MultiEqual` are larger, later).
+//! 1. Add the ~45 missing `PcodeOpcode` variants to `compiler.rs`'s match
+//!    (integer arithmetic/shifts/comparisons and zero/sign extension are
+//!    now covered; `IntCarry`/`IntSCarry`/`IntSBorrow`,
+//!    `Piece`/`SubPiece`/`PtrAdd`/`PtrSub`/`PopCount`/`LzCount` are next
+//!    most load-bearing; `Float*`/`Call*`/`MultiEqual` are larger, later).
+//!    Also close the two documented-but-real correctness gaps in what's
+//!    already implemented: results aren't truncated to the varnode's
+//!    declared bit width, and shift amounts aren't clamped to that width
+//!    before shifting (see `compiler.rs`'s own doc for both).
 //! 2. Support intra-instruction relative BRANCH/CBRANCH (the TZCNT-style
 //!    loop construct) -- `compiler.rs` currently refuses to compile any TB
 //!    containing one, matching `crate::jit::compiler::remap_relative_
