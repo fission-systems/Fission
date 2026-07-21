@@ -2907,6 +2907,83 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           by construction), full `cargo nextest run --workspace`
           2144/2144 minus the same 7 pre-existing unrelated
           `fission-emulator` failures.
+      - **Fix — 8 missing `FLOAT_*` opcode lowerings, found via a new
+        audit axis** (commit `95176c91`). After the `Analyzer.java`
+        roster (both the original 54-item survey and the fresh re-derive
+        of its leftover 15) stopped producing new real gaps, pivoted to
+        checking Ghidra's actual decompiler backend
+        (`Ghidra/Features/Decompiler/src/decompile/cpp`, ~160 `Rule`
+        classes) instead of surveying it exhaustively (too large for one
+        pass) — spot-checked one well-known pain point directly against a
+        real fixture: classic x86-32 x87 floating-point code (still
+        common in real 32-bit binaries, the default float codegen path
+        before SSE2 became universal). A real `i686-w64-mingw32-gcc`
+        double-precision function hit a **hard decompilation failure**
+        (`unsupported pcode pattern: opcode`) — not degraded output, a
+        complete crash for the whole function.
+        - Root cause: `FloatFloat2Float`, `FloatNeg`, `FloatAbs`,
+          `FloatSqrt`, `FloatCeil`, `FloatFloor`, `FloatRound`, and
+          `FloatTrunc` are all real, defined `PcodeOpcode` variants (used
+          by x87's `FLD`-driven precision promotion, `FABS`/`FSQRT`/
+          `FCHS`, etc.) with **zero lowering handlers** in
+          `lower_def_op_inner`'s big match — falling through to the
+          generic catch-all error. None of these are x87-specific at the
+          p-code level, so any code using them (x87 or otherwise, e.g.
+          plain `sqrt()`/`fabs()`/`ceil()` inlined as native FP
+          instructions on some target) would hit the identical crash.
+        - Implementation verified against Ghidra's own `TypeOpFloat*` C++
+          declarations (`typeop.cc`), not guessed from opcode names:
+          `FloatFloat2Float` → `Cast` to `float_type_from_size(output.
+          size)` (same shape as the pre-existing `FloatInt2Float`
+          handler, which already handled `size=10 → Float{bits:80}` for
+          x87 extended precision — the type system was already ready for
+          this, just missing the opcode arm). `FloatNeg` →
+          `HirUnaryOp::Neg` with a float type (`TypeOpFloatNeg` is
+          `TYPE_FLOAT,TYPE_FLOAT`, prints as `-`). `FloatAbs`/
+          `FloatSqrt`/`FloatCeil`/`FloatFloor`/`FloatRound` → intrinsic
+          calls to their real `<math.h>` names (`fabs`/`sqrt`/`ceil`/
+          `floor`/`round`) — confirmed all five are `TYPE_FLOAT,
+          TYPE_FLOAT` in `typeop.cc`, genuine float-to-float math
+          functions, unlike the CPU-flag intrinsics (`__carry`/
+          `__sborrow`) that already use a synthetic `__`-prefixed name.
+          `FloatTrunc` → `Cast` to a **signed int** type, NOT a call to
+          `trunc()` — Ghidra's own `TypeOpFloatTrunc` constructor is
+          explicitly `TYPE_INT,TYPE_FLOAT` (a truncating float-to-int
+          conversion, i.e. `(int)x`), the one opcode in this group that
+          breaks the float-to-float pattern of its siblings; verified by
+          reading `typeop.cc`, not assumed from the name (would have been
+          a real, subtle bug otherwise).
+        - Also added all 8 to `is_materializable_output_opcode`
+          (`pcode_util.rs`), matching how the pre-existing
+          `FloatInt2Float`/`FloatNan` siblings are already listed there.
+        - Validated: `FloatFloat2Float` and `FloatAbs` each confirmed
+          against a real `i686-w64-mingw32-gcc` x87 fixture — a hard
+          crash became a working decompile for both. New synthetic test
+          covers the remaining opcodes not hit by available real fixtures
+          (chained `FloatNeg`/`FloatSqrt`/`FloatCeil`/`FloatFloor`/
+          `FloatRound`/`FloatTrunc`), explicitly asserting `FloatTrunc`
+          does NOT render as `trunc(`. `fission-pcode`/`-decompiler`/
+          `-static`/`-midend-normalize` 1305/1305 (+1), `golden_corpus_
+          check.py` clean (x64 SSE2 arithmetic already goes through the
+          pre-existing `FloatAdd`/`FloatSub`/`FloatMult`/`FloatDiv`
+          family; math-function calls in the corpus are real libm calls,
+          not these opcodes, so unaffected by construction), full
+          `cargo nextest run --workspace` 2145/2145 minus the same 7
+          pre-existing unrelated `fission-emulator` failures.
+        - **Scope note — this fixes the crash, not full x87 output
+          quality.** The x87-specific FPU register-stack push/pop
+          shift-chain (SLEIGH lifts `FLD`/`FSTP` as 8 fixed-offset-
+          register `Copy` rotations modeling the hardware stack) still
+          isn't specially recognized by the materialize/copy-propagation
+          pipeline, so a genuinely double-precision x87 function now
+          *decompiles* instead of *crashing*, but with confusing
+          `st0`/`st6`/`st7`-named temporaries and (in the observed real
+          fixture) an incorrect final return value. Reconciling the
+          8-register shift-chain into clean value flow would need a
+          dedicated new normalize pass recognizing this specific rotation
+          pattern — a separate, larger, genuinely not-yet-attempted gap,
+          clearly distinct from (and much bigger than) the crash fixed
+          here.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
