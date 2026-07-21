@@ -96,11 +96,12 @@ pub fn try_repair_orphan_gotos(
         return Some(body);
     }
 
+    let protected = host.lsda_landing_pad_labels();
     let mut body = body;
     for _ in 0..host.block_count().saturating_add(8) {
         let orphans = orphan_goto_labels(&body);
         if orphans.is_empty() {
-            return Some(finalize_structured_body(body));
+            return Some(finalize_structured_body(&protected, body));
         }
 
         let mut repaired_any = false;
@@ -114,7 +115,7 @@ pub fn try_repair_orphan_gotos(
         if !repaired_any {
             return None;
         }
-        body = finalize_structured_body(body);
+        body = finalize_structured_body(&protected, body);
         if !has_orphan_goto_labels(&body) {
             return Some(body);
         }

@@ -7,15 +7,41 @@ use crate::HashSet;
 mod goto;
 pub use goto::eliminate_redundant_gotos;
 
-pub fn finalize_structured_body(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
+/// `protected` labels are never removed by the cleanup passes below even
+/// when nothing in `body` textually references them via `Goto` -- see
+/// [`cleanup_redundant_labels_protecting`]. Pass `host.lsda_landing_pad_labels()`
+/// (empty for the overwhelming majority of functions, which have no C++
+/// exception handling at all).
+pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<HirStmt>) -> Vec<HirStmt> {
     body = eliminate_redundant_gotos(body);
     body = dedupe_structured_region_entry_labels(body);
-    body = cleanup_redundant_labels(body, None);
+    body = cleanup_redundant_labels_protecting(body, protected);
     let referenced = collect_referenced_labels(&body);
-    while matches!(body.first(), Some(HirStmt::Label(label)) if !referenced.contains(label)) {
+    while matches!(body.first(), Some(HirStmt::Label(label)) if !referenced.contains(label) && !protected.contains(label))
+    {
         body.remove(0);
     }
     body
+}
+
+/// Like [`cleanup_redundant_labels`], but additionally protects every label
+/// in `protected` from removal even when nothing in `body` textually
+/// references it via `Goto` -- for labels reachable only via an edge with
+/// no `HirStmt` representation at all (see
+/// `StructuringHost::lsda_landing_pad_labels`). Ordinary label cleanup
+/// (`referenced.contains`) is exactly right for real dead labels; it just
+/// has no way to know a C++ exception landing pad's label is a live entry
+/// point when nothing in the text ever does `Goto` to it.
+pub fn cleanup_redundant_labels_protecting(
+    body: Vec<HirStmt>,
+    protected: &HashSet<String>,
+) -> Vec<HirStmt> {
+    if protected.is_empty() {
+        return cleanup_redundant_labels(body, None);
+    }
+    let mut referenced = core_labels::collect_referenced_labels(&body);
+    referenced.extend(protected.iter().cloned());
+    cleanup_redundant_labels(body, Some(&referenced))
 }
 
 /// Remove duplicate block labels emitted both outside and inside a structured region
@@ -200,10 +226,13 @@ pub fn cleanup_redundant_labels(
     core_labels::cleanup_redundant_labels(body, global_refs)
 }
 
-pub fn normalize_guarded_tail_layout(body: Vec<HirStmt>) -> (Vec<HirStmt>, usize) {
-    let cleaned = cleanup_redundant_labels(body, None);
+pub fn normalize_guarded_tail_layout(
+    body: Vec<HirStmt>,
+    protected: &HashSet<String>,
+) -> (Vec<HirStmt>, usize) {
+    let cleaned = cleanup_redundant_labels_protecting(body, protected);
     let (canonicalized, rewritten_aliases) = canonicalize_top_level_forward_label_aliases(cleaned);
-    let cleaned = cleanup_redundant_labels(canonicalized, None);
+    let cleaned = cleanup_redundant_labels_protecting(canonicalized, protected);
     (cleaned, rewritten_aliases)
 }
 
@@ -617,7 +646,7 @@ mod tests {
             HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
         ];
 
-        let (normalized, _) = normalize_guarded_tail_layout(body);
+        let (normalized, _) = normalize_guarded_tail_layout(body, &HashSet::default());
         assert_eq!(
             normalized,
             vec![
@@ -710,10 +739,81 @@ mod tests {
             HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
         ];
 
-        let finalized = finalize_structured_body(body);
+        let finalized = finalize_structured_body(&HashSet::default(), body);
         assert_eq!(
             finalized,
             vec![HirStmt::Return(Some(HirExpr::Var("ret".to_string())))]
+        );
+    }
+
+    /// A block reachable only via a synthetic edge (e.g. a C++ exception
+    /// landing pad -- see `StructuringHost::lsda_landing_pad_labels`) has
+    /// no `Goto` anywhere in the text pointing at its label. Without
+    /// protection, `finalize_structured_body` would treat it exactly like
+    /// the genuinely-dead segment in the test above and delete it -- this
+    /// pins that a `protected` label survives instead.
+    #[test]
+    fn finalize_structured_body_protects_unreferenced_landing_pad_label() {
+        let body = vec![
+            HirStmt::Goto("block_join".to_string()),
+            HirStmt::Label("block_landing_pad".to_string()),
+            HirStmt::Expr(HirExpr::Var("catch_handler_call".to_string())),
+            HirStmt::Goto("block_join".to_string()),
+            HirStmt::Label("block_join".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+        let protected: HashSet<String> = ["block_landing_pad".to_string()].into_iter().collect();
+
+        let finalized = finalize_structured_body(&protected, body);
+        // The landing pad's label survives (the actual point of this test).
+        // The trailing `Goto("block_join")` -> `Label("block_join")` pair
+        // collapses via ordinary "empty jump removal" -- unrelated to
+        // protection, just `eliminate_redundant_gotos` doing its normal job.
+        assert_eq!(
+            finalized,
+            vec![
+                HirStmt::Goto("block_join".to_string()),
+                HirStmt::Label("block_landing_pad".to_string()),
+                HirStmt::Expr(HirExpr::Var("catch_handler_call".to_string())),
+                HirStmt::Label("block_join".to_string()),
+                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            ]
+        );
+    }
+
+    #[test]
+    fn cleanup_redundant_labels_protecting_keeps_unreferenced_protected_label() {
+        // The label must NOT be the first statement (`cleaned.is_empty()`
+        // already keeps a leading label unconditionally) -- placing an
+        // unrelated statement first exercises the actual `referenced`/
+        // `protected` check this test is pinning.
+        let body = vec![
+            HirStmt::Expr(HirExpr::Var("leading".to_string())),
+            HirStmt::Label("block_unreferenced".to_string()),
+            HirStmt::Return(None),
+        ];
+        let protected: HashSet<String> = ["block_unreferenced".to_string()].into_iter().collect();
+
+        // Baseline: with no protection, an unreferenced mid-body label is
+        // dropped by ordinary cleanup (matching `cleanup_redundant_labels`'s
+        // behavior with `global_refs: None`).
+        let unprotected = cleanup_redundant_labels_protecting(body.clone(), &HashSet::default());
+        assert_eq!(
+            unprotected,
+            vec![
+                HirStmt::Expr(HirExpr::Var("leading".to_string())),
+                HirStmt::Return(None),
+            ]
+        );
+
+        let protected_result = cleanup_redundant_labels_protecting(body, &protected);
+        assert_eq!(
+            protected_result,
+            vec![
+                HirStmt::Expr(HirExpr::Var("leading".to_string())),
+                HirStmt::Label("block_unreferenced".to_string()),
+                HirStmt::Return(None),
+            ]
         );
     }
 

@@ -267,6 +267,22 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
         PreviewBuilder::collect_jump_targets(self)
     }
+    fn lsda_landing_pad_labels(&self) -> HashSet<String> {
+        let Some(binary) = self.binary else {
+            return HashSet::default();
+        };
+        let Some(entry_address) = self.pcode.blocks.first().map(|block| block.start_address) else {
+            return HashSet::default();
+        };
+        let Some(info) = binary.eh_lsda.get(&entry_address) else {
+            return HashSet::default();
+        };
+        info.call_sites
+            .iter()
+            .filter_map(|call_site| call_site.landing_pad)
+            .map(fission_midend_structuring::block_label)
+            .collect()
+    }
     fn accept_structured_region(
         &mut self,
         start_idx: usize,

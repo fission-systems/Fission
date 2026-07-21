@@ -3,7 +3,7 @@
 //! P-code opcode triviality checks remain host residual; this owner assembles
 //! the multiblock HIR body from host lowering primitives.
 
-use crate::cleanup::{cleanup_redundant_labels, finalize_structured_body};
+use crate::cleanup::{cleanup_redundant_labels_protecting, finalize_structured_body};
 use crate::guarded_tail::{discover_guarded_tail_candidates, promote_guarded_tail_regions_until_stable};
 use crate::helpers::{block_label, recovered_switch_case_values};
 use crate::host::StructuringHost;
@@ -297,8 +297,9 @@ pub fn build_linear_multiblock_body(
         }
         idx += 1;
     }
-    let mut body = cleanup_redundant_labels(body, None);
+    let protected = host.lsda_landing_pad_labels();
+    let mut body = cleanup_redundant_labels_protecting(body, &protected);
     promote_guarded_tail_regions_until_stable(host, &mut body);
     discover_guarded_tail_candidates(host, &body);
-    Ok(finalize_structured_body(body))
+    Ok(finalize_structured_body(&protected, body))
 }

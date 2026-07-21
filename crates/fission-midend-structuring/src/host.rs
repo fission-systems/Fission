@@ -173,6 +173,17 @@ pub trait StructuringHost {
         indices: &[usize],
     ) -> Result<Option<LinearExit>, MlilPreviewError>;
     fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError>;
+    /// Labels of blocks reachable only via an out-of-band edge with no
+    /// textual `Goto` representation at all -- currently just C++ exception
+    /// landing pads (see `fission_loader::loader::elf::lsda`), reachable
+    /// only via the personality routine unwinding into them at runtime.
+    /// `cleanup_redundant_labels`/`collect_referenced_labels` treat any
+    /// label with zero referencing `Goto` as dead and drop it -- correct
+    /// for ordinary code, wrong here, since the label is a real entry point
+    /// that just has no `HirStmt::Goto` anywhere pointing at it. Callers
+    /// that clean up labels must union this set into their "referenced"
+    /// set rather than relying on `collect_referenced_labels` alone.
+    fn lsda_landing_pad_labels(&self) -> HashSet<String>;
     fn accept_structured_region(
         &mut self,
         start_idx: usize,

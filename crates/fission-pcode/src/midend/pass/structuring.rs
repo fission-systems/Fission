@@ -3,7 +3,7 @@ use crate::midend::structuring::irreducible::{compute_fas_virtual_gotos, compute
 use crate::midend::ir::{HirStmt, MlilPreviewError};
 // ADR 0012: admission / SESE / collapse free-fns owned by midend-structuring.
 use fission_midend_structuring::{
-    StructuringAdmissionInput, StructuringAdmissionReason,
+    StructuringAdmissionInput, StructuringAdmissionReason, StructuringHost,
     apply_blockgraph_collapse_admission_gate, blockgraph_collapse_admission_enabled,
     build_linear_multiblock_body, build_sese_region_body, collapse_loop_admission_enabled,
     decide_structuring_admission, structure_cfg_via_sese, structuring_diag_enabled,
@@ -288,7 +288,9 @@ impl NirPass for SeseStructuringPass {
                         body.len()
                     );
                 }
-                let finalized = crate::midend::structuring::finalize_structured_body(body);
+                let protected = ir.builder.lsda_landing_pad_labels();
+                let finalized =
+                    crate::midend::structuring::finalize_structured_body(&protected, body);
                 ir.set_structured_body(finalized);
                 Ok(PassResult::Changed)
             }

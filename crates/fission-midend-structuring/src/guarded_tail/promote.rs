@@ -15,7 +15,9 @@ pub fn promote_single_entry_guarded_tail_regions(
     host: &mut impl StructuringHost,
     body: &mut Vec<HirStmt>,
 ) -> bool {
-    let (normalized, alias_rewrites) = normalize_guarded_tail_layout(std::mem::take(body));
+    let protected = host.lsda_landing_pad_labels();
+    let (normalized, alias_rewrites) =
+        normalize_guarded_tail_layout(std::mem::take(body), &protected);
     *body = normalized;
     let referenced = collect_referenced_label_counts(body);
     let mut changed = alias_rewrites > 0;
@@ -86,7 +88,8 @@ pub fn promote_single_entry_guarded_tail_regions(
 
 /// Discover guarded-tail candidates for telemetry (no mutation of structure).
 pub fn discover_guarded_tail_candidates(host: &mut impl StructuringHost, body: &[HirStmt]) {
-    let (normalized, _) = normalize_guarded_tail_layout(body.to_vec());
+    let protected = host.lsda_landing_pad_labels();
+    let (normalized, _) = normalize_guarded_tail_layout(body.to_vec(), &protected);
     host.discover_guarded_tail_candidates_in_body(&normalized);
 }
 
