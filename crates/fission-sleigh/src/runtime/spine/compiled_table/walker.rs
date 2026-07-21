@@ -387,14 +387,30 @@ mod construct_state_offset_tests {
     }
 
     #[test]
-    fn pattern_expression_shifts_fail_closed_on_invalid_amounts() {
+    fn pattern_expression_shifts_fail_closed_on_negative_amounts() {
         assert_eq!(checked_pattern_left_shift(1, 63).unwrap(), i64::MIN);
         assert_eq!(checked_pattern_right_shift(-1, 63).unwrap(), 1);
 
         assert!(checked_pattern_left_shift(1, -1).is_err());
-        assert!(checked_pattern_left_shift(1, 64).is_err());
         assert!(checked_pattern_right_shift(1, -1).is_err());
-        assert!(checked_pattern_right_shift(1, 64).is_err());
+    }
+
+    /// Ghidra's own `LeftShiftExpression`/`RightShiftExpression::getValue`
+    /// evaluate shifts as a raw C++ `<<`/`>>` on a 64-bit `intb` -- on the
+    /// x86-64/ARM64 hosts Ghidra actually runs on, the CPU's shift
+    /// instruction only consults the low 6 bits of the count, so amounts
+    /// >= 64 behave as `amount & 63`, not an error. AArch64's `ubfx`/
+    /// `bfxil`-family decode legitimately computes a shift amount of
+    /// exactly 64 for a full-width 64-bit bitfield immediate (confirmed
+    /// via a real `aarch64-linux-gnu-gcc`-compiled bitfield-struct fixture
+    /// that failed to *decode* entirely before this was masked instead of
+    /// rejected).
+    #[test]
+    fn pattern_expression_shifts_wrap_amounts_past_64_like_ghidras_host_cpu() {
+        assert_eq!(checked_pattern_left_shift(1, 64).unwrap(), 1); // amount & 63 == 0
+        assert_eq!(checked_pattern_right_shift(1, 64).unwrap(), 1);
+        assert_eq!(checked_pattern_left_shift(1, 65).unwrap(), 2); // amount & 63 == 1
+        assert_eq!(checked_pattern_left_shift(1, 127).unwrap(), i64::MIN); // amount & 63 == 63
     }
 
     #[test]
@@ -1942,13 +1958,24 @@ fn pattern_context_bits_i64(raw: u64, bit_width: u32, sign_extend: bool) -> Resu
     }
 }
 
+/// Ghidra's own `LeftShiftExpression`/`RightShiftExpression::getValue` (in
+/// `slghpatexpress.cc`) evaluate pattern-expression shifts as a raw C++
+/// `leftval << rightval` / `leftval >> rightval` on `intb` (a plain 64-bit
+/// `int8`) -- a shift amount >= 64 is undefined behavior per the C++
+/// standard, but on the x86-64/ARM64 hosts Ghidra actually runs on, the
+/// CPU's SHL/SAR instruction only consults the low 6 bits of the shift
+/// count, so in practice this behaves as `amount & 63`, not an error.
+/// AArch64's own `ubfx`/`bfxil`-family decode (`ImmR_bitfield64_imm` ->
+/// `DecodeWMask64` in `AARCH64instructions.sinc`) legitimately computes a
+/// shift amount of exactly 64 for a full-width 64-bit bitfield immediate
+/// -- confirmed via a real `aarch64-linux-gnu-gcc`-compiled bitfield-struct
+/// fixture, where this previously hard-failed *decoding* the instruction
+/// entirely (not just lowering it) with "shift amount 64 exceeds i64
+/// width". Masking to match Ghidra's de facto behavior fixes it.
 fn pattern_shift_amount(value: i64) -> Result<u32> {
     let amount = u32::try_from(value)
         .map_err(|_| anyhow!("pattern expression shift amount {value} is negative or too large"))?;
-    if amount >= 64 {
-        bail!("pattern expression shift amount {amount} exceeds i64 width");
-    }
-    Ok(amount)
+    Ok(amount & 63)
 }
 
 #[cfg(test)]

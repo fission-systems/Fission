@@ -616,24 +616,45 @@ impl RegisterNamer {
         }
     }
 
+    /// Candidate varnodes for "the register holding this function's return
+    /// value," most-likely-correct first.
+    ///
+    /// x86's `REGISTER_SPACE_ID` offsets happen to coincide with its real
+    /// hardware GPR numbering (`x86_ia32_low_gpr_name`: offset 0 = EAX,
+    /// 4 = ECX, ...), so `REGISTER_SPACE_ID` stays x86's first candidate --
+    /// changing that order broke real, previously-passing unit tests whose
+    /// synthetic p-code relies on it for live-register *naming* even
+    /// without an explicit def. Non-x86 architectures (AArch64/ARM32/
+    /// PowerPC/Mips/LoongArch) have no such coincidence: confirmed via a
+    /// real `aarch64-linux-gnu-gcc`-compiled `int cmp(int,int)` fixture
+    /// (three-way-branch function, shared epilogue block) that
+    /// `REGISTER_SPACE_ID` at AArch64's default return offset resolves to
+    /// the *link register* name ("x30"), not X0 -- `RUST_SLEIGH_REGISTER_
+    /// SPACE_ID` is what the live pipeline's own p-code for these
+    /// architectures actually uses (confirmed via a real `raw-pcode`
+    /// dump), so it goes first there instead. `REGISTER_SPACE_ID` is kept
+    /// as a second candidate everywhere rather than removed, in case some
+    /// other consumer still needs it for real Ghidra-space-numbered input.
     pub fn primary_return_registers(&self) -> Vec<Varnode> {
         let pointer_size = self.pointer_size;
         let offset = self
             .return_offset
             .unwrap_or_else(|| default_return_offset(self.abi));
-        let mut out = vec![Varnode {
+        let register_space_candidate = Varnode {
             space_id: REGISTER_SPACE_ID,
             offset,
             size: pointer_size,
             is_constant: false,
             constant_val: 0,
-        }];
+        };
+        let mut out = Vec::with_capacity(3);
         if matches!(
             self.abi,
             CallingConvention::WindowsX64
                 | CallingConvention::SystemVAmd64
                 | CallingConvention::X86_32
         ) {
+            out.push(register_space_candidate.clone());
             out.push(Varnode {
                 space_id: UNIQUE_SPACE_ID,
                 offset: X86_REG_BASE,
@@ -649,6 +670,7 @@ impl RegisterNamer {
                 is_constant: false,
                 constant_val: 0,
             });
+            out.push(register_space_candidate);
         }
         if matches!(
             self.abi,
