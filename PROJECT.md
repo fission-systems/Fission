@@ -3124,6 +3124,90 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           this entry closed a different, unrelated real bug found while
           spot-checking the same general category of "classic tricky
           decompiler cases."
+- **`native_decomp`/Ghidra-FFI dead architecture removed, and a GDT
+  ("actually used?") audit that closed as "already used, differently than
+  expected," 2026-07-21** (commit `7e207d14`): asked whether the 15 `.gdt`
+  (Ghidra Data Type archive) files bundled under
+  `utils/signatures/typeinfo/{win32,generic,golang,mac_10.9,rust}/` are
+  ever actually parsed, since `PathConfig::get_gdt_path`/`get_all_gdt_paths`
+  resolve them on every CLI decompile call (`run.rs` x2, `batch.rs`,
+  `emit.rs`) and even have a dedicated `PrepareTimings::gdt_ms` benchmark
+  field — looked live.
+  - Their only consumer, `decomp.set_gdt(path)`, sat behind
+    `#[cfg(feature = "native_decomp")]` — an old architecture (native
+    Ghidra decompiler linked via a `fission-ffi` crate + CMake-built
+    `libdecomp.so`) that turned out to be **permanently unbuildable**:
+    both `fission-static/build.rs` and `fission-cli/build.rs`
+    unconditionally `panic!`ed the instant `CARGO_FEATURE_NATIVE_DECOMP`
+    was set, the `ghidra_decompiler/` C++ source directory `build.rs`
+    pointed at no longer existed, and `fission-ffi` was never a workspace
+    member. Every `#[cfg(feature = "native_decomp")]` branch across 10
+    files (the whole `decompile.rs`/`decompile_exec` CLI module tree,
+    `fission-static`'s `prepare.rs`, half of `inventory/emit.rs`, plus
+    smaller spots in `provenance.rs`/`orchestration/types.rs`) was
+    unreachable dead code in every real build — removed outright (5046
+    deleted lines, 10 inserted). One real bug surfaced along the way:
+    `fission_nir_worker`/`fission_preview_worker` (the live pipeline's
+    crash-isolation subprocess workers, spawned by
+    `orchestration/worker.rs` with a graceful in-process fallback if
+    missing) were wrongly gated `required-features = ["native_decomp"]`
+    in `fission-cli/Cargo.toml` — meaning they could never be built
+    either, silently forcing every decompile onto the in-process fallback
+    path. Un-gated, not deleted; confirmed they now build and run.
+  - The GDT question itself resolved as: **win32's 2 archives are not
+    actually dead** — `utils/signatures/typeinfo/win32/{structures,
+    base_types}.json` (13,211 structs, 32 base types) is a pre-extracted
+    cache of both `windows_vs12_{32,64}.gdt` (confirmed via a real Ghidra
+    12.0.4 headless extraction of `windows_vs12_64.gdt` alone: 5,827
+    structs / 89,596 total datatypes — fewer than the merged JSON, as
+    expected for a single-bitness archive) that `fission-signatures`'
+    `WindowsStructures` loads at runtime and `facts.rs`'s
+    `resolve_nir_struct_name`/`build_nir_call_param_rules` uses to type
+    `LP*`/`P*`-prefixed WinAPI call-argument structs in decompiled
+    output. Real, live usage — just via an offline extraction step, not a
+    live `.gdt` parser (parsing `.gdt` directly would mean reimplementing
+    Java object serialization + an embedded zip + Ghidra's own proprietary
+    DB/B-tree table format from scratch; confirmed via `xxd`/`file` that
+    `.gdt` starts with `AC ED 00 05` Java serialization magic wrapping a
+    `DTArchive` marker and a nested `PK` zip stream — not attempted).
+  - The remaining 13 archives (`generic_clib{,_64}.gdt`, 9 golang
+    per-version archives, `mac_osx.gdt`, `rust-common.gdt`) really do have
+    **zero consumer of any kind** — no JSON extraction exists for them.
+    Investigated wiring the most promising candidate (`generic_clib`, the
+    only one covering ELF/POSIX binaries broadly) into the existing
+    win32-style mechanism and found a dead end: `resolve_nir_struct_name`
+    only fires for call arguments whose type name comes from
+    `SIGNATURE_RESOURCES.api_signatures()`, and
+    `generic_clib_signatures.txt` — the only signature source covering
+    libc functions — types every single parameter as a bare primitive
+    (`int`/`long`/`double`/`uint`/...; checked programmatically, 14,404
+    `int` + 315 `long` + ... + **zero** struct-pointer type names across
+    the whole file). `fstat|int|__fd:int,__buf:int` is representative:
+    `__buf` should be `struct stat *` but is typed `int`. A generic-C
+    struct DB would have nothing to match against without first rebuilding
+    that signature file with real types — a separate, comparably-sized
+    project. Golang/macOS/Rust have no per-language struct-typing pass to
+    hook into at all (the only existing struct-annotation mechanism is
+    Win32-Hungarian-notation-specific).
+  - **Left as prepared-but-unwired infrastructure, not deleted further**:
+    `PathConfig::get_gdt_path`/`get_all_gdt_paths`/`gdt_dir` now have zero
+    callers (their last caller was the deleted `prepare.rs`), but unlike
+    the `native_decomp` code they delete alongside, this is legitimate
+    groundwork for whichever of the two real follow-ups gets picked up
+    first: (a) rebuild `generic_clib_signatures.txt` with real parameter
+    types (headers/Ghidra function signatures, not hand-typed primitives),
+    then extend the win32 JSON-extraction pattern to `generic_clib.gdt`; or
+    (b) design a per-language struct-annotation pass for Go/Rust/macOS
+    binaries before extracting their archives at all, since there's
+    currently nothing in `facts.rs` for freshly-extracted structs to
+    plug into. A reusable GDT→JSON extraction path was proven working
+    (real Ghidra 12.0.4 headless run against `windows_vs12_64.gdt`) but
+    not productized into an in-repo script, since neither follow-up is
+    ready to consume its output yet.
+  - Validated: `cargo check`/`test --workspace` clean, `fission_cli
+    --version` still reports `0.1.6`, `golden_corpus_check.py` clean (160
+    functions across 16 binaries + determinism) — this was a structural
+    removal with no decompiled-output-affecting code deleted.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
