@@ -58,6 +58,7 @@ pub(super) fn collect_entry_register_param_aliases(
 pub(super) fn infer_entry_stack_layout(
     pcode: &PcodeFunction,
     options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
 ) -> (i64, bool, i64) {
     let Some(entry) = pcode.blocks.first() else {
         return (0, false, 0);
@@ -85,6 +86,60 @@ pub(super) fn infer_entry_stack_layout(
     // shadow `eax`'s def) still resolves to a concrete delta.
     let mut rsp_delta = 0_i64;
     let mut known_consts: HashMap<VarnodeKey, i64> = HashMap::default();
+
+    // Classic MSVC 32-bit `__chkstk`/`__alloca_probe`/`__alloca_probe_8`/
+    // `__alloca_probe_16`: unlike the Windows/mingw x64 (and mingw x86)
+    // `___chkstk_ms` idiom above (probe-only, caller does an explicit
+    // `sub esp, eax` the `IntSub` tracking above already sees), this
+    // *classic* 32-bit convention has the callee itself adjust `esp` --
+    // there is no visible `sub esp, eax` in the caller's own code at all,
+    // so without this the call is invisible to `rsp_delta` entirely.
+    // Ghidra's own `x86win.cspec` `<callfixup name="alloca_probe">`
+    // (targets `__alloca_probe`/`__alloca_probe_8`/`__alloca_probe_16`/
+    // `__chkstk`) gives the net effect as `ESP = ESP + 4 - EAX` (the `+4`
+    // accounts for this convention's own internal return-address
+    // juggling, not a typo -- taken directly from that definition).
+    // NOT independently verified against real MSVC-produced bytes: no
+    // MSVC toolchain is available to this session, and mingw (both x86
+    // and x86_64) always uses the already-handled `___chkstk_ms`
+    // convention instead, never this one -- ported directly from Ghidra's
+    // own cspec rather than a fixture-verified derivation like every
+    // other rule in this file. Gated to 32-bit only, matching that this
+    // callfixup exists solely in `x86win.cspec`, not `x86-64-win.cspec`.
+    let resolve_call_target_name = |op: &PcodeOp| -> Option<String> {
+        if let Some(name) = options.relocation_names.get(&op.address) {
+            return Some(name.clone());
+        }
+        let target = op.inputs.first()?;
+        if !target.is_constant {
+            return None;
+        }
+        let addr = if target.offset != 0 {
+            target.offset
+        } else if target.constant_val >= 0 {
+            target.constant_val as u64
+        } else {
+            return None;
+        };
+        type_context?
+            .call_target_refs
+            .get(&addr)
+            .map(|r| r.symbol.clone())
+    };
+    // Exact core names only (leading underscores stripped) -- deliberately
+    // *not* a substring match: mingw's `___chkstk_ms` contains `__chkstk`
+    // as a literal substring, which would otherwise also match here and
+    // double-count its effect on top of the `IntSub`-based tracking above
+    // that already handles it correctly (confirmed the hard way: this
+    // exact collision hung a real `i686-w64-mingw32-gcc`-compiled 8KB-
+    // local-array fixture using `___chkstk_ms` until this was tightened
+    // to exact-name matching).
+    const CHKSTK32_TARGETS: &[&str] = &[
+        "chkstk",
+        "alloca_probe",
+        "alloca_probe_8",
+        "alloca_probe_16",
+    ];
     // `lea rbp, [rsp+K]` for a nonzero compile-time-constant K: MSVC/mingw
     // sometimes position the frame pointer partway into a large frame
     // (rather than at its base, `mov rbp, rsp`'s implicit K=0) so both
@@ -144,6 +199,23 @@ pub(super) fn infer_entry_stack_layout(
                 if let Some(delta) = delta {
                     rsp_delta -= delta;
                 }
+            }
+        }
+
+        if !options.is_64bit
+            && matches!(op.opcode, PcodeOpcode::Call)
+            && let Some(name) = resolve_call_target_name(op)
+            && CHKSTK32_TARGETS.contains(&name.trim_start_matches('_'))
+        {
+            let eax = Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset: 0,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            };
+            if let Some(probe_size) = known_consts.get(&VarnodeKey::from(&eax)) {
+                rsp_delta += pointer_size - probe_size;
             }
         }
 
@@ -389,7 +461,7 @@ mod tests {
             op(5, PcodeOpcode::Copy, Some(rbp), vec![lea_temp]),
         ];
 
-        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options());
+        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
         assert!(established);
         let rsp_delta = -(8 + probe_size);
         assert_eq!(bias, rsp_delta + k + 8);
@@ -412,7 +484,7 @@ mod tests {
             ),
             op(1, PcodeOpcode::Copy, Some(rbp), vec![rsp]),
         ];
-        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options());
+        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
         assert!(established);
         assert_eq!(bias, 0);
     }
@@ -429,8 +501,92 @@ mod tests {
         let rsp = reg(0x20, 8);
         let rbp = reg(0x28, 8);
         let ops = vec![op(0, PcodeOpcode::Copy, Some(rbp), vec![rsp])];
-        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options());
+        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
         assert!(established);
         assert_eq!(bias, 8);
+    }
+
+    fn x86_32_options() -> MlilPreviewOptions {
+        let mut options = MlilPreviewOptions {
+            pe_x64_only: false,
+            is_64bit: false,
+            is_big_endian: false,
+            pointer_size: 4,
+            format: "PE32".to_string(),
+            image_base: 0x0040_0000,
+            sections: vec![(0x0040_1000, 0x0040_2000)],
+            region_linearize_structuring: false,
+            calling_convention: CallingConvention::X86_32,
+            ..Default::default()
+        };
+        apply_preview_cspec(&mut options);
+        options
+    }
+
+    /// Classic MSVC 32-bit `__chkstk`, resolved via `type_context.
+    /// call_target_refs` (matching how a statically-linked internal
+    /// symbol -- never imported from a DLL -- is actually looked up in
+    /// the real pipeline, per `resolve_call_target_by_address` in
+    /// `expr/lower_expr.rs`). Exercises the mechanism this file's own
+    /// `CHKSTK32_TARGETS` doc comment marks as *unvalidated against real
+    /// MSVC bytes* -- this test proves the formula's arithmetic is wired
+    /// correctly given a matching call target, not that the formula
+    /// itself is correct against a real MSVC binary (no such fixture is
+    /// available to this session).
+    #[test]
+    fn classic_msvc_chkstk32_contributes_to_rsp_delta() {
+        let esp = reg(0x10, 4);
+        let ebp = reg(0x14, 4);
+        let eax = reg(0x0, 4);
+        let probe_size = 0x2000_i64;
+        let chkstk_addr = 0x0040_5000_u64;
+
+        let ops = vec![
+            // push ebp
+            op(
+                0,
+                PcodeOpcode::IntSub,
+                Some(esp.clone()),
+                vec![esp.clone(), imm(4, 4)],
+            ),
+            // mov eax, probe_size
+            op(1, PcodeOpcode::Copy, Some(eax), vec![imm(probe_size, 4)]),
+            // call __chkstk (classic convention -- no explicit `sub esp,
+            // eax` follows; the callee itself adjusts esp)
+            op(
+                2,
+                PcodeOpcode::Call,
+                None,
+                vec![Varnode {
+                    space_id: 3,
+                    offset: chkstk_addr,
+                    size: 4,
+                    is_constant: true,
+                    constant_val: chkstk_addr as i64,
+                }],
+            ),
+            // mov ebp, esp
+            op(3, PcodeOpcode::Copy, Some(ebp), vec![esp]),
+        ];
+
+        let mut type_context = NirTypeContext::default();
+        type_context.call_target_refs.insert(
+            chkstk_addr,
+            CallTargetRef {
+                address: Some(chkstk_addr),
+                symbol: "__chkstk".to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 100,
+            },
+        );
+
+        let (_, established, bias) =
+            infer_entry_stack_layout(&pcode(ops), &x86_32_options(), Some(&type_context));
+        assert!(established);
+        // rsp_delta = -4 (push ebp) + (pointer_size(4) - probe_size) =
+        // -probe_size; bias = rsp_delta + pointer_size (direct-copy `mov
+        // ebp, esp` branch).
+        assert_eq!(bias, -probe_size + 4);
     }
 }
