@@ -2061,6 +2061,66 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           representation (not just whether they're reachable at all).
           Scoped as further follow-up, not attempted here, to keep this
           change's diff and risk to exactly what was traced and verified.
+      - **Update — protect LSDA landing-pad labels from dead-label cleanup**
+        (commit `b98d9041`). User asked to continue into the fourth layer.
+        Traced it precisely by diffing before/after diagnostic dumps at each
+        pipeline stage rather than guessing further:
+        - `try_lower_if` (`fission-midend-structuring/src/conditionals/
+          plain_if.rs`) correctly structures the landing pad's own real
+          conditional branch into an `HirStmt::If`, and
+          `reconstruct_sese_final_body` correctly computes it needs a
+          leading `Label` (a genuine multi-entry jump target) and inserts
+          one — confirmed via a dump right before `finalize_structured_body`
+          runs: the label IS present, directly preceding the structured
+          catch-handler `Block`. So the "fourth layer" hypothesis from the
+          prior update turned out to be wrong — SESE structuring itself was
+          already correct.
+        - The **actual** culprit: `cleanup_redundant_labels`
+          (`fission-midend-core/src/util/label_cleanup.rs:27`) keeps a
+          `Label` only if it's the first statement or something does a
+          textual `Goto` to it. A landing pad's label is neither — reachable
+          only via the personality routine unwinding into it at runtime,
+          which has zero `HirStmt` representation — so this entirely
+          reasonable "kill unreferenced labels" rule (correct for every
+          ordinary label in the codebase) silently deletes it, and its
+          disappearance is what let `finalize_structured_body`'s separate
+          "strip code between an unconditional goto and the next label"
+          pass treat the whole handler as dead code on the very next pass.
+        - Fix: `StructuringHost` gains `lsda_landing_pad_labels()` (sourced
+          from `LoadedBinary::eh_lsda`, empty for every function without C++
+          exceptions), and a new `cleanup_redundant_labels_protecting`
+          unions that set into "referenced" rather than relying on textual
+          `Goto` alone. Threaded into all four call sites that previously
+          called `cleanup_redundant_labels`/`finalize_structured_body`
+          without host awareness (`normalize_guarded_tail_layout` ×2 call
+          sites, `build_linear_multiblock_body`, `try_repair_orphan_gotos`,
+          `SeseStructuringPass`) — four separate places independently
+          capable of dropping the same label, matching the "duplicated
+          dead-code logic across many passes" pattern this whole
+          investigation kept surfacing at every layer.
+        - Validated: full pre-existing suite across the 5 touched crates
+          unchanged (1424/1424, +2 new), `golden_corpus_check.py` clean
+          (critical — `cleanup_redundant_labels`/`finalize_structured_body`
+          are among the most foundational, widely-shared utilities in the
+          whole structuring pipeline; clean golden corpus confirms zero
+          behavioral change for any function without LSDA data), full
+          workspace regression unaffected (same 7 pre-existing unrelated
+          `fission-emulator` failures as every check this session). Also hit
+          this session's worst `cargo fmt` sweep yet mid-investigation (70
+          files across `fission-pcode`/`fission-sleigh`) while iterating on
+          an *earlier, wrong* hypothesis about this bug (the "fourth layer"
+          one that turned out to be already-correct); that work was fully
+          reverted via debug-instrumentation cleanup before this update's
+          actual fix was written, so it left no trace in this commit.
+        - **Still not attempted**: `fission-midend-normalize` independently
+          reimplements the identical pattern
+          (`cleanup/control_flow.rs::prune_unreachable_after_terminal`,
+          runs *after* structuring, no `protected`-label concept). Final
+          decompiled *text* still won't show the catch handler until that's
+          fixed too — same fix shape, but normalize's pipeline has no
+          `StructuringHost`-equivalent binary-aware context threaded through
+          it at all today, making it a larger, separate follow-up rather
+          than a trivial continuation.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
