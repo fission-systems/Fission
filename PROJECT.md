@@ -3361,6 +3361,60 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     scope for this round, since Bug 2's fix was already validated and
     landing on its own merits; recorded here rather than left for a
     future session to rediscover from scratch.
+- **Fix — root-caused and fixed the 7 "pre-existing, unrelated"
+  `fission-emulator` test failures down to one real JIT bug; found (but
+  did not fix) a second, later, separate bug, 2026-07-22** (commit
+  `623cd67d`). User asked to fix these too — they had been treated as an
+  unrelated baseline throughout this whole session's Fission-side work.
+  All 7 share one real binary (`testdata/x64_static_printf_malloc.elf`)
+  and, traced with `fission_cli sandbox --dump-trace`, one root cause:
+  "Executing PC=0xFFFFFFFF" right after JIT-compiling the TB containing
+  `TZCNT`.
+  - `TZCNT`'s own SLEIGH semantic template implements the bit-scan as a
+    p-code-level loop using intra-instruction relative BRANCH/CBRANCH
+    (constant-space deltas like -1/-2, relative to the *current op*).
+    `remap_relative_branches` in `fission-emulator/src/jit/compiler.rs`
+    already existed specifically to convert these to absolute flat-op
+    indices — its own doc comment describes this exact TZCNT scenario —
+    but its guard (`space_id == 0 || is_constant`) never actually fired:
+    confirmed via a temporary debug print that this emulator's own
+    SLEIGH decode path tags every Branch/CBranch destination with
+    `space_id=3, is_constant=false` and puts the relative delta in
+    `offset`, not `constant_val` — a *different* tagging convention than
+    `fission-pcode`'s decompiler-facing lifter (which does use
+    `space_id==0`+`is_constant`) — so the guard's check simply never
+    matched anything, and the raw delta (e.g. -1 as u32 = 0xFFFFFFFF)
+    got executed directly as a guest PC.
+  - Fixed without hardcoding a different magic space_id: the new check
+    validates the one invariant that's actually always true of a
+    relative delta — `local_index + delta` lands inside the *same
+    instruction's own p-code op range* — something no real guest address
+    can produce by coincidence. On match, marks the varnode
+    `is_constant=true` (**not** `false` — an earlier attempt at this fix
+    got the sense backwards and would have hit the identical bug through
+    a different path, caught by checking how this same file's own
+    Branch/CBranch codegen reads a resolved flat index a few hundred
+    lines down, which expects exactly `space_id == 0 || is_constant`).
+  - Confirmed the crash itself is gone (TZCNT's loop now iterates
+    correctly, execution proceeds far past the old failure point) — but
+    all 7 tests still fail, now on a **different, later, separate bug**:
+    execution eventually runs off the end of `.text` (confirmed via
+    `objdump -h`: text ends `0x1006bff`) into unmapped memory
+    (`fission_cli disasm` at `0x1006c00`: "not in any section"),
+    apparently right after a `ret` in a 128-bit-SSE (`movaps`/`movups`)
+    memcpy loop. Checked the JIT's own `size > 8` handling for
+    `Load`/`Store` (`read_bytes`/`write_bytes` via an explicit stack
+    slot, not the 8-byte-only `read_space`/`write_space` path) and it
+    looks structurally correct on inspection — did not find the actual
+    root cause of the stack/return-address corruption this round.
+    Recorded here with the concrete evidence gathered (exact crash
+    address, section boundary, disassembly) rather than re-explored from
+    scratch by a future session, but explicitly **not** claiming a root
+    cause I haven't confirmed.
+  - Validated: `fission-emulator --lib` 33/33, `--tests` 33/33 excluding
+    the 7 still failing on the new/later bug, `golden_corpus_check.py`
+    clean (unaffected by construction — the x86-64 decompiler path never
+    touches `fission-emulator`'s own JIT).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
