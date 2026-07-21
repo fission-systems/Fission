@@ -2428,6 +2428,70 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           that instead), Itanium multi/virtual-inheritance RTTI (done, this
           update). All four items from the original survey have been
           either implemented or resolved to their real underlying issue.
+      - **Update — split DWARF debug-info resolution (`.gnu_debuglink`/
+        `.note.gnu.build-id`), a fresh gap found via a second audit round**
+        (commit `1e8046a3`). User asked to find another gap; a
+        `general-purpose` survey of Ghidra's analyzer roster *outside* the
+        Base/Decompiler/FunctionID/PDB areas the original audit covered
+        (MicrosoftCodeAnalyzer, GnuDemangler, DWARF-external, Go, ELF/
+        Mach-O-specific analyzers) found Ghidra's
+        `DWARFExternalDebugFilesPlugin`: it follows a stripped binary's
+        `.gnu_debuglink`/`.note.gnu.build-id` to load its real
+        `.debug_info`/etc. from a *separate* companion file. Fission had
+        no equivalent — `DwarfAnalyzer` only ever looked at
+        `binary.sections` of the file actually being analyzed, so any
+        binary using this split (every Debian/Ubuntu `-dbgsym` package,
+        every Fedora/RHEL `debuginfo` package, and the local `objcopy
+        --only-keep-debug` + `--strip-debug` + `--add-gnu-debuglink`
+        workflow — the *default* packaging for most distro system
+        libraries, not an edge case) silently produced zero DWARF-derived
+        types/functions/lines, even though the DIE walker itself was
+        already solid (confirmed by MSVC RTTI and Go's own real support
+        already being at parity, ruled out during the same survey).
+        - New `dwarf/external.rs` parses both conventions and tries them
+          in order: `.gnu_debuglink` (NUL-terminated filename + 4-byte-
+          aligned CRC32 of the companion's full contents, checked against
+          `crc32fast` — rejects a stale same-named leftover from a
+          previous build, the most realistic real-world failure mode) at
+          two real candidate locations (same directory, `.debug/`
+          subdirectory), then `.note.gnu.build-id` (standard ELF note,
+          `NT_GNU_BUILD_ID`) at the distro-standard
+          `/usr/lib/debug/.build-id/xx/yyyy...debug`. A candidate is only
+          accepted after actually loading it and confirming it has
+          `.debug_info`.
+        - Wired as `LoadedBinary::external_debug_binary: Option<Box<
+          LoadedBinary>>`, populated once in `auto_detect_and_parse` right
+          after `eh_lsda` (only when the binary's own sections lack
+          `.debug_info`), consulted via a new `DwarfAnalyzer::
+          debug_source()` indirection so every section/byte access in the
+          `dwarf` module transparently prefers the resolved companion.
+          Loading the companion goes through a new
+          `auto_detect_and_parse_inner(..., resolve_external_debug: bool)`
+          so a companion that's itself (incorrectly or maliciously)
+          stripped-with-a-debuglink can't chain into unbounded recursion —
+          a real DWARF companion is never itself missing debug sections,
+          so this only matters for adversarial inputs.
+        - Built a real split-debug fixture the standard way (`gcc -g`,
+          then the exact three-step `objcopy`/`strip` sequence every
+          distro package's own build step uses) to validate against:
+          loading *only* the stripped `x64_dyn_split_debug_test.elf`
+          recovers full DWARF function info from the sibling `.elf.debug`
+          this never gets opened directly except through debuglink
+          resolution — confirmed end-to-end through the real CLI too
+          (`fission_cli decomp` on the stripped binary alone now shows
+          DWARF-sourced parameter names, not just `param_1`/`param_2`).
+        - Validated: full workspace check clean, `fission-loader` 122/122
+          (+4 new: happy-path resolution, the `.debug/` subdirectory
+          convention, CRC-mismatch rejection, pre-existing no-companion
+          case unaffected), `golden_corpus_check.py` clean (unaffected —
+          none of the corpus binaries are stripped), full `cargo nextest
+          run --workspace` shows only the same 7 pre-existing unrelated
+          `fission-emulator` failures this session has confirmed unrelated
+          at every prior checkpoint.
+        - **Not attempted**: the build-id system path isn't independently
+          testable in this dev sandbox (no real `/usr/lib/debug` locally),
+          though it shares all the same validation logic already proven
+          via the debuglink path.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
