@@ -3415,6 +3415,74 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     the 7 still failing on the new/later bug, `golden_corpus_check.py`
     clean (unaffected by construction — the x86-64 decompiler path never
     touches `fission-emulator`'s own JIT).
+- **New — self-implemented JIT skeleton for `fission-emulator`, genuinely
+  working (not just compiling) for a real opcode subset, 2026-07-22**
+  (commit `3469278d`). User's explicit direction: Cranelift
+  (`crate::jit`) is an external dependency that must eventually be
+  replaced with a self-implemented compiler, and wanted a skeleton —
+  clarified specifically that this means a real JIT (native codegen),
+  not an interpreter, after an initial interpreter-first proposal was
+  rejected.
+  - `crate::jit::TbBackend` trait is the seam: `JitCompiler` (Cranelift)
+    now implements it as a pure refactor (zero behavior change), and
+    `crate::selfjit::SelfJitCompiler` implements it as the new
+    self-implemented backend — `core.rs`'s TB cache/chaining logic
+    doesn't need to know which one produced a given function pointer.
+  - `selfjit::codebuf`: real RWX-free executable memory management
+    (mmap RW → write → mprotect RX) plus a real AArch64 I-cache
+    invalidation fix (`sys_icache_invalidate`) — found load-bearing the
+    hard way (omitting it reliably caused SIGBUS on real generated code
+    past a couple of trivial instructions), not assumed.
+  - `selfjit::emit::aarch64`: a minimal hand-encoded A64 assembler
+    (immediate loads, register ALU, compare+conditional branch, call,
+    ret). `emit::x86_64` is a same-shaped, unimplemented stub — this
+    session's own dev machine is Apple Silicon, so x86-64 host codegen
+    could not be built *and verified* here the same way.
+  - `selfjit::compiler::SelfJitCompiler`: translates `Copy`, `IntAdd/
+    Sub/And/Or/Xor`, `IntEqual/NotEqual/SLess/Less`, and single-exit
+    `Branch`/`CBranch` into real AArch64 machine code, reusing the
+    *same* `jit_read_space`/`jit_write_space` host callbacks
+    `crate::jit::compiler` (Cranelift) already uses rather than
+    re-deriving memory-model correctness from scratch. All other
+    `PcodeOpcode` variants (~55 of ~70) and intra-instruction relative
+    branches (the TZCNT-style loop construct — see the fix earlier this
+    same session) return a descriptive `Err`, not silently-wrong output.
+  - Two real bugs found and fixed while getting the integration test to
+    actually *pass*, not just compile — both confirmed via bisection
+    against already-passing narrower tests, not guessed:
+    1. `compile_translation_block` returned a raw pointer into an
+       `ExecutableCode` that was then immediately dropped (unmapping the
+       page) — the returned function pointer outlived its own mapping.
+       Fixed with a `code_arena: Vec<ExecutableCode>` field that outlives
+       every compiled TB, matching how Cranelift's own `JITModule` keeps
+       all compiled functions alive for the process's lifetime.
+    2. The fixed "value is here right now" registers originally lived in
+       X9-X11 — caller-saved per AAPCS64, which a *second*
+       `jit_read_space` call is explicitly permitted to clobber. `10 +
+       32` silently came out as leftover garbage from inside
+       `jit_read_space`'s own compiled body, not 42, until moved to
+       callee-saved X20-X22 (alongside the existing X19 for the emulator
+       pointer) with the prologue/epilogue extended to match.
+  - **Not wired in anywhere as the active backend** —
+    `crate::core::Emulator` still only ever constructs
+    `crate::jit::JitCompiler`. Flipping the default before the coverage
+    gap closes would silently break every guest program touching an
+    unimplemented opcode, given there is still no interpreter fallback.
+    `selfjit::mod`'s own doc comment lays out the recommended path to
+    closing that gap: **copy-and-patch** stencil codegen (the technique
+    CPython 3.13's JIT and early LuaJIT/WebKit baseline tiers used, not
+    a second full Cranelift-equivalent with real register allocation),
+    plus the concrete remaining steps in order (remaining opcodes,
+    intra-instruction branches, the x86-64 emitter, differential testing
+    against Cranelift on this session's own real corpus binaries, only
+    then a default flip and the `cranelift-*` dependency removal).
+  - Validated: `fission-emulator --lib` 37/37 (33 pre-existing + 4 new:
+    `codebuf`'s mmap/mprotect/call round-trip, 2 `aarch64` emitter
+    encoding checks, `SelfJitCompiler`'s own real compile-and-execute
+    integration test), full `cargo nextest run --workspace` 2146/2153 —
+    same 7 pre-existing failures (the separate memcpy/`.text`-overrun
+    bug recorded above), no new regressions. clippy clean on every new
+    file.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
