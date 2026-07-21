@@ -2354,6 +2354,80 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           — out of scope for this update, which focused on the concrete,
           now-empirically-confirmed corruption rather than the audit's
           original (partially inaccurate, for x64) framing.
+      - **Update — Itanium `__vmi_class_type_info` (broader-audit item 4,
+        the last one): closes the 2026-07-21 broader Ghidra-parity audit**
+        (commit `3a88da10`). User picked the final item.
+        `parse_itanium_type_info` only recognized `__si_class_type_info`
+        (single inheritance); anything using `__vmi_class_type_info` (more
+        than one base, or any virtual base) silently got zero bases.
+        - Built a real `x86_64-linux-musl-g++`-compiled fixture (`struct D
+          : public B, public C` for multiple inheritance, `struct E :
+          public virtual A` for virtual inheritance) and decoded the raw
+          type_info bytes by hand against `objdump -s` before trusting a
+          parser: confirmed `__vmi_class_type_info`'s layout byte-for-byte
+          — base `__class_type_info` (vtable_ptr, name_ptr), then `flags:
+          u32`, `base_count: u32`, then `base_count` `__base_class_type_
+          info` entries (`{ base_type: ptr; offset_flags: long }`, bit 0 =
+          virtual, bit 1 = public, bits 8+ = signed byte offset — for a
+          virtual base this is a vcall-offset into the vtable, confirmed
+          negative in the real `E` fixture). Base addresses surface as a
+          flat `Vec<u64>`, matching `parse_msvc_col`'s existing MSVC-side
+          shape (`CppClassInfo::base_classes`) rather than inventing an
+          unused richer type.
+        - **Found the whole Itanium RTTI analyzer was actually
+          non-functional on any real ELF binary**, for two reasons
+          unrelated to VMI itself, discovered only because this update
+          insisted on validating against a real fixture instead of trusting
+          the existing (untested — this file had zero `#[test]`s before
+          this update) code:
+          1. Discovery matched raw mangled prefixes (`"__ZTI"`/`"__ZTV"`),
+             but `LoadedBinaryBuilder` demangles every symbol name
+             (`iat_symbols`/`global_symbols`/`functions`, all formats)
+             before this analyzer ever runs — `cpp_demangle`'s actual
+             output for `_ZTI1D`/`_ZTV1D` is `"typeinfo for D"`/
+             `"{vtable(D)}"`, which never matched, so discovery silently
+             found zero classes on every real ELF binary. Rewrote to match
+             the demangled convention.
+          2. Even with discovery fixed, the SI/VMI discriminator (checking
+             the type_info's own vtable pointer against
+             `__si_class_type_info`'s/`__vmi_class_type_info`'s vtable
+             symbol) failed for dynamically-linked binaries: that vtable
+             lives in libstdc++ (an external DSO), so `vtable_ptr` is just
+             an unrelocated on-disk placeholder (`0`). Fixed by consulting
+             `relocation_symbols`, keyed by the field's own slot address
+             (same pattern `elf/lsda.rs`'s `symbol_at` closure already uses
+             for LSDA type-table entries) — checked *before* the
+             value-based lookups, since checking it after left the
+             placeholder `0` free to coincidentally match this loader's own
+             synthetic `"ELF_HEADER"` marker at address `0`, masking the
+             correct answer.
+        - Also extended `to_inferred_types`'s struct-name formatting to
+          walk *all* entries in `base_classes` (`"D : public B, public C"`),
+          not just the first — the single-base assumption predates VMI
+          support entirely.
+        - New `testdata/x64_dyn_vmi_rtti_test.elf` (dynamically-linked
+          `-fPIE`, 21KB, symbols intact since RTTI discovery is
+          symbol-name-driven) plus a new `cpp.rs` test module: multi-base,
+          single-virtual-base, and single-inheritance-still-works cases,
+          all cross-checked against `nm`/`objdump -s`/`readelf -r`.
+        - Validated: full workspace check clean, `fission-loader` 119/119,
+          `golden_corpus_check.py` clean (unaffected — none of the C-only
+          corpus binaries exercise C++ RTTI), full `cargo nextest run
+          --workspace` shows only the same 7 pre-existing unrelated
+          `fission-emulator` failures this session has confirmed unrelated
+          at every prior checkpoint.
+        - **Not attempted**: per-base offset/virtual-flag consumption
+          downstream (only base type_info addresses are surfaced, matching
+          the MSVC path's existing shallow scope); MSVC's own multi/virtual
+          -inheritance handling was already at parity per the original
+          audit finding.
+        - **This closes the entire 2026-07-21 broader Ghidra-parity audit**:
+          Windows `.pdata`/`.xdata` SEH (done), GCC/Itanium LSDA (done),
+          Call-Fixup mechanism (investigated — found the real bug was a
+          stack-frame resolution gap, not a literal call-fixup need; fixed
+          that instead), Itanium multi/virtual-inheritance RTTI (done, this
+          update). All four items from the original survey have been
+          either implemented or resolved to their real underlying issue.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
