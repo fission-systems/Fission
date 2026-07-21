@@ -8,6 +8,7 @@ pub mod trace;
 pub mod sym;
 pub mod jit;
 pub mod metrics;
+pub mod selfjit;
 pub mod srd;
 
 pub use arch::{ArchInfo, Endianness};

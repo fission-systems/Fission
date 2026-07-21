@@ -33,3 +33,7 @@ cranelift-module = "0.133.1"
 cranelift-codegen = "0.133.1"
 cranelift-frontend = "0.133.1"
 cranelift-native = "0.133.1"
+# Only used by `selfjit` (the self-implemented JIT skeleton, see
+# src/selfjit/mod.rs) for raw executable-memory management -- everything
+# else in this crate still goes through the `cranelift-*` backend above.
+libc = "0.2"
