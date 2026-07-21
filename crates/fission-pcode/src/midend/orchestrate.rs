@@ -282,26 +282,28 @@ pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
 }
 
 thread_local! {
-    static LAST_DIR_SNAPSHOT: std::cell::RefCell<Option<Vec<super::HirStmt>>> =
+    static LAST_DIR_SNAPSHOT: std::cell::RefCell<Option<super::Dir>> =
         const { std::cell::RefCell::new(None) };
 }
 
 fn store_last_dir_snapshot(body: Vec<super::HirStmt>) {
     LAST_DIR_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = Some(body);
+        *slot.borrow_mut() = Some(super::Dir(body));
     });
 }
 
-/// Take the flattened, goto/label-based HIR body ("DIR") that structuring
-/// consumed as input on the most recent `render_mlil_preview*`/`render_nir*`
-/// call on this thread -- i.e. the same `Vec<HirStmt>`/`HirExpr` types as the
-/// final structured HIR, just captured immediately before structuring's
-/// CFG-to-AST rewrite runs. Pairing this with the structured HIR the normal
-/// call already returns lets an external verifier (e.g. `fission-dir`)
-/// interpret both and diff results for the same concrete inputs, without any
-/// change to what structuring itself computes -- purely observational, same
+/// Take the flattened, goto/label-based HIR body ([`super::Dir`]) that
+/// structuring consumed as input on the most recent
+/// `render_mlil_preview*`/`render_nir*` call on this thread -- the same
+/// `HirStmt`/`HirExpr` grammar as the final structured HIR, just captured
+/// immediately before structuring's CFG-to-AST rewrite runs and tagged with
+/// a distinct type so callers can't accidentally swap it with the
+/// structured HIR. Pairing this with the structured HIR the normal call
+/// already returns lets an external verifier (e.g. `fission-dir`) interpret
+/// both and diff results for the same concrete inputs, without any change
+/// to what structuring itself computes -- purely observational, same
 /// pattern as `take_last_layered_pseudocode` above.
-pub fn take_last_dir_snapshot() -> Option<Vec<super::HirStmt>> {
+pub fn take_last_dir_snapshot() -> Option<super::Dir> {
     LAST_DIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
 }
 

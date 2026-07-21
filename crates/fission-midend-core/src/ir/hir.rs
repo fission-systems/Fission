@@ -158,3 +158,24 @@ pub enum HirBinaryOp {
     SGt,
     SGe,
 }
+
+/// The flattened, goto/label-based body that `fission-pcode`'s structuring
+/// stage receives as input -- "동적으로 일치한 IR" (dynamically-verified IR):
+/// the same `HirStmt`/`HirExpr` grammar as [`Hir`], captured immediately
+/// before structuring's CFG-to-AST rewrite runs (see
+/// `fission_pcode::take_last_dir_snapshot`). Deliberately a thin newtype
+/// over `Vec<HirStmt>` rather than a parallel AST: DIR and HIR share an
+/// identical grammar (structuring only ever rewrites control flow, never
+/// invents new statement/expression shapes), so duplicating the enum would
+/// just be the same variants twice with a conversion layer between them for
+/// no benefit. What the newtype *does* buy: an accidental DIR/HIR argument
+/// swap (e.g. in `fission_dir::diff::diff_dir_hir`) becomes a compile error
+/// instead of a same-shaped `Vec<HirStmt>` silently passing type-checking
+/// while being logically wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dir(pub Vec<HirStmt>);
+
+/// The final, structured HIR body (if/while/for, no stray `Goto`/`Label`
+/// left over from flattening) -- same wrapper rationale as [`Dir`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hir(pub Vec<HirStmt>);

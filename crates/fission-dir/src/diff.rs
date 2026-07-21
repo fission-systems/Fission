@@ -5,7 +5,7 @@
 //! (HIR) and reports any input where the two disagree -- a real structuring
 //! bug, with a concrete repro input, not a hand-diffed hunch.
 
-use fission_midend_core::ir::{HirStmt, NirBinding};
+use fission_midend_core::ir::{Dir, Hir, NirBinding};
 
 use crate::interp::interpret;
 
@@ -30,9 +30,12 @@ pub enum VerifyOutcome {
     Unsupported { reason: String },
 }
 
-/// Differentially interpret `dir_body` and `hir_body` (same
-/// `params`/`locals`, per [`interpret`]'s documented assumption) over each
-/// tuple in `samples`, in order, and report the outcome.
+/// Differentially interpret `dir` and `hir` (same `params`/`locals`, per
+/// [`interpret`]'s documented assumption) over each tuple in `samples`, in
+/// order, and report the outcome. Taking the distinct [`Dir`]/[`Hir`]
+/// newtypes here (rather than two same-shaped `&[HirStmt]` slices) means an
+/// accidentally swapped argument order is a compile error, not a silent
+/// runtime bug.
 ///
 /// A concrete input that makes *both* sides return `Err` (e.g. a shared
 /// division-by-zero) is treated as inconclusive for that sample, not a
@@ -41,8 +44,8 @@ pub enum VerifyOutcome {
 /// changed anything. A sample where exactly one side errors *is* reported:
 /// that asymmetry is itself suspicious and worth surfacing.
 pub fn diff_dir_hir(
-    dir_body: &[HirStmt],
-    hir_body: &[HirStmt],
+    dir: &Dir,
+    hir: &Hir,
     params: &[NirBinding],
     locals: &[NirBinding],
     samples: &[Vec<i64>],
@@ -51,8 +54,8 @@ pub fn diff_dir_hir(
     let mut checked = 0usize;
 
     for args in samples {
-        let dir_r = interpret(dir_body, params, locals, args);
-        let hir_r = interpret(hir_body, params, locals, args);
+        let dir_r = interpret(&dir.0, params, locals, args);
+        let hir_r = interpret(&hir.0, params, locals, args);
 
         match (dir_r, hir_r) {
             (Ok(dir_result), Ok(hir_result)) => {
@@ -134,7 +137,7 @@ pub fn default_samples(arity: usize) -> Vec<Vec<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_midend_core::ir::{HirBinaryOp, HirExpr, HirLValue, NirBindingOrigin};
+    use fission_midend_core::ir::{HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBindingOrigin};
 
     fn i32_ty() -> fission_midend_core::ir::NirType {
         fission_midend_core::ir::NirType::Int {
@@ -172,12 +175,12 @@ mod tests {
     }
 
     /// HIR (structured): `if (a > b) { return a; } else { return b; }`.
-    fn max_hir() -> Vec<HirStmt> {
-        vec![HirStmt::If {
+    fn max_hir() -> Hir {
+        Hir(vec![HirStmt::If {
             cond: a_gt_b(),
             then_body: vec![HirStmt::Return(Some(var("a")))],
             else_body: vec![HirStmt::Return(Some(var("b")))],
-        }]
+        }])
     }
 
     /// DIR (flattened goto/label form of the *same* logic): a conditional
@@ -185,8 +188,8 @@ mod tests {
     /// this is how a p-code CBranch naturally maps onto `HirStmt` without a
     /// dedicated "conditional goto" variant) to a label guarding the
     /// then-arm, with the else-arm falling straight through.
-    fn max_dir() -> Vec<HirStmt> {
-        vec![
+    fn max_dir() -> Dir {
+        Dir(vec![
             HirStmt::If {
                 cond: a_gt_b(),
                 then_body: vec![HirStmt::Goto("L_then".to_string())],
@@ -195,7 +198,7 @@ mod tests {
             HirStmt::Return(Some(var("b"))),
             HirStmt::Label("L_then".to_string()),
             HirStmt::Return(Some(var("a"))),
-        ]
+        ])
     }
 
     fn max_params() -> Vec<NirBinding> {
@@ -225,7 +228,7 @@ mod tests {
     /// trivially reporting everything as equivalent.
     #[test]
     fn diverging_dir_and_hir_are_caught_with_a_concrete_repro() {
-        let buggy_dir = vec![HirStmt::Return(Some(var("a")))];
+        let buggy_dir = Dir(vec![HirStmt::Return(Some(var("a")))]);
         let outcome = diff_dir_hir(&buggy_dir, &max_hir(), &max_params(), &[], &default_samples(2));
         match outcome {
             VerifyOutcome::Diverged(divs) => {
