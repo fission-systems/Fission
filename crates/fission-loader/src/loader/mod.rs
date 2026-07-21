@@ -52,6 +52,24 @@ impl LoadedBinary {
 
     /// Auto-detect binary format and parse
     fn auto_detect_and_parse(data: DataBuffer, path: String) -> Result<Self> {
+        Self::auto_detect_and_parse_inner(data, path, true)
+    }
+
+    /// `resolve_external_debug: false` skips `.gnu_debuglink`/
+    /// `.note.gnu.build-id` companion-file resolution -- used when loading
+    /// a companion file *for* that resolution (see
+    /// `dwarf::external::resolve_external_debug_binary`), so a companion
+    /// that's itself stripped-with-a-debuglink can't chain into unbounded
+    /// recursion. In the ordinary (non-companion) case this is always
+    /// `true`; the companion binary's own `.debug_info` presence already
+    /// makes resolution a no-op for it regardless (a real DWARF companion
+    /// file is never itself missing debug sections), so this guard only
+    /// matters for maliciously/incorrectly constructed inputs.
+    fn auto_detect_and_parse_inner(
+        data: DataBuffer,
+        path: String,
+        resolve_external_debug: bool,
+    ) -> Result<Self> {
         let mut binary = pipeline::LoaderPipeline::load(data, path)?;
         binary.identity_report = Some(identity::analyze(
             &binary,
@@ -69,6 +87,16 @@ impl LoadedBinary {
         }
         if format.starts_with("PE") {
             binary.eh_lsda = pe::seh::analyze_seh_lsda(&binary);
+        }
+        if resolve_external_debug
+            && !binary
+                .sections
+                .iter()
+                .any(|s| s.name == ".debug_info" || s.name == "__debug_info")
+        {
+            let own_path = binary.path.clone();
+            binary.external_debug_binary =
+                dwarf::external::resolve_external_debug_binary(&binary, &own_path).map(Box::new);
         }
         merge_debug_function_sizes(&mut binary);
 

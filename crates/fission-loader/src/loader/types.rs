@@ -394,6 +394,15 @@ pub struct LoadedBinary {
     /// from `.pdata`/`.xdata` (see `pe::seh::analyze_seh_lsda`) — both
     /// produce the same [`super::gcc_lsda::LsdaInfo`] shape.
     pub eh_lsda: std::collections::HashMap<u64, super::gcc_lsda::LsdaInfo>,
+    /// A separately-loaded companion binary holding this binary's *real*
+    /// DWARF sections, resolved via `.gnu_debuglink`/`.note.gnu.build-id`
+    /// when this binary is itself stripped of debug info (the standard
+    /// distro `-dbgsym`/`debuginfo` packaging split, and the local
+    /// `objcopy --only-keep-debug` workflow). Not serialized — rebuilt on
+    /// each load. See `dwarf::external::resolve_external_debug_binary`;
+    /// `DwarfAnalyzer` prefers this binary's sections/bytes over the
+    /// primary binary's own (empty) debug sections when present.
+    pub external_debug_binary: Option<Box<LoadedBinary>>,
 }
 
 impl LoadedBinary {
@@ -408,6 +417,7 @@ impl LoadedBinary {
             function_candidates: Vec::new(),
             dwarf_lines: Vec::new(),
             eh_lsda: std::collections::HashMap::new(),
+            external_debug_binary: None,
         }
     }
 

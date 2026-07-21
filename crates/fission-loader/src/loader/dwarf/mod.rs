@@ -15,6 +15,7 @@
 //! - [`sections`] - Section data loading helper
 
 pub mod analyzer;
+pub(in crate::loader) mod external;
 mod functions;
 mod lines;
 mod sections;

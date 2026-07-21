@@ -18,11 +18,26 @@ pub struct DwarfAnalyzer<'a> {
 impl<'a> DwarfAnalyzer<'a> {
     /// Create a new DWARF analyzer for the given binary
     pub fn new(binary: &'a LoadedBinary) -> Self {
-        let has_debug = binary.sections.iter().any(|s| {
+        let has_debug = Self::debug_source_of(binary).sections.iter().any(|s| {
             let name = s.name.as_str();
             name == ".debug_info" || name == "__debug_info"
         });
         Self { binary, has_debug }
+    }
+
+    /// The `LoadedBinary` whose sections/bytes actually hold DWARF data --
+    /// `binary.external_debug_binary` when this binary is stripped and a
+    /// `.gnu_debuglink`/build-id companion was resolved (see
+    /// `dwarf::external::resolve_external_debug_binary`), `binary` itself
+    /// otherwise. Every section/byte access in this module goes through
+    /// this, not `self.binary` directly, so the split-debug-info case is
+    /// transparent to the rest of the analyzer.
+    fn debug_source_of(binary: &'a LoadedBinary) -> &'a LoadedBinary {
+        binary.external_debug_binary.as_deref().unwrap_or(binary)
+    }
+
+    fn debug_source(&self) -> &'a LoadedBinary {
+        Self::debug_source_of(self.binary)
     }
 
     /// Check if DWARF debug information is available
@@ -80,9 +95,10 @@ impl<'a> DwarfAnalyzer<'a> {
     pub(super) fn build_dwarf(
         &self,
     ) -> Result<gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>, gimli::Error> {
-        let sections = SectionData::new(self.binary);
-        let data = self.binary.data.as_slice();
-        let endian = if self.binary.arch_spec.contains("BE") {
+        let debug_source = self.debug_source();
+        let sections = SectionData::new(debug_source);
+        let data = debug_source.data.as_slice();
+        let endian = if debug_source.arch_spec.contains("BE") {
             RunTimeEndian::Big
         } else {
             RunTimeEndian::Little

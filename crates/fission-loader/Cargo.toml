@@ -28,6 +28,7 @@ msvc-demangler = "0.9"
 memmap2 = "0.9"
 pdb = "0.8"
 rayon = "1.10"
+crc32fast = "1.5"
 
 [dev-dependencies]
 tempfile = "3.8"
