@@ -1,8 +1,3 @@
-use fission_midend_core::wave_stats::{
-    add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
-    add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
-    add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
-};
 /// Call-site inter-procedural type propagation pass.
 ///
 /// All type inference so far has been intra-procedural: it only sees the types
@@ -46,9 +41,14 @@ use fission_midend_core::wave_stats::{
 /// Constraints are injected using the same `merge_constraint` / fixed-point
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use crate::prelude::*;
-use fission_midend_core::rename_vars_in_stmts;
-use fission_signatures::{ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup};
 use crate::{HashMap, HashSet};
+use fission_midend_core::rename_vars_in_stmts;
+use fission_midend_core::wave_stats::{
+    add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
+    add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
+    add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
+};
+use fission_signatures::{ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup};
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
 /// unconstrained types (void, variadic, …).
@@ -524,6 +524,329 @@ fn is_known_variadic_runtime_symbol(target: &str) -> bool {
     )
 }
 
+/// Ghidra `FormatStringAnalyzer` scorecard item: types printf-family
+/// variadic arguments from their own format string's `%`-conversion
+/// specifiers, e.g. `printf("%d %s", x, y)` types `x` as `int` and `y` as
+/// `char*` -- previously only the fixed leading parameter (if any) was
+/// ever typed for a variadic call, per [`is_known_variadic_runtime_symbol`]'s
+/// role elsewhere in this file (arity pruning only).
+///
+/// The format string's *text* is trivially available here already: `lower_
+/// varnode_inner` (`fission-pcode/src/midend/builder/expr/lower_expr.rs`)
+/// resolves a constant matching `options.global_names` -- which
+/// `NirRenderOptions::from_loaded_binary` (`fission-midend-core/src/ir/
+/// options.rs`) pre-populates with every extracted `.rdata` string,
+/// already wrapped in quotes and escaped -- to `HirExpr::AddressOfGlobal(
+/// "\"...\"")`. [`arg_var_name`] (used by [`collect_callsites_stmts`]
+/// already, for the unrelated existing per-parameter typing above) already
+/// captures `AddressOfGlobal` names verbatim, so the quoted format-string
+/// text is already sitting in `arg_vars` by the time this runs -- no new
+/// binary access or HIR traversal needed.
+///
+/// Deliberately scoped to the unambiguous ANSI narrow-string printf family
+/// (`printf`/`fprintf`/`sprintf`/`snprintf`/their `_s` secure-CRT
+/// variants). Two families are intentionally excluded, not overlooked:
+/// scanf-family functions take *pointers* to write into (a different
+/// typing rule -- `%d` there means `int*`, not `int`), and the wide-
+/// character `wprintf`/`swprintf` family flips `%s`'s meaning (narrow
+/// `char*`, not `wchar_t*`, per the ANSI convention -- a correctness trap
+/// not worth the risk without a dedicated fixture to validate against).
+fn apply_variadic_printf_format_string_arg_types(
+    func: &mut HirFunction,
+    callsites: &[(Option<String>, String, Vec<Option<String>>)],
+) -> bool {
+    // The call-site argument variable is often just a same-block temp
+    // holding a plain copy of the real source binding (`argN = param_2;
+    // printf(fmt, argN)`) -- a shape later copy-propagation would
+    // normally collapse, but doing so isn't guaranteed to happen *before*
+    // this pass's own type refinement would otherwise need to survive
+    // (confirmed via a real fixture: the temp's type refined correctly on
+    // every fixed-point iteration, but never reached the real `char *`
+    // parameter it was copied from in the final output). Walking the
+    // copy chain back to the true source and refining every hop directly
+    // sidesteps that pipeline-ordering fragility instead of depending on
+    // it.
+    let mut copy_sources = HashMap::default();
+    collect_copy_sources(&func.body, &mut copy_sources);
+
+    let mut changed = false;
+    for (_, callee, arg_vars) in callsites {
+        let Some(format_index) = printf_family_format_string_arg_index(callee) else {
+            continue;
+        };
+        let Some(literal) = arg_vars
+            .get(format_index)
+            .and_then(|arg| arg.as_deref())
+            .and_then(quoted_string_literal_text)
+        else {
+            continue;
+        };
+        for (offset, ty) in parse_printf_format_specifier_types(literal)
+            .into_iter()
+            .enumerate()
+        {
+            let Some(ty) = ty else { continue };
+            let arg_index = format_index + 1 + offset;
+            let Some(Some(arg_var)) = arg_vars.get(arg_index) else {
+                continue;
+            };
+            changed |= apply_variadic_printf_arg_ty_transitively(func, &copy_sources, arg_var, &ty);
+        }
+    }
+    changed
+}
+
+/// Like [`tighten_binding_ty`], but additionally allowed to override a
+/// generic *unsigned*-int binding, not just an `Unknown` one.
+///
+/// By the time this pass runs on real compiled code, a call-argument
+/// binding almost never still has `NirType::Unknown` -- `fission-pcode`'s
+/// HIR builder always assigns *some* default int type at materialization
+/// time based purely on the raw register/stack-slot width (`type_from_
+/// size(size, false)`, used throughout the builder), and that default is
+/// always unsigned. That default is not real type evidence, just "whatever
+/// size the value happened to be passed in" -- unlike `tighten_binding_ty`'s
+/// caller above (the WinAPI-signature-driven typing, which has this exact
+/// same real-world limitation, confirmed via a real fixture: `GetWindowRect`'s
+/// own `HWND`/`RECT*` parameters stayed `ulonglong` end-to-end), a format
+/// specifier IS strong, authoritative evidence (the actual variadic-call
+/// API contract, not a guess) -- specific enough to be worth overriding
+/// that generic default for. `tighten_binding_ty` itself stays untouched
+/// (its conservatism is appropriate for its many other, less-certain
+/// callers); this local override is scoped to just this one, narrow,
+/// high-confidence case.
+fn apply_variadic_printf_arg_ty(binding: &mut NirBinding, candidate: &NirType) -> bool {
+    if tighten_binding_ty(binding, candidate) {
+        return true;
+    }
+    if matches!(binding.ty, NirType::Int { signed: false, .. }) && binding.ty != *candidate {
+        binding.ty = candidate.clone();
+        return true;
+    }
+    false
+}
+
+/// Applies [`apply_variadic_printf_arg_ty`] to `arg_var`'s own binding,
+/// then walks `copy_sources` backward (bounded by a visited-set, same
+/// cycle-safety pattern used throughout this crate) applying it to every
+/// transitive copy-source too, so a refinement on a call-site temp
+/// reaches the real originating parameter/local it was copied from.
+fn apply_variadic_printf_arg_ty_transitively(
+    func: &mut HirFunction,
+    copy_sources: &HashMap<String, String>,
+    arg_var: &str,
+    ty: &NirType,
+) -> bool {
+    let mut changed = false;
+    let mut current = arg_var.to_string();
+    let mut visited = HashSet::default();
+    while visited.insert(current.clone()) {
+        if let Some(b) = binding_by_name_mut(&mut func.locals, &current)
+            .or_else(|| binding_by_name_mut(&mut func.params, &current))
+        {
+            changed |= apply_variadic_printf_arg_ty(b, ty);
+        }
+        match copy_sources.get(&current) {
+            Some(next) => current = next.clone(),
+            None => break,
+        }
+    }
+    changed
+}
+
+/// Single-hop `target = source` (bare `Var`-to-`Var`) copy map, used by
+/// [`apply_variadic_printf_arg_ty_transitively`] to trace a call-site
+/// argument temp back to its real originating binding.
+fn collect_copy_sources(stmts: &[HirStmt], out: &mut HashMap<String, String>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(target),
+                rhs: HirExpr::Var(source),
+            } => {
+                out.insert(target.clone(), source.clone());
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_copy_sources(body, out);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_copy_sources(then_body, out);
+                collect_copy_sources(else_body, out);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(i) = init {
+                    collect_copy_sources(std::slice::from_ref(i), out);
+                }
+                if let Some(u) = update {
+                    collect_copy_sources(std::slice::from_ref(u), out);
+                }
+                collect_copy_sources(body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_copy_sources(&case.body, out);
+                }
+                collect_copy_sources(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 0-based argument index of the format-string parameter for a known
+/// printf-family symbol, or `None` if `target` isn't one of the (narrow-
+/// string-only, see [`apply_variadic_printf_format_string_arg_types`]'s
+/// doc comment) symbols this recognizes.
+fn printf_family_format_string_arg_index(target: &str) -> Option<usize> {
+    match canonical_variadic_runtime_symbol(target).as_str() {
+        "printf" | "printf_s" => Some(0),
+        "fprintf" | "fprintf_s" | "sprintf" => Some(1),
+        "sprintf_s" | "snprintf" | "snprintf_s" => Some(2),
+        _ => None,
+    }
+}
+
+/// Strips the surrounding quotes `NirRenderOptions::from_loaded_binary`
+/// wraps every extracted string constant in, or `None` if `name` isn't
+/// one (e.g. an ordinary symbol/global name, or a non-constant argument
+/// [`arg_var_name`] captured by variable name instead).
+fn quoted_string_literal_text(name: &str) -> Option<&str> {
+    name.strip_prefix('"')?.strip_suffix('"')
+}
+
+/// Scans a printf-style format string for `%`-conversion specifiers,
+/// returning one entry per specifier (in order) with the `NirType` it
+/// implies for that variadic argument, or `None` for a specifier this
+/// doesn't have a confident type for (unrecognized conversion character --
+/// leaves that argument's type alone rather than guessing). `%%` (a
+/// literal percent) and a `*` dynamic width/precision (which itself
+/// consumes an extra leading `int` argument, per the C standard: "the
+/// argument supplying [a `*`] width/precision... shall appear before the
+/// argument (if any) to be converted") are both handled to keep the
+/// specifier-to-argument-position alignment correct.
+fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirType>> {
+    let mut result = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            continue;
+        }
+        if chars.peek().copied() == Some('%') {
+            chars.next();
+            continue;
+        }
+        while matches!(chars.peek().copied(), Some('-' | '+' | ' ' | '#' | '0')) {
+            chars.next();
+        }
+        if chars.peek().copied() == Some('*') {
+            chars.next();
+            result.push(Some(NirType::Int {
+                bits: 32,
+                signed: true,
+            }));
+        } else {
+            while matches!(chars.peek().copied(), Some(c) if c.is_ascii_digit()) {
+                chars.next();
+            }
+        }
+        if chars.peek().copied() == Some('.') {
+            chars.next();
+            if chars.peek().copied() == Some('*') {
+                chars.next();
+                result.push(Some(NirType::Int {
+                    bits: 32,
+                    signed: true,
+                }));
+            } else {
+                while matches!(chars.peek().copied(), Some(c) if c.is_ascii_digit()) {
+                    chars.next();
+                }
+            }
+        }
+        // Length modifiers: `hh`/`h` (narrower, doesn't affect promoted
+        // vararg width so ignored), `l`/`ll` (widens to 64-bit at `ll`;
+        // a lone `l` also means wide-char for `%s`/`%c`), `L`/`z`/`j`/`t`
+        // (ignored, doesn't change the promoted vararg width this cares
+        // about), MSVC `I32`/`I64`.
+        let mut long_count = 0u8;
+        loop {
+            match chars.peek().copied() {
+                Some('h') => {
+                    chars.next();
+                    if chars.peek().copied() == Some('h') {
+                        chars.next();
+                    }
+                }
+                Some('l') => {
+                    chars.next();
+                    long_count += 1;
+                    if chars.peek().copied() == Some('l') {
+                        chars.next();
+                        long_count += 1;
+                    }
+                }
+                Some('L' | 'z' | 'j' | 't') => {
+                    chars.next();
+                }
+                Some('I') => {
+                    chars.next();
+                    if chars.peek().copied() == Some('6') {
+                        chars.next();
+                        if chars.peek().copied() == Some('4') {
+                            chars.next();
+                            long_count = 2;
+                        }
+                    } else if chars.peek().copied() == Some('3') {
+                        chars.next();
+                        if chars.peek().copied() == Some('2') {
+                            chars.next();
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        let Some(conv) = chars.next() else {
+            break;
+        };
+        let is_wide = long_count >= 1;
+        let is_64 = long_count >= 2;
+        let ty = match conv {
+            'd' | 'i' => Some(NirType::Int {
+                bits: if is_64 { 64 } else { 32 },
+                signed: true,
+            }),
+            'u' | 'x' | 'X' | 'o' => Some(NirType::Int {
+                bits: if is_64 { 64 } else { 32 },
+                signed: false,
+            }),
+            'c' => Some(NirType::Int {
+                bits: 32,
+                signed: true,
+            }),
+            's' => Some(NirType::Ptr(Box::new(NirType::Int {
+                bits: if is_wide { 16 } else { 8 },
+                signed: false,
+            }))),
+            'f' | 'F' | 'e' | 'E' | 'g' | 'G' | 'a' | 'A' => Some(NirType::Float { bits: 64 }),
+            'p' => Some(NirType::Ptr(Box::new(NirType::Unknown))),
+            'n' => Some(NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: true,
+            }))),
+            _ => None,
+        };
+        result.push(ty);
+    }
+    result
+}
+
 /// Apply call-site type propagation to a function.
 ///
 /// Collects all `Call` expressions, looks up each target in the API type provider, and
@@ -542,6 +865,7 @@ pub fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
     // Collect call sites: (receiver_name_opt, callee_name, arg_var_names)
     let mut callsites: Vec<(Option<String>, String, Vec<Option<String>>)> = Vec::new();
     collect_callsites_stmts(&func.body, &mut callsites);
+    changed |= apply_variadic_printf_format_string_arg_types(func, &callsites);
     let call_target_rewrites = build_call_target_rewrites(&func.callee_summaries);
 
     for (receiver, callee, arg_vars) in &callsites {
@@ -1023,9 +1347,9 @@ fn collect_callsites_expr(
 
 #[cfg(test)]
 mod tests {
-    use fission_midend_core::wave_stats::{reset_normalize_wave_stats, take_normalize_wave_stats};
     use super::*;
-// prelude via parent
+    use fission_midend_core::wave_stats::{reset_normalize_wave_stats, take_normalize_wave_stats};
+    // prelude via parent
     use fission_core::CallingConvention;
 
     fn unknown_binding(name: &str, origin: Option<NirBindingOrigin>) -> NirBinding {
@@ -1257,6 +1581,116 @@ mod tests {
             HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 6),
             other => panic!("unexpected stmt: {other:?}"),
         }
+    }
+
+    /// Ghidra `FormatStringAnalyzer` scorecard item. `arg_tmp`/`arg_tmp2`
+    /// model the shape a real call-argument temp actually has by the time
+    /// this pass runs on compiled code: a plain copy of the real
+    /// parameter, already carrying the generic *unsigned*-int default
+    /// `fission-pcode`'s HIR builder assigns purely from raw register
+    /// width (confirmed via a real fixture, not `NirType::Unknown` the
+    /// way `unknown_binding`-based tests elsewhere in this file assume --
+    /// that idealized starting condition doesn't occur in practice for
+    /// call-argument bindings, which is exactly why `tighten_binding_ty`
+    /// alone wasn't enough and `apply_variadic_printf_arg_ty` exists).
+    /// Checks both that the format-derived type reaches the immediate
+    /// call-site temp *and* transitively reaches the real parameter it
+    /// was copied from (`apply_variadic_printf_arg_ty_transitively`) --
+    /// confirmed via the same real fixture that this transitive step is
+    /// not optional: without it, the refinement computed correctly but
+    /// never survived to the parameter shown in the final signature.
+    #[test]
+    fn callsite_type_prop_types_printf_variadic_args_from_format_specifiers() {
+        fn generic_uint(bits: u32) -> NirType {
+            NirType::Int {
+                bits,
+                signed: false,
+            }
+        }
+
+        let mut func = HirFunction {
+            name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![
+                NirBinding {
+                    name: "param_1".to_string(),
+                    ty: generic_uint(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(0)),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "param_2".to_string(),
+                    ty: generic_uint(64),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(1)),
+                    initializer: None,
+                },
+            ],
+            locals: vec![
+                NirBinding {
+                    name: "arg_tmp".to_string(),
+                    ty: generic_uint(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "arg_tmp2".to_string(),
+                    ty: generic_uint(64),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("arg_tmp".to_string()),
+                    rhs: HirExpr::Var("param_1".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("arg_tmp2".to_string()),
+                    rhs: HirExpr::Var("param_2".to_string()),
+                },
+                HirStmt::Expr(HirExpr::Call {
+                    target: "printf".to_string(),
+                    args: vec![
+                        HirExpr::AddressOfGlobal("\"value=%d name=%s\\n\"".to_string()),
+                        HirExpr::Var("arg_tmp".to_string()),
+                        HirExpr::Var("arg_tmp2".to_string()),
+                    ],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+
+        let want_int = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let want_str = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        assert_eq!(
+            func.params[0].ty, want_int,
+            "param_1 should type as %d's int"
+        );
+        assert_eq!(
+            func.params[1].ty, want_str,
+            "param_2 should type as %s's char* (transitively, through the arg_tmp2 copy)"
+        );
+        assert_eq!(func.locals[0].ty, want_int);
+        assert_eq!(func.locals[1].ty, want_str);
     }
 
     #[test]
