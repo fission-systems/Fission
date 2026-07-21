@@ -2755,6 +2755,90 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           (`x86_64-w64-mingw32-gcc -O2`, a `caller` function that GCC
           tail-jumps into a `helper` function) confirming `return
           helper();` end-to-end outside the golden corpus too.
+      - **Implement — `AggressiveInstructionFinderAnalyzer`, the last of
+        the ranked scorecard items** (commit `9452ca6a`). Ghidra's AIF
+        finds function starts hiding in undisassembled gaps of stripped/
+        heavily-optimized binaries by fingerprinting a candidate's first
+        two instructions' *masked* bytes (immediate/displacement operands
+        zeroed out) and requiring that fingerprint to recur ≥4 times
+        among the binary's own already-known functions before trusting
+        it — a self-calibrating signal needing no hardcoded signature DB,
+        unlike Ghidra's separate static "Function Start Search" analyzer
+        (which Fission already has, via `scan_ghidra_patterns`'s Ghidra
+        XML pattern DB).
+        - `scan_dynamic_prologues` (`fission-static/discover.rs`) was
+          already wired into the pipeline under exactly this name but was
+          a dead stub (`Vec::new()`) — filled it in. Fingerprint pool:
+          `(mnemonic, mnemonic)` pair of the first two decoded
+          instructions per known function (Fission's SLEIGH runtime
+          doesn't expose an instruction-mask primitive at this layer, so
+          mnemonic-pair substitutes for Ghidra's byte-masking — still
+          invariant to immediate/register-*value* choice, just unable to
+          distinguish two different *registers* in an otherwise-identical
+          encoding; documented as a deliberate simplification, not an
+          oversight). Candidate positions reuse `scan_cc_padding_regions`'s
+          proven-safe padding-run enumeration (that scanner stays disabled
+          on its own — "valid routine after padding" alone was too
+          permissive, causing FPs; the fingerprint-recurrence gate is
+          exactly the missing piece), validated through the existing
+          `validate_subroutine_candidate`.
+        - Gated strictly to `Aggressive`, not `Balanced` — matches
+          Ghidra's AIF being off-by-default/riskier than reference- and
+          signature-driven analyzers. Fission's own `Aggressive`/
+          `Balanced` profiles were previously behaviorally identical (an
+          empty `if profile == Aggressive {}` block, dead since some
+          earlier change); this is the first real differentiator between
+          them. Updated `types.rs`'s stale per-variant doc comments to
+          match.
+        - **Found and fixed a real, pre-existing, 100%-reproducible crash**
+          while testing this, unrelated to the new scanner itself:
+          `scan_ghidra_patterns` built its `AhoCorasick` automaton with
+          `MatchKind::LeftmostFirst` but called `find_overlapping_iter`,
+          which only `MatchKind::Standard` supports — confirmed via a real
+          binary crashing unconditionally
+          (`AhoCorasick::try_find_overlapping_iter ... MatchError(
+          UnsupportedOverlapping)`) under `--function-discovery-profile
+          balanced`/`aggressive`. Never caught before because
+          `golden_corpus_check.py` (and every prior manual check this
+          whole session) always runs at the CLI's `conservative` default,
+          which skips `scan_ghidra_patterns` entirely — this bug has
+          likely existed since `scan_ghidra_patterns` was written. Fixed
+          by switching to `MatchKind::Standard`, which is also the
+          semantically correct choice here (every raw hit is re-verified
+          in full against the actual pattern afterward, so the automaton
+          only needs to be a complete "does any prefix start here"
+          pre-filter, not a single-best-match search).
+        - New tests: a synthetic fixture with 20 "known" (symbol-seeded)
+          functions sharing a deliberately uncommon two-instruction
+          prologue (`push r15; push r14`, chosen specifically to avoid
+          colliding with a real signature in the Ghidra XML pattern DB —
+          confirmed via `xml_hits=0` in the test's own `SCANNER_STATS`
+          output) plus one more, identically-shaped function placed the
+          same way but not seeded (simulating a padding-hidden function).
+          Confirms the hidden function is recovered under `Aggressive`
+          and NOT recovered under `Balanced`/`Conservative`.
+        - Validated: full workspace check clean, `fission-static` 69/69,
+          full `cargo nextest run --workspace` 2143/2143 minus the same 7
+          pre-existing unrelated `fission-emulator` failures.
+          `golden_corpus_check.py` clean (runs at the `conservative`
+          default, entirely unaffected by this change by construction).
+          Manually re-verified the aho-corasick crash fix and the new
+          scanner's non-crashing behavior across 4 additional real
+          corpus binaries under `--function-discovery-profile aggressive`
+          via `--all` batch mode.
+        - **Scope note**: this closes the scorecard's fourth and final
+          ranked item (`CallFixupAnalyzer`, `TEBAnalyzer`,
+          `SharedReturnAnalyzer`, `AggressiveInstructionFinderAnalyzer`),
+          completing this audit thread. Not attempted: genuine SLEIGH
+          byte-masking (mnemonic-pair fingerprinting is coarser, as
+          documented above); no real corpus binary was found that
+          actually exercises `scan_dynamic_prologues`'s ≥20-known-
+          functions/≥4-fingerprint-recurrence gates end-to-end with a
+          real hidden function (expected — the golden corpus's fixtures
+          are small, ordinarily-linked binaries with no deliberately
+          hidden functions; the synthetic unit tests are the primary
+          regression guard, matching how Ghidra's own AIF is inherently
+          hard to validate against "normal" binaries by design).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
