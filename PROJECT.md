@@ -2121,6 +2121,80 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           `StructuringHost`-equivalent binary-aware context threaded through
           it at all today, making it a larger, separate follow-up rather
           than a trivial continuation.
+      - **Update — protect LSDA landing-pad labels in fission-midend-normalize
+        too, closing out the LSDA investigation end to end** (commit
+        `fb57f1dc`). User asked to continue past the structuring-layer fix.
+        `prune_unreachable_after_terminal` turned out to be only the first
+        of **six** independent places in this crate reimplementing the same
+        "zero textual `Goto` references == dead label" heuristic — each
+        found one at a time via iterative debug-instrumented CLI runs
+        against `guarded()`/`x64_dyn_lsda_test.elf` (add a targeted
+        `eprintln!`, rebuild release, run the CLI, see where the label still
+        disappears, read surrounding code for the next culprit, repeat):
+        `prune_unreachable_after_terminal`; `cleanup_func_stmt_list`'s own
+        `global_refs` computation; the `cleanup_boundary_label_{stage}` pass
+        closure's separate `global_refs` recompute; the `depth == 0` branch
+        in `cleanup_stmt_list_with_options_and_preserved`; the same
+        `depth == 0` pattern duplicated verbatim in both `cleanup_stmt_list`
+        and `cleanup_stmt_list_with_options`; and
+        `single_pred_label_inline_flat` — structurally different from the
+        rest, since it drains the "dead zone" *between* a `Goto` and its
+        matching `Label` using a separate `ref_counts`/
+        `collect_referenced_label_counts` comparison rather than a plain
+        referenced-set lookup.
+        - Fix: `PROTECTED_LSDA_LABELS`, a `thread_local!` built to the exact
+          shape of the pre-existing `GLOBAL_SYMBOL_CONTEXT` in the same file
+          (`pipeline/run.rs`) — set from `StructuringHost::
+          lsda_landing_pad_labels()` right before `normalize_hir_function`
+          runs (`fission-pcode/src/midend/orchestrate.rs`), cleared right
+          after. Chosen over threading a `protected: &HashSet<String>`
+          parameter through `normalize_function_body`/`normalize_hir_function`
+          because that would touch ~70+ call sites (mostly raw `HirFunction`
+          struct-literal test constructors across `fission-pcode`'s midend
+          test suite, none of which have or need LSDA context); and over
+          adding a field to `HirFunction` itself, which doesn't derive
+          `Default` or have a constructor, so every one of its ~40
+          construction sites would need a mechanical update for a field the
+          overwhelming majority of them would never set. Kept
+          `std::collections::HashSet` rather than this crate's own
+          `HashSet` `FxBuildHasher` alias, matching `GLOBAL_SYMBOL_CONTEXT`'s
+          own precedent for a value crossing a crate boundary.
+        - Validated: `cargo check --workspace --all-targets` clean,
+          `cargo nextest run` on the 3 touched/adjacent crates (1281/1281),
+          `golden_corpus_check.py` clean against the 160-function/16-binary
+          snapshot (critical — every fixed function is used by every single
+          decompiled function in the codebase; clean golden corpus confirms
+          zero behavioral change for the overwhelming majority of code that
+          has no LSDA data), full `cargo nextest run --workspace`
+          (2122/2129, same 7 pre-existing unrelated `fission-emulator`
+          instruction-fetch failures as every check this session). Added 5
+          regression tests: `prune_unreachable_after_terminal` and
+          `single_pred_label_inline_flat` each get a protected-label-survives
+          case *and* (for the latter) a negative case proving an unprotected
+          dead zone still drains normally, plus a `cleanup_func_stmt_list`
+          integration-level test exercising the full entry point.
+        - **This closes the LSDA investigation end to end**: `.gcc_except_table`
+          parsing (LSDA metadata extraction) → CFG edge threading (landing
+          pads reachable, not irreducible-cut) → SESE structuring label
+          protection (`cleanup_redundant_labels_protecting`) → normalize
+          label protection (this update). `guarded()`'s `catch` handler —
+          the `runtime_error` type check via the `param_3`/selector
+          register, the cleanup calls, `result = -1` — now renders as real
+          code in `fission_cli decomp` output for the first time:
+          ```c
+          block_401230:
+              {
+                  if (param_3 != 1) {
+                      rax = sub_4010b0((ulonglong)result, 4198974);
+                  }
+              }
+              xVar7 = result;
+              rax = sub_401040(xVar7, 4198982);
+              local_10 = rax;
+              local_4 = 4294967295;
+              sub_401080(xVar7, 4198998);
+              goto block_40122b;
+          ```
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
