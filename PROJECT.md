@@ -2195,6 +2195,79 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
               sub_401080(xVar7, 4198998);
               goto block_40122b;
           ```
+      - **Update — Windows `.pdata`/`.xdata` SEH exception tables (mingw-w64
+        `g++`)** (commit `ebb21967`). User picked the next broader-audit
+        item: Windows `.xdata`/SEH. Investigated by cross-compiling a real
+        `try`/`catch` fixture with `x86_64-w64-mingw32-g++` (`guarded()`/
+        `risky()`, same shape as the ELF LSDA fixtures) and reading its
+        `.pdata`/`.xdata` by hand against `objdump -x`'s "interpreted
+        .xdata" dump before trusting a parser.
+        - Key finding: mingw-w64 `g++` on x86_64 targets Windows' native SEH
+          unwind ABI (`__SEH__`), but its C++ personality
+          (`__gxx_personality_seh0`) still emits the *exact same*
+          GCC/Itanium LSDA byte format already implemented for ELF's
+          `.gcc_except_table` (same `LPStart`/`TType`/call-site-table
+          header, same call-site record shape) — just physically appended
+          after each function's `UNWIND_INFO` in `.xdata` as the
+          "language-specific handler data" following the
+          `ExceptionHandler` RVA, instead of referenced from `.eh_frame`.
+          Confirmed byte-for-byte: the call-site table's landing-pad offset
+          decodes to the exact address `objdump`'s disassembly shows as the
+          `cmp rdx, 0x1` catch-dispatch check.
+        - Given that, extracted the byte-format parser (`parse_lsda` and its
+          `Cursor`/`LsdaInfo`/`LsdaCallSite`/`LsdaTypeEntry` types — all
+          already producer-agnostic, taking only bytes + a
+          `read_at`/`symbol_at` closure pair) out of `elf/lsda.rs` into a
+          new shared `gcc_lsda.rs`, so PE reuses it instead of
+          reimplementing the same encoding. `elf/lsda.rs` keeps only the
+          ELF-specific half (walking `.eh_frame`'s FDEs to find the LSDA
+          pointer); new `pe/seh.rs` is the PE-specific half (walks
+          `.pdata`'s `RUNTIME_FUNCTION` table, reads each `UNWIND_INFO`'s
+          flags/`CountOfCodes` to locate the trailing handler data, skips
+          `UNW_FLAG_CHAININFO` entries — chained/split fragments, out of
+          scope — and hands the rest to the shared parser).
+        - Caught and fixed one real bug this generalization exposed:
+          `.xdata`'s "language-specific handler data" isn't reserved
+          exclusively for LSDAs the way ELF's `.gcc_except_table` *section*
+          is — any `EHANDLER`/`UHANDLER` handler can stash arbitrary bytes
+          there, and a non-C++ handler (mingw's CRT stack-probe handler, in
+          the test fixture) decoded as call-site addresses in the billions
+          when naively run through `parse_lsda`. No reliable way to
+          name-check `ExceptionHandler`'s target in a stripped binary, so
+          `call_sites_within_region` validates structurally instead: a real
+          LSDA's call-site ranges and landing pads are always offsets
+          inside the owning function's own `[begin, end)` — anything
+          outside that is a different handler's data having been
+          misparsed, not a real LSDA, and gets discarded.
+        - `binary.eh_lsda` (already the generic, format-agnostic sink the
+          entire downstream pipeline — CFG edge threading,
+          `StructuringHost::lsda_landing_pad_labels`, normalize's
+          `PROTECTED_LSDA_LABELS` — consumes unconditionally) now gets
+          populated for PE the same way it already does for ELF. Verified
+          this needed **zero further downstream changes**: the
+          mingw-compiled `guarded()`'s catch handler renders correctly in
+          `fission_cli decomp` output out of the box, closing the Windows
+          side of the same landing-pad-rendering investigation this
+          session already closed for ELF (the entire ELF-built pipeline —
+          CFG edges, structuring label protection, normalize label
+          protection — turned out to be genuinely format-agnostic).
+        - New `testdata/x64_seh_guarded_test.exe` (stripped, 41KB, force-
+          added past the repo's blanket `*.exe` `.gitignore` rule, matching
+          `x64_pdb_struct_test.exe`'s existing precedent).
+        - Validated: full workspace check clean, all pre-existing LSDA/SEH
+          tests pass (1469/1469 across the 5 touched crates),
+          `golden_corpus_check.py` clean (zero diff — no behavioral change
+          for any binary without this exception data), full `cargo nextest
+          run --workspace` shows only the same 7 pre-existing unrelated
+          `fission-emulator` failures this session has confirmed unrelated
+          at every prior checkpoint.
+        - **Known limitation, left for a future slice if ever needed**:
+          MSVC-compiled PE C++ EH (`__CxxFrameHandler3`/`4`'s own
+          `FuncInfo`/`UnwindMapEntry`/`TryBlockMapEntry` tables) and raw
+          MSVC `__try`/`__except` (`_C_specific_handler`'s own scope-table
+          format) are genuinely different, unrelated encodings this doesn't
+          attempt — narrower scope than "any PE personality routine",
+          matching only the one this session has a real fixture for.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
