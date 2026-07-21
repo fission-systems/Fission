@@ -160,8 +160,8 @@ pub enum HirBinaryOp {
 }
 
 /// The flattened, goto/label-based body that `fission-pcode`'s structuring
-/// stage receives as input -- "동적으로 일치한 IR" (dynamically-verified IR):
-/// the same `HirStmt`/`HirExpr` grammar as [`Hir`], captured immediately
+/// stage receives as input -- "DIR" (dynamically-verified IR): the same
+/// `HirStmt`/`HirExpr` grammar as [`Hir`], captured immediately
 /// before structuring's CFG-to-AST rewrite runs (see
 /// `fission_pcode::take_last_dir_snapshot`). Deliberately a thin newtype
 /// over `Vec<HirStmt>` rather than a parallel AST: DIR and HIR share an

@@ -1,7 +1,7 @@
 //! DIR/HIR differential verification.
 //!
-//! **DIR** ("동적으로 일치한 IR" -- dynamically-verified IR) is not a new IR
-//! type: it is the exact `Vec<HirStmt>` that
+//! **DIR** (dynamically-verified IR) is not a new IR type: it is the exact
+//! `Vec<HirStmt>` that
 //! `fission_pcode`'s structuring stage receives as input (flattened,
 //! goto/label-based), captured via [`fission_pcode::take_last_dir_snapshot`]
 //! immediately before structuring's CFG-to-AST rewrite runs. **HIR** is the
