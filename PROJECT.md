@@ -1977,6 +1977,90 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
         - Remaining broader-audit items, unchanged: Windows `.xdata`/SEH
           exception handling, Call-Fixup mechanism, Itanium
           multi/virtual-inheritance RTTI.
+      - **Update — wire LSDA exception edges into the CFG** (commit
+        `d6c08b43`). User asked to close the gap the LSDA-parsing commit
+        deliberately left open. Confirmed the real bug first: `guarded()`'s
+        entire `catch` body was silently absent from `decomp` output on
+        `x64_dyn_lsda_test.elf` — not just unstructured, *gone* — since the
+        landing pad has no ordinary jump/call/fallthrough predecessor (only
+        reachable via the C++ personality routine unwinding into it at
+        runtime), so every stage that derives reachability from real branch
+        instructions treated it as dead code.
+        - Traced the pipeline stage by stage with `raw-pcode`/
+          `pcode-topology` CLI output at each step (not by guessing) and
+          found the fix needed **three separate, independently-broken
+          layers**, each re-deriving reachability from scratch without
+          knowing about the other's hints:
+          1. `fission-static`'s `ControlFlowFacts::assemble` now folds
+             `binary.eh_lsda`'s landing pads into `label_leaders`/
+             `flow_edges`, and `decode_context_for` exposes them via a new
+             `DecodeMemoryContext::additional_decode_entries` field — kept
+             separate from `block_entry_hints`/`flow_edges`, which (it
+             turned out) only affect how *already-decoded* instructions get
+             grouped into blocks, never what gets decoded in the first
+             place.
+          2. `fission-sleigh`'s actual instruction-decode worklist AND its
+             separate post-decode reachability walk (`reach_queue`, which
+             re-prunes anything the first pass decoded but doesn't itself
+             re-reach via branch semantics) both only ever start from
+             `entry_address` — `DecodeMemoryContext`'s hints were never
+             consulted for seeding, only used afterward for block-splitting.
+             Both now also seed from `additional_decode_entries`.
+          3. `fission-pcode`'s `build_successor_index_map` — the function
+             `PreviewBuilder::new_with_binary` uses to build the
+             successors/predecessors arrays dominance, loop analysis, and
+             dead-code elimination all run on — independently re-derives
+             every edge from each block's own terminator op and **never
+             reads `PcodeBasicBlock.successors` at all**, so even after (1)
+             and (2) correctly put the landing pad in the p-code with a real
+             successor edge at the `fission-sleigh` layer, this layer
+             recomputed its own successors from scratch and dropped it
+             again. New `lsda_extra_edges()` resolves `binary.eh_lsda`'s
+             addresses to this function's own block indices and merges them
+             into `successors` right before `predecessors` is derived —
+             confirmed via direct inspection that
+             `predecessors[landing_pad_idx]` goes from empty to
+             `[call_site_idx]`.
+        - Both `fission-pcode` entry points are strictly additive and scoped
+          to `binary.eh_lsda`: a function with no LSDA entry (every function
+          in every binary without C++ exceptions — the overwhelming
+          majority of all decompiled code) gets zero extra edges, so this
+          can't change existing behavior for anything else. This mattered a
+          lot here specifically because `build_successor_index_map` is about
+          as foundational/high-blast-radius as a function gets in this
+          codebase.
+        - **Also hit, and had to clean up, this session's worst case yet of
+          the recurring `cargo fmt` sweep pitfall**: running it on the 5
+          touched files reformatted **70 files** across `fission-pcode`/
+          `fission-sleigh` (pre-existing, unrelated drift in both crates).
+          Reverted all 65 untouched files via `git checkout --`, then
+          manually re-diffed the remaining 5 against pre-fmt content to
+          strip incidental reformatting of *pre-existing* nearby code while
+          keeping the actual additions — `git diff` on the final 5 files
+          confirmed purely additive (zero unexpected deletions) before
+          committing.
+        - Validated: `cargo check --workspace --all-targets` clean, `cargo
+          nextest run -p fission-pcode -p fission-sleigh -p fission-static
+          -p fission-decompiler` 1325/1325 (5 new tests: 4 unit tests for
+          `lsda_extra_edges` in `fission-pcode`, 1 in `fission-static`
+          confirming `ControlFlowFacts`/`DecodeMemoryContext` threading),
+          release build + `golden_corpus_check.py` clean (critical given the
+          blast radius — confirms zero behavioral change for the 160
+          existing golden functions), `cargo nextest run --workspace
+          --no-fail-fast` 2116/2123 (same 7 pre-existing, unrelated
+          `fission-emulator` failures as every check this session).
+        - **Deliberately not attempted**: the final decompiled C-like text
+          still doesn't render the `catch` block's code, even though it's
+          now correctly present and connected in the HIR builder's own block
+          graph (verified non-empty predecessors, no irreducible-edge
+          pruning removing it). That's a **fourth** distinct layer —
+          `fission-midend-structuring`'s SESE region/materialization rules,
+          which decide how to linearize a block graph into actual
+          statements — and needs its own focused investigation into how it
+          decides which *reachable* blocks earn a structured-programming
+          representation (not just whether they're reachable at all).
+          Scoped as further follow-up, not attempted here, to keep this
+          change's diff and risk to exactly what was traced and verified.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
