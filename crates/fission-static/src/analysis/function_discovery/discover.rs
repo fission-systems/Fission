@@ -235,14 +235,25 @@ pub fn discover_functions_with_runtime(
         candidates.extend(xml_hits.clone());
         all_known.extend(xml_hits.clone());
 
-        let mut dynamic = scan_dynamic_prologues(
-            binary,
-            &frontend,
-            &executable_ranges,
-            &all_known,
-            &tracker,
-            &mut validation_cache,
-        );
+        // Ghidra's Aggressive Instruction Finder scorecard item: strictly
+        // riskier than the reference/signature-driven scanners above (which
+        // validate against known references/a static pattern DB), so --
+        // like Ghidra's own version, which is off by default with an
+        // explicit "YOU MUST CHECK THE RESULTS" warning -- only wired under
+        // the Aggressive profile, not Balanced.
+        let mut dynamic = if profile == FunctionDiscoveryProfile::Aggressive {
+            scan_dynamic_prologues(
+                binary,
+                &frontend,
+                &executable_ranges,
+                &all_known,
+                &tracker,
+                &mut validation_cache,
+                Some(&all_references),
+            )
+        } else {
+            Vec::new()
+        };
         dynamic.retain(|&addr| !tracker.is_overlap(addr));
         eprintln!("SCANNER_STATS: dynamic_prologues={}", dynamic.len());
         for &dyn_addr in &dynamic {
@@ -823,8 +834,19 @@ fn scan_ghidra_patterns(
         }
     }
 
+    // `find_overlapping_iter` below only supports `MatchKind::Standard`
+    // (aho-corasick panics on any overlapping search otherwise -- confirmed
+    // via a real binary crashing 100% of the time under `--function-
+    // discovery-profile balanced`/`aggressive`, since `LeftmostFirst` was
+    // used here previously). `Standard` is also the right *semantic* fit:
+    // every raw hit below is re-verified in full against `patterns[i]`
+    // afterward, so this automaton only needs to be a fast, complete
+    // "does any registered prefix start here" pre-filter -- it should
+    // report every prefix occurrence (including overlapping ones), not
+    // silently drop some in favor of a single "best" match per position
+    // the way `LeftmostFirst` would if it supported overlapping search.
     let ac = aho_corasick::AhoCorasickBuilder::new()
-        .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+        .match_kind(aho_corasick::MatchKind::Standard)
         .build(&ac_patterns)
         .unwrap();
 
@@ -1343,6 +1365,39 @@ fn scan_data_references(
     refs
 }
 
+/// Ghidra's `AggressiveInstructionFinderAnalyzer` scorecard item, adapted to
+/// Fission's primitives.
+///
+/// Ghidra's version fingerprints a candidate by the *masked* bytes of its
+/// first two instructions (SLEIGH's instruction mask zeroes out immediate/
+/// displacement operand bits, so two prologues differing only in, say, a
+/// stack-frame-size immediate still fingerprint identically) and requires
+/// that fingerprint to recur at least [`AIF_MIN_FINGERPRINT_COUNT`] times
+/// among the binary's own already-known function starts before trusting it
+/// as a real prologue shape -- a self-calibrating signal that needs no
+/// hardcoded signature database and adapts to calling conventions/compilers
+/// it has never seen, as long as the same binary reuses the pattern.
+/// Fission's SLEIGH runtime doesn't expose an instruction-mask primitive at
+/// this layer, so [`function_start_fingerprint`] uses the coarser
+/// `(mnemonic, mnemonic)` pair of the first two decoded instructions
+/// instead -- still invariant to register/immediate/displacement choice
+/// (the same reason Ghidra's masking tolerates them), just unable to
+/// distinguish two different *registers* used in an otherwise-identical
+/// encoding the way byte-masking would. Documented simplification, not an
+/// oversight: real byte-masking would need SLEIGH's per-constructor
+/// operand-field boundaries exposed, a much larger addition than this
+/// scorecard item warrants on its own.
+///
+/// Candidate positions reuse the same 2+-byte `0xCC`/`0x90` padding-run
+/// boundaries `scan_cc_padding_regions` already enumerates (that scanner is
+/// kept disabled on its own -- see the comment at its call site -- because
+/// accepting any valid-looking routine after padding produces too many
+/// false positives). The fingerprint-recurrence gate below is exactly the
+/// piece that was missing there: requiring a candidate's shape to match the
+/// binary's *own* observed prologue pattern at least
+/// [`AIF_MIN_FINGERPRINT_COUNT`] times is a much stronger, self-calibrating
+/// signal than "valid routine after padding" alone, and is Ghidra AIF's
+/// actual distinguishing technique.
 fn scan_dynamic_prologues(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
@@ -1350,8 +1405,165 @@ fn scan_dynamic_prologues(
     known_functions: &std::collections::HashSet<u64>,
     tracker: &InstructionBoundaryTracker,
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
+    global_references: Option<&std::collections::HashSet<u64>>,
 ) -> Vec<u64> {
-    Vec::new()
+    // Mirrors Ghidra AIF's own `MINIMUM_FUNCTION_COUNT` gate: too few known
+    // functions means too little statistical signal to trust a fingerprint.
+    const AIF_MIN_KNOWN_FUNCTIONS: usize = 20;
+    const AIF_MIN_FINGERPRINT_COUNT: usize = 4;
+    // Mirrors Ghidra AIF's `numInstr <= 2` rejection (i.e. requires > 2).
+    const AIF_MIN_INSNS: usize = 3;
+
+    if known_functions.len() < AIF_MIN_KNOWN_FUNCTIONS {
+        return Vec::new();
+    }
+
+    let mut fingerprint_counts: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
+    for &addr in known_functions {
+        if let Some(fp) = function_start_fingerprint(binary, frontend, addr) {
+            *fingerprint_counts.entry(fp).or_insert(0) += 1;
+        }
+    }
+    let common_fingerprints: std::collections::HashSet<(String, String)> = fingerprint_counts
+        .into_iter()
+        .filter(|&(_, count)| count >= AIF_MIN_FINGERPRINT_COUNT)
+        .map(|(fp, _)| fp)
+        .collect();
+    if common_fingerprints.is_empty() {
+        return Vec::new();
+    }
+
+    let mut section_spans: Vec<(u64, u64)> = binary
+        .sections
+        .iter()
+        .filter(|s| s.is_executable)
+        .filter_map(|s| {
+            binary
+                .view_bytes(s.virtual_address, s.virtual_size as usize)
+                .map(|_| (s.virtual_address, s.virtual_address + s.virtual_size as u64))
+        })
+        .collect();
+    section_spans.sort_unstable();
+
+    let mut known_sorted: Vec<u64> = known_functions.iter().copied().collect();
+    known_sorted.sort_unstable();
+    known_sorted.dedup();
+
+    // Collect every position right after a 2+-byte 0xCC/0x90 padding run
+    // within [gap_start, gap_end) -- same enumeration `scan_cc_padding_
+    // regions` uses, just collecting all hits in the gap instead of only
+    // the first, since a single gap can hide more than one padded-off
+    // function in a heavily stripped binary.
+    let collect_padding_boundaries = |gap_start: u64, gap_end: u64, out: &mut Vec<u64>| {
+        if gap_end <= gap_start + 2 {
+            return;
+        }
+        let len = (gap_end - gap_start) as usize;
+        let Some(bytes) = binary.view_bytes(gap_start, len) else {
+            return;
+        };
+        let mut i = 0usize;
+        while i < bytes.len() {
+            let pad_start = i;
+            while i < bytes.len() && (bytes[i] == 0xcc || bytes[i] == 0x90) {
+                i += 1;
+            }
+            let pad_len = i - pad_start;
+            if pad_len >= 2 && i < bytes.len() {
+                if bytes[i] != 0xcc && bytes[i] != 0x90 && bytes[i] != 0x00 {
+                    out.push(gap_start + i as u64);
+                }
+                while i < bytes.len() && bytes[i] != 0xcc && bytes[i] != 0x90 {
+                    i += 1;
+                }
+            } else if pad_len == 0 {
+                i += 1;
+            } else {
+                while i < bytes.len() && bytes[i] != 0xcc && bytes[i] != 0x90 {
+                    i += 1;
+                }
+            }
+        }
+    };
+
+    let mut results = Vec::new();
+    for &(sec_start, sec_end) in &section_spans {
+        let in_section: Vec<u64> = known_sorted
+            .iter()
+            .copied()
+            .filter(|&a| a >= sec_start && a < sec_end)
+            .collect();
+
+        let mut boundaries: Vec<(u64, u64)> = Vec::new();
+        if in_section.is_empty() {
+            boundaries.push((sec_start, sec_end));
+        } else {
+            if in_section[0] > sec_start {
+                boundaries.push((sec_start, in_section[0]));
+            }
+            for w in in_section.windows(2) {
+                boundaries.push((w[0], w[1]));
+            }
+            if *in_section.last().unwrap() < sec_end {
+                boundaries.push((*in_section.last().unwrap(), sec_end));
+            }
+        }
+
+        let mut gap_candidates = Vec::new();
+        for (gap_start, gap_end) in boundaries {
+            collect_padding_boundaries(gap_start, gap_end, &mut gap_candidates);
+        }
+
+        for candidate in gap_candidates {
+            if known_functions.contains(&candidate) || tracker.is_overlap(candidate) {
+                continue;
+            }
+            if !is_strict_boundary(binary, candidate) {
+                continue;
+            }
+            let Some(fp) = function_start_fingerprint(binary, frontend, candidate) else {
+                continue;
+            };
+            if !common_fingerprints.contains(&fp) {
+                continue;
+            }
+            let (valid, _) = validate_subroutine_candidate(
+                binary,
+                frontend,
+                candidate,
+                AIF_MIN_INSNS,
+                4000,
+                true,
+                known_functions,
+                cache,
+                global_references,
+            );
+            if valid {
+                results.push(candidate);
+            }
+        }
+    }
+
+    results
+}
+
+/// Fingerprint for [`scan_dynamic_prologues`]: the `(mnemonic, mnemonic)`
+/// pair of the first two instructions decoded from `address`, or `None` if
+/// fewer than two instructions decode there (e.g. too close to a section's
+/// end). See the doc comment on [`scan_dynamic_prologues`] for why this is
+/// mnemonic-based rather than byte-masked like Ghidra's own fingerprint.
+fn function_start_fingerprint(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    address: u64,
+) -> Option<(String, String)> {
+    let bytes = binary.view_bytes(address, 32)?;
+    let decoded = frontend.decode_window(bytes, address, 2).ok()?;
+    if decoded.len() < 2 {
+        return None;
+    }
+    Some((decoded[0].mnemonic.clone(), decoded[1].mnemonic.clone()))
 }
 
 fn scan_jmp_thunks(
