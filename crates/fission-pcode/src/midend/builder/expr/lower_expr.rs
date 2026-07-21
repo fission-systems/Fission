@@ -2840,7 +2840,7 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::FloatNotEqual
             | PcodeOpcode::FloatLess
             | PcodeOpcode::FloatLessEqual => self.lower_binary_op(op, visiting),
-            PcodeOpcode::FloatInt2Float => {
+            PcodeOpcode::FloatInt2Float | PcodeOpcode::FloatFloat2Float => {
                 let output = op
                     .output
                     .as_ref()
@@ -2850,6 +2850,61 @@ impl<'a> PreviewBuilder<'a> {
                     ty: float_type_from_size(output.size),
                     expr: Box::new(expr),
                 })
+            }
+            // `FLOAT_TRUNC` is a float-to-*integer* truncating conversion
+            // (Ghidra's own `TypeOpFloatTrunc` declares output metatype
+            // `TYPE_INT`, input `TYPE_FLOAT` -- unlike CEIL/FLOOR/ROUND
+            // below, which stay float-to-float) -- i.e. `(int)x`, not
+            // `trunc(x)`.
+            PcodeOpcode::FloatTrunc => {
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
+                let expr = self.lower_varnode(&op.inputs[0], visiting)?;
+                Ok(HirExpr::Cast {
+                    ty: type_from_size(output.size, true),
+                    expr: Box::new(expr),
+                })
+            }
+            PcodeOpcode::FloatNeg => {
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
+                let expr = self.lower_varnode(&op.inputs[0], visiting)?;
+                Ok(HirExpr::Unary {
+                    op: HirUnaryOp::Neg,
+                    expr: Box::new(expr),
+                    ty: float_type_from_size(output.size),
+                })
+            }
+            // ABS/SQRT/CEIL/FLOOR/ROUND stay float-to-float (Ghidra's own
+            // `TypeOpFunc` declarations all use `TYPE_FLOAT, TYPE_FLOAT`)
+            // and, unlike the CPU-flag-level intrinsics below
+            // (`__carry`/`__sborrow`, which have no real C equivalent),
+            // these correspond exactly to real `<math.h>` functions, so
+            // they're rendered under their real libc names rather than a
+            // synthetic `__`-prefixed marker.
+            PcodeOpcode::FloatAbs
+            | PcodeOpcode::FloatSqrt
+            | PcodeOpcode::FloatCeil
+            | PcodeOpcode::FloatFloor
+            | PcodeOpcode::FloatRound => {
+                let ty = op
+                    .output
+                    .as_ref()
+                    .map(|out| float_type_from_size(out.size))
+                    .unwrap_or(NirType::Unknown);
+                let name = match op.opcode {
+                    PcodeOpcode::FloatAbs => "fabs",
+                    PcodeOpcode::FloatSqrt => "sqrt",
+                    PcodeOpcode::FloatCeil => "ceil",
+                    PcodeOpcode::FloatFloor => "floor",
+                    PcodeOpcode::FloatRound => "round",
+                    _ => unreachable!(),
+                };
+                self.lower_intrinsic_call(op, visiting, name, ty)
             }
             PcodeOpcode::FloatNan => {
                 self.lower_intrinsic_call(op, visiting, "__isnan", NirType::Bool)

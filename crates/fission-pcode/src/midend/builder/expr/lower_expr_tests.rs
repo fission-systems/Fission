@@ -2072,3 +2072,78 @@ fn gs_relative_peb_being_debugged_gets_descriptive_name() {
         "PEB field access must not degrade return-type inference to `undefined`:\n{code}"
     );
 }
+
+/// `FLOAT_NEG`/`FLOAT_SQRT`/`FLOAT_CEIL`/`FLOAT_FLOOR`/`FLOAT_ROUND`/
+/// `FLOAT_TRUNC` previously had no lowering handler at all, hitting the
+/// generic "unsupported pcode pattern" fallback and failing the *whole
+/// function's* decompilation outright -- confirmed via a real
+/// `i686-w64-mingw32-gcc -mfpmath=387` fixture using `fabs()` (a sibling
+/// opcode in the same previously-unhandled group, added alongside these)
+/// that a hard crash became a real, working decompile once these were
+/// added. `FLOAT_TRUNC` is specifically *not* `trunc()`: Ghidra's own
+/// `TypeOpFloatTrunc` declares output metatype `TYPE_INT`, input
+/// `TYPE_FLOAT` (a truncating float-to-int conversion, i.e. `(int)x`),
+/// unlike `CEIL`/`FLOOR`/`ROUND`, which stay float-to-float and are
+/// rendered under their real `<math.h>` names.
+#[test]
+fn float_unary_opcodes_all_lower_without_falling_back_to_unsupported() {
+    let options = test_options();
+
+    let x = varnode(0x9000);
+    let neg = varnode(0x9100);
+    let sqrt_v = varnode(0x9200);
+    let ceil_v = varnode(0x9300);
+    let floor_v = varnode(0x9400);
+    let round_v = varnode(0x9500);
+    let trunc_v = varnode(0x9600);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::FloatNeg, Some(neg.clone()), vec![x]),
+            op(1, PcodeOpcode::FloatSqrt, Some(sqrt_v.clone()), vec![neg]),
+            op(
+                2,
+                PcodeOpcode::FloatCeil,
+                Some(ceil_v.clone()),
+                vec![sqrt_v],
+            ),
+            op(
+                3,
+                PcodeOpcode::FloatFloor,
+                Some(floor_v.clone()),
+                vec![ceil_v],
+            ),
+            op(
+                4,
+                PcodeOpcode::FloatRound,
+                Some(round_v.clone()),
+                vec![floor_v],
+            ),
+            op(
+                5,
+                PcodeOpcode::FloatTrunc,
+                Some(trunc_v.clone()),
+                vec![round_v],
+            ),
+            op(6, PcodeOpcode::Return, None, vec![constant(0), trunc_v]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "float_unary_ops", 0x1000, &options).expect("render");
+    eprintln!("float_unary_ops:\n{code}");
+    assert!(
+        !code.to_lowercase().contains("unsupported"),
+        "every FLOAT_* unary opcode should lower cleanly, not fall back to \
+         an unsupported-pattern marker:\n{code}"
+    );
+    assert!(code.contains("sqrt("), "{code}");
+    assert!(code.contains("ceil("), "{code}");
+    assert!(code.contains("floor("), "{code}");
+    assert!(code.contains("round("), "{code}");
+    assert!(
+        !code.contains("trunc("),
+        "FLOAT_TRUNC is a float-to-int conversion, not a call to trunc():\n{code}"
+    );
+}

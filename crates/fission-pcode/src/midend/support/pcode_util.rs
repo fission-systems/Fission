@@ -119,6 +119,14 @@ pub(crate) fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
             | PcodeOpcode::FloatMult
             | PcodeOpcode::FloatSub
             | PcodeOpcode::FloatInt2Float
+            | PcodeOpcode::FloatFloat2Float
+            | PcodeOpcode::FloatTrunc
+            | PcodeOpcode::FloatNeg
+            | PcodeOpcode::FloatAbs
+            | PcodeOpcode::FloatSqrt
+            | PcodeOpcode::FloatCeil
+            | PcodeOpcode::FloatFloor
+            | PcodeOpcode::FloatRound
             | PcodeOpcode::FloatEqual
             | PcodeOpcode::FloatNotEqual
             | PcodeOpcode::FloatLess
