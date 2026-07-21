@@ -104,8 +104,8 @@ pub use crate::render::{
 pub use self::orchestrate::{
     render_mlil_preview, render_mlil_preview_with_binary_and_context,
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
-    render_nir_with_context, take_last_dir_snapshot, take_last_layered_pseudocode,
-    test_refine_partitions,
+    render_nir_with_context, take_last_dir_snapshot, take_last_hir_function_snapshot,
+    take_last_layered_pseudocode, test_refine_partitions,
 };
 
 /// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.

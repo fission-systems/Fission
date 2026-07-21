@@ -47,7 +47,8 @@ pub use midend::{
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
     render_nir_with_context, seed_nir_render_options, structuring_outcome_for_signature,
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
-    take_last_dir_snapshot, take_last_layered_pseudocode, take_last_nir_build_stats,
-    take_last_nir_hint_stats, take_last_preview_build_stats, take_last_preview_hint_stats,
+    take_last_dir_snapshot, take_last_hir_function_snapshot, take_last_layered_pseudocode,
+    take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
+    take_last_preview_hint_stats,
 };
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};

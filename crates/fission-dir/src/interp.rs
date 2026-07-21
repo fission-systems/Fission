@@ -174,9 +174,101 @@ fn eval_expr(expr: &HirExpr, env: &Env) -> Result<Value> {
             };
             Ok(normalize(v, ty))
         }
+        HirExpr::Call { target, args, ty } => eval_builtin_call(target, args, ty, env),
         other => bail!(
             "interp: unsupported expr {other:?} -- no memory/call model in Phase 1, see module docs"
         ),
+    }
+}
+
+/// x86-flag-recovery pseudo-calls (`fission_pcode`'s own
+/// `is_pure_intrinsic_call` list: `__carry`/`__scarry`/`__sborrow`/
+/// `__popcount`) are the *only* `Call` targets Phase 1 evaluates -- real
+/// x86 comparisons almost never survive to this HIR snapshot as a plain
+/// `HirBinaryOp` comparison; they go through this flag-decomposition
+/// machinery instead (`of = __sborrow(a,b); ... if (zf || xVar) ...`), so
+/// without recognizing these specific four, Phase 1 couldn't verify almost
+/// any real x86 function with a comparison in it -- confirmed by running
+/// this crate's first real-binary test before this was added (see
+/// `tests/real_binary_end_to_end.rs`; it hit exactly this gap). Any other
+/// `Call` target still bails -- this is a small, fixed, well-known
+/// whitelist of *pure* intrinsics, not general interprocedural support.
+fn eval_builtin_call(target: &str, args: &[HirExpr], ty: &NirType, env: &Env) -> Result<Value> {
+    match target {
+        "__carry" | "__scarry" | "__sborrow" => {
+            anyhow::ensure!(args.len() == 2, "interp: {target} needs 2 args");
+            let l = eval_expr(&args[0], env)?;
+            let r = eval_expr(&args[1], env)?;
+            let bits = width_of(infer_ty(&args[0], env)?).clamp(1, 64);
+            let flag = match target {
+                "__carry" => unsigned_add_carries(l, r, bits),
+                "__scarry" => signed_add_overflows(l, r, bits),
+                "__sborrow" => signed_sub_overflows(l, r, bits),
+                _ => unreachable!(),
+            };
+            Ok(normalize(bool_to_raw(flag), ty))
+        }
+        "__popcount" => {
+            anyhow::ensure!(args.len() == 1, "interp: __popcount needs 1 arg");
+            let v = eval_expr(&args[0], env)?;
+            let bits = width_of(infer_ty(&args[0], env)?).clamp(1, 64);
+            let count = unsigned_masked(v, bits).count_ones() as i64;
+            Ok(normalize(count, ty))
+        }
+        other => bail!(
+            "interp: unsupported call target '{other}' -- only the pure x86-flag \
+             intrinsics (__carry/__scarry/__sborrow/__popcount) are modeled, see \
+             module docs"
+        ),
+    }
+}
+
+/// Unsigned carry-out of `l + r` at `bits` width (`INT_CARRY`'s definition:
+/// CF after an unsigned add) -- computed in `u128` to sidestep width-64
+/// wraparound edge cases entirely rather than reasoning about it bitwise.
+fn unsigned_add_carries(l: i64, r: i64, bits: u32) -> bool {
+    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+    let sum = unsigned_masked(l, bits) as u128 + unsigned_masked(r, bits) as u128;
+    sum > mask as u128
+}
+
+/// Signed overflow of `l + r` at `bits` width (`INT_SCARRY`'s definition: OF
+/// after a signed add), via `i128` arithmetic against the true signed range
+/// for `bits`.
+fn signed_add_overflows(l: i64, r: i64, bits: u32) -> bool {
+    let (min, max) = signed_range(bits);
+    let sum = sign_extend_i128(l, bits) + sign_extend_i128(r, bits);
+    sum < min || sum > max
+}
+
+/// Signed overflow of `l - r` at `bits` width (`INT_SBORROW`'s definition:
+/// OF after a signed subtract / `cmp`) -- this is the one this crate's real
+/// end-to-end test actually hit (`__sborrow` guarding an `if (a > b)`-style
+/// comparison's flag recovery).
+fn signed_sub_overflows(l: i64, r: i64, bits: u32) -> bool {
+    let (min, max) = signed_range(bits);
+    let diff = sign_extend_i128(l, bits) - sign_extend_i128(r, bits);
+    diff < min || diff > max
+}
+
+fn signed_range(bits: u32) -> (i128, i128) {
+    if bits >= 64 {
+        (i64::MIN as i128, i64::MAX as i128)
+    } else {
+        (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
+    }
+}
+
+fn sign_extend_i128(raw: i64, bits: u32) -> i128 {
+    if bits >= 64 {
+        raw as i128
+    } else {
+        let masked = (raw as u64) & ((1u64 << bits) - 1);
+        if masked & (1u64 << (bits - 1)) != 0 {
+            (masked as i128) - (1i128 << bits)
+        } else {
+            masked as i128
+        }
     }
 }
 
@@ -257,8 +349,23 @@ fn exec_stmt(stmt: &HirStmt, env: &mut Env) -> Result<Flow> {
                     "interp: unsupported assignment target {other:?} -- no memory model in Phase 1"
                 ),
             };
-            let ty = env.ty(name)?.clone();
+            // A real function's `HirFunction::locals` doesn't necessarily
+            // list every name its body assigns -- e.g. a return-value
+            // scaffold slot (`NirBindingOrigin::ReturnScaffold`-style) can
+            // be assigned without a matching `NirBinding` entry (confirmed
+            // empirically: this crate's real end-to-end test fixture
+            // assigns `local_4` in both `if` arms with no declaration for
+            // it at all). Rather than bailing on every such case, infer the
+            // type from the RHS and register it as a fresh variable the
+            // first time it's assigned -- matches how a real dynamically-
+            // typed evaluator would behave, and is strictly more permissive
+            // than silently guessing a value.
+            let ty = match env.types.get(name) {
+                Some(ty) => ty.clone(),
+                None => infer_ty(rhs, env)?.clone(),
+            };
             let v = normalize(eval_expr(rhs, env)?, &ty);
+            env.types.insert(name.clone(), ty);
             env.set(name, v);
             Ok(Flow::Normal)
         }

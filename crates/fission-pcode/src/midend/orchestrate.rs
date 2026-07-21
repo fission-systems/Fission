@@ -189,6 +189,13 @@ pub fn render_mlil_preview_with_binary_and_context(
     // Structuring may wrap/rearrange after normalize; drop pure identity
     // assigns that only become adjacent post-layout.
     let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut hir.body);
+    // Observation side channel, same rationale as `store_last_dir_snapshot`
+    // above: the fully-finalized `HirFunction` (structured body, plus the
+    // `params`/`locals` an interpreter needs) as of the point a real caller
+    // would consider structuring's semantic output done -- any remaining
+    // steps below this point are printer-facing, not semantic (see
+    // `midend/AGENTS.md`: "Do not fix structuring bugs only in printer.rs").
+    store_last_hir_function_snapshot(hir.clone());
     normalize_pipeline::GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = None;
     });
@@ -305,6 +312,29 @@ fn store_last_dir_snapshot(body: Vec<super::HirStmt>) {
 /// pattern as `take_last_layered_pseudocode` above.
 pub fn take_last_dir_snapshot() -> Option<super::Dir> {
     LAST_DIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
+}
+
+thread_local! {
+    static LAST_HIR_FUNCTION_SNAPSHOT: std::cell::RefCell<Option<super::HirFunction>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn store_last_hir_function_snapshot(func: super::HirFunction) {
+    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| {
+        *slot.borrow_mut() = Some(func);
+    });
+}
+
+/// Take the fully-finalized `HirFunction` (structured body, `params`,
+/// `locals`) from the most recent `render_mlil_preview*`/`render_nir*` call
+/// on this thread -- the counterpart to [`take_last_dir_snapshot`]: a
+/// caller that wants to differentially verify structuring calls both after
+/// one decompile call, wraps the returned `HirFunction::body` in
+/// [`super::Hir`], and diffs it against the `Dir` using the same
+/// `params`/`locals`. Same observational side-channel pattern as
+/// `take_last_layered_pseudocode`/`take_last_dir_snapshot` above.
+pub fn take_last_hir_function_snapshot() -> Option<super::HirFunction> {
+    LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| slot.borrow_mut().take())
 }
 
 #[derive(Debug, Clone, Copy)]

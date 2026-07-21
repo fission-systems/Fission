@@ -3689,3 +3689,74 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     real-execution fidelity check for DIR itself via the emulator) is
     unstarted; `fission-emulator`/`fission-solver` are wired into
     `fission-dir`'s `Cargo.toml` but not yet imported by any code.
+- **`fission-dir`: `Dir`/`Hir` promoted to real newtypes, first real-binary
+  end-to-end pass, 2 real interpreter gaps found and fixed, 2026-07-22.**
+  - **Newtype refinement** (user's own suggestion): `Dir(Vec<HirStmt>)`/
+    `Hir(Vec<HirStmt>)` added in `crates/fission-midend-core/src/ir/hir.rs`,
+    right next to `HirStmt`. Deliberately still a thin wrapper over the
+    existing grammar, not a parallel AST (DIR and HIR are provably the same
+    grammar -- structuring only rewrites control flow) -- but now an
+    accidental argument swap in `diff_dir_hir(dir, hir, ...)` is a compile
+    error instead of two same-shaped `Vec<HirStmt>` silently type-checking
+    while being logically backwards. `take_last_dir_snapshot` returns `Dir`;
+    added the missing counterpart `take_last_hir_function_snapshot()`
+    (returns the full, fully-finalized `HirFunction` -- body *and*
+    `params`/`locals`, captured right after `eliminate_redundant_var_assigns`
+    runs, same thread-local side-channel pattern) since nothing previously
+    exposed the raw post-structuring AST at all (only rendered text via
+    `take_last_layered_pseudocode`).
+  - **First real end-to-end run** (`crates/fission-dir/tests/
+    real_binary_end_to_end.rs`, fixture `testdata/max2.elf` /
+    `testdata/src_max2.c` -- a tiny real `-O0` static x86-64 binary built
+    for this test via `zig cc`, deliberately *not* hand-built p-code, so
+    stack-spilled args/locals actually exercise Fission's stack-slot
+    promotion, not just clean synthetic Vars) through the real public
+    `decompile_with_rust_sleigh` entrypoint `fission_cli` itself uses.
+  - **Two real interpreter gaps found this way, neither visible from the
+    hand-built Phase 1 unit tests**:
+    1. Real x86 comparisons almost never survive to this HIR snapshot as a
+       plain `HirBinaryOp` comparison -- they go through SLEIGH's flag-
+       recovery machinery (`of = __sborrow(a,b); sf = ...; zf = ...; if
+       (zf || xVar) ...`), which HIR represents as `HirExpr::Call` to one
+       of a small, fixed set of pure intrinsic names
+       (`fission_pcode::midend::support::expr_util::is_pure_intrinsic_call`:
+       `__carry`/`__scarry`/`__sborrow`/`__popcount`). Without recognizing
+       these specifically, Phase 1 couldn't verify almost any real x86
+       function with a comparison in it. Fixed by adding exactly these four
+       as interpreter builtins (`eval_builtin_call` in
+       `crates/fission-dir/src/interp.rs`) — carry/scarry/sborrow computed
+       via `i128`/`u128` arithmetic against the true signed/unsigned range
+       for the operand's declared bit width (sidesteps bitwise sign-trick
+       edge cases entirely), popcount via `count_ones`. Any *other* `Call`
+       target still bails — a small whitelist of provably pure intrinsics,
+       not general interprocedural support.
+    2. `HirFunction::locals` doesn't necessarily list every name the body
+       assigns — the real fixture assigns `local_4` (likely a
+       `NirBindingOrigin::ReturnScaffold`-style slot) in both `if` arms with
+       no matching `NirBinding` declaration anywhere. Fixed by having
+       `Assign` infer-and-register a fresh variable's type from its RHS the
+       first time it's assigned, instead of requiring every assignment
+       target to be pre-declared.
+  - **Serendipitous finding, not caught by this tool's own diff (caught by
+    reading the panic output before the two fixes above), recorded but not
+    investigated further**: the real fixture's printed HIR contains
+    `return (zf || xVar11) ? uVar16 : uVar13;` where `uVar13`/`uVar16` are
+    each assigned in only one arm of a preceding `if`/`else` — and the
+    printer's own `render::presentation::invariants` self-check flags
+    exactly this pair as "became used-without-def after presentation" and
+    rolls back one polish transform, yet the tree it falls back to still
+    has the same shape. **After the fixes above, `diff_dir_hir` proved DIR
+    and HIR agree on this exact function across all of `default_samples`**
+    — so whatever this is, it does not (on this evidence) change the
+    function's behavior; the redundant `(zf || xVar11)` condition
+    provably always re-selects the same branch that was actually taken, so
+    neither variable is ever read on the branch where it's unset. Reads as
+    a real C-soundness/readability concern in the presentation layer (a
+    human reading this code has no way to know it's safe) rather than a
+    behavior-changing bug — flagged for a human look, not chased further
+    here.
+  - Validated: `fission-dir --lib` + `--tests` 4/4 (3 hand-built fixture
+    tests + the new real-binary test), full `cargo build --workspace`
+    clean, `golden_corpus_check.py check` clean (160/160, determinism
+    holds) confirming the `take_last_hir_function_snapshot` hook is equally
+    zero-behavior-change.
