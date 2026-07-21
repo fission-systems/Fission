@@ -3276,6 +3276,91 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     still open — this fix closed specifically the "wrong/missing return
     value" half of the x87 known issue, not the full x87 output-quality
     gap.
+- **Fix — pivoted the Ghidra-parity audit from metadata gaps to the
+  decompiler backend itself; two real bugs found and fixed via a real
+  AArch64 fixture, a third found and characterized but left open,
+  2026-07-22** (commit `d168056f`). User asked to move on from metadata
+  gaps (DWARF/PDB/GDT, the Windows analyzer-class survey — both largely
+  closed) to `fission-pcode`/`fission-midend-normalize`, the area
+  corresponding to Ghidra's own ~160-`Rule`-class decompiler backend,
+  never systematically surveyed this session. Built real fixtures with
+  Docker (`gcc:latest --platform linux/arm64`, since no local AArch64
+  cross-compiler was available) rather than staying x86-only, since the
+  session's own audit trail already flagged non-x86 architectures as an
+  almost entirely unvalidated axis.
+  - **Bug 1 — SLEIGH pattern-expression shift amounts >= 64 hard-failed
+    *decode*, not just lowering.** A packed-bitfield C struct
+    (`unsigned a:3, b:5, c:8, d:16`) compiled by real
+    `aarch64-linux-gnu-gcc` couldn't even be decoded: AArch64's
+    `ubfx`/`bfxil`-family instruction decode (`ImmR_bitfield64_imm` ->
+    `DecodeWMask64` in `AARCH64instructions.sinc`) legitimately computes a
+    shift amount of exactly 64 for a full-width 64-bit bitfield
+    immediate, and `pattern_shift_amount` in
+    `fission-sleigh/runtime/spine/compiled_table/walker.rs` rejected any
+    amount >= 64 outright. Checked Ghidra's own C++ source
+    (`slghpatexpress.cc`'s `LeftShiftExpression`/
+    `RightShiftExpression::getValue`) before assuming a fix: it evaluates
+    shifts as a raw `leftval << rightval` on a 64-bit `intb` — UB by the
+    C++ standard, but on the x86-64/ARM64 hosts Ghidra actually ships on,
+    the CPU's own shift instruction only consults the low 6 bits of the
+    count, so in practice this behaves as `amount & 63`, not an error.
+    Masked instead of rejecting; updated the one existing unit test that
+    had asserted the old (wrong) "fail closed on amount>=64" behavior,
+    replacing it with one confirming the mod-64 wraparound. Even after
+    this fix, `pack`'s actual bitfield-extraction arithmetic still
+    renders far uglier than Ghidra's clean `(param_1 & 7) + ...` form
+    (confirmed via a real Ghidra 12.0.4 headless decompile) — a separate,
+    not-yet-investigated rendering-quality gap in how `DecodeWMask64`-
+    derived bitfield masks get typed/simplified downstream.
+  - **Bug 2 — non-x86 `primary_return_registers()` picked a dead register
+    space first, silently returning the wrong register's value.** A real
+    `int cmp(int,int)` AArch64 fixture (three-way branch — `>`, `<`,
+    equal — converging on one shared epilogue block, the standard shape a
+    compiler emits for this) decompiled to `return x30;` — the *link
+    register* (return address), not the actual computed result. Root
+    cause: `RegisterNamer::primary_return_registers()` always listed
+    `REGISTER_SPACE_ID` (Ghidra's own literal space numbering) as its
+    first candidate — a leftover from before this session's
+    native_decomp/Ghidra-FFI removal (see two entries above). Confirmed
+    via real `raw-pcode` dumps of both this AArch64 fixture and a real
+    x86-64 golden-corpus binary that `REGISTER_SPACE_ID` is *never*
+    actually populated by the live Rust-Sleigh pipeline on either
+    architecture — but x86 gets away with it anyway, because
+    `REGISTER_SPACE_ID`'s offset numbering happens to coincide with real
+    x86 GPR offsets (`x86_ia32_low_gpr_name`: 0=EAX, 4=ECX, ...) closely
+    enough that live-register *naming* (not an actual tracked value)
+    still resolves correctly. AArch64 has no such coincidence — the same
+    default-return-offset value that (accidentally) means "X0" under
+    x86's convention resolves to "X30" under AArch64's real register
+    layout. Reordered so the Rust-Sleigh-space candidate goes first for
+    non-x86 ABIs specifically; **deliberately left x86's order
+    unchanged** after this exposed 3 real, previously-passing unit tests
+    whose synthetic p-code relies on `REGISTER_SPACE_ID`-first for
+    live-register naming (not a real def) — confirmed by tracing each
+    failure rather than reverting first and asking later.
+  - Validated: `cargo nextest run --workspace` 2142/2149, same 7
+    pre-existing unrelated `fission-emulator` failures. `golden_corpus_
+    check.py` clean with **zero** snapshot diff (confirms x86-64 output
+    is byte-identical, i.e. the x86 candidate-order fix truly changed
+    nothing for x86). `fission-sleigh` 298/298. An earlier, broader
+    version of the Bug 2 fix (reordering *all* ABIs uniformly) was caught
+    failing 3 x86 unit tests and 68 golden-corpus lines before landing —
+    narrowed to non-x86-only after tracing the root cause, not just
+    special-cased blindly.
+  - **Bug 3, found but NOT fixed — AArch64 loses if/else structure
+    entirely once Bug 2's masking bug stops hiding it.** With Bug 2
+    fixed, the same `cmp` fixture no longer returns garbage, but still
+    renders as a single linear block (`return xVar5;`, using an unrelated
+    parameter) instead of the real three-way branch — confirmed wrong via
+    a real Ghidra 12.0.4 headless decompile of the identical binary,
+    which correctly renders the full `if (y<x) 1; else if (x<y) -1; else
+    0;` structure. This is a separate bug in how multiple predecessor
+    blocks that each set the return value before jumping to one shared
+    epilogue block get structured on AArch64 (or possibly non-x86
+    generally — not cross-checked against ARM32/MIPS/PowerPC) — out of
+    scope for this round, since Bug 2's fix was already validated and
+    landing on its own merits; recorded here rather than left for a
+    future session to rediscover from scratch.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
