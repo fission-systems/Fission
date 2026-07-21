@@ -2492,6 +2492,88 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           testable in this dev sandbox (no real `/usr/lib/debug` locally),
           though it shares all the same validation logic already proven
           via the debuglink path.
+      - **Update — full Ghidra analyzer-roster scorecard, then classic
+        32-bit `__chkstk`/`__alloca_probe`** (commit `f52b5351`). User
+        asked whether Fission is now genuinely "at the same starting
+        line" as Ghidra. A `general-purpose` agent enumerated all 54
+        non-abstract, non-scope-excluded analyzer classes across every
+        Ghidra 12.0.4 `Features/*` module (not just the areas prior
+        rounds sampled) and checked each against real Fission code:
+        **24 solidly implemented, 12 legitimately out of Fission's scope
+        (classic-Mac PEF, 16-bit real-mode x86, VersionTracking/BSim/
+        Sarif/Headless — Ghidra-UI-only, .NET IL), 15 with zero
+        corresponding code.** Also specifically checked ARM's
+        `.ARM.exidx`/`.ARM.extab` EHABI unwind format (a hypothesis this
+        might be a third distinct exception-handling convention beyond
+        the already-closed Itanium LSDA/Windows SEH) — Ghidra itself
+        never implements EHABI parsing either, so this is parity by
+        mutual absence, not a Fission gap.
+        - Honest answer given: **not full parity, but the base is
+          genuinely strong** — the top-ranked real gap was
+          `CallFixupAnalyzer` (general call-substitution mechanism),
+          already self-diagnosed in this file (see the Call-Fixup update
+          above) rather than newly discovered. Next tier:
+          `TEBAnalyzer` (Windows TEB/PEB `fs:`/`gs:`-relative field
+          recognition — confirmed SLEIGH already lifts these as
+          `IntAdd(FS_OFFSET/GS_OFFSET, const)`, a viable hook point, but
+          the naming-pipeline integration wasn't scoped out in this
+          session), `SharedReturnAnalyzer` (tail-merged shared-epilogue
+          function-boundary correction), `AggressiveInstructionFinderAnalyzer`
+          (code/data disambiguation in stripped/gappy binaries) — all
+          real, none attempted this round.
+        - Followed up on the `CallFixupAnalyzer` finding specifically:
+          re-examined the one case the earlier Call-Fixup update
+          deliberately left unaddressed. Confirmed via Ghidra's own
+          `x86win.cspec` that *classic* 32-bit MSVC `__chkstk`/
+          `__alloca_probe`/`__alloca_probe_8`/`__alloca_probe_16`
+          genuinely differ from mingw's `___chkstk_ms` (both x86 and
+          x86_64, already correctly handled): `<callfixup name=
+          "alloca_probe">` gives the net effect as `ESP = ESP + 4 - EAX`
+          — the callee itself adjusts `esp` on this convention. Ported
+          that formula into `infer_entry_stack_layout`'s existing
+          `rsp_delta` tracker (threading `type_context` through as a new
+          parameter, since `__chkstk` is always a statically-linked
+          internal symbol, never a DLL import, so `call_target_refs` is
+          needed to resolve it) — no changes needed to the deeper
+          `stack_slots.rs` resolver, since classic-chkstk functions
+          establish `ebp` right after the call and address everything
+          `ebp`-relative from there.
+        - Caught a real bug while building the fixture to test the
+          *mechanism* (not the formula, which is unvalidated — see
+          below): substring-matching `"__chkstk"` also matches mingw's
+          `"___chkstk_ms"` (the triple-underscore name literally contains
+          the double-underscore one), double-counting its effect on top
+          of the already-correct `IntSub`-based tracking and hanging a
+          real `i686-w64-mingw32-gcc`-compiled 8KB-local-array fixture
+          until tightened to exact-name matching (strip leading
+          underscores, then exact comparison).
+        - **Explicitly NOT validated against real MSVC-produced bytes**,
+          unlike every other stack-resolution fix this session: no MSVC
+          toolchain is available in this environment, and mingw (the only
+          available Windows-target toolchain) always emits the
+          already-handled `___chkstk_ms` convention instead, never this
+          one. The new unit test proves the arithmetic is wired correctly
+          given a matching call target, not that the formula itself is
+          correct against real MSVC output — ported directly from
+          Ghidra's cspec rather than derived from a fixture, breaking
+          this session's own established validation discipline for this
+          one specific rule. Flagged as such in the code comment; revisit
+          if a real MSVC-produced 32-bit binary with a large stack frame
+          ever becomes available to check against.
+        - **New known issue, discovered but not fixed (out of scope)**:
+          decompiling the `i686-w64-mingw32-gcc`-compiled chkstk fixture
+          itself hangs/times out. Confirmed pre-existing on `main` before
+          any of this update's changes (reproduced by stashing the diff
+          and re-testing) — a real, separate x86-32 decompilation
+          performance issue this work incidentally surfaced, not a
+          regression. Worth its own dedicated investigation later.
+        - Validated: full workspace check clean,
+          `fission-pcode`/`-decompiler`/`-static` 1032/1032 (+1 new test),
+          `golden_corpus_check.py` clean, full `cargo nextest run
+          --workspace` shows only the same 7 pre-existing unrelated
+          `fission-emulator` failures this session has confirmed
+          unrelated at every prior checkpoint. The x64 mingw chkstk
+          fixture re-verified unaffected (change is `is_64bit`-gated).
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
