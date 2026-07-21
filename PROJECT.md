@@ -2635,6 +2635,60 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           pattern immediately recognizable without it. 32-bit `fs:`
           convention only unit-tested, not verified against a real
           32-bit binary the way the 64-bit `gs:` case was.
+      - **Follow-up — `PEB.BeingDebugged` second hop, plus a real
+        `subvar_flow` bug it surfaced** (user: "진행합니다" after being
+        shown the "not attempted" list above). Added
+        `resolve_peb_field_offset`/`try_peb_field_var`/`peb_field_name`
+        (`stack_slots.rs`) mirroring the TEB helpers: recognizes
+        `Load(teb_ProcessEnvironmentBlock_address) + K` (the *value*
+        loaded from the TEB field used as a further arithmetic base, via
+        a `Load` arm added to the recursive resolver that calls back into
+        `resolve_teb_field_offset_inner` on the inner `Load`'s address and
+        checks the name is specifically `teb_ProcessEnvironmentBlock`) and
+        names `+0x2` off it `peb_BeingDebugged`. Also validated 32-bit
+        `fs:` end-to-end this round (a real `i686-w64-mingw32-gcc` build
+        of the same fixture) — closing that previously-open gap too.
+        - First end-to-end run against the real 64-bit fixture (not the
+          synthetic unit test, which passed immediately) showed a new
+          regression: `longlong local_1; local_1 = (uchar)peb_BeingDebugged;
+          return local_1;` at the NIR layer printed fine, but a *different*
+          local got declared with **no assignment anywhere** —
+          `uchar peb_BeingDebugged_sub8;` used only in `return
+          peb_BeingDebugged_sub8;`. Root cause was not in the new PEB code
+          at all: `fission-midend-normalize`'s `subvar_flow.rs` (Global
+          Subvariable Flow, general bit-width narrowing) treats *any*
+          def-less variable name reached during backward tracing as a safe
+          "leaf parameter / input boundary" and unconditionally fabricates
+          a new `func.locals` entry for its narrowed form — with no
+          initializer, since nothing ever really assigned it. This had
+          never surfaced before because every previous case reaching that
+          leaf branch really was a registered parameter or the value never
+          got compiler-round-tripped through a real stack slot in a way
+          that fed `subvar_flow`'s candidate detection; our intentionally
+          unregistered `Cast(uchar, Var("peb_BeingDebugged"))` (the exact
+          "give the use site a type without implying storage exists"
+          design from the TEB work above) is exactly the kind of def-less,
+          *unregistered* name the pass wasn't guarding against.
+        - Fix, at the root cause rather than worked around in the new PEB
+          code: `trace_backward`'s leaf case now only treats a def-less
+          name as safe to rename if it's actually in `type_map` (seeded
+          from `func.params`/`func.locals` — i.e. a genuinely declared
+          binding), otherwise the whole candidate chain is conservatively
+          abandoned. This is a general correctness fix, not TEB/PEB
+          specific — it protects any future feature that surfaces a named
+          value without registering backing storage for it. Updated
+          `test_subvar_flow_rewrite` to register its `a`/`b` free
+          variables as real params, since the old (accidentally-permissive)
+          behavior was masking that they were never declared either.
+        - Validated: full workspace check clean,
+          `fission-pcode`/`-decompiler`/`-static`/`-midend-normalize`
+          1301/1301 (up from 1033 — this round's target set includes
+          `fission-midend-normalize` for the first time), `golden_corpus_
+          check.py` clean, full `cargo nextest run --workspace` shows only
+          the same 7 pre-existing unrelated `fission-emulator` failures.
+          Re-verified end-to-end against both the real 64-bit and (newly
+          built) real 32-bit mingw fixtures: both render the single clean
+          line `return (uchar)peb_BeingDebugged;`, no stray declarations.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
