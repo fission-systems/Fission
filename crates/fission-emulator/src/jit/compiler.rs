@@ -139,7 +139,7 @@ impl JitCompiler {
                 let mut op = op.clone();
                 // SLEIGH relative BRANCH/CBRANCH offsets are from the *current*
                 // p-code op, not the instruction start. Convert to absolute flat index.
-                remap_relative_branches(&mut op, base, local_i);
+                remap_relative_branches(&mut op, base, local_i, insn.ops.len());
                 flat.push(op);
             }
         }
@@ -1808,14 +1808,59 @@ fn space_const(vn: &Varnode) -> u64 {
 /// breaks backward loops: `-6 as usize` becomes a huge out-of-range index and
 /// the JIT falls through, so `tzcnt` never iterates and size-class recovery
 /// livelocks (static CRT stop_pc `0x10035A3`).
-fn remap_relative_branches(op: &mut PcodeOp, base: usize, local_index: usize) {
+/// `insn_op_count` is the number of p-code ops in the *single guest
+/// instruction* `op` belongs to (before flattening into the TB-wide `flat`
+/// vec) -- used to validate a candidate relative delta, not to bound the
+/// search.
+fn remap_relative_branches(op: &mut PcodeOp, base: usize, local_index: usize, insn_op_count: usize) {
     match op.opcode {
         PcodeOpcode::Branch | PcodeOpcode::CBranch => {
             if let Some(dest) = op.inputs.first_mut() {
-                if dest.space_id == 0 || dest.is_constant {
-                    let abs = base as i128 + local_index as i128 + dest.constant_val as i128;
+                // Two encodings of a branch destination reach here:
+                // 1. An already-resolved absolute guest address (the common
+                //    case -- normal cross-instruction jumps/calls).
+                // 2. A relative delta, from SLEIGH's own intra-instruction
+                //    control flow (loop/skip constructs within one
+                //    instruction's semantic template, e.g. TZCNT's bit-scan
+                //    loop) -- always small in magnitude, since it can only
+                //    ever address an op within the *same* instruction.
+                //
+                // Ghidra's own decompiler-facing lifter tags relative deltas
+                // with space_id==0 (constant space) and is_constant==true,
+                // but this emulator's own SLEIGH decode path does not draw
+                // that distinction the same way -- confirmed empirically
+                // (real static-binary fixture, `space_id`/`is_constant` were
+                // identical for both an absolute target and a relative -1/-2
+                // delta; the raw delta value showed up in `offset`, not
+                // `constant_val`). Rather than guess a magic-number
+                // threshold, validate against the one invariant that's
+                // actually true of every relative delta: it must land
+                // *inside this same instruction's own op range* when added
+                // to `local_index`. A real guest address essentially never
+                // satisfies that by coincidence (every loaded binary in
+                // practice starts well above the highest plausible
+                // instruction op count).
+                let raw = if dest.offset != 0 {
+                    dest.offset as u32
+                } else {
+                    dest.constant_val as u32
+                };
+                let delta = i32::from_le_bytes(raw.to_le_bytes());
+                let candidate = local_index as i64 + delta as i64;
+                let is_relative = delta != 0
+                    && candidate >= 0
+                    && (candidate as usize) < insn_op_count
+                    && candidate as usize != local_index;
+                if is_relative {
+                    // Downstream (this file's Branch/CBranch codegen) reads
+                    // `constant_val` as a flat TB op index precisely when
+                    // `space_id == 0 || is_constant` -- mark this resolved
+                    // the same way, or it falls into the "absolute guest
+                    // address" branch and treats the flat index as a real
+                    // address instead.
+                    let abs = base as i128 + candidate as i128;
                     dest.constant_val = abs as i64;
-                    dest.offset = dest.constant_val as u64;
+                    dest.is_constant = true;
                 }
             }
         }
