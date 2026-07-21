@@ -2689,6 +2689,72 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
           Re-verified end-to-end against both the real 64-bit and (newly
           built) real 32-bit mingw fixtures: both render the single clean
           line `return (uchar)peb_BeingDebugged;`, no stray declarations.
+      - **Audit — `SharedReturnAnalyzer`, the third-tier scorecard item**
+        (commit `bfd0ec3f`). Ghidra's `SharedReturnAnalyzer`/
+        `SharedReturnAnalysisCmd` retags an unconditional-JMP instruction
+        whose target is another function's entry point as `CALL_RETURN`
+        flow — fixing function-boundary attribution (the jumped-to code
+        stays its own function, doesn't get absorbed) and the call graph
+        (a real call edge, not a raw branch), for both genuine
+        sibling/tail calls and compiler-deduped shared epilogues.
+        Dispatched a research agent first rather than assuming this was
+        unimplemented, since by this point in the audit most named gaps
+        had turned out to be real. Result: **Fission already has a direct
+        analogue** — `function_discovery`'s "G2" pass
+        (`fission-static/src/analysis/function_discovery/discover.rs:
+        299-379`) walks unconditional-jump edges, detects a destination
+        crossing into another known function's range, validates it as a
+        real subroutine, and promotes it into its own `FunctionInfo`; a
+        companion check in the same file's boundary tracker
+        (`add_function`, ~618-660) explicitly refuses to trace across
+        unconditional jumps "to avoid enveloping tail call targets."
+        Function-boundary correctness and call-graph edges were already
+        right — no gap there.
+        - The audit did surface one real, narrower bug on the *rendering*
+          side, unrelated to function boundaries: `emit_unsupported_
+          control_surface` (`fission-pcode/src/midend/builder/mod.rs`)
+          decides whether a recovered tail-call `Call` expression becomes
+          `HirStmt::Return(call)` or a bare `HirStmt::Expr(call)` by
+          literally comparing `evidence.opcode == "BranchInd"` — true only
+          for a genuine register-indirect jump. Every tail-call-recovery
+          site (`recover_known_external_tail_call_expr`,
+          `recover_tail_call_expr_from_target_expr`,
+          `recover_tail_call_expr_from_branchind_target`,
+          `terminator.rs`) sets `surface: IndirectControlSurface::
+          BranchInd` uniformly regardless of whether the underlying p-code
+          opcode was a real `BranchInd` or a direct `Branch` to a
+          statically-known address — so a direct-address tail call
+          (`jmp known_func`) silently dropped the `return`, rendering
+          `known_func();` as if execution continued afterward, when it
+          doesn't. Confirmed on a real, non-synthetic case already in the
+          golden corpus: mingw's CRT `__gcc_register_frame` tail-jumps into
+          `atexit` (`lea rcx,[__gcc_deregister_frame]; jmp atexit`) and was
+          rendering as `undefined __gcc_register_frame(void) {
+          atexit(); }` instead of `ulonglong __gcc_register_frame(void) {
+          return atexit(); }` (return-type inference also improved, since
+          a `return` statement now feeds it — previously `undefined`).
+          Two pre-existing tests (`bootstrap_x86.rs`) had the buggy
+          no-`return` behavior baked into their assertions
+          (`external_tail();`, `external_tail(callback);`); tightened both
+          to require the `return` prefix explicitly, so they'd actually
+          catch a regression back to the old behavior.
+        - Fix: dropped the opcode-string check entirely — any `surface`
+          in `{BranchInd, SwitchLike}` with a recovered `Call` target_expr
+          is, by construction of every site that produces one, a genuine
+          tail call and should always render as `return`.
+        - Validated: full workspace check clean, targeted
+          `fission-pcode`/`-decompiler`/`-static` 1034/1034 (both tightened
+          tests pass under the new behavior), full `cargo nextest run
+          --workspace` shows only the same 7 pre-existing unrelated
+          `fission-emulator` failures. `golden_corpus_check.py` flagged
+          exactly one function changed across all 160 functions / 16
+          binaries (`__gcc_register_frame`, all 16 binaries share the same
+          mingw CRT) — reviewed the diff, confirmed it was the intended
+          fix (not a regression), and accepted the new snapshot. Also
+          built a second, purpose-made real fixture
+          (`x86_64-w64-mingw32-gcc -O2`, a `caller` function that GCC
+          tail-jumps into a `helper` function) confirming `return
+          helper();` end-to-end outside the golden corpus too.
 - **Two recurring migration pitfalls, worth checking on every future slice:**
   1. `cleanup_pass` (budget-gated, matches the original `run_cleanup_block`)
      vs `fn_pass` (ungated, matches original bare/unconditional calls) are
