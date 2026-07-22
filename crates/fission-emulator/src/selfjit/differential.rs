@@ -119,7 +119,8 @@ fn selfjit_supports<'a>(ops: impl IntoIterator<Item = &'a fission_pcode::ir::Pco
         | PcodeOpcode::BranchInd
         | PcodeOpcode::Return
         | PcodeOpcode::MultiEqual
-        | PcodeOpcode::Indirect => true,
+        | PcodeOpcode::Indirect
+        | PcodeOpcode::SegmentOp => true,
         // Load/Store: implemented, but only the <=8-byte path (see
         // `selfjit/compiler.rs`'s wide-path gap note).
         PcodeOpcode::Load => op.output.as_ref().is_none_or(|o| o.size <= 8),

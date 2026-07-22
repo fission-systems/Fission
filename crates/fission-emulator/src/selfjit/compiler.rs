@@ -43,7 +43,9 @@
 //! `IntNotEqual`, `IntSLess`, `IntLess`, `IntSLessEqual`, `IntLessEqual`,
 //! `IntCarry`, `IntSCarry`, `IntSBorrow`, `PopCount`, `PtrAdd`, `Piece`,
 //! `SubPiece`, `LzCount`, `Extract`, `Insert`, `Call`, `CallInd`,
-//! `BranchInd`, `Return`, `MultiEqual`, `Indirect`, all 8 `Float*` binops
+//! `BranchInd`, `Return`, `MultiEqual`, `Indirect`, `SegmentOp` (simplified
+//! to base + offset, matching `crate::jit::compiler`'s own arm), all 8
+//! `Float*` binops
 //! (`FloatAdd`/`Sub`/`Mult`/`Div`/`Equal`/`NotEqual`/`Less`/`LessEqual`)
 //! and all 10 `Float*` unops (`FloatNeg`/`Abs`/`Sqrt`/`Nan`/`Ceil`/
 //! `Floor`/`Round`/`Trunc`/`Int2Float`/`Float2Float`) -- routed through
@@ -124,12 +126,11 @@
 //! alongside the ≤8-byte path.
 //!
 //! Not implemented at all (of ~70 `PcodeOpcode` variants): `CallOther`
-//! (Ghidra's generic HLE/pseudo-op mechanism, e.g. syscalls, segment-
-//! register reads -- needs a real stack-slot allocator to marshal
-//! variadic arguments into a `*const u64` buffer for the host callback,
-//! which this backend doesn't have yet, tied to the same gap blocking
-//! `Load`/`Store`'s >8-byte path) and `SegmentOp`.
-//! `compile_translation_block` returns a descriptive
+//! (Ghidra's generic HLE/pseudo-op mechanism, e.g. syscalls -- needs a
+//! real stack-slot allocator to marshal variadic arguments into a
+//! `*const u64` buffer for the host callback, which this backend doesn't
+//! have yet, tied to the same gap blocking `Load`/`Store`'s >8-byte
+//! path). `compile_translation_block` returns a descriptive
 //! `Err` for any of these rather than emitting wrong code -- matching this
 //! session's own repeated finding (the 8 missing `FLOAT_*` decompiler
 //! opcodes, the emulator's own TZCNT bug) that a loud failure beats
@@ -1223,6 +1224,19 @@ fn compile_op(
             if let Some(out) = op.output.as_ref() {
                 if !op.inputs.is_empty() {
                     load_value(asm, &op.inputs[0], RESULT);
+                    store_value(asm, out, RESULT);
+                }
+            }
+        }
+        // Segment calculation, simplified to base + offset -- matches
+        // `crate::jit::compiler`'s own arm exactly (same simplification,
+        // not a gap unique to this backend).
+        PcodeOpcode::SegmentOp => {
+            if let Some(out) = op.output.as_ref() {
+                if op.inputs.len() >= 2 {
+                    load_value(asm, &op.inputs[0], A_VAL);
+                    load_value(asm, &op.inputs[1], B_VAL);
+                    asm.add_reg(RESULT, A_VAL, B_VAL);
                     store_value(asm, out, RESULT);
                 }
             }
@@ -2358,6 +2372,19 @@ mod tests {
         ];
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 8), 42);
+    }
+
+    /// `SegmentOp`, simplified to base + offset (matches
+    /// `crate::jit::compiler`'s own arm exactly).
+    #[test]
+    fn segment_op_adds_base_and_offset() {
+        let ops = vec![
+            copy_const(0, 0x1000),
+            copy_const(8, 0x234),
+            binop(PcodeOpcode::SegmentOp, 16, 0, 8),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), 0x1234);
     }
 }
 

@@ -37,9 +37,9 @@
 //!
 //! `crate::jit::compiler` (Cranelift) covers effectively the full
 //! `PcodeOpcode` surface and all host register allocation. `selfjit::
-//! compiler` covers ~56 opcodes now (integer/boolean/comparison/pointer,
+//! compiler` covers ~57 opcodes now (integer/boolean/comparison/pointer,
 //! all 18 `Float*` ops, `Extract`/`Insert`, `Call`/`CallInd`/`BranchInd`/
-//! `Return`/`MultiEqual`/`Indirect` -- see that module's own doc for the
+//! `Return`/`MultiEqual`/`Indirect`/`SegmentOp` -- see that module's own doc for the
 //! exact list) and no register allocation (every operand round-trips
 //! through a host callback call -- correct, but slow) -- but, as of this
 //! phase, *does* support intra-instruction relative-branch loops (item 2
@@ -57,9 +57,9 @@
 //! proof). As of this phase, `selfjit::differential`'s two existing real-
 //! corpus fixtures both replay with **zero unsupported-opcode skips** --
 //! every TB either backend reaches from those entry points now matches
-//! cleanly. The remaining real gaps are `CallOther`/`SegmentOp` (item 1
-//! below, `CallOther` needing a stack-slot allocator) and the >8-byte
-//! `Load`/`Store` path (the same allocator gap).
+//! cleanly. The remaining real gap is `CallOther` (item 1 below, needing
+//! a stack-slot allocator) and the >8-byte `Load`/`Store` path (the same
+//! allocator gap).
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -114,9 +114,10 @@
 //!    not a real phi-merge). Landing these unblocked every remaining skip
 //!    in both of `selfjit::differential`'s real-corpus fixtures --
 //!    `Call` alone took the ELF-entry-point walk from `matched=8,
-//!    skipped=2` to `matched=10, skipped=0`. `CallOther`/`SegmentOp` are
-//!    still not implemented -- `CallOther` specifically needs a real
-//!    stack-slot allocator (its host callback takes a `*const u64`
+//!    skipped=2` to `matched=10, skipped=0`. **Also done**: `SegmentOp`
+//!    (simplified to base + offset, matching `crate::jit::compiler`'s own
+//!    arm). `CallOther` is still not implemented -- it specifically needs
+//!    a real stack-slot allocator (its host callback takes a `*const u64`
 //!    argument buffer), the same gap blocking `Load`/`Store`'s >8-byte
 //!    path below.
 //!    **Done**, ahead of this list's original ordering too: the narrow-
