@@ -40,7 +40,7 @@ use fission_midend_core::wave_stats::{
 };
 use crate::{HashMap, HashSet};
 
-fn can_upgrade_binding_to_aggregate(binding: &NirBinding) -> bool {
+fn can_upgrade_binding_to_aggregate(binding: &DirBinding) -> bool {
     matches!(
         &binding.ty,
         NirType::Ptr(inner)
@@ -53,7 +53,7 @@ fn can_upgrade_binding_to_aggregate(binding: &NirBinding) -> bool {
     )
 }
 
-fn infer_storage_class(binding: &NirBinding) -> StorageClass {
+fn infer_storage_class(binding: &DirBinding) -> StorageClass {
     match binding.origin {
         Some(NirBindingOrigin::ParamIndex(_)) => StorageClass::Param,
         Some(
@@ -68,7 +68,7 @@ fn infer_storage_class(binding: &NirBinding) -> StorageClass {
 }
 
 fn should_emit_surface_binding(
-    binding: &NirBinding,
+    binding: &DirBinding,
     offset_count: usize,
     has_stores: bool,
 ) -> bool {
@@ -83,7 +83,7 @@ fn should_emit_surface_binding(
 }
 
 fn should_emit_surface_binding_from_facts(
-    binding: &NirBinding,
+    binding: &DirBinding,
     offsets: &std::collections::BTreeMap<u32, TypedAccessFacts>,
 ) -> bool {
     should_emit_surface_binding(
@@ -96,7 +96,7 @@ fn should_emit_surface_binding_from_facts(
 /// Apply aggregate field layout recovery to a function.
 ///
 /// Returns `true` if any `NirType::Aggregate` had fields added to it.
-pub fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
+pub fn apply_aggregate_fields_pass(func: &mut DirFunction) -> bool {
     let inventory = collect_typed_fact_inventory(func, true);
     if inventory.objects.is_empty() {
         return false;
@@ -128,8 +128,8 @@ pub fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
         add_object_shape_recoveries(1);
     }
 
-    // Update each NirBinding that is Ptr(Aggregate { .. }) with discovered fields.
-    let update_binding = |binding: &mut NirBinding| -> bool {
+    // Update each DirBinding that is Ptr(Aggregate { .. }) with discovered fields.
+    let update_binding = |binding: &mut DirBinding| -> bool {
         let Some(object_facts) = inventory.objects.get(&binding.name) else {
             return false;
         };
@@ -186,12 +186,12 @@ pub fn apply_aggregate_fields_pass(func: &mut HirFunction) -> bool {
 
 #[derive(Debug, Clone)]
 struct AggregateAlias {
-    root: HirExpr,
+    root: DirExpr,
     base_offset: i64,
     elem_ty: NirType,
 }
 
-pub fn apply_aggregate_alias_access_rewrite_pass(func: &mut HirFunction) -> bool {
+pub fn apply_aggregate_alias_access_rewrite_pass(func: &mut DirFunction) -> bool {
     let assigned_vars = assigned_var_names(&func.body);
     let aliases = func
         .locals
@@ -231,22 +231,22 @@ pub fn apply_aggregate_alias_access_rewrite_pass(func: &mut HirFunction) -> bool
     changed
 }
 
-fn assigned_var_names(stmts: &[HirStmt]) -> HashSet<String> {
-    fn visit(stmts: &[HirStmt], out: &mut HashSet<String>) {
+fn assigned_var_names(stmts: &[DirStmt]) -> HashSet<String> {
+    fn visit(stmts: &[DirStmt], out: &mut HashSet<String>) {
         for stmt in stmts {
             match stmt {
-                HirStmt::Assign {
-                    lhs: HirLValue::Var(name),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var(name),
                     ..
                 } => {
                     out.insert(name.clone());
                 }
-                HirStmt::Block(body)
-                | HirStmt::While { body, .. }
-                | HirStmt::DoWhile { body, .. } => {
+                DirStmt::Block(body)
+                | DirStmt::While { body, .. }
+                | DirStmt::DoWhile { body, .. } => {
                     visit(body, out);
                 }
-                HirStmt::If {
+                DirStmt::If {
                     then_body,
                     else_body,
                     ..
@@ -254,7 +254,7 @@ fn assigned_var_names(stmts: &[HirStmt]) -> HashSet<String> {
                     visit(then_body, out);
                     visit(else_body, out);
                 }
-                HirStmt::For {
+                DirStmt::For {
                     init, update, body, ..
                 } => {
                     if let Some(init) = init.as_deref() {
@@ -265,7 +265,7 @@ fn assigned_var_names(stmts: &[HirStmt]) -> HashSet<String> {
                     }
                     visit(body, out);
                 }
-                HirStmt::Switch { cases, default, .. } => {
+                DirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         visit(&case.body, out);
                     }
@@ -281,17 +281,17 @@ fn assigned_var_names(stmts: &[HirStmt]) -> HashSet<String> {
     out
 }
 
-fn aggregate_alias_root(expr: &HirExpr) -> Option<(HirExpr, i64)> {
+fn aggregate_alias_root(expr: &DirExpr) -> Option<(DirExpr, i64)> {
     match expr {
-        HirExpr::Cast { expr, .. } => aggregate_alias_root(expr),
-        HirExpr::PtrOffset { base, offset } => Some(((**base).clone(), *offset)),
+        DirExpr::Cast { expr, .. } => aggregate_alias_root(expr),
+        DirExpr::PtrOffset { base, offset } => Some(((**base).clone(), *offset)),
         _ => None,
     }
 }
 
-fn root_is_typed_object_carrier(func: &HirFunction, root: &HirExpr) -> bool {
+fn root_is_typed_object_carrier(func: &DirFunction, root: &DirExpr) -> bool {
     match root {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => func
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => func
             .params
             .iter()
             .chain(func.locals.iter())
@@ -308,22 +308,22 @@ fn root_is_typed_object_carrier(func: &HirFunction, root: &HirExpr) -> bool {
                     )
                 )
             }),
-        HirExpr::Cast { expr, .. } | HirExpr::PtrOffset { base: expr, .. } => {
+        DirExpr::Cast { expr, .. } | DirExpr::PtrOffset { base: expr, .. } => {
             root_is_typed_object_carrier(func, expr)
         }
         _ => false,
     }
 }
 
-fn stmt_list_uses_var(stmts: &[HirStmt], name: &str) -> bool {
+fn stmt_list_uses_var(stmts: &[DirStmt], name: &str) -> bool {
     stmts.iter().any(|stmt| stmt_uses_var(stmt, name))
 }
 
-fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
+fn stmt_uses_var(stmt: &DirStmt, name: &str) -> bool {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => lvalue_uses_var(lhs, name) || expr_uses_var(rhs, name),
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => expr_uses_var(expr, name),
-        HirStmt::If {
+        DirStmt::Assign { lhs, rhs } => lvalue_uses_var(lhs, name) || expr_uses_var(rhs, name),
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => expr_uses_var(expr, name),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -332,10 +332,10 @@ fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
                 || stmt_list_uses_var(then_body, name)
                 || stmt_list_uses_var(else_body, name)
         }
-        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
             expr_uses_var(cond, name) || stmt_list_uses_var(body, name)
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -349,7 +349,7 @@ fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
                     .is_some_and(|stmt| stmt_uses_var(stmt, name))
                 || stmt_list_uses_var(body, name)
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -360,38 +360,38 @@ fn stmt_uses_var(stmt: &HirStmt, name: &str) -> bool {
                     .any(|case| stmt_list_uses_var(&case.body, name))
                 || stmt_list_uses_var(default, name)
         }
-        HirStmt::Block(body) => stmt_list_uses_var(body, name),
-        HirStmt::Return(None)
-        | HirStmt::VaStart { .. }
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Break
-        | HirStmt::Continue => false,
+        DirStmt::Block(body) => stmt_list_uses_var(body, name),
+        DirStmt::Return(None)
+        | DirStmt::VaStart { .. }
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_)
+        | DirStmt::Break
+        | DirStmt::Continue => false,
     }
 }
 
-fn lvalue_uses_var(lhs: &HirLValue, name: &str) -> bool {
+fn lvalue_uses_var(lhs: &DirLValue, name: &str) -> bool {
     match lhs {
-        HirLValue::Var(var) => var == name,
-        HirLValue::Deref { ptr, .. } => expr_uses_var(ptr, name),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(var) => var == name,
+        DirLValue::Deref { ptr, .. } => expr_uses_var(ptr, name),
+        DirLValue::Index { base, index, .. } => {
             expr_uses_var(base, name) || expr_uses_var(index, name)
         }
-        HirLValue::FieldAccess { base, .. } => expr_uses_var(base, name),
+        DirLValue::FieldAccess { base, .. } => expr_uses_var(base, name),
     }
 }
 
-fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
+fn expr_uses_var(expr: &DirExpr, name: &str) -> bool {
     match expr {
-        HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => var == name,
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => expr_uses_var(expr, name),
-        HirExpr::Binary { lhs, rhs, .. } => expr_uses_var(lhs, name) || expr_uses_var(rhs, name),
-        HirExpr::Select {
+        DirExpr::Var(var) | DirExpr::AddressOfGlobal(var) => var == name,
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => expr_uses_var(expr, name),
+        DirExpr::Binary { lhs, rhs, .. } => expr_uses_var(lhs, name) || expr_uses_var(rhs, name),
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -401,45 +401,45 @@ fn expr_uses_var(expr: &HirExpr, name: &str) -> bool {
                 || expr_uses_var(then_expr, name)
                 || expr_uses_var(else_expr, name)
         }
-        HirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_var(arg, name)),
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_var(arg, name)),
+        DirExpr::Index { base, index, .. } => {
             expr_uses_var(base, name) || expr_uses_var(index, name)
         }
-        HirExpr::Const(_, _) => false,
+        DirExpr::Const(_, _) => false,
     }
 }
 
-fn alias_const_index_offset(alias: &AggregateAlias, index: &HirExpr) -> Option<i64> {
-    let HirExpr::Const(index, _) = index else {
+fn alias_const_index_offset(alias: &AggregateAlias, index: &DirExpr) -> Option<i64> {
+    let DirExpr::Const(index, _) = index else {
         return None;
     };
     let elem_size = i64::from(type_byte_size(&alias.elem_ty)?);
     alias.base_offset.checked_add(index.checked_mul(elem_size)?)
 }
 
-fn alias_ptr_offset(alias: &AggregateAlias, offset: i64) -> HirExpr {
+fn alias_ptr_offset(alias: &AggregateAlias, offset: i64) -> DirExpr {
     if offset == 0 {
         alias.root.clone()
     } else {
-        HirExpr::PtrOffset {
+        DirExpr::PtrOffset {
             base: Box::new(alias.root.clone()),
             offset,
         }
     }
 }
 
-fn rewrite_alias_stmts(stmts: &mut [HirStmt], aliases: &HashMap<String, AggregateAlias>) -> bool {
+fn rewrite_alias_stmts(stmts: &mut [DirStmt], aliases: &HashMap<String, AggregateAlias>) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 changed |= rewrite_alias_lvalue(lhs, aliases);
                 changed |= rewrite_alias_expr(rhs, aliases);
             }
-            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
                 changed |= rewrite_alias_expr(expr, aliases);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -448,11 +448,11 @@ fn rewrite_alias_stmts(stmts: &mut [HirStmt], aliases: &HashMap<String, Aggregat
                 changed |= rewrite_alias_stmts(then_body, aliases);
                 changed |= rewrite_alias_stmts(else_body, aliases);
             }
-            HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
                 changed |= rewrite_alias_expr(cond, aliases);
                 changed |= rewrite_alias_stmts(body, aliases);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -469,7 +469,7 @@ fn rewrite_alias_stmts(stmts: &mut [HirStmt], aliases: &HashMap<String, Aggregat
                 }
                 changed |= rewrite_alias_stmts(body, aliases);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -480,35 +480,35 @@ fn rewrite_alias_stmts(stmts: &mut [HirStmt], aliases: &HashMap<String, Aggregat
                 }
                 changed |= rewrite_alias_stmts(default, aliases);
             }
-            HirStmt::Block(body) => {
+            DirStmt::Block(body) => {
                 changed |= rewrite_alias_stmts(body, aliases);
             }
-            HirStmt::Return(None)
-            | HirStmt::VaStart { .. }
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Return(None)
+            | DirStmt::VaStart { .. }
+            | DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
     changed
 }
 
-fn rewrite_alias_lvalue(lhs: &mut HirLValue, aliases: &HashMap<String, AggregateAlias>) -> bool {
+fn rewrite_alias_lvalue(lhs: &mut DirLValue, aliases: &HashMap<String, AggregateAlias>) -> bool {
     match lhs {
-        HirLValue::Deref { ptr, .. } => rewrite_alias_expr(ptr, aliases),
-        HirLValue::Index {
+        DirLValue::Deref { ptr, .. } => rewrite_alias_expr(ptr, aliases),
+        DirLValue::Index {
             base,
             index,
             elem_ty,
         } => {
             let mut changed =
                 rewrite_alias_expr(base, aliases) | rewrite_alias_expr(index, aliases);
-            if let HirExpr::Var(name) = base.as_ref()
+            if let DirExpr::Var(name) = base.as_ref()
                 && let Some(alias) = aliases.get(name)
                 && let Some(offset) = alias_const_index_offset(alias, index)
             {
-                *lhs = HirLValue::Deref {
+                *lhs = DirLValue::Deref {
                     ptr: Box::new(alias_ptr_offset(alias, offset)),
                     ty: elem_ty.clone(),
                 };
@@ -516,22 +516,22 @@ fn rewrite_alias_lvalue(lhs: &mut HirLValue, aliases: &HashMap<String, Aggregate
             }
             changed
         }
-        HirLValue::Var(_) => false,
-        HirLValue::FieldAccess { base, .. } => rewrite_alias_expr(base, aliases),
+        DirLValue::Var(_) => false,
+        DirLValue::FieldAccess { base, .. } => rewrite_alias_expr(base, aliases),
     }
 }
 
-fn rewrite_alias_expr(expr: &mut HirExpr, aliases: &HashMap<String, AggregateAlias>) -> bool {
+fn rewrite_alias_expr(expr: &mut DirExpr, aliases: &HashMap<String, AggregateAlias>) -> bool {
     let changed = match expr {
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => rewrite_alias_expr(expr, aliases),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => rewrite_alias_expr(expr, aliases),
+        DirExpr::Binary { lhs, rhs, .. } => {
             rewrite_alias_expr(lhs, aliases) | rewrite_alias_expr(rhs, aliases)
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -541,22 +541,22 @@ fn rewrite_alias_expr(expr: &mut HirExpr, aliases: &HashMap<String, AggregateAli
                 | rewrite_alias_expr(then_expr, aliases)
                 | rewrite_alias_expr(else_expr, aliases)
         }
-        HirExpr::Call { args, .. } => args
+        DirExpr::Call { args, .. } => args
             .iter_mut()
             .fold(false, |acc, arg| rewrite_alias_expr(arg, aliases) | acc),
-        HirExpr::Load { ptr, .. } => rewrite_alias_expr(ptr, aliases),
-        HirExpr::Index {
+        DirExpr::Load { ptr, .. } => rewrite_alias_expr(ptr, aliases),
+        DirExpr::Index {
             base,
             index,
             elem_ty,
         } => {
             let mut changed =
                 rewrite_alias_expr(base, aliases) | rewrite_alias_expr(index, aliases);
-            if let HirExpr::Var(name) = base.as_ref()
+            if let DirExpr::Var(name) = base.as_ref()
                 && let Some(alias) = aliases.get(name)
                 && let Some(offset) = alias_const_index_offset(alias, index)
             {
-                *expr = HirExpr::Load {
+                *expr = DirExpr::Load {
                     ptr: Box::new(alias_ptr_offset(alias, offset)),
                     ty: elem_ty.clone(),
                 };
@@ -564,7 +564,7 @@ fn rewrite_alias_expr(expr: &mut HirExpr, aliases: &HashMap<String, AggregateAli
             }
             changed
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
     };
     changed
 }
@@ -587,10 +587,10 @@ mod tests {
 
     #[test]
     fn aggregate_fields_upgrades_unknown_pointer_to_aggregate() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
                 surface_type_name: None,
@@ -600,9 +600,9 @@ mod tests {
             locals: Vec::new(),
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Return(Some(HirExpr::Load {
-                ptr: Box::new(HirExpr::PtrOffset {
-                    base: Box::new(HirExpr::Var("param_1".to_string())),
+            body: vec![DirStmt::Return(Some(DirExpr::Load {
+                ptr: Box::new(DirExpr::PtrOffset {
+                    base: Box::new(DirExpr::Var("param_1".to_string())),
                     offset: 8,
                 }),
                 ty: NirType::Int {
@@ -631,10 +631,10 @@ mod tests {
 
     #[test]
     fn aggregate_fields_upgrades_byte_pointer_when_shape_is_structured() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "shape".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_u8(),
                 surface_type_name: None,
@@ -645,9 +645,9 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 4,
                     }),
                     ty: NirType::Int {
@@ -655,10 +655,10 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::PtrOffset {
-                            base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::PtrOffset {
+                            base: Box::new(DirExpr::Var("param_1".to_string())),
                             offset: 8,
                         }),
                         ty: NirType::Int {
@@ -666,7 +666,7 @@ mod tests {
                             signed: false,
                         },
                     },
-                    rhs: HirExpr::Const(
+                    rhs: DirExpr::Const(
                         0,
                         NirType::Int {
                             bits: 16,
@@ -696,10 +696,10 @@ mod tests {
 
     #[test]
     fn aggregate_fields_uses_windows_struct_field_names_when_surface_type_known() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "rect_shape".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
                 surface_type_name: Some("LPRECT".to_string()),
@@ -710,9 +710,9 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 0,
                     }),
                     ty: NirType::Int {
@@ -720,9 +720,9 @@ mod tests {
                         signed: true,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 4,
                     }),
                     ty: NirType::Int {
@@ -730,9 +730,9 @@ mod tests {
                         signed: true,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 8,
                     }),
                     ty: NirType::Int {
@@ -740,9 +740,9 @@ mod tests {
                         signed: true,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 12,
                     }),
                     ty: NirType::Int {
@@ -776,10 +776,10 @@ mod tests {
     fn aggregate_fields_infers_aggregate_from_multi_offset_accesses() {
         // Verify the aggregate field pass fires and infers correct field offsets
         // from multiple memory accesses on a pointer parameter.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "process_info_infer".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
                 surface_type_name: None,
@@ -790,9 +790,9 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 0,
                     }),
                     ty: NirType::Int {
@@ -800,9 +800,9 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 8,
                     }),
                     ty: NirType::Int {
@@ -810,9 +810,9 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 16,
                     }),
                     ty: NirType::Int {
@@ -820,9 +820,9 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 20,
                     }),
                     ty: NirType::Int {
@@ -865,10 +865,10 @@ mod tests {
         // When the caller supplies an explicit surface_type_name matching a known
         // Win32 struct (via LP prefix stripping), the aggregate pass must resolve
         // that name and propagate the surface type correctly.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "process_info_hint".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: ptr_unknown(),
                 surface_type_name: Some("LPPROCESS_INFORMATION".to_string()),
@@ -879,9 +879,9 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 0,
                     }),
                     ty: NirType::Int {
@@ -889,9 +889,9 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 8,
                     }),
                     ty: NirType::Int {
@@ -899,9 +899,9 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 16,
                     }),
                     ty: NirType::Int {
@@ -909,9 +909,9 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 20,
                     }),
                     ty: NirType::Int {

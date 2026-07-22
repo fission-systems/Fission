@@ -3,13 +3,13 @@ use crate::prelude::*;
 /// Simplifies comparisons involving 3-way comparisons.
 /// Detects expressions of the form `zext(a < b) + zext(a <= b) - 1` (or similar)
 /// compared to constants (-1, 0, 1) and replaces them with direct comparisons.
-pub fn apply_three_way_compare_pass(func: &mut HirFunction) -> bool {
+pub fn apply_three_way_compare_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
     changed |= simplify_stmts(&mut func.body);
     changed
 }
 
-fn simplify_stmts(stmts: &mut [HirStmt]) -> bool {
+fn simplify_stmts(stmts: &mut [DirStmt]) -> bool {
     let mut changed = false;
     for stmt in stmts {
         changed |= simplify_stmt(stmt);
@@ -17,20 +17,20 @@ fn simplify_stmts(stmts: &mut [HirStmt]) -> bool {
     changed
 }
 
-fn simplify_stmt(stmt: &mut HirStmt) -> bool {
+fn simplify_stmt(stmt: &mut DirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             changed |= simplify_expr(rhs);
             changed |= simplify_lvalue(lhs);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -47,7 +47,7 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
             }
             changed |= simplify_stmts(body);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -56,7 +56,7 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
             changed |= simplify_stmts(then_body);
             changed |= simplify_stmts(else_body);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -67,7 +67,7 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
             }
             changed |= simplify_stmts(default);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list);
         }
         _ => {}
@@ -75,46 +75,46 @@ fn simplify_stmt(stmt: &mut HirStmt) -> bool {
     changed
 }
 
-fn simplify_lvalue(lval: &mut HirLValue) -> bool {
+fn simplify_lvalue(lval: &mut DirLValue) -> bool {
     let mut changed = false;
     match lval {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => {
             changed |= simplify_expr(ptr);
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             changed |= simplify_expr(base);
         }
     }
     changed
 }
 
-fn simplify_expr(expr: &mut HirExpr) -> bool {
+fn simplify_expr(expr: &mut DirExpr) -> bool {
     let mut changed = false;
 
     // Recurse first
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. } => {
             changed |= simplify_expr(inner);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= simplify_expr(lhs);
             changed |= simplify_expr(rhs);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= simplify_expr(arg);
             }
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -124,7 +124,7 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
             changed |= simplify_expr(then_expr);
             changed |= simplify_expr(else_expr);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
@@ -132,9 +132,9 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
     }
 
     // Attempt to simplify 3-way comparisons on this Binary expression
-    if let HirExpr::Binary { op, lhs, rhs, ty } = expr {
+    if let DirExpr::Binary { op, lhs, rhs, ty } = expr {
         if let Some((new_op, v, w)) = try_simplify_three_way_cmp(*op, lhs, rhs) {
-            *expr = HirExpr::Binary {
+            *expr = DirExpr::Binary {
                 op: new_op,
                 lhs: Box::new(v),
                 rhs: Box::new(w),
@@ -147,9 +147,9 @@ fn simplify_expr(expr: &mut HirExpr) -> bool {
     changed
 }
 
-fn collect_add_terms(expr: &HirExpr, terms: &mut Vec<HirExpr>) {
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Add,
+fn collect_add_terms(expr: &DirExpr, terms: &mut Vec<DirExpr>) {
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Add,
         lhs,
         rhs,
         ..
@@ -162,7 +162,7 @@ fn collect_add_terms(expr: &HirExpr, terms: &mut Vec<HirExpr>) {
     }
 }
 
-fn detect_three_way(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirBinaryOp)> {
+fn detect_three_way(expr: &DirExpr) -> Option<(DirExpr, DirExpr, DirBinaryOp)> {
     let mut terms = Vec::new();
     collect_add_terms(expr, &mut terms);
     if terms.len() != 3 {
@@ -170,7 +170,7 @@ fn detect_three_way(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirBinaryOp)> {
     }
     // Find the constant -1
     let const_idx = terms.iter().position(|t| {
-        if let HirExpr::Const(val, ty) = t {
+        if let DirExpr::Const(val, ty) = t {
             let mask = match ty {
                 NirType::Int { bits, .. } => {
                     (1u64.checked_shl(*bits).unwrap_or(0).wrapping_sub(1)) as i64
@@ -187,8 +187,8 @@ fn detect_three_way(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirBinaryOp)> {
     // The other two terms must be Casts of comparisons
     let mut comparisons = Vec::new();
     for term in &terms {
-        if let HirExpr::Cast { expr: inner, .. } = term {
-            if let HirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref() {
+        if let DirExpr::Cast { expr: inner, .. } = term {
+            if let DirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref() {
                 comparisons.push((*op, lhs.as_ref(), rhs.as_ref()));
             }
         }
@@ -206,8 +206,8 @@ fn detect_three_way(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirBinaryOp)> {
     }
 
     // One must be less than, the other must be less-than-or-equal
-    let is_less = |op: HirBinaryOp| matches!(op, HirBinaryOp::Lt | HirBinaryOp::SLt);
-    let is_lesseq = |op: HirBinaryOp| matches!(op, HirBinaryOp::Le | HirBinaryOp::SLe);
+    let is_less = |op: DirBinaryOp| matches!(op, DirBinaryOp::Lt | DirBinaryOp::SLt);
+    let is_lesseq = |op: DirBinaryOp| matches!(op, DirBinaryOp::Le | DirBinaryOp::SLe);
 
     if (is_less(op1) && is_lesseq(op2)) || (is_lesseq(op1) && is_less(op2)) {
         let less_op = if is_less(op1) { op1 } else { op2 };
@@ -226,36 +226,36 @@ enum TargetRelation {
     Ne,
 }
 
-fn get_compare_op(less_op: HirBinaryOp, rel: TargetRelation) -> HirBinaryOp {
+fn get_compare_op(less_op: DirBinaryOp, rel: TargetRelation) -> DirBinaryOp {
     match (less_op, rel) {
-        (HirBinaryOp::Lt, TargetRelation::Lt) => HirBinaryOp::Lt,
-        (HirBinaryOp::Lt, TargetRelation::Le) => HirBinaryOp::Le,
-        (HirBinaryOp::Lt, TargetRelation::Gt) => HirBinaryOp::Gt,
-        (HirBinaryOp::Lt, TargetRelation::Ge) => HirBinaryOp::Ge,
-        (HirBinaryOp::Lt, TargetRelation::Eq) => HirBinaryOp::Eq,
-        (HirBinaryOp::Lt, TargetRelation::Ne) => HirBinaryOp::Ne,
+        (DirBinaryOp::Lt, TargetRelation::Lt) => DirBinaryOp::Lt,
+        (DirBinaryOp::Lt, TargetRelation::Le) => DirBinaryOp::Le,
+        (DirBinaryOp::Lt, TargetRelation::Gt) => DirBinaryOp::Gt,
+        (DirBinaryOp::Lt, TargetRelation::Ge) => DirBinaryOp::Ge,
+        (DirBinaryOp::Lt, TargetRelation::Eq) => DirBinaryOp::Eq,
+        (DirBinaryOp::Lt, TargetRelation::Ne) => DirBinaryOp::Ne,
 
-        (HirBinaryOp::SLt, TargetRelation::Lt) => HirBinaryOp::SLt,
-        (HirBinaryOp::SLt, TargetRelation::Le) => HirBinaryOp::SLe,
-        (HirBinaryOp::SLt, TargetRelation::Gt) => HirBinaryOp::SGt,
-        (HirBinaryOp::SLt, TargetRelation::Ge) => HirBinaryOp::SGe,
-        (HirBinaryOp::SLt, TargetRelation::Eq) => HirBinaryOp::Eq,
-        (HirBinaryOp::SLt, TargetRelation::Ne) => HirBinaryOp::Ne,
+        (DirBinaryOp::SLt, TargetRelation::Lt) => DirBinaryOp::SLt,
+        (DirBinaryOp::SLt, TargetRelation::Le) => DirBinaryOp::SLe,
+        (DirBinaryOp::SLt, TargetRelation::Gt) => DirBinaryOp::SGt,
+        (DirBinaryOp::SLt, TargetRelation::Ge) => DirBinaryOp::SGe,
+        (DirBinaryOp::SLt, TargetRelation::Eq) => DirBinaryOp::Eq,
+        (DirBinaryOp::SLt, TargetRelation::Ne) => DirBinaryOp::Ne,
 
         _ => less_op,
     }
 }
 
 fn try_simplify_three_way_cmp(
-    op: HirBinaryOp,
-    lhs: &HirExpr,
-    rhs: &HirExpr,
-) -> Option<(HirBinaryOp, HirExpr, HirExpr)> {
+    op: DirBinaryOp,
+    lhs: &DirExpr,
+    rhs: &DirExpr,
+) -> Option<(DirBinaryOp, DirExpr, DirExpr)> {
     // We expect one side to be a 3-way compare, and the other side to be a constant
     // Match (3way, constant) or (constant, 3way)
     let (three_way_expr, const_val, is_three_way_lhs) = match (lhs, rhs) {
-        (t, HirExpr::Const(c, _)) => (t, *c, true),
-        (HirExpr::Const(c, _), t) => (t, *c, false),
+        (t, DirExpr::Const(c, _)) => (t, *c, true),
+        (DirExpr::Const(c, _), t) => (t, *c, false),
         _ => return None,
     };
 
@@ -272,24 +272,24 @@ fn try_simplify_three_way_cmp(
         op
     } else {
         match op {
-            HirBinaryOp::Lt => HirBinaryOp::Gt,
-            HirBinaryOp::SLt => HirBinaryOp::SGt,
+            DirBinaryOp::Lt => DirBinaryOp::Gt,
+            DirBinaryOp::SLt => DirBinaryOp::SGt,
 
-            HirBinaryOp::Le => HirBinaryOp::Ge,
-            HirBinaryOp::SLe => HirBinaryOp::SGe,
+            DirBinaryOp::Le => DirBinaryOp::Ge,
+            DirBinaryOp::SLe => DirBinaryOp::SGe,
 
-            HirBinaryOp::Gt => HirBinaryOp::Lt,
-            HirBinaryOp::SGt => HirBinaryOp::SLt,
+            DirBinaryOp::Gt => DirBinaryOp::Lt,
+            DirBinaryOp::SGt => DirBinaryOp::SLt,
 
-            HirBinaryOp::Ge => HirBinaryOp::Le,
-            HirBinaryOp::SGe => HirBinaryOp::SLe,
+            DirBinaryOp::Ge => DirBinaryOp::Le,
+            DirBinaryOp::SGe => DirBinaryOp::SLe,
 
             other => other, // Eq, Ne are symmetric
         }
     };
 
     // Helper to return comparison inputs in order (v, w) or (w, v)
-    let make_ret = |rel: TargetRelation| -> Option<(HirBinaryOp, HirExpr, HirExpr)> {
+    let make_ret = |rel: TargetRelation| -> Option<(DirBinaryOp, DirExpr, DirExpr)> {
         match rel {
             TargetRelation::Lt => Some((
                 get_compare_op(less_op, TargetRelation::Lt),
@@ -326,7 +326,7 @@ fn try_simplify_three_way_cmp(
 
     match normalized_op {
         // EQUAL
-        HirBinaryOp::Eq => {
+        DirBinaryOp::Eq => {
             match const_val {
                 -1 => make_ret(TargetRelation::Lt), // X == -1 => v < w
                 0 => make_ret(TargetRelation::Eq),  // X == 0  => v == w
@@ -335,7 +335,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // NOT EQUAL
-        HirBinaryOp::Ne => {
+        DirBinaryOp::Ne => {
             match const_val {
                 -1 => make_ret(TargetRelation::Ge), // X != -1 => v >= w
                 0 => make_ret(TargetRelation::Ne),  // X != 0  => v != w
@@ -344,7 +344,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // LESS THAN (signed and unsigned)
-        HirBinaryOp::Lt | HirBinaryOp::SLt => {
+        DirBinaryOp::Lt | DirBinaryOp::SLt => {
             match const_val {
                 0 => make_ret(TargetRelation::Lt), // X < 0  => v < w
                 1 => make_ret(TargetRelation::Le), // X < 1  => v <= w
@@ -353,7 +353,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // LESS OR EQUAL
-        HirBinaryOp::Le | HirBinaryOp::SLe => {
+        DirBinaryOp::Le | DirBinaryOp::SLe => {
             match const_val {
                 -1 => make_ret(TargetRelation::Lt), // X <= -1 => v < w
                 0 => make_ret(TargetRelation::Le),  // X <= 0  => v <= w
@@ -362,7 +362,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // GREATER THAN
-        HirBinaryOp::Gt | HirBinaryOp::SGt => {
+        DirBinaryOp::Gt | DirBinaryOp::SGt => {
             match const_val {
                 0 => make_ret(TargetRelation::Gt),  // X > 0  => w < v (v > w)
                 -1 => make_ret(TargetRelation::Ge), // X > -1 => w <= v (v >= w)
@@ -371,7 +371,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // GREATER OR EQUAL
-        HirBinaryOp::Ge | HirBinaryOp::SGe => {
+        DirBinaryOp::Ge | DirBinaryOp::SGe => {
             match const_val {
                 1 => make_ret(TargetRelation::Gt), // X >= 1  => w < v (v > w)
                 0 => make_ret(TargetRelation::Ge), // X >= 0  => w <= v (v >= w)

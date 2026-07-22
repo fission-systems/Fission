@@ -6,7 +6,7 @@
 //!
 //! This gives three concrete enforcement properties:
 //!
-//! 1. **Contract boundary**: structuring receives `&mut HirFunction`, not raw
+//! 1. **Contract boundary**: structuring receives `&mut DirFunction`, not raw
 //!    `PreviewBuilder` state.  Any ad-hoc patch that needs to reach into the
 //!    builder internals cannot be expressed as a `Pass` and will fail at the
 //!    module boundary.
@@ -20,13 +20,13 @@
 use crate::midend::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, Repeat, group,
 };
-use crate::midend::ir::HirFunction;
+use crate::midend::ir::DirFunction;
 
 /// A no-op structuring pass placeholder.
 ///
 /// The actual structuring work is done inside `PreviewBuilder::build_hir`
 /// (via `structure_cfg_via_collapse_loop` / `structure_cfg_via_sese`), which
-/// produces the initial `HirFunction`.  This pass operates on the _already-
+/// produces the initial `DirFunction`.  This pass operates on the _already-
 /// structured_ HIR body and applies post-structuring cleanup rules that are
 /// safe to repeat until stable.
 ///
@@ -72,7 +72,7 @@ pub(crate) fn build_structuring_pipeline() -> Pipeline {
 ///
 /// Called from `render_mlil_preview_with_binary_and_context` after
 /// `PreviewBuilder::build_hir` returns the initial HIR.
-pub(crate) fn run_structuring_pipeline(func: &mut HirFunction, diag: bool, perf: bool) {
+pub(crate) fn run_structuring_pipeline(func: &mut DirFunction, diag: bool, perf: bool) {
     let pipeline = build_structuring_pipeline();
     let mut ctx = PassCtx {
         func,

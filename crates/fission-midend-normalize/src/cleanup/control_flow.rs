@@ -1,12 +1,12 @@
 use super::utils::{collect_referenced_labels, *};
 use crate::pipeline::PROTECTED_LSDA_LABELS;
 use crate::prelude::{
-    HashMap, HashSet, HirBinaryOp, HirExpr, HirStmt, fold_logical_chain, negate_expr,
+    HashMap, HashSet, DirBinaryOp, DirExpr, DirStmt, fold_logical_chain, negate_expr,
     simplify_logical_expr,
 };
-use fission_midend_core::util::label_cleanup::cleanup_redundant_labels;
+use fission_midend_core::util_dir::label_cleanup::cleanup_redundant_labels;
 
-pub fn prune_unreachable_after_terminal(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn prune_unreachable_after_terminal(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     let mut referenced_labels = collect_referenced_labels(stmts);
     PROTECTED_LSDA_LABELS.with(|protected| {
@@ -33,23 +33,23 @@ pub fn prune_unreachable_after_terminal(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn is_unconditional_terminal(stmt: &HirStmt) -> bool {
+fn is_unconditional_terminal(stmt: &DirStmt) -> bool {
     matches!(
         stmt,
-        HirStmt::Return(_) | HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue
+        DirStmt::Return(_) | DirStmt::Goto(_) | DirStmt::Break | DirStmt::Continue
     )
 }
 
-fn stmt_contains_referenced_label(stmt: &HirStmt, referenced_labels: &HashSet<String>) -> bool {
+fn stmt_contains_referenced_label(stmt: &DirStmt, referenced_labels: &HashSet<String>) -> bool {
     match stmt {
-        HirStmt::Label(label) => referenced_labels.contains(label),
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => body
+        DirStmt::Label(label) => referenced_labels.contains(label),
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => body
             .iter()
             .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels)),
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -61,7 +61,7 @@ fn stmt_contains_referenced_label(stmt: &HirStmt, referenced_labels: &HashSet<St
                     .iter()
                     .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             default
                 .iter()
                 .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
@@ -71,29 +71,29 @@ fn stmt_contains_referenced_label(stmt: &HirStmt, referenced_labels: &HashSet<St
                         .any(|stmt| stmt_contains_referenced_label(stmt, referenced_labels))
                 })
         }
-        HirStmt::Assign { .. }
-        | HirStmt::VaStart { .. }
-        | HirStmt::Expr(_)
-        | HirStmt::Return(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Break
-        | HirStmt::Continue => false,
+        DirStmt::Assign { .. }
+        | DirStmt::VaStart { .. }
+        | DirStmt::Expr(_)
+        | DirStmt::Return(_)
+        | DirStmt::Goto(_)
+        | DirStmt::Break
+        | DirStmt::Continue => false,
     }
 }
 
-pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
 
     for stmt in stmts.drain(..) {
         match stmt {
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
                 let constant = match cond {
-                    HirExpr::Const(value, _) => Some(value != 0),
+                    DirExpr::Const(value, _) => Some(value != 0),
                     _ => None,
                 };
 
@@ -106,14 +106,14 @@ pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<HirStmt>) -> bool {
                 if then_body.is_empty() && else_body.is_empty() {
                     changed = true;
                     if expr_has_side_effects(&cond) {
-                        rewritten.push(HirStmt::Expr(cond));
+                        rewritten.push(DirStmt::Expr(cond));
                     }
                     continue;
                 }
 
                 if then_body.is_empty() && !else_body.is_empty() {
                     changed = true;
-                    rewritten.push(HirStmt::If {
+                    rewritten.push(DirStmt::If {
                         cond: negate_expr(cond),
                         then_body: else_body,
                         else_body: Vec::new(),
@@ -121,7 +121,7 @@ pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<HirStmt>) -> bool {
                     continue;
                 }
 
-                rewritten.push(HirStmt::If {
+                rewritten.push(DirStmt::If {
                     cond,
                     then_body,
                     else_body,
@@ -139,29 +139,29 @@ pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 changed |= simplify_empty_and_constant_ifs_recursive(body);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init.as_mut()
-                    && let HirStmt::Block(body) = init.as_mut()
+                    && let DirStmt::Block(body) = init.as_mut()
                 {
                     changed |= simplify_empty_and_constant_ifs_recursive(body);
                 }
                 if let Some(update) = update.as_mut()
-                    && let HirStmt::Block(body) = update.as_mut()
+                    && let DirStmt::Block(body) = update.as_mut()
                 {
                     changed |= simplify_empty_and_constant_ifs_recursive(body);
                 }
                 changed |= simplify_empty_and_constant_ifs_recursive(body);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -169,29 +169,29 @@ pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<HirStmt>) -> bo
                 changed |= simplify_empty_and_constant_ifs_recursive(then_body);
                 changed |= simplify_empty_and_constant_ifs_recursive(else_body);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= simplify_empty_and_constant_ifs_recursive(&mut case.body);
                 }
                 changed |= simplify_empty_and_constant_ifs_recursive(default);
             }
-            HirStmt::Assign { .. }
-            | HirStmt::VaStart { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Assign { .. }
+            | DirStmt::VaStart { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
     changed |= simplify_empty_and_constant_ifs(stmts);
     let before_len = stmts.len();
-    stmts.retain(|stmt| !matches!(stmt, HirStmt::Block(body) if body.is_empty()));
+    stmts.retain(|stmt| !matches!(stmt, DirStmt::Block(body) if body.is_empty()));
     changed | (stmts.len() != before_len)
 }
 
-pub fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn simplify_fallthrough_edges(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
 
@@ -199,10 +199,10 @@ pub fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
         let stmt = stmts[idx].clone();
         let next_label = next_adjacent_label_name(stmts, idx + 1);
         match stmt {
-            HirStmt::Goto(label) if next_label.as_deref() == Some(label.as_str()) => {
+            DirStmt::Goto(label) if next_label.as_deref() == Some(label.as_str()) => {
                 changed = true;
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -213,10 +213,10 @@ pub fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
             {
                 changed = true;
                 if expr_has_side_effects(&cond) {
-                    rewritten.push(HirStmt::Expr(cond));
+                    rewritten.push(DirStmt::Expr(cond));
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -227,10 +227,10 @@ pub fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
             {
                 changed = true;
                 if expr_has_side_effects(&cond) {
-                    rewritten.push(HirStmt::Expr(cond));
+                    rewritten.push(DirStmt::Expr(cond));
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -244,7 +244,7 @@ pub fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
                     {
                         changed = true;
                         if expr_has_side_effects(&cond) {
-                            rewritten.push(HirStmt::Expr(cond));
+                            rewritten.push(DirStmt::Expr(cond));
                         }
                     }
                     (Some(_next), Some(then_target), Some(else_target))
@@ -252,27 +252,27 @@ pub fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
                     {
                         changed = true;
                         if expr_has_side_effects(&cond) {
-                            rewritten.push(HirStmt::Expr(cond));
+                            rewritten.push(DirStmt::Expr(cond));
                         }
-                        rewritten.push(HirStmt::Goto(then_target.to_string()));
+                        rewritten.push(DirStmt::Goto(then_target.to_string()));
                     }
                     (Some(next), Some(then_target), Some(else_target)) if then_target == next => {
                         changed = true;
-                        rewritten.push(HirStmt::If {
+                        rewritten.push(DirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![HirStmt::Goto(else_target.to_string())],
+                            then_body: vec![DirStmt::Goto(else_target.to_string())],
                             else_body: Vec::new(),
                         });
                     }
                     (Some(next), Some(then_target), Some(else_target)) if else_target == next => {
                         changed = true;
-                        rewritten.push(HirStmt::If {
+                        rewritten.push(DirStmt::If {
                             cond,
-                            then_body: vec![HirStmt::Goto(then_target.to_string())],
+                            then_body: vec![DirStmt::Goto(then_target.to_string())],
                             else_body: Vec::new(),
                         });
                     }
-                    _ => rewritten.push(HirStmt::If {
+                    _ => rewritten.push(DirStmt::If {
                         cond,
                         then_body,
                         else_body,
@@ -287,30 +287,30 @@ pub fn simplify_fallthrough_edges(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn next_adjacent_label_name(stmts: &[HirStmt], start_idx: usize) -> Option<String> {
+fn next_adjacent_label_name(stmts: &[DirStmt], start_idx: usize) -> Option<String> {
     for stmt in stmts.iter().skip(start_idx) {
         match stmt {
-            HirStmt::Label(label) => return Some(label.clone()),
+            DirStmt::Label(label) => return Some(label.clone()),
             _ => return None,
         }
     }
     None
 }
 
-fn next_label_index_and_name(stmts: &[HirStmt], start_idx: usize) -> Option<(usize, String)> {
+fn next_label_index_and_name(stmts: &[DirStmt], start_idx: usize) -> Option<(usize, String)> {
     for (idx, stmt) in stmts.iter().enumerate().skip(start_idx) {
-        if let HirStmt::Label(label) = stmt {
+        if let DirStmt::Label(label) = stmt {
             return Some((idx, label.clone()));
         }
     }
     None
 }
 
-fn matches_single_goto(body: &[HirStmt], label: &str) -> bool {
-    matches!(body, [HirStmt::Goto(target)] if target == label)
+fn matches_single_goto(body: &[DirStmt], label: &str) -> bool {
+    matches!(body, [DirStmt::Goto(target)] if target == label)
 }
 
-pub fn fuse_single_predecessor_boundaries(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn fuse_single_predecessor_boundaries(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
     while idx < stmts.len() {
@@ -325,23 +325,23 @@ pub fn fuse_single_predecessor_boundaries(stmts: &mut Vec<HirStmt>) -> bool {
         }
 
         let replacement = match &stmts[idx] {
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } if matches_single_goto(then_body, &label_name) && else_body.is_empty() => {
-                Some(HirStmt::If {
+                Some(DirStmt::If {
                     cond: negate_expr(cond.clone()),
                     then_body: fused_segment.clone(),
                     else_body: Vec::new(),
                 })
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } if then_body.is_empty() && matches_single_goto(else_body, &label_name) => {
-                Some(HirStmt::If {
+                Some(DirStmt::If {
                     cond: cond.clone(),
                     then_body: fused_segment.clone(),
                     else_body: Vec::new(),
@@ -363,20 +363,20 @@ pub fn fuse_single_predecessor_boundaries(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn stmts_are_fuseable_linear_segment(stmts: &[HirStmt]) -> bool {
+fn stmts_are_fuseable_linear_segment(stmts: &[DirStmt]) -> bool {
     stmts.iter().all(stmt_is_fuseable_linear)
 }
 
-fn stmt_is_fuseable_linear(stmt: &HirStmt) -> bool {
+fn stmt_is_fuseable_linear(stmt: &DirStmt) -> bool {
     match stmt {
         // Return is linear for if-goto inversion: the statements between
         // `if (c) goto L;` and `L:` may include early returns (saturating_add).
-        HirStmt::Assign { .. }
-        | HirStmt::Expr(_)
-        | HirStmt::VaStart { .. }
-        | HirStmt::Return(_) => true,
-        HirStmt::Block(body) => stmts_are_fuseable_linear_segment(body),
-        HirStmt::If {
+        DirStmt::Assign { .. }
+        | DirStmt::Expr(_)
+        | DirStmt::VaStart { .. }
+        | DirStmt::Return(_) => true,
+        DirStmt::Block(body) => stmts_are_fuseable_linear_segment(body),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -384,29 +384,29 @@ fn stmt_is_fuseable_linear(stmt: &HirStmt) -> bool {
             stmts_are_fuseable_linear_segment(then_body)
                 && stmts_are_fuseable_linear_segment(else_body)
         }
-        HirStmt::Switch { .. }
-        | HirStmt::While { .. }
-        | HirStmt::DoWhile { .. }
-        | HirStmt::For { .. }
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Break
-        | HirStmt::Continue => false,
+        DirStmt::Switch { .. }
+        | DirStmt::While { .. }
+        | DirStmt::DoWhile { .. }
+        | DirStmt::For { .. }
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_)
+        | DirStmt::Break
+        | DirStmt::Continue => false,
     }
 }
 
-pub fn promote_guarded_jump_target_tail(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn promote_guarded_jump_target_tail(stmts: &mut Vec<DirStmt>) -> bool {
     let referenced = collect_referenced_label_counts(stmts);
     let mut changed = false;
     let mut idx = 0usize;
     while idx + 3 < stmts.len() {
         let (
-            HirStmt::If {
+            DirStmt::If {
                 cond: first_cond,
                 then_body: first_then,
                 else_body: first_else,
             },
-            HirStmt::If {
+            DirStmt::If {
                 cond: second_cond,
                 then_body: second_then,
                 else_body: second_else,
@@ -433,7 +433,7 @@ pub fn promote_guarded_jump_target_tail(stmts: &mut Vec<HirStmt>) -> bool {
             idx += 1;
             continue;
         }
-        if !matches!(stmts.get(idx + 2), Some(HirStmt::Label(label)) if label == &body_label) {
+        if !matches!(stmts.get(idx + 2), Some(DirStmt::Label(label)) if label == &body_label) {
             idx += 1;
             continue;
         }
@@ -457,9 +457,9 @@ pub fn promote_guarded_jump_target_tail(stmts: &mut Vec<HirStmt>) -> bool {
 
         let combined_cond = fold_logical_chain(
             vec![first_cond.clone(), negate_expr(second_cond.clone())],
-            HirBinaryOp::LogicalOr,
+            DirBinaryOp::LogicalOr,
         );
-        stmts[idx] = HirStmt::If {
+        stmts[idx] = DirStmt::If {
             cond: combined_cond,
             then_body: body_segment,
             else_body: Vec::new(),
@@ -471,14 +471,14 @@ pub fn promote_guarded_jump_target_tail(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn single_goto_target(body: &[HirStmt]) -> Option<&str> {
+fn single_goto_target(body: &[DirStmt]) -> Option<&str> {
     match body {
-        [HirStmt::Goto(target)] => Some(target.as_str()),
+        [DirStmt::Goto(target)] => Some(target.as_str()),
         _ => None,
     }
 }
 
-pub fn collapse_common_exit_guard_chain(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn collapse_common_exit_guard_chain(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
 
@@ -489,7 +489,7 @@ pub fn collapse_common_exit_guard_chain(stmts: &mut Vec<HirStmt>) -> bool {
         };
         let Some(exit_idx) = stmts.iter().enumerate().skip(idx + guard_count).find_map(
             |(label_idx, stmt)| match stmt {
-                HirStmt::Label(label) if label == &exit_label => Some(label_idx),
+                DirStmt::Label(label) if label == &exit_label => Some(label_idx),
                 _ => None,
             },
         ) else {
@@ -502,8 +502,8 @@ pub fn collapse_common_exit_guard_chain(stmts: &mut Vec<HirStmt>) -> bool {
         }
 
         let guarded_body = stmts[idx + guard_count..exit_idx].to_vec();
-        let exit_cond = simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalOr));
-        stmts[idx] = HirStmt::If {
+        let exit_cond = simplify_logical_expr(fold_logical_chain(conds, DirBinaryOp::LogicalOr));
+        stmts[idx] = DirStmt::If {
             cond: negate_expr(exit_cond),
             then_body: guarded_body,
             else_body: Vec::new(),
@@ -517,15 +517,15 @@ pub fn collapse_common_exit_guard_chain(stmts: &mut Vec<HirStmt>) -> bool {
 }
 
 fn common_exit_guard_chain(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     start_idx: usize,
-) -> Option<(String, usize, Vec<HirExpr>)> {
+) -> Option<(String, usize, Vec<DirExpr>)> {
     let mut guard_count = 0usize;
     let mut exit_label: Option<String> = None;
     let mut conds = Vec::new();
 
     for stmt in stmts.iter().skip(start_idx) {
-        let HirStmt::If {
+        let DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -553,7 +553,7 @@ fn common_exit_guard_chain(
 }
 
 pub fn cleanup_redundant_boundary_labels(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     global_refs: Option<&HashSet<String>>,
 ) -> bool {
     // `cleanup_redundant_labels` lives in fission-midend-core and takes
@@ -572,7 +572,7 @@ pub fn cleanup_redundant_boundary_labels(
 }
 
 pub fn remove_unreferenced_leading_labels(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     global_refs: Option<&HashSet<String>>,
 ) -> bool {
     let local_refs = if global_refs.is_none() {
@@ -582,7 +582,7 @@ pub fn remove_unreferenced_leading_labels(
     };
     let referenced = global_refs.unwrap_or_else(|| local_refs.as_ref().unwrap());
     let mut changed = false;
-    while let Some(HirStmt::Label(label)) = stmts.first() {
+    while let Some(DirStmt::Label(label)) = stmts.first() {
         if !referenced.contains(label) && !should_preserve_unreferenced_leading_labels(stmts) {
             stmts.remove(0);
             changed = true;
@@ -593,17 +593,17 @@ pub fn remove_unreferenced_leading_labels(
     changed
 }
 
-fn should_preserve_unreferenced_leading_labels(stmts: &[HirStmt]) -> bool {
+fn should_preserve_unreferenced_leading_labels(stmts: &[DirStmt]) -> bool {
     let first_non_label = stmts
         .iter()
-        .position(|stmt| !matches!(stmt, HirStmt::Label(_)));
+        .position(|stmt| !matches!(stmt, DirStmt::Label(_)));
     match first_non_label {
         None => true,
-        Some(idx) => matches!(stmts.get(idx..), Some([HirStmt::Return(_)])),
+        Some(idx) => matches!(stmts.get(idx..), Some([DirStmt::Return(_)])),
     }
 }
 
-pub fn single_pred_label_inline(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn single_pred_label_inline(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         changed |= single_pred_label_inline_in_stmt(stmt);
@@ -612,10 +612,10 @@ pub fn single_pred_label_inline(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn single_pred_label_inline_in_stmt(stmt: &mut HirStmt) -> bool {
+fn single_pred_label_inline_in_stmt(stmt: &mut DirStmt) -> bool {
     match stmt {
-        HirStmt::Block(body) => single_pred_label_inline(body),
-        HirStmt::If {
+        DirStmt::Block(body) => single_pred_label_inline(body),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -624,11 +624,11 @@ fn single_pred_label_inline_in_stmt(stmt: &mut HirStmt) -> bool {
             let b = single_pred_label_inline(else_body);
             a || b
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             single_pred_label_inline(body)
         }
-        HirStmt::For { body, .. } => single_pred_label_inline(body),
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::For { body, .. } => single_pred_label_inline(body),
+        DirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases.iter_mut() {
                 changed |= single_pred_label_inline(&mut case.body);
@@ -640,7 +640,7 @@ fn single_pred_label_inline_in_stmt(stmt: &mut HirStmt) -> bool {
     }
 }
 
-fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
+fn single_pred_label_inline_flat(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     for _ in 0..512 {
         let ref_counts = collect_referenced_label_counts(stmts);
@@ -649,7 +649,7 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
         let mut i = 0;
         while i < stmts.len() {
             let goto_label = match &stmts[i] {
-                HirStmt::Goto(label) => label.clone(),
+                DirStmt::Goto(label) => label.clone(),
                 _ => {
                     i += 1;
                     continue;
@@ -663,7 +663,7 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
 
             let label_pos = stmts[i + 1..]
                 .iter()
-                .position(|s| matches!(s, HirStmt::Label(l) if l == &goto_label))
+                .position(|s| matches!(s, DirStmt::Label(l) if l == &goto_label))
                 .map(|offset| offset + i + 1);
 
             let Some(j) = label_pos else {
@@ -680,7 +680,7 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
             // `ref_counts`/`collect_referenced_label_counts` (both purely
             // Goto-based) have no way to see.
             let external_ref_found = segment.iter().any(|s| {
-                if let HirStmt::Label(l) = s {
+                if let DirStmt::Label(l) = s {
                     if PROTECTED_LSDA_LABELS.with(|protected| protected.borrow().contains(l)) {
                         return true;
                     }

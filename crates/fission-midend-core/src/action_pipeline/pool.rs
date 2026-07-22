@@ -1,15 +1,15 @@
 //! ActionPool: fixpoint rule sweep over HIR (Ghidra ActionPool analog).
 
-use crate::ir::{HirExpr, HirFunction, HirLValue, HirStmt};
+use crate::ir::{DirExpr, DirFunction, DirLValue, DirStmt};
 use super::concept::GhidraActionConcept;
 use super::pass::{Pass, PassCtx, PassOutcome};
 
 pub trait Rule {
     fn name(&self) -> &'static str;
-    fn apply_stmt(&self, _stmt: &mut HirStmt) -> bool {
+    fn apply_stmt(&self, _stmt: &mut DirStmt) -> bool {
         false
     }
-    fn apply_expr(&self, _expr: &mut HirExpr) -> bool {
+    fn apply_expr(&self, _expr: &mut DirExpr) -> bool {
         false
     }
 }
@@ -67,7 +67,7 @@ impl Pass for ActionPool {
     }
 }
 
-pub fn apply_rules_to_stmts(stmts: &mut [HirStmt], rules: &[Box<dyn Rule>]) -> bool {
+pub fn apply_rules_to_stmts(stmts: &mut [DirStmt], rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
     for stmt in stmts {
         changed |= apply_rules_to_stmt(stmt, rules);
@@ -75,7 +75,7 @@ pub fn apply_rules_to_stmts(stmts: &mut [HirStmt], rules: &[Box<dyn Rule>]) -> b
     changed
 }
 
-fn apply_rules_to_stmt(stmt: &mut HirStmt, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_stmt(stmt: &mut DirStmt, rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
 
     for rule in rules {
@@ -83,20 +83,20 @@ fn apply_rules_to_stmt(stmt: &mut HirStmt, rules: &[Box<dyn Rule>]) -> bool {
     }
 
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             changed |= apply_rules_to_lvalue(lhs, rules);
             changed |= apply_rules_to_expr(rhs, rules);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             changed |= apply_rules_to_expr(expr, rules);
         }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => {
             changed |= apply_rules_to_stmts(body, rules);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -105,7 +105,7 @@ fn apply_rules_to_stmt(stmt: &mut HirStmt, rules: &[Box<dyn Rule>]) -> bool {
             changed |= apply_rules_to_stmts(then_body, rules);
             changed |= apply_rules_to_stmts(else_body, rules);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -122,13 +122,13 @@ fn apply_rules_to_stmt(stmt: &mut HirStmt, rules: &[Box<dyn Rule>]) -> bool {
     changed
 }
 
-fn apply_rules_to_lvalue(lhs: &mut HirLValue, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_lvalue(lhs: &mut DirLValue, rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
     match lhs {
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Deref { ptr, .. } => {
             changed |= apply_rules_to_expr(ptr, rules);
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             changed |= apply_rules_to_expr(base, rules);
             changed |= apply_rules_to_expr(index, rules);
         }
@@ -137,22 +137,22 @@ fn apply_rules_to_lvalue(lhs: &mut HirLValue, rules: &[Box<dyn Rule>]) -> bool {
     changed
 }
 
-fn apply_rules_to_expr(expr: &mut HirExpr, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_expr(expr: &mut DirExpr, rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
 
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::Load { ptr: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::Load { ptr: inner, .. } => {
             changed |= apply_rules_to_expr(inner, rules);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= apply_rules_to_expr(lhs, rules);
             changed |= apply_rules_to_expr(rhs, rules);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -162,12 +162,12 @@ fn apply_rules_to_expr(expr: &mut HirExpr, rules: &[Box<dyn Rule>]) -> bool {
             changed |= apply_rules_to_expr(then_expr, rules);
             changed |= apply_rules_to_expr(else_expr, rules);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= apply_rules_to_expr(arg, rules);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= apply_rules_to_expr(base, rules);
             changed |= apply_rules_to_expr(index, rules);
         }

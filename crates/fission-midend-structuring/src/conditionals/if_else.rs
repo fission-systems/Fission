@@ -3,8 +3,8 @@
 use super::{forward_join_idx_from_address, shared_forward_linear_exit};
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator};
-use fission_midend_core::ir::{HirStmt, MlilPreviewError};
-use fission_midend_core::negate_expr;
+use fission_midend_core::ir::{DirStmt, MlilPreviewError};
+use fission_midend_core::util_dir::negate_expr;
 use crate::HashSet;
 
 /// Follow a linear single-predecessor chain to a Return within `[start, follow)`.
@@ -12,8 +12,8 @@ pub fn try_lower_return_chain_arm(
     host: &mut impl StructuringHost,
     start_idx: usize,
     follow_idx: usize,
-) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
-    let mut body: Vec<HirStmt> = Vec::new();
+) -> Result<Option<(Vec<DirStmt>, usize)>, MlilPreviewError> {
+    let mut body: Vec<DirStmt> = Vec::new();
     let mut visited: HashSet<usize> = HashSet::default();
     let mut idx = start_idx;
     loop {
@@ -23,7 +23,7 @@ pub fn try_lower_return_chain_arm(
         body.extend(host.lower_block_stmts(idx)?);
         match host.lower_block_terminator(idx)? {
             LoweredTerminator::Return(expr) => {
-                body.push(HirStmt::Return(expr));
+                body.push(DirStmt::Return(expr));
                 return Ok(Some((body, follow_idx)));
             }
             LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
@@ -50,7 +50,7 @@ pub fn try_lower_return_chain_arm(
 pub fn try_lower_if_else(
     host: &mut impl StructuringHost,
     idx: usize,
-) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
     let cond_prefix = host.lower_block_stmts(idx)?;
     if idx + 2 >= host.block_count() {
         return Ok(None);
@@ -96,7 +96,7 @@ pub fn try_lower_if_else(
         LinearExit::Join(join_idx) => join_idx,
         LinearExit::Return | LinearExit::End => then_skip.max(else_skip),
     };
-    let stmt = HirStmt::If {
+    let stmt = DirStmt::If {
         cond,
         then_body,
         else_body,
@@ -106,7 +106,7 @@ pub fn try_lower_if_else(
     } else {
         let mut wrapped = cond_prefix;
         wrapped.push(stmt);
-        Ok(Some((HirStmt::Block(wrapped), skip_to)))
+        Ok(Some((DirStmt::Block(wrapped), skip_to)))
     }
 }
 
@@ -115,7 +115,7 @@ pub fn try_reduce_if_else_with_follow(
     host: &mut impl StructuringHost,
     idx: usize,
     follow: Option<usize>,
-) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
     let Some(follow_idx) = follow else {
         return Ok(None);
     };
@@ -174,7 +174,7 @@ pub fn try_reduce_if_else_with_follow(
         },
     };
 
-    let stmt = HirStmt::If {
+    let stmt = DirStmt::If {
         cond,
         then_body,
         else_body,
@@ -184,6 +184,6 @@ pub fn try_reduce_if_else_with_follow(
     } else {
         let mut wrapped = cond_prefix;
         wrapped.push(stmt);
-        Ok(Some((HirStmt::Block(wrapped), follow_idx)))
+        Ok(Some((DirStmt::Block(wrapped), follow_idx)))
     }
 }

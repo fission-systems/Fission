@@ -1,6 +1,8 @@
 use super::*;
 use crate::midend::abstract_location::AbstractStackSlot;
-use crate::midend::var_rename::{rename_vars_in_stmts, rewrite_field_access_names_in_stmts};
+use fission_midend_core::util::var_rename::{
+    rename_vars_in_stmts, rewrite_field_access_names_in_stmts,
+};
 use tracing::trace_span;
 
 pub(super) struct StackAliasCollector {

@@ -60,7 +60,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn guarded_tail_trace_emit_snapshot(
         prefix: &str,
-        stmts: &[HirStmt],
+        stmts: &[DirStmt],
         max_lines: usize,
     ) {
         let take_n = stmts.len().min(max_lines.max(1));
@@ -97,8 +97,8 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn classify_must_emit_label_rejection(
-        _body: &[HirStmt],
-        _middle: &[HirStmt],
+        _body: &[DirStmt],
+        _middle: &[DirStmt],
         _if_idx: usize,
         _label_idx: usize,
         _label: &str,
@@ -337,12 +337,12 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(crate) fn promote_single_entry_guarded_tail_regions(
         &mut self,
-        body: &mut Vec<HirStmt>,
+        body: &mut Vec<DirStmt>,
     ) -> bool {
         fission_midend_structuring::promote_single_entry_guarded_tail_regions(self, body)
     }
 
-    pub(crate) fn discover_guarded_tail_candidates(&mut self, body: &[HirStmt]) {
+    pub(crate) fn discover_guarded_tail_candidates(&mut self, body: &[DirStmt]) {
         fission_midend_structuring::discover_guarded_tail_candidates(self, body)
     }
 
@@ -374,32 +374,32 @@ impl<'a> PreviewBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::midend::{HirExpr, HirStmt, HirUnaryOp, NirType};
+    use crate::midend::{DirExpr, DirStmt, DirUnaryOp, NirType};
 
     #[test]
     fn must_emit_label_internalizes_same_guard_family_nested_before_owner() {
         let body = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("join".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("join".to_string())],
+                then_body: vec![DirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Goto("join".to_string()),
-            HirStmt::Label("join".to_string()),
-            HirStmt::Goto("end".to_string()),
-            HirStmt::Label("end".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Goto("join".to_string()),
+            DirStmt::Label("join".to_string()),
+            DirStmt::Goto("end".to_string()),
+            DirStmt::Label("end".to_string()),
+            DirStmt::Return(None),
         ];
-        let middle = vec![HirStmt::Goto("join".to_string())];
+        let middle = vec![DirStmt::Goto("join".to_string())];
 
         let rejection =
             PreviewBuilder::classify_must_emit_label_rejection(&body, &middle, 1, 3, "join", 1, 1);
@@ -410,27 +410,27 @@ mod tests {
     #[test]
     fn must_emit_label_rejects_unrelated_nested_before_owner() {
         let body = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("outer".to_string()),
-                then_body: vec![HirStmt::Goto("join".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("outer".to_string()),
+                then_body: vec![DirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("join".to_string())],
+                then_body: vec![DirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Goto("join".to_string()),
-            HirStmt::Label("join".to_string()),
-            HirStmt::Goto("end".to_string()),
-            HirStmt::Label("end".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Goto("join".to_string()),
+            DirStmt::Label("join".to_string()),
+            DirStmt::Goto("end".to_string()),
+            DirStmt::Label("end".to_string()),
+            DirStmt::Return(None),
         ];
-        let middle = vec![HirStmt::Goto("join".to_string())];
+        let middle = vec![DirStmt::Goto("join".to_string())];
 
         let rejection =
             PreviewBuilder::classify_must_emit_label_rejection(&body, &middle, 1, 3, "join", 1, 1);

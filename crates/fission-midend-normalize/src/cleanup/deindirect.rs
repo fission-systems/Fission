@@ -35,28 +35,28 @@ use crate::HashMap;
 /// Traverse and statically resolve indirect calls in a function.
 ///
 /// Returns `true` if any indirect calls were successfully rewritten to direct calls.
-pub fn apply_deindirect_pass(func: &mut HirFunction) -> bool {
+pub fn apply_deindirect_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
 
     // 1. Gather all local variable initializers representing constants or global symbol addresses.
     // This allows resolving variables whose values are established at local definition sites.
-    let mut const_initializers = HashMap::<String, HirExpr>::default();
+    let mut const_initializers = HashMap::<String, DirExpr>::default();
     for local in &func.locals {
         if let Some(initializer) = &local.initializer {
             match initializer {
-                HirExpr::Const(val, ty) => {
-                    const_initializers.insert(local.name.clone(), HirExpr::Const(*val, ty.clone()));
+                DirExpr::Const(val, ty) => {
+                    const_initializers.insert(local.name.clone(), DirExpr::Const(*val, ty.clone()));
                 }
-                HirExpr::Cast { expr, .. } => {
-                    if let HirExpr::Const(val, ty) = expr.as_ref() {
+                DirExpr::Cast { expr, .. } => {
+                    if let DirExpr::Const(val, ty) = expr.as_ref() {
                         const_initializers
-                            .insert(local.name.clone(), HirExpr::Const(*val, ty.clone()));
+                            .insert(local.name.clone(), DirExpr::Const(*val, ty.clone()));
                     }
                 }
-                HirExpr::AddressOfGlobal(global_name) => {
+                DirExpr::AddressOfGlobal(global_name) => {
                     const_initializers.insert(
                         local.name.clone(),
-                        HirExpr::AddressOfGlobal(global_name.clone()),
+                        DirExpr::AddressOfGlobal(global_name.clone()),
                     );
                 }
                 _ => {}
@@ -81,28 +81,28 @@ pub fn apply_deindirect_pass(func: &mut HirFunction) -> bool {
 }
 
 fn deindirect_in_stmt(
-    stmt: &mut HirStmt,
-    initializers: &HashMap<String, HirExpr>,
+    stmt: &mut DirStmt,
+    initializers: &HashMap<String, DirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             changed |= deindirect_in_lvalue(lhs, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(rhs, initializers, addr_to_symbol);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             changed |= deindirect_in_expr(va_list, initializers, addr_to_symbol);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             changed |= deindirect_in_expr(expr, initializers, addr_to_symbol);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             for s in body.iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             update,
             cond,
@@ -121,7 +121,7 @@ fn deindirect_in_stmt(
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -134,7 +134,7 @@ fn deindirect_in_stmt(
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -155,44 +155,44 @@ fn deindirect_in_stmt(
 }
 
 fn deindirect_in_lvalue(
-    lhs: &mut HirLValue,
-    initializers: &HashMap<String, HirExpr>,
+    lhs: &mut DirLValue,
+    initializers: &HashMap<String, DirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> bool {
     match lhs {
-        HirLValue::Var(_) => false,
-        HirLValue::Deref { ptr, .. } => deindirect_in_expr(ptr, initializers, addr_to_symbol),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(_) => false,
+        DirLValue::Deref { ptr, .. } => deindirect_in_expr(ptr, initializers, addr_to_symbol),
+        DirLValue::Index { base, index, .. } => {
             let mut changed = deindirect_in_expr(base, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(index, initializers, addr_to_symbol);
             changed
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             deindirect_in_expr(base, initializers, addr_to_symbol)
         }
     }
 }
 
 fn deindirect_in_expr(
-    expr: &mut HirExpr,
-    initializers: &HashMap<String, HirExpr>,
+    expr: &mut DirExpr,
+    initializers: &HashMap<String, DirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> bool {
     let mut changed = false;
 
     // 1. Process sub-expressions first to normalize targets nested in complexes.
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             changed |= deindirect_in_expr(inner, initializers, addr_to_symbol);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= deindirect_in_expr(lhs, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(rhs, initializers, addr_to_symbol);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -202,33 +202,33 @@ fn deindirect_in_expr(
             changed |= deindirect_in_expr(then_expr, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(else_expr, initializers, addr_to_symbol);
         }
-        HirExpr::PtrOffset { base, .. } => {
+        DirExpr::PtrOffset { base, .. } => {
             changed |= deindirect_in_expr(base, initializers, addr_to_symbol);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= deindirect_in_expr(base, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(index, initializers, addr_to_symbol);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args.iter_mut() {
                 changed |= deindirect_in_expr(arg, initializers, addr_to_symbol);
             }
         }
-        HirExpr::Load { ptr, .. } => {
+        DirExpr::Load { ptr, .. } => {
             changed |= deindirect_in_expr(ptr, initializers, addr_to_symbol);
         }
         _ => {}
     }
 
     // 2. Try to resolve __fission_callind_opaque in the current expression.
-    if let HirExpr::Call { target, args, ty } = expr {
+    if let DirExpr::Call { target, args, ty } = expr {
         if target == "__fission_callind_opaque" && !args.is_empty() {
             let fn_ptr = &args[0];
             if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol)
             {
                 // Found a static direct target symbol. Re-write the call!
                 let remaining_args = args[1..].to_vec();
-                *expr = HirExpr::Call {
+                *expr = DirExpr::Call {
                     target: resolved_symbol,
                     args: remaining_args,
                     ty: ty.clone(),
@@ -242,13 +242,13 @@ fn deindirect_in_expr(
 }
 
 fn resolve_call_target(
-    fn_ptr: &HirExpr,
-    initializers: &HashMap<String, HirExpr>,
+    fn_ptr: &DirExpr,
+    initializers: &HashMap<String, DirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> Option<String> {
     match fn_ptr {
         // Direct constant address.
-        HirExpr::Const(addr, _) => {
+        DirExpr::Const(addr, _) => {
             let target_addr = *addr as u64;
             if let Some(symbol) = addr_to_symbol.get(&target_addr) {
                 return Some(symbol.clone());
@@ -258,18 +258,18 @@ fn resolve_call_target(
             }
         }
         // Pointer cast const.
-        HirExpr::Cast { expr: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. } => {
             return resolve_call_target(inner, initializers, addr_to_symbol);
         }
         // Direct global symbol.
-        HirExpr::AddressOfGlobal(symbol_name) => {
+        DirExpr::AddressOfGlobal(symbol_name) => {
             return Some(symbol_name.clone());
         }
         // Load through a known IAT slot address: *(IAT_addr).
         // This is the pattern emitted by x86-64 Sleigh for `CALL qword ptr [IAT_addr]`
         // where the IAT slot address is a statically known constant.
-        HirExpr::Load { ptr, .. } => {
-            if let HirExpr::Const(iat_addr, _) = ptr.as_ref() {
+        DirExpr::Load { ptr, .. } => {
+            if let DirExpr::Const(iat_addr, _) = ptr.as_ref() {
                 let slot_addr = *iat_addr as u64;
                 if let Some(symbol) = addr_to_symbol.get(&slot_addr) {
                     return Some(symbol.clone());
@@ -277,9 +277,9 @@ fn resolve_call_target(
             }
         }
         // Local variable reference, trace to its definition initializer.
-        HirExpr::Var(var_name) => {
+        DirExpr::Var(var_name) => {
             if let Some(init_expr) = initializers.get(var_name) {
-                if let HirExpr::Var(next_var) = init_expr {
+                if let DirExpr::Var(next_var) = init_expr {
                     if next_var == var_name {
                         return None;
                     }

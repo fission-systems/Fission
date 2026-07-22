@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-pub fn apply_switch_norm_pass(func: &mut HirFunction) -> bool {
+pub fn apply_switch_norm_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
     if process_statement_list(&mut func.body) {
         changed = true;
@@ -8,31 +8,31 @@ pub fn apply_switch_norm_pass(func: &mut HirFunction) -> bool {
     changed
 }
 
-fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
+fn process_statement_list(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
 
     // 1. Recurse into nested blocks first (bottom-up)
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 changed |= process_statement_list(body);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
-                    if let HirStmt::Block(init_body) = init_stmt.as_mut() {
+                    if let DirStmt::Block(init_body) = init_stmt.as_mut() {
                         changed |= process_statement_list(init_body);
                     }
                 }
                 if let Some(update_stmt) = update {
-                    if let HirStmt::Block(update_body) = update_stmt.as_mut() {
+                    if let DirStmt::Block(update_body) = update_stmt.as_mut() {
                         changed |= process_statement_list(update_body);
                     }
                 }
                 changed |= process_statement_list(body);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -40,7 +40,7 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
                 changed |= process_statement_list(then_body);
                 changed |= process_statement_list(else_body);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= process_statement_list(&mut case.body);
                 }
@@ -53,7 +53,7 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
     // 2. Process switch guard folding at the current level
     let mut i = 0;
     while i < stmts.len() {
-        if let HirStmt::If {
+        if let DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -76,7 +76,7 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
                                 } else {
                                     sw_default.to_vec()
                                 };
-                                stmts[i] = HirStmt::Switch {
+                                stmts[i] = DirStmt::Switch {
                                     expr: sw_expr.clone(),
                                     cases: sw_cases.to_vec(),
                                     default: new_default,
@@ -96,7 +96,7 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
                                 } else {
                                     sw_default.to_vec()
                                 };
-                                stmts[i] = HirStmt::Switch {
+                                stmts[i] = DirStmt::Switch {
                                     expr: sw_expr.clone(),
                                     cases: sw_cases.to_vec(),
                                     default: new_default,
@@ -115,31 +115,31 @@ fn process_statement_list(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn strip_casts(expr: &HirExpr) -> &HirExpr {
+fn strip_casts(expr: &DirExpr) -> &DirExpr {
     match expr {
-        HirExpr::Cast { expr: inner, .. } => strip_casts(inner),
+        DirExpr::Cast { expr: inner, .. } => strip_casts(inner),
         _ => expr,
     }
 }
 
-fn get_var_name(expr: &HirExpr) -> Option<String> {
+fn get_var_name(expr: &DirExpr) -> Option<String> {
     match strip_casts(expr) {
-        HirExpr::Var(name) => Some(name.clone()),
+        DirExpr::Var(name) => Some(name.clone()),
         _ => None,
     }
 }
 
-fn get_single_switch(stmts: &[HirStmt]) -> Option<(&HirExpr, &[HirSwitchCase], &[HirStmt])> {
+fn get_single_switch(stmts: &[DirStmt]) -> Option<(&DirExpr, &[DirSwitchCase], &[DirStmt])> {
     let block = if stmts.len() == 1 {
         match &stmts[0] {
-            HirStmt::Block(inner) => inner.as_slice(),
+            DirStmt::Block(inner) => inner.as_slice(),
             _ => stmts,
         }
     } else {
         stmts
     };
     if block.len() == 1 {
-        if let HirStmt::Switch {
+        if let DirStmt::Switch {
             expr,
             cases,
             default,
@@ -151,66 +151,66 @@ fn get_single_switch(stmts: &[HirStmt]) -> Option<(&HirExpr, &[HirSwitchCase], &
     None
 }
 
-fn is_cmp_op(op: HirBinaryOp) -> bool {
+fn is_cmp_op(op: DirBinaryOp) -> bool {
     matches!(
         op,
-        HirBinaryOp::Lt
-            | HirBinaryOp::Le
-            | HirBinaryOp::Gt
-            | HirBinaryOp::Ge
-            | HirBinaryOp::SLt
-            | HirBinaryOp::SLe
-            | HirBinaryOp::SGt
-            | HirBinaryOp::SGe
-            | HirBinaryOp::Eq
-            | HirBinaryOp::Ne
+        DirBinaryOp::Lt
+            | DirBinaryOp::Le
+            | DirBinaryOp::Gt
+            | DirBinaryOp::Ge
+            | DirBinaryOp::SLt
+            | DirBinaryOp::SLe
+            | DirBinaryOp::SGt
+            | DirBinaryOp::SGe
+            | DirBinaryOp::Eq
+            | DirBinaryOp::Ne
     )
 }
 
-fn swap_cmp_op(op: HirBinaryOp) -> Option<HirBinaryOp> {
+fn swap_cmp_op(op: DirBinaryOp) -> Option<DirBinaryOp> {
     match op {
-        HirBinaryOp::Lt => Some(HirBinaryOp::Gt),
-        HirBinaryOp::Le => Some(HirBinaryOp::Ge),
-        HirBinaryOp::Gt => Some(HirBinaryOp::Lt),
-        HirBinaryOp::Ge => Some(HirBinaryOp::Le),
-        HirBinaryOp::SLt => Some(HirBinaryOp::SGt),
-        HirBinaryOp::SLe => Some(HirBinaryOp::SGe),
-        HirBinaryOp::SGt => Some(HirBinaryOp::SLt),
-        HirBinaryOp::SGe => Some(HirBinaryOp::SLe),
-        HirBinaryOp::Eq => Some(HirBinaryOp::Eq),
-        HirBinaryOp::Ne => Some(HirBinaryOp::Ne),
+        DirBinaryOp::Lt => Some(DirBinaryOp::Gt),
+        DirBinaryOp::Le => Some(DirBinaryOp::Ge),
+        DirBinaryOp::Gt => Some(DirBinaryOp::Lt),
+        DirBinaryOp::Ge => Some(DirBinaryOp::Le),
+        DirBinaryOp::SLt => Some(DirBinaryOp::SGt),
+        DirBinaryOp::SLe => Some(DirBinaryOp::SGe),
+        DirBinaryOp::SGt => Some(DirBinaryOp::SLt),
+        DirBinaryOp::SGe => Some(DirBinaryOp::SLe),
+        DirBinaryOp::Eq => Some(DirBinaryOp::Eq),
+        DirBinaryOp::Ne => Some(DirBinaryOp::Ne),
         _ => None,
     }
 }
 
-fn negate_cmp_op(op: HirBinaryOp) -> Option<HirBinaryOp> {
+fn negate_cmp_op(op: DirBinaryOp) -> Option<DirBinaryOp> {
     match op {
-        HirBinaryOp::Lt => Some(HirBinaryOp::Ge),
-        HirBinaryOp::Le => Some(HirBinaryOp::Gt),
-        HirBinaryOp::Gt => Some(HirBinaryOp::Le),
-        HirBinaryOp::Ge => Some(HirBinaryOp::Lt),
-        HirBinaryOp::SLt => Some(HirBinaryOp::SGe),
-        HirBinaryOp::SLe => Some(HirBinaryOp::SGt),
-        HirBinaryOp::SGt => Some(HirBinaryOp::SLe),
-        HirBinaryOp::SGe => Some(HirBinaryOp::SLt),
-        HirBinaryOp::Eq => Some(HirBinaryOp::Ne),
-        HirBinaryOp::Ne => Some(HirBinaryOp::Eq),
+        DirBinaryOp::Lt => Some(DirBinaryOp::Ge),
+        DirBinaryOp::Le => Some(DirBinaryOp::Gt),
+        DirBinaryOp::Gt => Some(DirBinaryOp::Le),
+        DirBinaryOp::Ge => Some(DirBinaryOp::Lt),
+        DirBinaryOp::SLt => Some(DirBinaryOp::SGe),
+        DirBinaryOp::SLe => Some(DirBinaryOp::SGt),
+        DirBinaryOp::SGt => Some(DirBinaryOp::SLe),
+        DirBinaryOp::SGe => Some(DirBinaryOp::SLt),
+        DirBinaryOp::Eq => Some(DirBinaryOp::Ne),
+        DirBinaryOp::Ne => Some(DirBinaryOp::Eq),
         _ => None,
     }
 }
 
-fn match_var_const_comparison(expr: &HirExpr) -> Option<(String, HirBinaryOp, i64)> {
+fn match_var_const_comparison(expr: &DirExpr) -> Option<(String, DirBinaryOp, i64)> {
     let expr = strip_casts(expr);
     match expr {
-        HirExpr::Binary { op, lhs, rhs, .. } => match (strip_casts(lhs), strip_casts(rhs)) {
-            (HirExpr::Var(name), HirExpr::Const(val, _)) => {
+        DirExpr::Binary { op, lhs, rhs, .. } => match (strip_casts(lhs), strip_casts(rhs)) {
+            (DirExpr::Var(name), DirExpr::Const(val, _)) => {
                 if is_cmp_op(*op) {
                     Some((name.clone(), *op, *val))
                 } else {
                     None
                 }
             }
-            (HirExpr::Const(val, _), HirExpr::Var(name)) => {
+            (DirExpr::Const(val, _), DirExpr::Var(name)) => {
                 if let Some(swapped_op) = swap_cmp_op(*op) {
                     Some((name.clone(), swapped_op, *val))
                 } else {
@@ -219,8 +219,8 @@ fn match_var_const_comparison(expr: &HirExpr) -> Option<(String, HirBinaryOp, i6
             }
             _ => None,
         },
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr: inner,
             ..
         } => {

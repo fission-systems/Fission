@@ -6,7 +6,7 @@ use crate::host::StructuringHost;
 use crate::linear_recovery::build_linear_sese_child_fallback;
 use crate::regions::{RegionKind, RegionProof};
 use crate::sese_driver::build_sese_region_body;
-use fission_midend_core::ir::{HirStmt, MlilPreviewError};
+use fission_midend_core::ir::{DirStmt, MlilPreviewError};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -179,7 +179,7 @@ pub fn build_sese_tree(mut regions: Vec<SeseRegion>, total_nodes: usize) -> Sese
 pub fn sese_structure_region(
     host: &mut impl StructuringHost,
     region: &SeseRegion,
-    results: &mut HashMap<(usize, usize), Vec<HirStmt>>,
+    results: &mut HashMap<(usize, usize), Vec<DirStmt>>,
     total_nodes: usize,
 ) -> Result<(), MlilPreviewError> {
     let is_root = region.entry == 0 && region.exit == total_nodes;
@@ -226,7 +226,7 @@ pub fn sese_structure_region(
 pub fn structure_cfg_via_sese(
     host: &mut impl StructuringHost,
     total_nodes: usize,
-) -> Result<Vec<HirStmt>, MlilPreviewError> {
+) -> Result<Vec<DirStmt>, MlilPreviewError> {
     let dom = host.cfg_facts().dominators().clone();
     let postdom = host.cfg_facts().postdominators().clone();
 

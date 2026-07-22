@@ -19,9 +19,9 @@ use crate::regions::{
     RegionKind, RegionLegality, RegionRejectionReason,
 };
 use fission_midend_core::ir::{
-    HirBinaryOp, HirExpr, HirLValue, HirStmt, HirUnaryOp, NirBindingOrigin, NirType,
+    DirBinaryOp, DirExpr, DirLValue, DirStmt, DirUnaryOp, NirBindingOrigin, NirType,
 };
-use fission_midend_core::{negate_expr, simplify_logical_expr, strip_casts};
+use fission_midend_core::util_dir::{negate_expr, simplify_logical_expr, strip_casts};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -30,13 +30,13 @@ pub fn guarded_tail_diag_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("FISSION_GUARDED_TAIL_DIAG").is_some())
 }
 
-pub fn apply_guarded_tail_replacement_read(stmt: &mut HirStmt, merge: &GuardedTailSyntheticMerge) {
-        let replacement_expr = HirExpr::Var(merge.replacement_target.clone());
+pub fn apply_guarded_tail_replacement_read(stmt: &mut DirStmt, merge: &GuardedTailSyntheticMerge) {
+        let replacement_expr = DirExpr::Var(merge.replacement_target.clone());
         replace_var_in_stmt(stmt, &merge.binding_name, &replacement_expr);
     }
 
 pub fn are_all_external_refs_top_level_goto(
-        full_body: &[HirStmt],
+        full_body: &[DirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
@@ -52,7 +52,7 @@ pub fn are_all_external_refs_top_level_goto(
     }
 
 pub fn build_nested_before_alias_ownership_proof(
-        full_body: &[HirStmt],
+        full_body: &[DirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
@@ -75,7 +75,7 @@ pub fn build_nested_before_alias_ownership_proof(
         let current_label_idx = full_body.iter().enumerate().find_map(|(idx, stmt)| {
             (idx >= segment_start
                 && idx < segment_end
-                && matches!(stmt, HirStmt::Label(candidate) if candidate == label))
+                && matches!(stmt, DirStmt::Label(candidate) if candidate == label))
             .then_some(idx)
         });
         let Some(current_label_idx) = current_label_idx else {
@@ -89,7 +89,7 @@ pub fn build_nested_before_alias_ownership_proof(
             };
         };
         let terminal_label_idx = (current_label_idx + 1..full_body.len())
-            .find(|idx| matches!(full_body[*idx], HirStmt::Label(_)));
+            .find(|idx| matches!(full_body[*idx], DirStmt::Label(_)));
         let Some(terminal_label_idx) = terminal_label_idx else {
             return AliasOwnershipProof {
                 label: label.to_string(),
@@ -184,7 +184,7 @@ pub fn build_nested_before_alias_ownership_proof(
     }
 
 pub fn classify_alias_ref_sites(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label_idx: usize,
         label: &str,
     ) -> (usize, usize, usize) {
@@ -202,7 +202,7 @@ pub fn classify_alias_ref_sites(
                 continue;
             }
             match stmt {
-                HirStmt::Goto(target) if target == label => top_level_before += 1,
+                DirStmt::Goto(target) if target == label => top_level_before += 1,
                 _ => nested_before += ref_count,
             }
         }
@@ -211,7 +211,7 @@ pub fn classify_alias_ref_sites(
     }
 
 pub fn classify_external_alias_ref_sites(
-        full_body: &[HirStmt],
+        full_body: &[DirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
@@ -232,7 +232,7 @@ pub fn classify_external_alias_ref_sites(
     }
 
 pub fn classify_external_alias_ref_sites_detailed(
-        full_body: &[HirStmt],
+        full_body: &[DirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
@@ -252,12 +252,12 @@ pub fn classify_external_alias_ref_sites_detailed(
             }
             if idx < segment_start {
                 match stmt {
-                    HirStmt::Goto(target) if target == label => top_level_before += 1,
+                    DirStmt::Goto(target) if target == label => top_level_before += 1,
                     _ => nested_before += ref_count,
                 }
             } else {
                 match stmt {
-                    HirStmt::Goto(target) if target == label => top_level_after += 1,
+                    DirStmt::Goto(target) if target == label => top_level_after += 1,
                     _ => nested_after += ref_count,
                 }
             }
@@ -272,7 +272,7 @@ pub fn classify_external_alias_ref_sites_detailed(
     }
 
 pub fn classify_nested_before_alias_witnesses(
-        full_body: &[HirStmt],
+        full_body: &[DirStmt],
         segment_start: usize,
         label: &str,
     ) -> Vec<NestedBeforeAliasWitness> {
@@ -284,7 +284,7 @@ pub fn classify_nested_before_alias_witnesses(
             if stmt_contains_goto_label(stmt, label) == 0 {
                 continue;
             }
-            if matches!(stmt, HirStmt::Goto(target) if target == label) {
+            if matches!(stmt, DirStmt::Goto(target) if target == label) {
                 continue;
             }
 
@@ -304,8 +304,8 @@ pub fn classify_nested_before_alias_witnesses(
         witnesses
     }
 
-pub fn classify_nested_before_nonlocal_payload(stmt: &HirStmt, label: &str) -> bool {
-        let HirStmt::If {
+pub fn classify_nested_before_nonlocal_payload(stmt: &DirStmt, label: &str) -> bool {
+        let DirStmt::If {
             then_body,
             else_body,
             ..
@@ -326,11 +326,11 @@ pub fn classify_nested_before_nonlocal_payload(stmt: &HirStmt, label: &str) -> b
     }
 
 pub fn classify_stmt_read_kind(
-        stmt: &HirStmt,
+        stmt: &DirStmt,
         name: &str,
     ) -> Option<GuardedTailReadKind> {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 if expr_contains_var(rhs, name) {
                     Some(GuardedTailReadKind::AssignRhs)
                 } else if lvalue_contains_var(lhs, name) {
@@ -339,29 +339,29 @@ pub fn classify_stmt_read_kind(
                     None
                 }
             }
-            HirStmt::Expr(HirExpr::Call { args, .. })
+            DirStmt::Expr(DirExpr::Call { args, .. })
                 if args.iter().any(|arg| expr_contains_var(arg, name)) =>
             {
                 Some(GuardedTailReadKind::CallArg)
             }
-            HirStmt::Expr(expr) if expr_contains_var(expr, name) => {
+            DirStmt::Expr(expr) if expr_contains_var(expr, name) => {
                 Some(GuardedTailReadKind::NestedExpr)
             }
-            HirStmt::Expr(_) => None,
-            HirStmt::If { cond, .. } if expr_contains_var(cond, name) => {
+            DirStmt::Expr(_) => None,
+            DirStmt::If { cond, .. } if expr_contains_var(cond, name) => {
                 Some(GuardedTailReadKind::ConditionExpr)
             }
-            HirStmt::Switch { expr, .. } if expr_contains_var(expr, name) => {
+            DirStmt::Switch { expr, .. } if expr_contains_var(expr, name) => {
                 Some(GuardedTailReadKind::SwitchSelector)
             }
-            HirStmt::Return(Some(expr)) if expr_contains_var(expr, name) => {
+            DirStmt::Return(Some(expr)) if expr_contains_var(expr, name) => {
                 Some(GuardedTailReadKind::ReturnExpr)
             }
-            HirStmt::Return(_) => None,
-            HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => stmts
+            DirStmt::Return(_) => None,
+            DirStmt::Block(stmts) | DirStmt::While { body: stmts, .. } => stmts
                 .iter()
                 .find_map(|stmt| classify_stmt_read_kind(stmt, name)),
-            HirStmt::DoWhile { body, cond } => body
+            DirStmt::DoWhile { body, cond } => body
                 .iter()
                 .find_map(|stmt| classify_stmt_read_kind(stmt, name))
                 .or_else(|| {
@@ -371,12 +371,12 @@ pub fn classify_stmt_read_kind(
                         None
                     }
                 }),
-            HirStmt::Switch { cases, default, .. } => cases
+            DirStmt::Switch { cases, default, .. } => cases
                 .iter()
                 .flat_map(|case| case.body.iter())
                 .chain(default.iter())
                 .find_map(|stmt| classify_stmt_read_kind(stmt, name)),
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -384,7 +384,7 @@ pub fn classify_stmt_read_kind(
                 .iter()
                 .chain(else_body.iter())
                 .find_map(|stmt| classify_stmt_read_kind(stmt, name)),
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -406,18 +406,18 @@ pub fn classify_stmt_read_kind(
                     body.iter()
                         .find_map(|stmt| classify_stmt_read_kind(stmt, name))
                 }),
-            HirStmt::VaStart { va_list, .. } if expr_contains_var(va_list, name) => {
+            DirStmt::VaStart { va_list, .. } if expr_contains_var(va_list, name) => {
                 Some(GuardedTailReadKind::NestedExpr)
             }
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Break
-            | HirStmt::Continue
-            | HirStmt::VaStart { .. } => None,
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Break
+            | DirStmt::Continue
+            | DirStmt::VaStart { .. } => None,
         }
     }
 
-pub fn collapse_duplicate_top_level_guard_ladder(stmts: &mut Vec<HirStmt>) -> usize {
+pub fn collapse_duplicate_top_level_guard_ladder(stmts: &mut Vec<DirStmt>) -> usize {
         let mut removed = 0usize;
         let mut i = 0usize;
 
@@ -432,7 +432,7 @@ pub fn collapse_duplicate_top_level_guard_ladder(stmts: &mut Vec<HirStmt>) -> us
             let mut j = i + 1;
             while j < stmts.len() {
                 match &stmts[j] {
-                    HirStmt::Block(body) if body.is_empty() => j += 1,
+                    DirStmt::Block(body) if body.is_empty() => j += 1,
                     _ => break,
                 }
             }
@@ -460,14 +460,14 @@ pub fn collapse_duplicate_top_level_guard_ladder(stmts: &mut Vec<HirStmt>) -> us
     }
 
 pub fn collapse_top_level_sink_to_return_goto_chain(
-        stmts: &mut [HirStmt],
-        full_body: &[HirStmt],
+        stmts: &mut [DirStmt],
+        full_body: &[DirStmt],
     ) -> usize {
         let mut rewritten = 0usize;
 
         for idx in 0..stmts.len() {
             let target = match &stmts[idx] {
-                HirStmt::Goto(target) => target.clone(),
+                DirStmt::Goto(target) => target.clone(),
                 _ => continue,
             };
 
@@ -483,13 +483,13 @@ pub fn collapse_top_level_sink_to_return_goto_chain(
                 continue;
             }
 
-            let Some(HirStmt::Return(ret)) =
+            let Some(DirStmt::Return(ret)) =
                 resolve_terminal_tail_exit_stmt(full_body, &target)
             else {
                 continue;
             };
 
-            stmts[idx] = HirStmt::Return(ret);
+            stmts[idx] = DirStmt::Return(ret);
             rewritten += 1;
         }
 
@@ -497,8 +497,8 @@ pub fn collapse_top_level_sink_to_return_goto_chain(
     }
 
 pub fn collect_guarded_tail_candidate_reads(
-        body: &[HirStmt],
-        middle: &[HirStmt],
+        body: &[DirStmt],
+        middle: &[DirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
@@ -529,14 +529,14 @@ pub fn collect_guarded_tail_candidate_reads(
     }
 
 pub fn condition_matches_assumption(
-        expr: &HirExpr,
+        expr: &DirExpr,
         assumption: &ConditionAssumption,
     ) -> Option<bool> {
         if expr == &assumption.expr {
             return Some(assumption.value);
         }
-        if let HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        if let DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr: inner,
             ..
         } = expr
@@ -544,8 +544,8 @@ pub fn condition_matches_assumption(
         {
             return Some(!assumption.value);
         }
-        if let HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        if let DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr: inner,
             ..
         } = &assumption.expr
@@ -556,12 +556,12 @@ pub fn condition_matches_assumption(
         None
     }
 
-pub fn count_goto_refs_in_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
+pub fn count_goto_refs_in_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>) {
         match stmt {
-            HirStmt::Goto(label) => {
+            DirStmt::Goto(label) => {
                 *out.entry(label.clone()).or_insert(0) += 1;
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -573,15 +573,15 @@ pub fn count_goto_refs_in_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>)
                     count_goto_refs_in_stmt(nested, out);
                 }
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 for nested in body {
                     count_goto_refs_in_stmt(nested, out);
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     for nested in &case.body {
                         count_goto_refs_in_stmt(nested, out);
@@ -591,19 +591,19 @@ pub fn count_goto_refs_in_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>)
                     count_goto_refs_in_stmt(nested, out);
                 }
             }
-            HirStmt::Assign { .. }
-            | HirStmt::VaStart { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::Label(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Assign { .. }
+            | DirStmt::VaStart { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::Label(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
 
 pub fn count_sink_equivalent_top_level_after_label_refs(
-        body: &[HirStmt],
-        full_body: &[HirStmt],
+        body: &[DirStmt],
+        full_body: &[DirStmt],
         label: &str,
         label_idx: usize,
         top_level_after_positions: &[usize],
@@ -625,7 +625,7 @@ pub fn count_sink_equivalent_top_level_after_label_refs(
     }
 
 pub fn count_top_level_goto_refs_in_range(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         start_exclusive: usize,
         end_exclusive: usize,
@@ -635,12 +635,12 @@ pub fn count_top_level_goto_refs_in_range(
         }
         body[start_exclusive + 1..end_exclusive]
             .iter()
-            .filter(|stmt| matches!(stmt, HirStmt::Goto(target) if target == label))
+            .filter(|stmt| matches!(stmt, DirStmt::Goto(target) if target == label))
             .count()
     }
 
 pub fn effective_middle_refs_for_promotion(
-        middle: &[HirStmt],
+        middle: &[DirStmt],
         label: &str,
         middle_refs: usize,
     ) -> usize {
@@ -653,7 +653,7 @@ pub fn effective_middle_refs_for_promotion(
     }
 
 pub fn evaluate_condition_assumptions(
-        expr: &HirExpr,
+        expr: &DirExpr,
         assumptions: &[ConditionAssumption],
     ) -> Option<bool> {
         assumptions
@@ -661,22 +661,22 @@ pub fn evaluate_condition_assumptions(
             .find_map(|assumption| condition_matches_assumption(expr, assumption))
     }
 
-pub fn expr_is_pure_value(expr: &HirExpr) -> bool {
+pub fn expr_is_pure_value(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => true,
-            HirExpr::Cast { expr, .. } => expr_is_pure_value(expr),
-            HirExpr::Unary { expr, .. } => expr_is_pure_value(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => true,
+            DirExpr::Cast { expr, .. } => expr_is_pure_value(expr),
+            DirExpr::Unary { expr, .. } => expr_is_pure_value(expr),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 expr_is_pure_value(lhs) && expr_is_pure_value(rhs)
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 expr_is_pure_value(base)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 expr_is_pure_value(base) && expr_is_pure_value(index)
             }
-            HirExpr::AggregateCopy { src, .. } => expr_is_pure_value(src),
-            HirExpr::Select {
+            DirExpr::AggregateCopy { src, .. } => expr_is_pure_value(src),
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -686,17 +686,17 @@ pub fn expr_is_pure_value(expr: &HirExpr) -> bool {
                     && expr_is_pure_value(then_expr)
                     && expr_is_pure_value(else_expr)
             }
-            HirExpr::Call { target, args, .. } => {
+            DirExpr::Call { target, args, .. } => {
                 guarded_tail_call_target_is_known_pure_helper(target)
                     && args.iter().all(expr_is_pure_value)
             }
-            HirExpr::Load { .. } => false,
+            DirExpr::Load { .. } => false,
         }
     }
 
 pub fn factor_duplicate_top_level_guard_cluster_with_trivial_gap(
-        stmts: &mut Vec<HirStmt>,
-        full_body: &[HirStmt],
+        stmts: &mut Vec<DirStmt>,
+        full_body: &[DirStmt],
     ) -> usize {
         let mut removed = 0usize;
         let mut i = 0usize;
@@ -737,57 +737,57 @@ pub fn factor_duplicate_top_level_guard_cluster_with_trivial_gap(
     }
 
 pub fn find_guarded_tail_preexisting_source(
-        body: &[HirStmt],
+        body: &[DirStmt],
         if_idx: usize,
         binding_name: &str,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         for stmt in body[..if_idx].iter().rev() {
             match stmt {
-                HirStmt::Assign {
-                    lhs: HirLValue::Var(name),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var(name),
                     rhs,
                 } if name == binding_name && expr_is_pure_value(rhs) => {
                     return Some(rhs.clone());
                 }
-                HirStmt::Return(_)
-                | HirStmt::Break
-                | HirStmt::Continue
-                | HirStmt::If { .. }
-                | HirStmt::Switch { .. }
-                | HirStmt::While { .. }
-                | HirStmt::DoWhile { .. }
-                | HirStmt::For { .. } => return None,
-                HirStmt::Label(_)
-                | HirStmt::Goto(_)
-                | HirStmt::Assign { .. }
-                | HirStmt::VaStart { .. }
-                | HirStmt::Expr(_)
-                | HirStmt::Block(_) => {}
+                DirStmt::Return(_)
+                | DirStmt::Break
+                | DirStmt::Continue
+                | DirStmt::If { .. }
+                | DirStmt::Switch { .. }
+                | DirStmt::While { .. }
+                | DirStmt::DoWhile { .. }
+                | DirStmt::For { .. } => return None,
+                DirStmt::Label(_)
+                | DirStmt::Goto(_)
+                | DirStmt::Assign { .. }
+                | DirStmt::VaStart { .. }
+                | DirStmt::Expr(_)
+                | DirStmt::Block(_) => {}
             }
         }
         None
     }
 
 pub fn find_top_level_label_after(
-        body: &[HirStmt],
+        body: &[DirStmt],
         start_idx: usize,
         label: &str,
     ) -> Option<usize> {
         (start_idx + 1..body.len()).find(
-            |pos| matches!(body.get(*pos), Some(HirStmt::Label(candidate)) if candidate == label),
+            |pos| matches!(body.get(*pos), Some(DirStmt::Label(candidate)) if candidate == label),
         )
     }
 
-pub fn flatten_guarded_tail_segment(segment: &[HirStmt], out: &mut Vec<HirStmt>) {
+pub fn flatten_guarded_tail_segment(segment: &[DirStmt], out: &mut Vec<DirStmt>) {
         for stmt in segment {
             match stmt {
-                HirStmt::Block(body) => flatten_guarded_tail_segment(body, out),
+                DirStmt::Block(body) => flatten_guarded_tail_segment(body, out),
                 other => out.push(other.clone()),
             }
         }
     }
 
-pub fn goto_ref_counts(body: &[HirStmt]) -> HashMap<String, usize> {
+pub fn goto_ref_counts(body: &[DirStmt]) -> HashMap<String, usize> {
         let mut out = HashMap::default();
         for stmt in body {
             count_goto_refs_in_stmt(stmt, &mut out);
@@ -795,20 +795,20 @@ pub fn goto_ref_counts(body: &[HirStmt]) -> HashMap<String, usize> {
         out
     }
 
-pub fn guarded_tail_middle_is_execution_safe(middle: &[HirStmt], label: &str) -> bool {
+pub fn guarded_tail_middle_is_execution_safe(middle: &[DirStmt], label: &str) -> bool {
         middle
             .iter()
             .all(|stmt| guarded_tail_stmt_is_execution_safe(stmt, label))
     }
 
-pub fn guarded_tail_stmt_is_execution_safe(stmt: &HirStmt, label: &str) -> bool {
+pub fn guarded_tail_stmt_is_execution_safe(stmt: &DirStmt, label: &str) -> bool {
         match stmt {
-            HirStmt::Assign { .. } => true,
-            HirStmt::VaStart { .. } => true,
-            HirStmt::Expr(_) => true,
-            HirStmt::Goto(_) => true,
-            HirStmt::Block(body) => guarded_tail_middle_is_execution_safe(body, label),
-            HirStmt::If {
+            DirStmt::Assign { .. } => true,
+            DirStmt::VaStart { .. } => true,
+            DirStmt::Expr(_) => true,
+            DirStmt::Goto(_) => true,
+            DirStmt::Block(body) => guarded_tail_middle_is_execution_safe(body, label),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -816,19 +816,19 @@ pub fn guarded_tail_stmt_is_execution_safe(stmt: &HirStmt, label: &str) -> bool 
                 guarded_tail_middle_is_execution_safe(then_body, label)
                     && guarded_tail_middle_is_execution_safe(else_body, label)
             }
-            HirStmt::Label(_)
-            | HirStmt::Switch { .. }
-            | HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::For { .. }
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => true,
+            DirStmt::Label(_)
+            | DirStmt::Switch { .. }
+            | DirStmt::While { .. }
+            | DirStmt::DoWhile { .. }
+            | DirStmt::For { .. }
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => true,
         }
     }
 
 pub fn inferred_alias_forward_target_with_after_label_refs(
-        segment: &[HirStmt],
+        segment: &[DirStmt],
         label: &str,
     ) -> Option<String> {
         let mut inferred_target = None::<String>;
@@ -842,7 +842,7 @@ pub fn inferred_alias_forward_target_with_after_label_refs(
                 continue;
             }
 
-            let HirStmt::Goto(target) = stmt else {
+            let DirStmt::Goto(target) = stmt else {
                 return None;
             };
             if target == label {
@@ -868,10 +868,10 @@ pub fn inferred_alias_forward_target_with_after_label_refs(
     }
 
 pub fn internalized_guard_family_nested_before_refs_for_join_owner(
-        body: &[HirStmt],
+        body: &[DirStmt],
         if_idx: usize,
         label: &str,
-        candidate_cond: &HirExpr,
+        candidate_cond: &DirExpr,
     ) -> usize {
         body.iter()
             .take(if_idx)
@@ -884,14 +884,14 @@ pub fn internalized_guard_family_nested_before_refs_for_join_owner(
             .count()
     }
 
-pub fn is_local_alias_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
+pub fn is_local_alias_forward_segment(segment: &[DirStmt], next_label: &str) -> bool {
         let mut saw_forward_goto = false;
         for stmt in segment {
             if is_ignorable_discovery_stmt(stmt) {
                 continue;
             }
             match stmt {
-                HirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+                DirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
                     saw_forward_goto = true;
                 }
                 _ => return false,
@@ -901,13 +901,13 @@ pub fn is_local_alias_forward_segment(segment: &[HirStmt], next_label: &str) -> 
     }
 
 pub fn is_local_alias_forward_segment_with_after_label_refs(
-        segment: &[HirStmt],
+        segment: &[DirStmt],
         label: &str,
         next_label: &str,
     ) -> bool {
         let mut saw_forward_goto = false;
         for stmt in segment {
-            if matches!(stmt, HirStmt::Goto(target) if target == next_label) {
+            if matches!(stmt, DirStmt::Goto(target) if target == next_label) {
                 saw_forward_goto = true;
             }
             if !stmt_is_alias_forward_safe(stmt, label, next_label) {
@@ -918,7 +918,7 @@ pub fn is_local_alias_forward_segment_with_after_label_refs(
     }
 
 pub fn is_pure_multi_goto_gap_to_label(
-        body: &[HirStmt],
+        body: &[DirStmt],
         goto_positions: &[usize],
         label_idx: usize,
         label: &str,
@@ -932,12 +932,12 @@ pub fn is_pure_multi_goto_gap_to_label(
         body[start + 1..label_idx].iter().all(|stmt| {
             is_ignorable_discovery_stmt(stmt)
                 || stmt_is_pure_value_expr(stmt)
-                || matches!(stmt, HirStmt::Goto(target) if target == label)
+                || matches!(stmt, DirStmt::Goto(target) if target == label)
         })
     }
 
 pub fn is_trivial_join_forward_or_pure_segment(
-        segment: &[HirStmt],
+        segment: &[DirStmt],
         next_label: &str,
     ) -> bool {
         for stmt in segment {
@@ -945,21 +945,21 @@ pub fn is_trivial_join_forward_or_pure_segment(
                 continue;
             }
             match stmt {
-                HirStmt::Goto(label) if label == next_label => {}
+                DirStmt::Goto(label) if label == next_label => {}
                 _ => return false,
             }
         }
         true
     }
 
-pub fn is_trivial_join_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
+pub fn is_trivial_join_forward_segment(segment: &[DirStmt], next_label: &str) -> bool {
         let mut saw_forward_goto = false;
         for stmt in segment {
             if is_ignorable_discovery_stmt(stmt) {
                 continue;
             }
             match stmt {
-                HirStmt::Goto(label) if label == next_label => {
+                DirStmt::Goto(label) if label == next_label => {
                     saw_forward_goto = true;
                 }
                 _ => return false,
@@ -969,13 +969,13 @@ pub fn is_trivial_join_forward_segment(segment: &[HirStmt], next_label: &str) ->
     }
 
 pub fn local_after_label_ref_is_sink_equivalent(
-        body: &[HirStmt],
-        full_body: &[HirStmt],
+        body: &[DirStmt],
+        full_body: &[DirStmt],
         label: &str,
         label_idx: usize,
         after_label_pos: usize,
     ) -> bool {
-        let Some(HirStmt::Goto(target)) = body.get(after_label_pos) else {
+        let Some(DirStmt::Goto(target)) = body.get(after_label_pos) else {
             return false;
         };
         if after_label_pos <= label_idx || target != label {
@@ -985,14 +985,14 @@ pub fn local_after_label_ref_is_sink_equivalent(
             return false;
         }
 
-        let Some(HirStmt::Return(sink_return)) =
+        let Some(DirStmt::Return(sink_return)) =
             resolve_terminal_tail_exit_stmt(full_body, label)
         else {
             return false;
         };
 
         let next_label_idx = (after_label_pos + 1..body.len())
-            .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+            .find(|pos| matches!(body[*pos], DirStmt::Label(_)))
             .unwrap_or(body.len());
 
         body[after_label_pos + 1..next_label_idx]
@@ -1003,8 +1003,8 @@ pub fn local_after_label_ref_is_sink_equivalent(
     }
 
 pub fn local_forward_branch_target(
-        then_body: &[HirStmt],
-        else_body: &[HirStmt],
+        then_body: &[DirStmt],
+        else_body: &[DirStmt],
     ) -> Option<(String, bool)> {
         if let Some(label) = single_goto_target(then_body)
             && else_body.is_empty()
@@ -1019,25 +1019,25 @@ pub fn local_forward_branch_target(
         None
     }
 
-pub fn local_goto_positions_by_label(body: &[HirStmt]) -> HashMap<String, Vec<usize>> {
+pub fn local_goto_positions_by_label(body: &[DirStmt]) -> HashMap<String, Vec<usize>> {
         let mut refs = HashMap::default();
         for (idx, stmt) in body.iter().enumerate() {
-            if let HirStmt::Goto(label) = stmt {
+            if let DirStmt::Goto(label) = stmt {
                 refs.entry(label.clone()).or_insert_with(Vec::new).push(idx);
             }
         }
         refs
     }
 
-pub fn middle_is_join_label_only_glue(middle: &[HirStmt], label: &str) -> bool {
+pub fn middle_is_join_label_only_glue(middle: &[DirStmt], label: &str) -> bool {
         middle.iter().all(|stmt| {
             is_ignorable_discovery_stmt(stmt)
-                || matches!(stmt, HirStmt::Goto(target) if target == label)
+                || matches!(stmt, DirStmt::Goto(target) if target == label)
         })
     }
 
 pub fn outside_refs_are_elidable_next_flow(
-        body: &[HirStmt],
+        body: &[DirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
@@ -1053,7 +1053,7 @@ pub fn outside_refs_are_elidable_next_flow(
             }
             found = true;
             match stmt {
-                HirStmt::Goto(target) if target == label && idx < if_idx => {}
+                DirStmt::Goto(target) if target == label && idx < if_idx => {}
                 _ => return false,
             }
         }
@@ -1061,7 +1061,7 @@ pub fn outside_refs_are_elidable_next_flow(
     }
 
 pub fn outside_refs_preserve_forward_owner(
-        body: &[HirStmt],
+        body: &[DirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
@@ -1077,7 +1077,7 @@ pub fn outside_refs_preserve_forward_owner(
             }
             found = true;
             match stmt {
-                HirStmt::Goto(target) if target == label && idx < label_idx => {}
+                DirStmt::Goto(target) if target == label && idx < label_idx => {}
                 _ => return false,
             }
         }
@@ -1103,11 +1103,11 @@ pub fn resolve_alias_redirect(
     }
 
 pub fn resolve_guarded_tail_else_source(
-        body: &[HirStmt],
+        body: &[DirStmt],
         if_idx: usize,
         binding_name: &str,
         cache: &mut GuardedTailReplacementCache,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         if let Some(expr) = cache.else_sources.get(binding_name) {
             return Some(expr.clone());
         }
@@ -1119,9 +1119,9 @@ pub fn resolve_guarded_tail_else_source(
     }
 
 pub fn resolve_terminal_tail_exit_stmt(
-        body: &[HirStmt],
+        body: &[DirStmt],
         target_label: &str,
-    ) -> Option<HirStmt> {
+    ) -> Option<DirStmt> {
         let mut current = target_label.to_string();
         let mut seen = HashSet::default();
 
@@ -1142,14 +1142,14 @@ pub fn resolve_terminal_tail_exit_stmt(
 
             let label_idx = body
                 .iter()
-                .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &current))?;
+                .position(|stmt| matches!(stmt, DirStmt::Label(label) if label == &current))?;
             let next_label_idx = body[label_idx + 1..]
                 .iter()
-                .position(|stmt| matches!(stmt, HirStmt::Label(_)))
+                .position(|stmt| matches!(stmt, DirStmt::Label(_)))
                 .map(|offset| label_idx + 1 + offset)
                 .unwrap_or(body.len());
 
-            let mut terminal_return: Option<Option<HirExpr>> = None;
+            let mut terminal_return: Option<Option<DirExpr>> = None;
             let mut terminal_goto: Option<String> = None;
 
             for stmt in &body[label_idx + 1..next_label_idx] {
@@ -1165,36 +1165,36 @@ pub fn resolve_terminal_tail_exit_stmt(
                 }
 
                 match stmt {
-                    HirStmt::Return(ret) => {
+                    DirStmt::Return(ret) => {
                         if terminal_return.is_some() || terminal_goto.is_some() {
                             return None;
                         }
                         terminal_return = Some(ret.clone());
                     }
-                    HirStmt::Goto(next) => {
+                    DirStmt::Goto(next) => {
                         if terminal_return.is_some() || terminal_goto.is_some() {
                             return None;
                         }
                         terminal_goto = Some(next.clone());
                     }
                     // Keep nested/nonlocal control-flow crossing forbidden.
-                    HirStmt::Break
-                    | HirStmt::Continue
-                    | HirStmt::If { .. }
-                    | HirStmt::Switch { .. }
-                    | HirStmt::While { .. }
-                    | HirStmt::DoWhile { .. }
-                    | HirStmt::For { .. }
-                    | HirStmt::Block(_)
-                    | HirStmt::VaStart { .. }
-                    | HirStmt::Assign { .. }
-                    | HirStmt::Expr(_)
-                    | HirStmt::Label(_) => return None,
+                    DirStmt::Break
+                    | DirStmt::Continue
+                    | DirStmt::If { .. }
+                    | DirStmt::Switch { .. }
+                    | DirStmt::While { .. }
+                    | DirStmt::DoWhile { .. }
+                    | DirStmt::For { .. }
+                    | DirStmt::Block(_)
+                    | DirStmt::VaStart { .. }
+                    | DirStmt::Assign { .. }
+                    | DirStmt::Expr(_)
+                    | DirStmt::Label(_) => return None,
                 }
             }
 
             if let Some(ret) = terminal_return {
-                return Some(HirStmt::Return(ret));
+                return Some(DirStmt::Return(ret));
             }
             if let Some(next) = terminal_goto {
                 current = next;
@@ -1204,14 +1204,14 @@ pub fn resolve_terminal_tail_exit_stmt(
         }
     }
 
-pub fn rewrite_goto_label_in_stmt(stmt: &mut HirStmt, from: &str, to: &str) {
+pub fn rewrite_goto_label_in_stmt(stmt: &mut DirStmt, from: &str, to: &str) {
         match stmt {
-            HirStmt::Goto(label) => {
+            DirStmt::Goto(label) => {
                 if label == from {
                     *label = to.to_string();
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1223,15 +1223,15 @@ pub fn rewrite_goto_label_in_stmt(stmt: &mut HirStmt, from: &str, to: &str) {
                     rewrite_goto_label_in_stmt(nested, from, to);
                 }
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 for nested in body {
                     rewrite_goto_label_in_stmt(nested, from, to);
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     for nested in &mut case.body {
                         rewrite_goto_label_in_stmt(nested, from, to);
@@ -1241,24 +1241,24 @@ pub fn rewrite_goto_label_in_stmt(stmt: &mut HirStmt, from: &str, to: &str) {
                     rewrite_goto_label_in_stmt(nested, from, to);
                 }
             }
-            HirStmt::Assign { .. }
-            | HirStmt::VaStart { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::Label(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Assign { .. }
+            | DirStmt::VaStart { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::Label(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
 
-pub fn rewrite_goto_label_in_stmts(stmts: &mut [HirStmt], from: &str, to: &str) {
+pub fn rewrite_goto_label_in_stmts(stmts: &mut [DirStmt], from: &str, to: &str) {
         for stmt in stmts {
             rewrite_goto_label_in_stmt(stmt, from, to);
         }
     }
 
 pub fn rewrite_guarded_tail_sequence(
-        stmts: &[HirStmt],
+        stmts: &[DirStmt],
         join_label: &str,
         assumptions: &[ConditionAssumption],
     ) -> GuardedTailRewriteResult {
@@ -1266,14 +1266,14 @@ pub fn rewrite_guarded_tail_sequence(
         let mut idx = 0usize;
         while idx < stmts.len() {
             match &stmts[idx] {
-                HirStmt::Goto(target) if target == join_label => {
+                DirStmt::Goto(target) if target == join_label => {
                     return GuardedTailRewriteResult {
                         stmts: out,
                         exits_to_join: true,
                         unresolved_join_refs: 0,
                     };
                 }
-                HirStmt::If {
+                DirStmt::If {
                     cond,
                     then_body,
                     else_body,
@@ -1284,7 +1284,7 @@ pub fn rewrite_guarded_tail_sequence(
                         && let Some(label_pos) = (idx + 1..stmts.len()).find(|pos| {
                             matches!(
                                 stmts.get(*pos),
-                                Some(HirStmt::Label(candidate)) if candidate == &branch_label
+                                Some(DirStmt::Label(candidate)) if candidate == &branch_label
                             )
                         })
                     {
@@ -1344,7 +1344,7 @@ pub fn rewrite_guarded_tail_sequence(
                             )
                         };
 
-                        out.push(HirStmt::If {
+                        out.push(DirStmt::If {
                             cond: cond.clone(),
                             then_body: then_result,
                             else_body: else_result,
@@ -1409,7 +1409,7 @@ pub fn rewrite_guarded_tail_sequence(
                             assumptions,
                         );
                         if then_rewritten.exits_to_join && else_rewritten.exits_to_join {
-                            out.push(HirStmt::If {
+                            out.push(DirStmt::If {
                                 cond: cond.clone(),
                                 then_body: then_rewritten.stmts,
                                 else_body: else_rewritten.stmts,
@@ -1426,7 +1426,7 @@ pub fn rewrite_guarded_tail_sequence(
                         if then_rewritten.exits_to_join {
                             let mut continue_body = else_rewritten.stmts;
                             continue_body.extend(rest.stmts);
-                            out.push(HirStmt::If {
+                            out.push(DirStmt::If {
                                 cond: cond.clone(),
                                 then_body: then_rewritten.stmts,
                                 else_body: continue_body,
@@ -1434,7 +1434,7 @@ pub fn rewrite_guarded_tail_sequence(
                         } else {
                             let mut continue_body = then_rewritten.stmts;
                             continue_body.extend(rest.stmts);
-                            out.push(HirStmt::If {
+                            out.push(DirStmt::If {
                                 cond: cond.clone(),
                                 then_body: continue_body,
                                 else_body: else_rewritten.stmts,
@@ -1449,19 +1449,19 @@ pub fn rewrite_guarded_tail_sequence(
                         };
                     }
 
-                    out.push(HirStmt::If {
+                    out.push(DirStmt::If {
                         cond: cond.clone(),
                         then_body: then_rewritten.stmts,
                         else_body: else_rewritten.stmts,
                     });
                 }
-                HirStmt::Goto(target) => {
-                    out.push(HirStmt::Goto(target.clone()));
+                DirStmt::Goto(target) => {
+                    out.push(DirStmt::Goto(target.clone()));
                 }
-                HirStmt::Block(inner) => {
+                DirStmt::Block(inner) => {
                     let rewritten =
                         rewrite_guarded_tail_sequence(inner, join_label, assumptions);
-                    out.push(HirStmt::Block(rewritten.stmts));
+                    out.push(DirStmt::Block(rewritten.stmts));
                     if rewritten.exits_to_join {
                         return GuardedTailRewriteResult {
                             stmts: out,
@@ -1486,7 +1486,7 @@ pub fn rewrite_guarded_tail_sequence(
         }
     }
 
-pub fn statement_sequence_always_terminates(stmts: &[HirStmt]) -> bool {
+pub fn statement_sequence_always_terminates(stmts: &[DirStmt]) -> bool {
     for stmt in stmts {
         if stmt_always_terminates(stmt) {
             return true;
@@ -1495,11 +1495,11 @@ pub fn statement_sequence_always_terminates(stmts: &[HirStmt]) -> bool {
     false
 }
 
-pub fn stmt_always_terminates(stmt: &HirStmt) -> bool {
+pub fn stmt_always_terminates(stmt: &DirStmt) -> bool {
     match stmt {
-        HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue => true,
-        HirStmt::Block(inner) => statement_sequence_always_terminates(inner),
-        HirStmt::If {
+        DirStmt::Return(_) | DirStmt::Break | DirStmt::Continue => true,
+        DirStmt::Block(inner) => statement_sequence_always_terminates(inner),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -1507,7 +1507,7 @@ pub fn stmt_always_terminates(stmt: &HirStmt) -> bool {
             statement_sequence_always_terminates(then_body)
                 && statement_sequence_always_terminates(else_body)
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             cases
                 .iter()
                 .all(|case| statement_sequence_always_terminates(&case.body))
@@ -1517,10 +1517,10 @@ pub fn stmt_always_terminates(stmt: &HirStmt) -> bool {
     }
 }
 
-pub fn stmt_contains_goto_label(stmt: &HirStmt, label: &str) -> usize {
+pub fn stmt_contains_goto_label(stmt: &DirStmt, label: &str) -> usize {
         match stmt {
-            HirStmt::Goto(target) => usize::from(target == label),
-            HirStmt::If {
+            DirStmt::Goto(target) => usize::from(target == label),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1534,14 +1534,14 @@ pub fn stmt_contains_goto_label(stmt: &HirStmt, label: &str) -> usize {
                         .map(|stmt| stmt_contains_goto_label(stmt, label))
                         .sum::<usize>()
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => body
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => body
                 .iter()
                 .map(|stmt| stmt_contains_goto_label(stmt, label))
                 .sum(),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 cases
                     .iter()
                     .map(|case| {
@@ -1556,17 +1556,17 @@ pub fn stmt_contains_goto_label(stmt: &HirStmt, label: &str) -> usize {
                         .map(|stmt| stmt_contains_goto_label(stmt, label))
                         .sum::<usize>()
             }
-            HirStmt::Assign { .. }
-            | HirStmt::VaStart { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::Label(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => 0,
+            DirStmt::Assign { .. }
+            | DirStmt::VaStart { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::Label(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => 0,
         }
     }
 
-pub fn stmt_is_alias_forward_safe(stmt: &HirStmt, label: &str, next_label: &str) -> bool {
+pub fn stmt_is_alias_forward_safe(stmt: &DirStmt, label: &str, next_label: &str) -> bool {
         if is_ignorable_discovery_stmt(stmt)
             || stmt_is_pure_value_expr(stmt)
             || stmt_is_pure_value_assign(stmt)
@@ -1575,11 +1575,11 @@ pub fn stmt_is_alias_forward_safe(stmt: &HirStmt, label: &str, next_label: &str)
         }
 
         match stmt {
-            HirStmt::Goto(target) => target == next_label || target == label,
-            HirStmt::Block(body) => body
+            DirStmt::Goto(target) => target == next_label || target == label,
+            DirStmt::Block(body) => body
                 .iter()
                 .all(|stmt| stmt_is_alias_forward_safe(stmt, label, next_label)),
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -1596,24 +1596,24 @@ pub fn stmt_is_alias_forward_safe(stmt: &HirStmt, label: &str, next_label: &str)
         }
     }
 
-pub fn stmt_is_guard_cluster_trivial_gap(stmt: &HirStmt, full_body: &[HirStmt]) -> bool {
-        if matches!(stmt, HirStmt::Label(_)) {
+pub fn stmt_is_guard_cluster_trivial_gap(stmt: &DirStmt, full_body: &[DirStmt]) -> bool {
+        if matches!(stmt, DirStmt::Label(_)) {
             return false;
         }
         is_ignorable_discovery_stmt(stmt)
-            || matches!(stmt, HirStmt::Block(body) if body.is_empty())
+            || matches!(stmt, DirStmt::Block(body) if body.is_empty())
             || stmt_is_sink_safe_return_goto(stmt, full_body)
     }
 
-pub fn stmt_is_guard_prefix_safe(stmt: &HirStmt) -> bool {
+pub fn stmt_is_guard_prefix_safe(stmt: &DirStmt) -> bool {
         is_ignorable_discovery_stmt(stmt)
-            || matches!(stmt, HirStmt::Label(_))
-            || matches!(stmt, HirStmt::Block(body) if body.is_empty())
+            || matches!(stmt, DirStmt::Label(_))
+            || matches!(stmt, DirStmt::Block(body) if body.is_empty())
             || top_level_guard_goto_signature(stmt).is_some()
     }
 
-pub fn stmt_is_pure_nested_single_branch_goto_to_label(stmt: &HirStmt, label: &str) -> bool {
-        let HirStmt::If {
+pub fn stmt_is_pure_nested_single_branch_goto_to_label(stmt: &DirStmt, label: &str) -> bool {
+        let DirStmt::If {
             then_body,
             else_body,
             ..
@@ -1628,35 +1628,35 @@ pub fn stmt_is_pure_nested_single_branch_goto_to_label(stmt: &HirStmt, label: &s
             || matches!(else_target, Some(target) if target == label) && then_body.is_empty()
     }
 
-pub fn stmt_is_pure_value_assign(stmt: &HirStmt) -> bool {
+pub fn stmt_is_pure_value_assign(stmt: &DirStmt) -> bool {
         matches!(
             stmt,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
                 rhs,
             } if expr_is_pure_value(rhs) && !suffix_expr_contains_call(rhs)
         )
     }
 
-pub fn stmt_is_pure_value_expr(stmt: &HirStmt) -> bool {
+pub fn stmt_is_pure_value_expr(stmt: &DirStmt) -> bool {
         matches!(
             stmt,
-            HirStmt::Expr(expr)
+            DirStmt::Expr(expr)
                 if expr_is_pure_value(expr) && !suffix_expr_contains_call(expr)
         )
     }
 
 pub fn stmt_is_sink_equivalent_after_label_gap(
-        stmt: &HirStmt,
-        full_body: &[HirStmt],
-        sink_return: &Option<HirExpr>,
+        stmt: &DirStmt,
+        full_body: &[DirStmt],
+        sink_return: &Option<DirExpr>,
     ) -> bool {
         if is_ignorable_discovery_stmt(stmt)
-            || matches!(stmt, HirStmt::Block(body) if body.is_empty())
+            || matches!(stmt, DirStmt::Block(body) if body.is_empty())
         {
             return true;
         }
-        let HirStmt::Goto(target) = stmt else {
+        let DirStmt::Goto(target) = stmt else {
             return false;
         };
         if top_level_label_definition_count(full_body, target) != 1 {
@@ -1664,12 +1664,12 @@ pub fn stmt_is_sink_equivalent_after_label_gap(
         }
         matches!(
             resolve_terminal_tail_exit_stmt(full_body, target),
-            Some(HirStmt::Return(ret)) if ret == *sink_return
+            Some(DirStmt::Return(ret)) if ret == *sink_return
         )
     }
 
-pub fn stmt_is_sink_safe_return_goto(stmt: &HirStmt, full_body: &[HirStmt]) -> bool {
-        let HirStmt::Goto(target) = stmt else {
+pub fn stmt_is_sink_safe_return_goto(stmt: &DirStmt, full_body: &[DirStmt]) -> bool {
+        let DirStmt::Goto(target) = stmt else {
             return false;
         };
         if top_level_label_definition_count(full_body, target) != 1 {
@@ -1677,26 +1677,26 @@ pub fn stmt_is_sink_safe_return_goto(stmt: &HirStmt, full_body: &[HirStmt]) -> b
         }
         matches!(
             resolve_terminal_tail_exit_stmt(full_body, target),
-            Some(HirStmt::Return(_))
+            Some(DirStmt::Return(_))
         )
     }
 
-pub fn suffix_expr_contains_call(expr: &HirExpr) -> bool {
+pub fn suffix_expr_contains_call(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Call { .. } => true,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => suffix_expr_contains_call(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Call { .. } => true,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => suffix_expr_contains_call(expr),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 suffix_expr_contains_call(lhs) || suffix_expr_contains_call(rhs)
             }
-            HirExpr::Load { ptr, .. }
-            | HirExpr::PtrOffset { base: ptr, .. }
-            | HirExpr::FieldAccess { base: ptr, .. } => suffix_expr_contains_call(ptr),
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Load { ptr, .. }
+            | DirExpr::PtrOffset { base: ptr, .. }
+            | DirExpr::FieldAccess { base: ptr, .. } => suffix_expr_contains_call(ptr),
+            DirExpr::Index { base, index, .. } => {
                 suffix_expr_contains_call(base) || suffix_expr_contains_call(index)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -1706,13 +1706,13 @@ pub fn suffix_expr_contains_call(expr: &HirExpr) -> bool {
                     || suffix_expr_contains_call(then_expr)
                     || suffix_expr_contains_call(else_expr)
             }
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
         }
     }
 
 pub fn surviving_label_refs_after_guarded_tail_promotion(
-        body: &[HirStmt],
-        middle: &[HirStmt],
+        body: &[DirStmt],
+        middle: &[DirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
@@ -1731,15 +1731,15 @@ pub fn surviving_label_refs_after_guarded_tail_promotion(
     }
 
 pub fn terminalizable_join_alias_target(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label_idx: usize,
     ) -> Option<(String, usize)> {
-        let HirStmt::Label(_) = &body[label_idx] else {
+        let DirStmt::Label(_) = &body[label_idx] else {
             return None;
         };
         let next_label_idx =
-            (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))?;
-        let HirStmt::Label(next_label) = &body[next_label_idx] else {
+            (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], DirStmt::Label(_)))?;
+        let DirStmt::Label(next_label) = &body[next_label_idx] else {
             return None;
         };
         let segment = &body[label_idx + 1..next_label_idx];
@@ -1753,11 +1753,11 @@ pub fn terminalizable_join_alias_target(
     }
 
 pub fn top_level_after_label_ref_is_dead_post_return(
-        body: &[HirStmt],
+        body: &[DirStmt],
         after_label_pos: usize,
         label: &str,
     ) -> bool {
-        let Some(HirStmt::Goto(target)) = body.get(after_label_pos) else {
+        let Some(DirStmt::Goto(target)) = body.get(after_label_pos) else {
             return false;
         };
         if target != label {
@@ -1767,12 +1767,12 @@ pub fn top_level_after_label_ref_is_dead_post_return(
         let mut saw_terminal_return = false;
         for stmt in &body[..after_label_pos] {
             if is_ignorable_discovery_stmt(stmt)
-                || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+                || matches!(stmt, DirStmt::Block(inner) if inner.is_empty())
             {
                 continue;
             }
             match stmt {
-                HirStmt::Return(_) => saw_terminal_return = true,
+                DirStmt::Return(_) => saw_terminal_return = true,
                 _ => saw_terminal_return = false,
             }
         }
@@ -1780,8 +1780,8 @@ pub fn top_level_after_label_ref_is_dead_post_return(
         saw_terminal_return
     }
 
-pub fn top_level_guard_goto_signature(stmt: &HirStmt) -> Option<(&HirExpr, &str)> {
-        let HirStmt::If {
+pub fn top_level_guard_goto_signature(stmt: &DirStmt) -> Option<(&DirExpr, &str)> {
+        let DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1793,19 +1793,19 @@ pub fn top_level_guard_goto_signature(stmt: &HirStmt) -> Option<(&HirExpr, &str)
             return None;
         }
         match then_body.as_slice() {
-            [HirStmt::Goto(label)] => Some((cond, label.as_str())),
+            [DirStmt::Goto(label)] => Some((cond, label.as_str())),
             _ => None,
         }
     }
 
-pub fn top_level_label_definition_count(body: &[HirStmt], label: &str) -> usize {
+pub fn top_level_label_definition_count(body: &[DirStmt], label: &str) -> usize {
         body.iter()
-            .filter(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label))
+            .filter(|stmt| matches!(stmt, DirStmt::Label(candidate) if candidate == label))
             .count()
     }
 
 pub fn trailing_middle_fallthrough_equivalent_refs(
-        middle: &[HirStmt],
+        middle: &[DirStmt],
         label: &str,
     ) -> usize {
         let mut trailing = 0usize;
@@ -1814,7 +1814,7 @@ pub fn trailing_middle_fallthrough_equivalent_refs(
                 continue;
             }
             match stmt {
-                HirStmt::Goto(target) if target == label => trailing += 1,
+                DirStmt::Goto(target) if target == label => trailing += 1,
                 _ => break,
             }
         }
@@ -1853,7 +1853,7 @@ pub fn build_nested_boundary_pair_trace(
     }
 
 pub fn classify_external_entry_ref_kind(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         terminal_label_idx: usize,
@@ -1867,7 +1867,7 @@ pub fn classify_external_entry_ref_kind(
             }
             if stmt_idx > anchor_idx
                 && stmt_idx < terminal_label_idx
-                && matches!(stmt, HirStmt::Goto(target) if target == label)
+                && matches!(stmt, DirStmt::Goto(target) if target == label)
             {
                 continue;
             }
@@ -1880,23 +1880,23 @@ pub fn classify_external_entry_ref_kind(
     }
 
 pub fn classify_external_entry_ref_kind_for_stmt(
-        stmt: &HirStmt,
+        stmt: &DirStmt,
         label: &str,
     ) -> ExternalEntryRefKind {
         match stmt {
-            HirStmt::Goto(target) if target == label => ExternalEntryRefKind::TopLevelExternalGoto,
-            HirStmt::If { .. } if stmt_contains_goto_label(stmt, label) > 0 => {
+            DirStmt::Goto(target) if target == label => ExternalEntryRefKind::TopLevelExternalGoto,
+            DirStmt::If { .. } if stmt_contains_goto_label(stmt, label) > 0 => {
                 ExternalEntryRefKind::NestedConditionalGoto
             }
-            HirStmt::Switch { .. }
-            | HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::For { .. }
+            DirStmt::Switch { .. }
+            | DirStmt::While { .. }
+            | DirStmt::DoWhile { .. }
+            | DirStmt::For { .. }
                 if stmt_contains_goto_label(stmt, label) > 0 =>
             {
                 ExternalEntryRefKind::LoopSwitchDerived
             }
-            HirStmt::Block(_) if stmt_contains_goto_label(stmt, label) > 0 => {
+            DirStmt::Block(_) if stmt_contains_goto_label(stmt, label) > 0 => {
                 ExternalEntryRefKind::AliasRedirectDerived
             }
             _ => ExternalEntryRefKind::UnknownExternalEntry,
@@ -1904,7 +1904,7 @@ pub fn classify_external_entry_ref_kind_for_stmt(
     }
 
 pub fn collect_nested_boundary_ref_traces(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         terminal_label_idx: usize,
@@ -1916,7 +1916,7 @@ pub fn collect_nested_boundary_ref_traces(
             }
             if stmt_idx > anchor_idx
                 && stmt_idx < terminal_label_idx
-                && matches!(stmt, HirStmt::Goto(target) if target == label)
+                && matches!(stmt, DirStmt::Goto(target) if target == label)
             {
                 continue;
             }
@@ -1930,7 +1930,7 @@ pub fn collect_nested_boundary_ref_traces(
     }
 
 pub fn count_candidate_internal_top_level_refs_in_suffix_window(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         terminal_label_idx: usize,
@@ -1940,12 +1940,12 @@ pub fn count_candidate_internal_top_level_refs_in_suffix_window(
         }
         body[anchor_idx + 1..terminal_label_idx]
             .iter()
-            .filter(|stmt| matches!(stmt, HirStmt::Goto(target) if target == label))
+            .filter(|stmt| matches!(stmt, DirStmt::Goto(target) if target == label))
             .count()
     }
 
 pub fn count_internalized_guard_family_nested_conditional_entries(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         current_label_idx: usize,
@@ -1994,7 +1994,7 @@ pub fn count_internalized_guard_family_nested_conditional_entries(
     }
 
 pub fn count_internalized_paired_nested_boundary_refs(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         current_label_idx: usize,
@@ -2006,7 +2006,7 @@ pub fn count_internalized_paired_nested_boundary_refs(
         }
         let label_idx = body
             .iter()
-            .position(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label));
+            .position(|stmt| matches!(stmt, DirStmt::Label(candidate) if candidate == label));
         if !label_idx.is_some_and(|idx| idx >= current_label_idx && idx < terminal_label_idx) {
             return 0;
         }
@@ -2046,7 +2046,7 @@ pub fn count_internalized_paired_nested_boundary_refs(
     }
 
 pub fn count_suffix_safe_self_terminal_refs_in_suffix_window(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         terminal_label_idx: usize,
@@ -2057,11 +2057,11 @@ pub fn count_suffix_safe_self_terminal_refs_in_suffix_window(
 
         let mut count = 0usize;
         for stmt_idx in anchor_idx + 1..terminal_label_idx {
-            if !matches!(body.get(stmt_idx), Some(HirStmt::Goto(target)) if target == label) {
+            if !matches!(body.get(stmt_idx), Some(DirStmt::Goto(target)) if target == label) {
                 continue;
             }
             let Some(next_label_idx) =
-                (stmt_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                (stmt_idx + 1..body.len()).find(|pos| matches!(body[*pos], DirStmt::Label(_)))
             else {
                 continue;
             };
@@ -2076,12 +2076,12 @@ pub fn count_suffix_safe_self_terminal_refs_in_suffix_window(
         count
     }
 
-pub fn exprs_share_guard_family(lhs: &HirExpr, rhs: &HirExpr) -> bool {
+pub fn exprs_share_guard_family(lhs: &DirExpr, rhs: &DirExpr) -> bool {
         if lhs == rhs {
             return true;
         }
-        if let HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        if let DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } = lhs
@@ -2089,8 +2089,8 @@ pub fn exprs_share_guard_family(lhs: &HirExpr, rhs: &HirExpr) -> bool {
         {
             return true;
         }
-        if let HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        if let DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } = rhs
@@ -2102,13 +2102,13 @@ pub fn exprs_share_guard_family(lhs: &HirExpr, rhs: &HirExpr) -> bool {
     }
 
 pub fn find_terminal_guard_family_match_excluding(
-        body: &[HirStmt],
+        body: &[DirStmt],
         current_label_idx: usize,
         terminal_label_idx: usize,
-        entry_cond: &HirExpr,
+        entry_cond: &DirExpr,
         excluded_stmt_idx: Option<usize>,
-    ) -> Option<HirExpr> {
-        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
+    ) -> Option<DirExpr> {
+        let Some(DirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
             return None;
         };
         if current_label_idx + 1 >= terminal_label_idx {
@@ -2157,19 +2157,19 @@ pub fn find_terminal_guard_family_match_excluding(
         None
     }
 
-pub fn guard_family_match_reason(lhs: &HirExpr, rhs: &HirExpr) -> &'static str {
+pub fn guard_family_match_reason(lhs: &DirExpr, rhs: &DirExpr) -> &'static str {
         if lhs == rhs {
             return "ExactExpr";
         }
         match lhs {
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
+            DirExpr::Unary {
+                op: DirUnaryOp::Not,
                 expr,
                 ..
             } if expr.as_ref() == rhs => "EntryNegatesCandidate",
             _ => match rhs {
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+                DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr,
                     ..
                 } if expr.as_ref() == lhs => "CandidateNegatesEntry",
@@ -2179,7 +2179,7 @@ pub fn guard_family_match_reason(lhs: &HirExpr, rhs: &HirExpr) -> &'static str {
     }
 
 pub fn nested_conditional_entry_is_guard_family_internal(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         current_label_idx: usize,
@@ -2261,7 +2261,7 @@ pub fn nested_conditional_entry_is_guard_family_internal(
     }
 
 pub fn nested_entry_boundary_context(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         current_label_idx: usize,
@@ -2271,7 +2271,7 @@ pub fn nested_entry_boundary_context(
         let raw_refs = referenced.get(label).copied().unwrap_or(0);
         let label_idx = body
             .iter()
-            .position(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label));
+            .position(|stmt| matches!(stmt, DirStmt::Label(candidate) if candidate == label));
         let label_in_current_suffix_window =
             label_idx.is_some_and(|idx| idx >= current_label_idx && idx < terminal_label_idx);
         let internal_candidate_refs =
@@ -2312,10 +2312,10 @@ pub fn nested_entry_boundary_context(
     }
 
 pub fn stmt_is_single_branch_if_to_label<'b>(
-        stmt: &'b HirStmt,
+        stmt: &'b DirStmt,
         label: &str,
-    ) -> Option<&'b HirExpr> {
-        let HirStmt::If {
+    ) -> Option<&'b DirExpr> {
+        let DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -2337,10 +2337,10 @@ pub fn stmt_is_single_branch_if_to_label<'b>(
     }
 
 pub fn stmt_is_single_goto_then_if_to_label<'b>(
-        stmt: &'b HirStmt,
+        stmt: &'b DirStmt,
         label: &str,
-    ) -> Option<&'b HirExpr> {
-        let HirStmt::If {
+    ) -> Option<&'b DirExpr> {
+        let DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -2355,12 +2355,12 @@ pub fn stmt_is_single_goto_then_if_to_label<'b>(
     }
 
 pub fn suffix_stmt_is_terminal_join_owned_safe(
-        body: &[HirStmt],
+        body: &[DirStmt],
         stmt_idx: usize,
         next_label_idx: usize,
         terminal_label: &str,
     ) -> bool {
-        let HirStmt::Goto(target) = &body[stmt_idx] else {
+        let DirStmt::Goto(target) = &body[stmt_idx] else {
             return false;
         };
         if target != terminal_label {
@@ -2372,7 +2372,7 @@ pub fn suffix_stmt_is_terminal_join_owned_safe(
 
         for trailing_stmt in &body[stmt_idx + 1..next_label_idx] {
             if is_ignorable_discovery_stmt(trailing_stmt)
-                || matches!(trailing_stmt, HirStmt::Block(inner) if inner.is_empty())
+                || matches!(trailing_stmt, DirStmt::Block(inner) if inner.is_empty())
                 || stmt_is_pure_value_expr(trailing_stmt)
                 || stmt_is_pure_value_assign(trailing_stmt)
             {
@@ -2380,30 +2380,30 @@ pub fn suffix_stmt_is_terminal_join_owned_safe(
             }
 
             match trailing_stmt {
-                HirStmt::Goto(target) if target == terminal_label => continue,
-                HirStmt::Break
-                | HirStmt::Continue
-                | HirStmt::Switch { .. }
-                | HirStmt::While { .. }
-                | HirStmt::DoWhile { .. }
-                | HirStmt::For { .. }
-                | HirStmt::If { .. }
-                | HirStmt::Block(_)
-                | HirStmt::VaStart { .. }
-                | HirStmt::Assign { .. }
-                | HirStmt::Expr(_)
-                | HirStmt::Return(_)
-                | HirStmt::Label(_) => return false,
-                HirStmt::Goto(_) => return false,
+                DirStmt::Goto(target) if target == terminal_label => continue,
+                DirStmt::Break
+                | DirStmt::Continue
+                | DirStmt::Switch { .. }
+                | DirStmt::While { .. }
+                | DirStmt::DoWhile { .. }
+                | DirStmt::For { .. }
+                | DirStmt::If { .. }
+                | DirStmt::Block(_)
+                | DirStmt::VaStart { .. }
+                | DirStmt::Assign { .. }
+                | DirStmt::Expr(_)
+                | DirStmt::Return(_)
+                | DirStmt::Label(_) => return false,
+                DirStmt::Goto(_) => return false,
             }
         }
 
         true
     }
 
-pub fn top_level_label_definition_count_for_owned_tail(body: &[HirStmt], label: &str) -> usize {
+pub fn top_level_label_definition_count_for_owned_tail(body: &[DirStmt], label: &str) -> usize {
         body.iter()
-            .filter(|stmt| matches!(stmt, HirStmt::Label(candidate) if candidate == label))
+            .filter(|stmt| matches!(stmt, DirStmt::Label(candidate) if candidate == label))
             .count()
     }
 
@@ -2447,7 +2447,7 @@ pub fn call_target_is_memory_mutating(target: &str) -> bool {
     }
 
 pub fn candidate_window_can_shrink_to_label(
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         candidate_label: &str,
         candidate_label_idx: usize,
@@ -2481,17 +2481,17 @@ pub fn candidate_window_can_shrink_to_label(
     }
 
 pub fn classify_nested_suffix_shape(
-        stmt: &HirStmt,
-        body: &[HirStmt],
+        stmt: &DirStmt,
+        body: &[DirStmt],
         current_label_idx: usize,
         terminal_label_idx: usize,
         next_label: &str,
     ) -> NestedSuffixShapeKind {
-        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
+        let Some(DirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
             return NestedSuffixShapeKind::NestedUnknown;
         };
         match stmt {
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -2540,18 +2540,18 @@ pub fn classify_nested_suffix_shape(
                 }
                 NestedSuffixShapeKind::NestedUnknown
             }
-            HirStmt::Block(inner) if !inner.is_empty() => NestedSuffixShapeKind::NestedUnknown,
+            DirStmt::Block(inner) if !inner.is_empty() => NestedSuffixShapeKind::NestedUnknown,
             _ => NestedSuffixShapeKind::NestedUnknown,
         }
     }
 
-pub fn classify_suffix_call_effect_shape(stmt: &HirStmt) -> SuffixCallEffectShapeKind {
+pub fn classify_suffix_call_effect_shape(stmt: &DirStmt) -> SuffixCallEffectShapeKind {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs: HirExpr::Call { target, args, .. },
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
+                rhs: DirExpr::Call { target, args, .. },
             }
-            | HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+            | DirStmt::Expr(DirExpr::Call { target, args, .. }) => {
                 if call_target_is_control_effect(target) {
                     return SuffixCallEffectShapeKind::ControlEffectCall;
                 }
@@ -2564,104 +2564,104 @@ pub fn classify_suffix_call_effect_shape(stmt: &HirStmt) -> SuffixCallEffectShap
                     return SuffixCallEffectShapeKind::PureKnownHelperCall;
                 }
                 match stmt {
-                    HirStmt::Assign { .. } => SuffixCallEffectShapeKind::ReturnValueAssignedLocal,
-                    HirStmt::Expr(HirExpr::Call { ty, .. }) if matches!(ty, NirType::Unknown) => {
+                    DirStmt::Assign { .. } => SuffixCallEffectShapeKind::ReturnValueAssignedLocal,
+                    DirStmt::Expr(DirExpr::Call { ty, .. }) if matches!(ty, NirType::Unknown) => {
                         SuffixCallEffectShapeKind::VoidUnknownCall
                     }
-                    HirStmt::Expr(HirExpr::Call { .. }) => {
+                    DirStmt::Expr(DirExpr::Call { .. }) => {
                         SuffixCallEffectShapeKind::ReturnValueIgnoredCall
                     }
                     _ => SuffixCallEffectShapeKind::UnknownCallEffect,
                 }
             }
-            HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::VaStart { .. } => {
+            DirStmt::Assign { .. } | DirStmt::Expr(_) | DirStmt::VaStart { .. } => {
                 SuffixCallEffectShapeKind::UnknownCallEffect
             }
             _ => SuffixCallEffectShapeKind::UnknownCallEffect,
         }
     }
 
-pub fn classify_suffix_side_effect_shape(stmt: &HirStmt) -> SuffixSideEffectShapeKind {
+pub fn classify_suffix_side_effect_shape(stmt: &DirStmt) -> SuffixSideEffectShapeKind {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Deref { .. } | HirLValue::Index { .. },
+            DirStmt::Assign {
+                lhs: DirLValue::Deref { .. } | DirLValue::Index { .. },
                 ..
             } => SuffixSideEffectShapeKind::MemoryWrite,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
                 rhs,
             } if suffix_expr_contains_call(rhs) => {
                 SuffixSideEffectShapeKind::CallExprSideEffect
             }
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
                 rhs,
             } if expr_is_pure_value(rhs) => match rhs {
-                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => {
                     SuffixSideEffectShapeKind::PureTempAssign
                 }
                 _ => SuffixSideEffectShapeKind::PureRegisterAssign,
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs: HirExpr::Load { ptr, .. },
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
+                rhs: DirExpr::Load { ptr, .. },
             } if expr_is_pure_value(ptr) => SuffixSideEffectShapeKind::MemoryReadOnlyAssign,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
                 rhs,
             } if expr_contains_load(rhs) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } if expr_contains_var(rhs, name)
-                || matches!(rhs, HirExpr::AggregateCopy { .. }) =>
+                || matches!(rhs, DirExpr::AggregateCopy { .. }) =>
             {
                 SuffixSideEffectShapeKind::CompoundAssignOrPhiLike
             }
-            HirStmt::Expr(HirExpr::Call { .. }) | HirStmt::VaStart { .. } => {
+            DirStmt::Expr(DirExpr::Call { .. }) | DirStmt::VaStart { .. } => {
                 SuffixSideEffectShapeKind::CallExprSideEffect
             }
-            HirStmt::Expr(HirExpr::Load { .. }) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
-            HirStmt::Expr(expr) if suffix_expr_contains_call(expr) => {
+            DirStmt::Expr(DirExpr::Load { .. }) => SuffixSideEffectShapeKind::VolatileOrUnknownLoad,
+            DirStmt::Expr(expr) if suffix_expr_contains_call(expr) => {
                 SuffixSideEffectShapeKind::CallExprSideEffect
             }
-            HirStmt::Expr(expr) if expr_contains_load(expr) => {
+            DirStmt::Expr(expr) if expr_contains_load(expr) => {
                 SuffixSideEffectShapeKind::VolatileOrUnknownLoad
             }
-            HirStmt::Assign { .. } => SuffixSideEffectShapeKind::UnknownSideEffect,
+            DirStmt::Assign { .. } => SuffixSideEffectShapeKind::UnknownSideEffect,
             _ => SuffixSideEffectShapeKind::UnknownSideEffect,
         }
     }
 
 pub fn classify_suffix_stmt(
-        stmt: &HirStmt,
-        body: &[HirStmt],
+        stmt: &DirStmt,
+        body: &[DirStmt],
         stmt_idx: usize,
         current_label_idx: usize,
         terminal_label_idx: usize,
         next_label: &str,
     ) -> Result<(), SuffixTailRejection> {
         if is_ignorable_discovery_stmt(stmt)
-            || matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+            || matches!(stmt, DirStmt::Block(inner) if inner.is_empty())
         {
             return Ok(());
         }
         if stmt_is_pure_value_expr(stmt) || stmt_is_pure_value_assign(stmt) {
             return Ok(());
         }
-        if let HirStmt::Goto(target) = stmt {
+        if let DirStmt::Goto(target) = stmt {
             if target == next_label
                 || stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
             {
                 return Ok(());
             }
             let next_stmt_label_idx = (stmt_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .find(|pos| matches!(body[*pos], DirStmt::Label(_)))
                 .unwrap_or(body.len());
             for trailing_idx in stmt_idx + 1..next_stmt_label_idx {
                 let trailing = &body[trailing_idx];
                 if is_ignorable_discovery_stmt(trailing)
-                    || matches!(trailing, HirStmt::Block(inner) if inner.is_empty())
+                    || matches!(trailing, DirStmt::Block(inner) if inner.is_empty())
                 {
                     continue;
                 }
@@ -2670,7 +2670,7 @@ pub fn classify_suffix_stmt(
                 }
                 if !stmt_is_pure_value_expr(trailing)
                     && !stmt_is_pure_value_assign(trailing)
-                    && !matches!(trailing, HirStmt::Goto(target) if target == next_label)
+                    && !matches!(trailing, DirStmt::Goto(target) if target == next_label)
                 {
                     return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
                 }
@@ -2680,7 +2680,7 @@ pub fn classify_suffix_stmt(
                 let terminal_label = body
                     .get(terminal_label_idx)
                     .and_then(|stmt| match stmt {
-                        HirStmt::Label(label) => Some(label.as_str()),
+                        DirStmt::Label(label) => Some(label.as_str()),
                         _ => None,
                     })
                     .unwrap_or("");
@@ -2712,12 +2712,12 @@ pub fn classify_suffix_stmt(
         }
         if matches!(
             stmt,
-            HirStmt::Switch { .. }
-                | HirStmt::While { .. }
-                | HirStmt::DoWhile { .. }
-                | HirStmt::For { .. }
-                | HirStmt::Break
-                | HirStmt::Continue
+            DirStmt::Switch { .. }
+                | DirStmt::While { .. }
+                | DirStmt::DoWhile { .. }
+                | DirStmt::For { .. }
+                | DirStmt::Break
+                | DirStmt::Continue
         ) {
             return Err(SuffixTailRejection::SuffixHasLoopOrSwitchCrossing { stmt_idx });
         }
@@ -2811,7 +2811,7 @@ pub fn classify_suffix_stmt(
     }
 
 pub fn compute_suffix_external_entry_budget(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         current_label_idx: usize,
@@ -2870,23 +2870,23 @@ pub fn compute_suffix_external_entry_budget(
         }
     }
 
-pub fn expr_contains_load(expr: &HirExpr) -> bool {
+pub fn expr_contains_load(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Load { .. } => true,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_load(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Load { .. } => true,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => expr_contains_load(expr),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 expr_contains_load(lhs) || expr_contains_load(rhs)
             }
-            HirExpr::Call { args, .. } => args.iter().any(expr_contains_load),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::Call { args, .. } => args.iter().any(expr_contains_load),
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 expr_contains_load(base)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 expr_contains_load(base) || expr_contains_load(index)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -2896,12 +2896,12 @@ pub fn expr_contains_load(expr: &HirExpr) -> bool {
                     || expr_contains_load(then_expr)
                     || expr_contains_load(else_expr)
             }
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
         }
     }
 
 pub fn find_earliest_owned_join_label(
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
@@ -2912,7 +2912,7 @@ pub fn find_earliest_owned_join_label(
         }
 
         for candidate_label_idx in anchor_idx + 1..terminal_label_idx {
-            let HirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
+            let DirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
                 continue;
             };
             let has_payload = has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]);
@@ -2945,7 +2945,7 @@ pub fn find_earliest_owned_join_label(
                     "[GT-TRACE] candidate={} join_label={} early_label={} first_fail={:?} stmt_idx={} first_fail_stmt={:?}",
                     anchor_idx,
                     match body.get(terminal_label_idx) {
-                        Some(HirStmt::Label(label)) => label.as_str(),
+                        Some(DirStmt::Label(label)) => label.as_str(),
                         _ => "<missing-terminal-label>",
                     },
                     candidate_label,
@@ -2963,12 +2963,12 @@ pub fn find_earliest_owned_join_label(
     }
 
 pub fn nested_terminal_join_tail_is_guard_family_owned_safe(
-        body: &[HirStmt],
+        body: &[DirStmt],
         stmt_idx: usize,
         current_label_idx: usize,
         terminal_label_idx: usize,
     ) -> bool {
-        let Some(HirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
+        let Some(DirStmt::Label(terminal_label)) = body.get(terminal_label_idx) else {
             return false;
         };
         let Some(stmt) = body.get(stmt_idx) else {
@@ -2995,7 +2995,7 @@ pub fn nested_terminal_join_tail_is_guard_family_owned_safe(
     }
 
 pub fn resolve_suffix_redirect_to_terminal(
-        body: &[HirStmt],
+        body: &[DirStmt],
         target_label: &str,
         next_label: &str,
     ) -> bool {
@@ -3007,7 +3007,7 @@ pub fn resolve_suffix_redirect_to_terminal(
         }
         let Some(mut current_idx) = body
             .iter()
-            .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == target_label))
+            .position(|stmt| matches!(stmt, DirStmt::Label(label) if label == target_label))
         else {
             return false;
         };
@@ -3020,19 +3020,19 @@ pub fn resolve_suffix_redirect_to_terminal(
             }
 
             let next_label_idx = (current_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .find(|pos| matches!(body[*pos], DirStmt::Label(_)))
                 .unwrap_or(body.len());
 
             let mut terminal_return = false;
             let mut terminal_goto = None::<String>;
             for stmt in &body[current_idx + 1..next_label_idx] {
                 match stmt {
-                    HirStmt::Goto(target) => terminal_goto = Some(target.clone()),
-                    HirStmt::Return(_) => terminal_return = true,
+                    DirStmt::Goto(target) => terminal_goto = Some(target.clone()),
+                    DirStmt::Return(_) => terminal_return = true,
                     stmt if is_ignorable_discovery_stmt(stmt) => {}
                     stmt if stmt_is_pure_value_expr(stmt) => {}
                     stmt if stmt_is_pure_value_assign(stmt) => {}
-                    HirStmt::Block(inner) if inner.is_empty() => {}
+                    DirStmt::Block(inner) if inner.is_empty() => {}
                     _ => return false,
                 }
             }
@@ -3048,7 +3048,7 @@ pub fn resolve_suffix_redirect_to_terminal(
             }
             let Some(next_idx) = body
                 .iter()
-                .position(|stmt| matches!(stmt, HirStmt::Label(label) if label == &next_target))
+                .position(|stmt| matches!(stmt, DirStmt::Label(label) if label == &next_target))
             else {
                 return false;
             };
@@ -3059,8 +3059,8 @@ pub fn resolve_suffix_redirect_to_terminal(
         true
     }
 
-pub fn stmt_is_sink_safe_return_goto_for_owned_tail(stmt: &HirStmt, body: &[HirStmt]) -> bool {
-        let HirStmt::Goto(target) = stmt else {
+pub fn stmt_is_sink_safe_return_goto_for_owned_tail(stmt: &DirStmt, body: &[DirStmt]) -> bool {
+        let DirStmt::Goto(target) = stmt else {
             return false;
         };
         if top_level_label_definition_count_for_owned_tail(body, target) != 1 {
@@ -3068,22 +3068,22 @@ pub fn stmt_is_sink_safe_return_goto_for_owned_tail(stmt: &HirStmt, body: &[HirS
         }
         matches!(
             resolve_terminal_tail_exit_stmt(body, target),
-            Some(HirStmt::Return(_))
+            Some(DirStmt::Return(_))
         )
     }
 
-pub fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str) -> bool {
+pub fn stmt_reads_binding_only_in_owned_safe_context(stmt: &DirStmt, name: &str) -> bool {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 if lvalue_contains_var(lhs, name) {
                     return false;
                 }
                 !expr_contains_var(rhs, name) || expr_is_pure_value(rhs)
             }
-            HirStmt::Expr(expr) => {
+            DirStmt::Expr(expr) => {
                 !expr_contains_var(expr, name) || expr_is_pure_value(expr)
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -3096,11 +3096,11 @@ pub fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str)
                         .iter()
                         .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
             }
-            HirStmt::Block(stmts) => stmts
+            DirStmt::Block(stmts) => stmts
                 .iter()
                 .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name)),
-            HirStmt::VaStart { va_list, .. } => !expr_contains_var(va_list, name),
-            HirStmt::Switch {
+            DirStmt::VaStart { va_list, .. } => !expr_contains_var(va_list, name),
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -3115,13 +3115,13 @@ pub fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str)
                         .iter()
                         .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
             }
-            HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+            DirStmt::While { cond, body } | DirStmt::DoWhile { cond, body } => {
                 !expr_contains_var(cond, name)
                     && body
                         .iter()
                         .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -3139,22 +3139,22 @@ pub fn stmt_reads_binding_only_in_owned_safe_context(stmt: &HirStmt, name: &str)
                         .iter()
                         .all(|stmt| stmt_reads_binding_only_in_owned_safe_context(stmt, name))
             }
-            HirStmt::Return(Some(expr)) => !expr_contains_var(expr, name),
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => true,
+            DirStmt::Return(Some(expr)) => !expr_contains_var(expr, name),
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(None)
+            | DirStmt::Break
+            | DirStmt::Continue => true,
         }
     }
 
-pub fn suffix_call_expr(stmt: &HirStmt) -> Option<(&str, &[HirExpr], bool)> {
+pub fn suffix_call_expr(stmt: &DirStmt) -> Option<(&str, &[DirExpr], bool)> {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs: HirExpr::Call { target, args, .. },
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
+                rhs: DirExpr::Call { target, args, .. },
             } => Some((target.as_str(), args.as_slice(), true)),
-            HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+            DirStmt::Expr(DirExpr::Call { target, args, .. }) => {
                 Some((target.as_str(), args.as_slice(), false))
             }
             _ => None,
@@ -3162,7 +3162,7 @@ pub fn suffix_call_expr(stmt: &HirStmt) -> Option<(&str, &[HirExpr], bool)> {
     }
 
 pub fn suffix_is_nonowned_terminal_tail(
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         start_label: &str,
         start_label_idx: usize,
@@ -3234,7 +3234,7 @@ pub fn suffix_is_nonowned_terminal_tail(
             }
 
             let Some(next_label_idx) = (current_label_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], HirStmt::Label(_)))
+                .find(|pos| matches!(body[*pos], DirStmt::Label(_)))
             else {
                 return Err(SuffixTailRejection::SuffixHasLabelCrossing {
                     stmt_idx: current_label_idx,
@@ -3247,10 +3247,10 @@ pub fn suffix_is_nonowned_terminal_tail(
                     label: current_label,
                 });
             }
-            let HirStmt::Label(terminal_label) = &body[terminal_label_idx] else {
+            let DirStmt::Label(terminal_label) = &body[terminal_label_idx] else {
                 unreachable!();
             };
-            let HirStmt::Label(next_label) = &body[next_label_idx] else {
+            let DirStmt::Label(next_label) = &body[next_label_idx] else {
                 unreachable!();
             };
             for (offset, stmt) in body[current_label_idx + 1..next_label_idx]
@@ -3258,7 +3258,7 @@ pub fn suffix_is_nonowned_terminal_tail(
                 .enumerate()
             {
                 let stmt_idx = current_label_idx + 1 + offset;
-                if matches!(stmt, HirStmt::Goto(target) if target == terminal_label)
+                if matches!(stmt, DirStmt::Goto(target) if target == terminal_label)
                     && suffix_stmt_is_terminal_join_owned_safe(
                         body,
                         stmt_idx,
@@ -3271,7 +3271,7 @@ pub fn suffix_is_nonowned_terminal_tail(
                 if rewrites == 0
                     && next_label_idx == terminal_label_idx
                     && !is_ignorable_discovery_stmt(stmt)
-                    && !matches!(stmt, HirStmt::Block(inner) if inner.is_empty())
+                    && !matches!(stmt, DirStmt::Block(inner) if inner.is_empty())
                 {
                     return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
                 }
@@ -3294,13 +3294,13 @@ pub fn suffix_is_nonowned_terminal_tail(
     }
 
 pub fn suffix_known_pure_helper_call_is_owned_safe(
-        body: &[HirStmt],
+        body: &[DirStmt],
         stmt_idx: usize,
         terminal_label_idx: usize,
     ) -> bool {
-        let Some(HirStmt::Assign {
-            lhs: HirLValue::Var(binding_name),
-            rhs: HirExpr::Call { target, args, .. },
+        let Some(DirStmt::Assign {
+            lhs: DirLValue::Var(binding_name),
+            rhs: DirExpr::Call { target, args, .. },
         }) = body.get(stmt_idx)
         else {
             return false;
@@ -3342,13 +3342,13 @@ pub fn suffix_known_pure_helper_call_is_owned_safe(
     }
 
 pub fn suffix_memory_read_only_assign_is_owned_safe(
-        body: &[HirStmt],
+        body: &[DirStmt],
         stmt_idx: usize,
         terminal_label_idx: usize,
     ) -> bool {
-        let Some(HirStmt::Assign {
-            lhs: HirLValue::Var(binding_name),
-            rhs: HirExpr::Load { ptr, ty },
+        let Some(DirStmt::Assign {
+            lhs: DirLValue::Var(binding_name),
+            rhs: DirExpr::Load { ptr, ty },
         }) = body.get(stmt_idx)
         else {
             return false;
@@ -3379,19 +3379,19 @@ pub fn suffix_memory_read_only_assign_is_owned_safe(
             .all(|stmt| count_var_reads_stmt(stmt, binding_name) == 0)
     }
 
-pub fn suffix_stmt_has_nested_or_nonlocal_ref(stmt: &HirStmt) -> bool {
+pub fn suffix_stmt_has_nested_or_nonlocal_ref(stmt: &DirStmt) -> bool {
         match stmt {
-            HirStmt::If { .. } => true,
-            HirStmt::Block(inner) => !inner.is_empty(),
+            DirStmt::If { .. } => true,
+            DirStmt::Block(inner) => !inner.is_empty(),
             _ => false,
         }
     }
 
 pub fn suffix_window_has_terminal_guard_family_match(
-        body: &[HirStmt],
+        body: &[DirStmt],
         current_label_idx: usize,
         terminal_label_idx: usize,
-        entry_cond: &HirExpr,
+        entry_cond: &DirExpr,
     ) -> bool {
         find_terminal_guard_family_match_excluding(
             body,

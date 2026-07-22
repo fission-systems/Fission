@@ -49,7 +49,7 @@ use super::run::{
     run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
 };
 use fission_midend_core::action_pipeline::PassBudget;
-use fission_midend_core::ir::HirFunction;
+use fission_midend_core::ir::DirFunction;
 use fission_midend_core::vsa::apply_jump_resolver_pass;
 use fission_midend_core::wave_stats;
 use std::time::Instant;
@@ -64,7 +64,7 @@ use tracing::debug_span;
 /// onward) are declarative `ActionGroup` passes registered after this one in
 /// `groups.rs`, so decomposing this head further is a separate, focused slice
 /// rather than blocking the rest of the stage.
-pub fn run_stage_proto_recovery_head(func: &mut HirFunction, _diag: bool, perf: bool) {
+pub fn run_stage_proto_recovery_head(func: &mut DirFunction, _diag: bool, perf: bool) {
     let _hir_normalize = debug_span!("hir_normalize", fn_name = %func.name).entered();
     run_cleanup_family_passes(
         func,
@@ -79,7 +79,7 @@ pub fn run_stage_proto_recovery_head(func: &mut HirFunction, _diag: bool, perf: 
 }
 
 /// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
-pub(super) fn cleanup_after_flag_recovery(func: &mut HirFunction) {
+pub(super) fn cleanup_after_flag_recovery(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
@@ -90,7 +90,7 @@ pub(super) fn cleanup_after_flag_recovery(func: &mut HirFunction) {
 /// `wave_stats::add_cleanup_budget_skips` telemetry) when the body has no
 /// `__popcount` calls at all, avoiding an expensive full-body DefUseMap
 /// build + 8-round scan for the common case.
-pub(super) fn body_contains_popcount_call_admitted(func: &HirFunction) -> bool {
+pub(super) fn body_contains_popcount_call_admitted(func: &DirFunction) -> bool {
     let admitted = body_contains_popcount_call(&func.body);
     if !admitted {
         wave_stats::add_cleanup_budget_skips(1);
@@ -98,7 +98,7 @@ pub(super) fn body_contains_popcount_call_admitted(func: &HirFunction) -> bool {
     admitted
 }
 
-pub(super) fn prune_after_elide_popcount(func: &mut HirFunction) -> bool {
+pub(super) fn prune_after_elide_popcount(func: &mut DirFunction) -> bool {
     let before = hir_shape(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -106,7 +106,7 @@ pub(super) fn prune_after_elide_popcount(func: &mut HirFunction) -> bool {
 }
 
 /// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
-pub(super) fn cleanup_after_entry_stack_scaffold(func: &mut HirFunction) {
+pub(super) fn cleanup_after_entry_stack_scaffold(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
@@ -114,19 +114,19 @@ pub(super) fn cleanup_after_entry_stack_scaffold(func: &mut HirFunction) {
 }
 
 /// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
-pub(super) fn cleanup_after_callee_save_prologue_epilogue(func: &mut HirFunction) {
+pub(super) fn cleanup_after_callee_save_prologue_epilogue(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
 
-pub(super) fn constant_folding_body_pass(func: &mut HirFunction) -> bool {
+pub(super) fn constant_folding_body_pass(func: &mut DirFunction) -> bool {
     constant_folding_pass(&mut func.body)
 }
 
 /// Budget-gated (`CleanupPass`, matching the original `run_cleanup_block`).
-pub(super) fn cleanup_after_constant_folding_init(func: &mut HirFunction) {
+pub(super) fn cleanup_after_constant_folding_init(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     eliminate_dead_local_clobber_assigns(func);
     prune_unused_temp_bindings(func);
@@ -138,7 +138,7 @@ pub(super) fn cleanup_after_constant_folding_init(func: &mut HirFunction) {
 /// `GatedFollowupPass` + `CleanupPass`); kept here only as the shared
 /// cleanup block body so both the pass registration and any direct callers
 /// see one definition.
-pub(super) fn cleanup_after_constant_ptr_recovery(func: &mut HirFunction) {
+pub(super) fn cleanup_after_constant_ptr_recovery(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -146,7 +146,7 @@ pub(super) fn cleanup_after_constant_ptr_recovery(func: &mut HirFunction) {
 
 /// Cleanup block for the `conditional_const` chain, same migration pattern
 /// as [`cleanup_after_constant_ptr_recovery`].
-pub(super) fn cleanup_after_conditional_const(func: &mut HirFunction) {
+pub(super) fn cleanup_after_conditional_const(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     constant_folding_pass(&mut func.body);
     eliminate_dead_local_clobber_assigns(func);
@@ -156,14 +156,14 @@ pub(super) fn cleanup_after_conditional_const(func: &mut HirFunction) {
 
 /// Cleanup block for the `entry_param_promotion` chain, same migration
 /// pattern as [`cleanup_after_constant_ptr_recovery`].
-pub(super) fn cleanup_after_entry_param_promotion(func: &mut HirFunction) {
+pub(super) fn cleanup_after_entry_param_promotion(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
 
-pub(super) fn sccp_is_admitted(func: &HirFunction) -> bool {
+pub(super) fn sccp_is_admitted(func: &DirFunction) -> bool {
     let admission = sccp_admission_summary(&func.body);
     if !admission.eligible {
         wave_stats::add_sccp_skipped_by_admission(1);
@@ -177,14 +177,14 @@ pub(super) fn sccp_is_admitted(func: &HirFunction) -> bool {
 /// migration does not newly admission-gate a call that always ran before.
 /// The one new telemetry entry this slice adds (`cleanup_sccp`) replaces a
 /// call that had no metric name at all; NIR/HIR output is unaffected.
-pub(super) fn cleanup_after_sccp(func: &mut HirFunction) -> bool {
+pub(super) fn cleanup_after_sccp(func: &mut DirFunction) -> bool {
     let before = hir_shape(func);
     cleanup_func_stmt_list(func);
     hir_shape(func) != before
 }
 
 /// Cleanup block for the nested `constant_folding_after_sccp` chain.
-pub(super) fn cleanup_elim_8(func: &mut HirFunction) {
+pub(super) fn cleanup_elim_8(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     eliminate_dead_local_clobber_assigns(func);
     prune_unused_temp_bindings(func);
@@ -195,7 +195,7 @@ pub(super) fn cleanup_elim_8(func: &mut HirFunction) {
 /// prune calls that followed it, bundled under `wide_dead_assignment`'s
 /// existing telemetry name (its own Changed result is what the original
 /// `run_pass_logged` reported; the prune calls were never logged).
-pub(super) fn wide_dead_assignment_and_prune(func: &mut HirFunction) -> bool {
+pub(super) fn wide_dead_assignment_and_prune(func: &mut DirFunction) -> bool {
     let changed = apply_wide_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -205,7 +205,7 @@ pub(super) fn wide_dead_assignment_and_prune(func: &mut HirFunction) -> bool {
 /// Tail of the `cse` chain: `defuse_dead_assignment_after_cse` (already
 /// individually logged in the original) plus the two bare, unlogged prune
 /// calls that followed it, bundled under the same telemetry name.
-pub(super) fn defuse_after_cse_and_prune(func: &mut HirFunction) -> bool {
+pub(super) fn defuse_after_cse_and_prune(func: &mut DirFunction) -> bool {
     let changed = defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -214,7 +214,7 @@ pub(super) fn defuse_after_cse_and_prune(func: &mut HirFunction) -> bool {
 
 /// Cleanup for the `branch_prefix_hoist` chain: bare, unlogged
 /// `cleanup_func_stmt_list` that used to open the `if` body.
-pub(super) fn cleanup_after_branch_prefix_hoist(func: &mut HirFunction) -> bool {
+pub(super) fn cleanup_after_branch_prefix_hoist(func: &mut DirFunction) -> bool {
     let before = hir_shape(func);
     cleanup_func_stmt_list(func);
     hir_shape(func) != before
@@ -222,7 +222,7 @@ pub(super) fn cleanup_after_branch_prefix_hoist(func: &mut HirFunction) -> bool 
 
 /// Tail of the `branch_prefix_hoist` chain: `defuse_dead_assignment_after_branch_hoist`
 /// (already individually logged) plus the two bare prune calls that followed it.
-pub(super) fn defuse_after_branch_hoist_and_prune(func: &mut HirFunction) -> bool {
+pub(super) fn defuse_after_branch_hoist_and_prune(func: &mut DirFunction) -> bool {
     let changed = defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -231,7 +231,7 @@ pub(super) fn defuse_after_branch_hoist_and_prune(func: &mut HirFunction) -> boo
 
 /// Cleanup for the `gvn_join_hoist` chain: bare, unlogged
 /// `cleanup_func_stmt_list` that used to open the `if` body.
-pub(super) fn cleanup_after_gvn_join_hoist(func: &mut HirFunction) -> bool {
+pub(super) fn cleanup_after_gvn_join_hoist(func: &mut DirFunction) -> bool {
     let before = hir_shape(func);
     cleanup_func_stmt_list(func);
     hir_shape(func) != before
@@ -239,7 +239,7 @@ pub(super) fn cleanup_after_gvn_join_hoist(func: &mut HirFunction) -> bool {
 
 /// Tail of the `gvn_join_hoist` chain: `defuse_dead_assignment_after_gvn`
 /// (already individually logged) plus the two bare prune calls that followed it.
-pub(super) fn defuse_after_gvn_and_prune(func: &mut HirFunction) -> bool {
+pub(super) fn defuse_after_gvn_and_prune(func: &mut DirFunction) -> bool {
     let changed = defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -247,18 +247,18 @@ pub(super) fn defuse_after_gvn_and_prune(func: &mut HirFunction) -> bool {
 }
 
 
-pub fn run_stage_type_early(func: &mut HirFunction, diag: bool, perf: bool) {
+pub fn run_stage_type_early(func: &mut DirFunction, diag: bool, perf: bool) {
     apply_type_signature_fixed_point(func, diag, perf);
 }
 
-pub(super) fn cleanup_after_subvar_flow(func: &mut HirFunction) {
+pub(super) fn cleanup_after_subvar_flow(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
 
-pub(super) fn cleanup_after_split_flow(func: &mut HirFunction) {
+pub(super) fn cleanup_after_split_flow(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
@@ -270,7 +270,7 @@ pub(super) fn cleanup_after_split_flow(func: &mut HirFunction) {
 /// `apply_type_signature_fixed_point(func, diag, perf)`, which needs
 /// diag/perf forwarded to its own internal `run_pass_logged` calls --
 /// `fn_pass` doesn't carry those through.
-pub fn run_stage_cast_elision(func: &mut HirFunction, diag: bool, perf: bool) {
+pub fn run_stage_cast_elision(func: &mut DirFunction, diag: bool, perf: bool) {
     if run_pass_logged(func, "cast_elision", perf, cast_elision_pass) {
         cleanup_func_stmt_list(func);
         if !contains_call_stmts(&func.body) {
@@ -292,20 +292,20 @@ pub fn run_stage_cast_elision(func: &mut HirFunction, diag: bool, perf: bool) {
     }
 }
 
-pub(super) fn cleanup_after_subvar_trim(func: &mut HirFunction) -> bool {
+pub(super) fn cleanup_after_subvar_trim(func: &mut DirFunction) -> bool {
     let before = hir_shape(func);
     cleanup_func_stmt_list(func);
     hir_shape(func) != before
 }
 
-pub(super) fn cleanup_after_entry_stack_scaffold_late(func: &mut HirFunction) {
+pub(super) fn cleanup_after_entry_stack_scaffold_late(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
 
-pub fn run_stage_heritage_value_recovery(func: &mut HirFunction, diag: bool, perf: bool) {
+pub fn run_stage_heritage_value_recovery(func: &mut DirFunction, diag: bool, perf: bool) {
     let allow_expensive_passes = !is_large_hir_function(func);
     let has_loopish_control = body_has_loopish_shapes(&func.body);
     let memory_fact_prefilter = memory_fact_prefilter_allows_full(func) && !has_loopish_control;
@@ -368,7 +368,7 @@ pub fn run_stage_heritage_value_recovery(func: &mut HirFunction, diag: bool, per
     }
 }
 
-pub fn run_stage_memory_recovery(func: &mut HirFunction, diag: bool, perf: bool) {
+pub fn run_stage_memory_recovery(func: &mut DirFunction, diag: bool, perf: bool) {
     let has_loopish_control = body_has_loopish_shapes(&func.body);
     let memory_fact_prefilter = memory_fact_prefilter_allows_full(func) && !has_loopish_control;
     if run_pass_logged(
@@ -561,7 +561,7 @@ pub fn run_stage_memory_recovery(func: &mut HirFunction, diag: bool, perf: bool)
     );
 }
 
-pub fn run_stage_merge(func: &mut HirFunction, diag: bool, perf: bool) {
+pub fn run_stage_merge(func: &mut DirFunction, diag: bool, perf: bool) {
     for round in 0..4 {
         let (before_stmts, before_locals) = if perf { hir_shape(func) } else { (0, 0) };
         let round_start = if perf { Some(Instant::now()) } else { None };
@@ -608,7 +608,7 @@ pub fn run_stage_merge(func: &mut HirFunction, diag: bool, perf: bool) {
 /// calls that followed it in the original (never individually gated or
 /// logged, so this stays an unwrapped `fn_pass`, not a budget-gated
 /// `cleanup_pass`).
-pub(super) fn cleanup_after_single_pred_label_inline(func: &mut HirFunction) -> bool {
+pub(super) fn cleanup_after_single_pred_label_inline(func: &mut DirFunction) -> bool {
     let before = hir_shape(func);
     cleanup_func_stmt_list(func);
     apply_for_loop_folding(&mut func.body);
@@ -619,21 +619,21 @@ pub(super) fn cleanup_after_single_pred_label_inline(func: &mut HirFunction) -> 
 
 /// `run_cleanup_block`-wrapped tail of the `loop_condition_trailing_temp_inline`
 /// chain (budget-gated, matching the original).
-pub(super) fn cleanup_after_loop_condition_temps(func: &mut HirFunction) {
+pub(super) fn cleanup_after_loop_condition_temps(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
 
 /// `run_cleanup_block`-wrapped tail of the `iv_recovery` chain.
-pub(super) fn cleanup_prune_9(func: &mut HirFunction) {
+pub(super) fn cleanup_prune_9(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
 
 /// `run_cleanup_block`-wrapped tail of the `break_continue_recovery` chain.
-pub(super) fn cleanup_prune_10(func: &mut HirFunction) {
+pub(super) fn cleanup_prune_10(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -642,21 +642,21 @@ pub(super) fn cleanup_prune_10(func: &mut HirFunction) {
 /// `run_cleanup_block`-wrapped head of the `licm` chain tail (just the
 /// statement-list cleanup; the rest of the original tail is
 /// `defuse_after_licm_and_prune` below).
-pub(super) fn cleanup_standalone_15(func: &mut HirFunction) {
+pub(super) fn cleanup_standalone_15(func: &mut DirFunction) {
     cleanup_func_stmt_list(func);
 }
 
 /// Tail of the `licm` chain: `defuse_dead_assignment_after_licm` (already
 /// individually logged in the original) plus the two bare, unlogged prune
 /// calls that followed it, bundled under the same telemetry name.
-pub(super) fn defuse_after_licm_and_prune(func: &mut HirFunction) -> bool {
+pub(super) fn defuse_after_licm_and_prune(func: &mut DirFunction) -> bool {
     let changed = defuse_dead_assignment_pass(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
     changed
 }
 
-pub fn run_stage_cleanup(func: &mut HirFunction, diag: bool, perf: bool) {
+pub fn run_stage_cleanup(func: &mut DirFunction, diag: bool, perf: bool) {
     let _ = run_pass_logged(
         func,
         "interproc_callsite_arity",

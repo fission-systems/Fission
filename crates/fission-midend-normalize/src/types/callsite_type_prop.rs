@@ -7,11 +7,11 @@
 /// This pass connects the existing `fission-signatures` Windows API database
 /// to the Fission type inference pipeline:
 ///
-/// 1. Walk every `HirStmt::Assign { rhs: Call { target, args } }` and
-///    `HirStmt::Expr(Call { target, args })`.
+/// 1. Walk every `DirStmt::Assign { rhs: Call { target, args } }` and
+///    `DirStmt::Expr(Call { target, args })`.
 /// 2. Look up `target` in the signatures API type provider.
 /// 3. For the return value: if there is a receiver binding (the lhs `Var` of
-///    the Assign), update `NirBinding.ty` to the resolved return type.
+///    the Assign), update `DirBinding.ty` to the resolved return type.
 /// 4. For each argument: if the argument is a `Var(x)` and the corresponding
 ///    parameter has a concrete type, update the binding for `x`.
 /// 5. Indirect/unknown calls (target not in DB) are silently skipped.
@@ -42,7 +42,7 @@
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
-use fission_midend_core::rename_vars_in_stmts;
+use fission_midend_core::util_dir::rename_vars_in_stmts;
 use fission_midend_core::wave_stats::{
     add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
     add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
@@ -211,7 +211,7 @@ fn resolve_return_ty(ret_type_str: &str) -> Option<NirType> {
 /// Follows the same monotone strengthening logic as `use_type_infer`:
 /// Unknown can be replaced by anything; a concrete type is only replaced if the
 /// candidate is strictly more informative (pointer vs. integer, or known vs. unknown).
-fn tighten_binding_ty(binding: &mut NirBinding, candidate: &NirType) -> bool {
+fn tighten_binding_ty(binding: &mut DirBinding, candidate: &NirType) -> bool {
     if binding.ty == *candidate {
         return false;
     }
@@ -284,7 +284,7 @@ fn is_generic_binding_name(name: &str) -> bool {
     )
 }
 
-fn is_renameable_generic_binding(binding: &NirBinding) -> bool {
+fn is_renameable_generic_binding(binding: &DirBinding) -> bool {
     is_generic_binding_name(&binding.name)
         && !matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_)))
 }
@@ -331,7 +331,7 @@ fn register_name_candidate(
 }
 
 fn apply_binding_surface_renames(
-    func: &mut HirFunction,
+    func: &mut DirFunction,
     rename_candidates: HashMap<String, String>,
     conflicts: &HashSet<String>,
 ) -> usize {
@@ -373,23 +373,23 @@ fn apply_binding_surface_renames(
     renames.len()
 }
 
-fn rewrite_call_targets_stmts(stmts: &mut [HirStmt], rewrites: &HashMap<String, String>) -> bool {
+fn rewrite_call_targets_stmts(stmts: &mut [DirStmt], rewrites: &HashMap<String, String>) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+            DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
                 changed |= rewrite_call_targets_expr(rhs, rewrites);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 changed |= rewrite_call_targets_expr(va_list, rewrites)
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 changed |= rewrite_call_targets_stmts(body, rewrites);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -400,7 +400,7 @@ fn rewrite_call_targets_stmts(stmts: &mut [HirStmt], rewrites: &HashMap<String, 
                 }
                 changed |= rewrite_call_targets_stmts(default, rewrites);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -409,20 +409,20 @@ fn rewrite_call_targets_stmts(stmts: &mut [HirStmt], rewrites: &HashMap<String, 
                 changed |= rewrite_call_targets_stmts(then_body, rewrites);
                 changed |= rewrite_call_targets_stmts(else_body, rewrites);
             }
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(None)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
     changed
 }
 
-fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, String>) -> bool {
+fn rewrite_call_targets_expr(expr: &mut DirExpr, rewrites: &HashMap<String, String>) -> bool {
     let mut changed = false;
     match expr {
-        HirExpr::Call { target, args, .. } => {
+        DirExpr::Call { target, args, .. } => {
             if let Some(replacement) = rewrites.get(target) {
                 *target = replacement.clone();
                 changed = true;
@@ -431,23 +431,23 @@ fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, Stri
                 changed |= rewrite_call_targets_expr(arg, rewrites);
             }
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= rewrite_call_targets_expr(lhs, rewrites);
             changed |= rewrite_call_targets_expr(rhs, rewrites);
         }
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => {
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => {
             changed |= rewrite_call_targets_expr(expr, rewrites);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= rewrite_call_targets_expr(base, rewrites);
             changed |= rewrite_call_targets_expr(index, rewrites);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -457,7 +457,7 @@ fn rewrite_call_targets_expr(expr: &mut HirExpr, rewrites: &HashMap<String, Stri
             changed |= rewrite_call_targets_expr(then_expr, rewrites);
             changed |= rewrite_call_targets_expr(else_expr, rewrites);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
     changed
 }
@@ -536,7 +536,7 @@ fn is_known_variadic_runtime_symbol(target: &str) -> bool {
 /// resolves a constant matching `options.global_names` -- which
 /// `NirRenderOptions::from_loaded_binary` (`fission-midend-core/src/ir/
 /// options.rs`) pre-populates with every extracted `.rdata` string,
-/// already wrapped in quotes and escaped -- to `HirExpr::AddressOfGlobal(
+/// already wrapped in quotes and escaped -- to `DirExpr::AddressOfGlobal(
 /// "\"...\"")`. [`arg_var_name`] (used by [`collect_callsites_stmts`]
 /// already, for the unrelated existing per-parameter typing above) already
 /// captures `AddressOfGlobal` names verbatim, so the quoted format-string
@@ -552,7 +552,7 @@ fn is_known_variadic_runtime_symbol(target: &str) -> bool {
 /// `char*`, not `wchar_t*`, per the ANSI convention -- a correctness trap
 /// not worth the risk without a dedicated fixture to validate against).
 fn apply_variadic_printf_format_string_arg_types(
-    func: &mut HirFunction,
+    func: &mut DirFunction,
     callsites: &[(Option<String>, String, Vec<Option<String>>)],
 ) -> bool {
     // The call-site argument variable is often just a same-block temp
@@ -615,7 +615,7 @@ fn apply_variadic_printf_format_string_arg_types(
 /// (its conservatism is appropriate for its many other, less-certain
 /// callers); this local override is scoped to just this one, narrow,
 /// high-confidence case.
-fn apply_variadic_printf_arg_ty(binding: &mut NirBinding, candidate: &NirType) -> bool {
+fn apply_variadic_printf_arg_ty(binding: &mut DirBinding, candidate: &NirType) -> bool {
     if tighten_binding_ty(binding, candidate) {
         return true;
     }
@@ -632,7 +632,7 @@ fn apply_variadic_printf_arg_ty(binding: &mut NirBinding, candidate: &NirType) -
 /// transitive copy-source too, so a refinement on a call-site temp
 /// reaches the real originating parameter/local it was copied from.
 fn apply_variadic_printf_arg_ty_transitively(
-    func: &mut HirFunction,
+    func: &mut DirFunction,
     copy_sources: &HashMap<String, String>,
     arg_var: &str,
     ty: &NirType,
@@ -657,19 +657,19 @@ fn apply_variadic_printf_arg_ty_transitively(
 /// Single-hop `target = source` (bare `Var`-to-`Var`) copy map, used by
 /// [`apply_variadic_printf_arg_ty_transitively`] to trace a call-site
 /// argument temp back to its real originating binding.
-fn collect_copy_sources(stmts: &[HirStmt], out: &mut HashMap<String, String>) {
+fn collect_copy_sources(stmts: &[DirStmt], out: &mut HashMap<String, String>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(target),
-                rhs: HirExpr::Var(source),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(target),
+                rhs: DirExpr::Var(source),
             } => {
                 out.insert(target.clone(), source.clone());
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 collect_copy_sources(body, out);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -677,7 +677,7 @@ fn collect_copy_sources(stmts: &[HirStmt], out: &mut HashMap<String, String>) {
                 collect_copy_sources(then_body, out);
                 collect_copy_sources(else_body, out);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
@@ -688,7 +688,7 @@ fn collect_copy_sources(stmts: &[HirStmt], out: &mut HashMap<String, String>) {
                 }
                 collect_copy_sources(body, out);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_copy_sources(&case.body, out);
                 }
@@ -853,7 +853,7 @@ fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirType>> {
 /// updates argument/receiver bindings with the resolved types.
 ///
 /// Returns `true` if any binding type was updated.
-pub fn apply_callsite_type_prop_pass(func: &mut HirFunction) -> bool {
+pub fn apply_callsite_type_prop_pass(func: &mut DirFunction) -> bool {
     // Build a lookup map from binding name to index in func.locals / func.params.
     let mut changed = false;
     let mut rename_candidates = HashMap::<String, String>::default();
@@ -1033,25 +1033,25 @@ fn exact_arity_for_target(
 }
 
 fn prune_known_api_call_args_stmts(
-    stmts: &mut [HirStmt],
+    stmts: &mut [DirStmt],
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> usize {
     let mut pruned = 0usize;
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+            DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
                 pruned += prune_known_api_call_args_expr(rhs, summaries);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 pruned += prune_known_api_call_args_expr(va_list, summaries);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 pruned += prune_known_api_call_args_stmts(body, summaries);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -1062,7 +1062,7 @@ fn prune_known_api_call_args_stmts(
                 }
                 pruned += prune_known_api_call_args_stmts(default, summaries);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -1071,23 +1071,23 @@ fn prune_known_api_call_args_stmts(
                 pruned += prune_known_api_call_args_stmts(then_body, summaries);
                 pruned += prune_known_api_call_args_stmts(else_body, summaries);
             }
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(None)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
     pruned
 }
 
 fn prune_known_api_call_args_expr(
-    expr: &mut HirExpr,
+    expr: &mut DirExpr,
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> usize {
     let mut pruned = 0usize;
     match expr {
-        HirExpr::Call { target, args, .. } => {
+        DirExpr::Call { target, args, .. } => {
             for arg in args.iter_mut() {
                 pruned += prune_known_api_call_args_expr(arg, summaries);
             }
@@ -1099,23 +1099,23 @@ fn prune_known_api_call_args_expr(
                 pruned += removed;
             }
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             pruned += prune_known_api_call_args_expr(lhs, summaries);
             pruned += prune_known_api_call_args_expr(rhs, summaries);
         }
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => {
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => {
             pruned += prune_known_api_call_args_expr(expr, summaries);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             pruned += prune_known_api_call_args_expr(base, summaries);
             pruned += prune_known_api_call_args_expr(index, summaries);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1125,28 +1125,28 @@ fn prune_known_api_call_args_expr(
             pruned += prune_known_api_call_args_expr(then_expr, summaries);
             pruned += prune_known_api_call_args_expr(else_expr, summaries);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
     pruned
 }
 
-fn prune_self_call_args_stmts(stmts: &mut [HirStmt], func_name: &str, arity: usize) -> usize {
+fn prune_self_call_args_stmts(stmts: &mut [DirStmt], func_name: &str, arity: usize) -> usize {
     let mut pruned = 0usize;
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) | HirStmt::Return(Some(rhs)) => {
+            DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
                 pruned += prune_self_call_args_expr(rhs, func_name, arity);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 pruned += prune_self_call_args_expr(va_list, func_name, arity);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 pruned += prune_self_call_args_stmts(body, func_name, arity);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -1157,7 +1157,7 @@ fn prune_self_call_args_stmts(stmts: &mut [HirStmt], func_name: &str, arity: usi
                 }
                 pruned += prune_self_call_args_stmts(default, func_name, arity);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -1166,20 +1166,20 @@ fn prune_self_call_args_stmts(stmts: &mut [HirStmt], func_name: &str, arity: usi
                 pruned += prune_self_call_args_stmts(then_body, func_name, arity);
                 pruned += prune_self_call_args_stmts(else_body, func_name, arity);
             }
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(None)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
     pruned
 }
 
-fn prune_self_call_args_expr(expr: &mut HirExpr, func_name: &str, arity: usize) -> usize {
+fn prune_self_call_args_expr(expr: &mut DirExpr, func_name: &str, arity: usize) -> usize {
     let mut pruned = 0usize;
     match expr {
-        HirExpr::Call { target, args, .. } => {
+        DirExpr::Call { target, args, .. } => {
             for arg in args.iter_mut() {
                 pruned += prune_self_call_args_expr(arg, func_name, arity);
             }
@@ -1189,23 +1189,23 @@ fn prune_self_call_args_expr(expr: &mut HirExpr, func_name: &str, arity: usize) 
                 pruned += removed;
             }
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             pruned += prune_self_call_args_expr(lhs, func_name, arity);
             pruned += prune_self_call_args_expr(rhs, func_name, arity);
         }
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => {
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => {
             pruned += prune_self_call_args_expr(expr, func_name, arity);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             pruned += prune_self_call_args_expr(base, func_name, arity);
             pruned += prune_self_call_args_expr(index, func_name, arity);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1215,30 +1215,30 @@ fn prune_self_call_args_expr(expr: &mut HirExpr, func_name: &str, arity: usize) 
             pruned += prune_self_call_args_expr(then_expr, func_name, arity);
             pruned += prune_self_call_args_expr(else_expr, func_name, arity);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
     pruned
 }
 
 fn binding_by_name_mut<'a>(
-    bindings: &'a mut Vec<NirBinding>,
+    bindings: &'a mut Vec<DirBinding>,
     name: &str,
-) -> Option<&'a mut NirBinding> {
+) -> Option<&'a mut DirBinding> {
     bindings.iter_mut().find(|b| b.name == name)
 }
 
 /// Extract the plain variable name from a Call argument expression (if it's
 /// `Var(x)` or `Cast(_, Var(x))`).  Returns `None` for complex expressions.
-fn arg_var_name(expr: &HirExpr) -> Option<String> {
+fn arg_var_name(expr: &DirExpr) -> Option<String> {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name.clone()),
-        HirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => Some(name.clone()),
+        DirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
         _ => None,
     }
 }
 
 fn collect_callsites_stmts(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     out: &mut Vec<(Option<String>, String, Vec<Option<String>>)>,
 ) {
     for stmt in stmts {
@@ -1247,14 +1247,14 @@ fn collect_callsites_stmts(
 }
 
 fn collect_callsites_stmt(
-    stmt: &HirStmt,
+    stmt: &DirStmt,
     out: &mut Vec<(Option<String>, String, Vec<Option<String>>)>,
 ) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
-            if let HirExpr::Call { target, args, .. } = rhs {
+        DirStmt::Assign { lhs, rhs } => {
+            if let DirExpr::Call { target, args, .. } = rhs {
                 let recv = match lhs {
-                    HirLValue::Var(name) => Some(name.clone()),
+                    DirLValue::Var(name) => Some(name.clone()),
                     _ => None,
                 };
                 let arg_vars = args.iter().map(arg_var_name).collect();
@@ -1263,15 +1263,15 @@ fn collect_callsites_stmt(
             // Also recurse in case call appears inside a more complex rhs.
             collect_callsites_expr(rhs, out);
         }
-        HirStmt::Expr(expr) => {
-            if let HirExpr::Call { target, args, .. } = expr {
+        DirStmt::Expr(expr) => {
+            if let DirExpr::Call { target, args, .. } = expr {
                 let arg_vars = args.iter().map(arg_var_name).collect();
                 out.push((None, target.clone(), arg_vars));
             }
         }
-        HirStmt::Return(Some(expr)) => collect_callsites_expr(expr, out),
-        HirStmt::Block(body) => collect_callsites_stmts(body, out),
-        HirStmt::If {
+        DirStmt::Return(Some(expr)) => collect_callsites_expr(expr, out),
+        DirStmt::Block(body) => collect_callsites_stmts(body, out),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1280,11 +1280,11 @@ fn collect_callsites_stmt(
             collect_callsites_stmts(then_body, out);
             collect_callsites_stmts(else_body, out);
         }
-        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
             collect_callsites_expr(cond, out);
             collect_callsites_stmts(body, out);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -1301,7 +1301,7 @@ fn collect_callsites_stmt(
             }
             collect_callsites_stmts(body, out);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -1317,30 +1317,30 @@ fn collect_callsites_stmt(
 }
 
 fn collect_callsites_expr(
-    expr: &HirExpr,
+    expr: &DirExpr,
     out: &mut Vec<(Option<String>, String, Vec<Option<String>>)>,
 ) {
     match expr {
-        HirExpr::Call { target, args, .. } => {
+        DirExpr::Call { target, args, .. } => {
             let arg_vars = args.iter().map(arg_var_name).collect();
             out.push((None, target.clone(), arg_vars));
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             collect_callsites_expr(lhs, out);
             collect_callsites_expr(rhs, out);
         }
-        HirExpr::Cast { expr: inner, .. } | HirExpr::Unary { expr: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. } | DirExpr::Unary { expr: inner, .. } => {
             collect_callsites_expr(inner, out);
         }
-        HirExpr::Load { ptr, .. } => collect_callsites_expr(ptr, out),
-        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+        DirExpr::Load { ptr, .. } => collect_callsites_expr(ptr, out),
+        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
             collect_callsites_expr(base, out)
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             collect_callsites_expr(base, out);
             collect_callsites_expr(index, out);
         }
-        HirExpr::AggregateCopy { src, .. } => collect_callsites_expr(src, out),
+        DirExpr::AggregateCopy { src, .. } => collect_callsites_expr(src, out),
         _ => {}
     }
 }
@@ -1352,8 +1352,8 @@ mod tests {
     // prelude via parent
     use fission_core::CallingConvention;
 
-    fn unknown_binding(name: &str, origin: Option<NirBindingOrigin>) -> NirBinding {
-        NirBinding {
+    fn unknown_binding(name: &str, origin: Option<NirBindingOrigin>) -> DirBinding {
+        DirBinding {
             name: name.to_string(),
             ty: NirType::Unknown,
             surface_type_name: None,
@@ -1364,7 +1364,7 @@ mod tests {
 
     #[test]
     fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![unknown_binding(
@@ -1377,11 +1377,11 @@ mod tests {
             )],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Call {
+            body: vec![DirStmt::Expr(DirExpr::Call {
                 target: "GetWindowRect".to_string(),
                 args: vec![
-                    HirExpr::Var("param_1".to_string()),
-                    HirExpr::Var("local_2".to_string()),
+                    DirExpr::Var("param_1".to_string()),
+                    DirExpr::Var("local_2".to_string()),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1399,14 +1399,14 @@ mod tests {
 
     #[test]
     fn callsite_type_prop_rewrites_target_through_wrapper_summary() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Call {
+            body: vec![DirStmt::Expr(DirExpr::Call {
                 target: "wrapper_foo".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -1454,7 +1454,7 @@ mod tests {
 
         assert!(apply_callsite_type_prop_pass(&mut func));
         match &func.body[0] {
-            HirStmt::Expr(HirExpr::Call { target, .. }) => {
+            DirStmt::Expr(DirExpr::Call { target, .. }) => {
                 assert_eq!(target, "MessageBoxA");
             }
             other => panic!("unexpected stmt: {other:?}"),
@@ -1464,7 +1464,7 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_extra_args_only_for_exact_api_signature() {
         reset_normalize_wave_stats();
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
@@ -1472,24 +1472,24 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Expr(HirExpr::Call {
+                DirStmt::Expr(DirExpr::Call {
                     target: "MessageBoxA".to_string(),
                     args: vec![
-                        HirExpr::Const(0, NirType::Unknown),
-                        HirExpr::Const(1, NirType::Unknown),
-                        HirExpr::Const(2, NirType::Unknown),
-                        HirExpr::Const(3, NirType::Unknown),
-                        HirExpr::Const(4, NirType::Unknown),
-                        HirExpr::Const(5, NirType::Unknown),
+                        DirExpr::Const(0, NirType::Unknown),
+                        DirExpr::Const(1, NirType::Unknown),
+                        DirExpr::Const(2, NirType::Unknown),
+                        DirExpr::Const(3, NirType::Unknown),
+                        DirExpr::Const(4, NirType::Unknown),
+                        DirExpr::Const(5, NirType::Unknown),
                     ],
                     ty: NirType::Unknown,
                 }),
-                HirStmt::Expr(HirExpr::Call {
+                DirStmt::Expr(DirExpr::Call {
                     target: "unresolved_target".to_string(),
                     args: vec![
-                        HirExpr::Const(0, NirType::Unknown),
-                        HirExpr::Const(1, NirType::Unknown),
-                        HirExpr::Const(2, NirType::Unknown),
+                        DirExpr::Const(0, NirType::Unknown),
+                        DirExpr::Const(1, NirType::Unknown),
+                        DirExpr::Const(2, NirType::Unknown),
                     ],
                     ty: NirType::Unknown,
                 }),
@@ -1508,11 +1508,11 @@ mod tests {
         assert_eq!(stats.call_prototype_signature_missing_count, 0);
         assert_eq!(stats.call_prototype_wrapper_resolved_count, 0);
         match &func.body[0] {
-            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 4),
+            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 4),
             other => panic!("unexpected first stmt: {other:?}"),
         }
         match &func.body[1] {
-            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 3),
+            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 3),
             other => panic!("unexpected second stmt: {other:?}"),
         }
     }
@@ -1520,22 +1520,22 @@ mod tests {
     #[test]
     fn callsite_type_prop_keeps_extra_args_for_known_variadic_runtime_symbol() {
         reset_normalize_wave_stats();
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Call {
+            body: vec![DirStmt::Expr(DirExpr::Call {
                 target: "printf".to_string(),
                 args: vec![
-                    HirExpr::Const(0, NirType::Unknown),
-                    HirExpr::Const(1, NirType::Unknown),
-                    HirExpr::Const(2, NirType::Unknown),
-                    HirExpr::Const(3, NirType::Unknown),
-                    HirExpr::Const(4, NirType::Unknown),
-                    HirExpr::Const(5, NirType::Unknown),
+                    DirExpr::Const(0, NirType::Unknown),
+                    DirExpr::Const(1, NirType::Unknown),
+                    DirExpr::Const(2, NirType::Unknown),
+                    DirExpr::Const(3, NirType::Unknown),
+                    DirExpr::Const(4, NirType::Unknown),
+                    DirExpr::Const(5, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1578,7 +1578,7 @@ mod tests {
         let stats = take_normalize_wave_stats();
         assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 0);
         match &func.body[0] {
-            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 6),
+            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 6),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }
@@ -1608,18 +1608,18 @@ mod tests {
             }
         }
 
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![
-                NirBinding {
+                DirBinding {
                     name: "param_1".to_string(),
                     ty: generic_uint(32),
                     surface_type_name: None,
                     origin: Some(NirBindingOrigin::ParamIndex(0)),
                     initializer: None,
                 },
-                NirBinding {
+                DirBinding {
                     name: "param_2".to_string(),
                     ty: generic_uint(64),
                     surface_type_name: None,
@@ -1628,14 +1628,14 @@ mod tests {
                 },
             ],
             locals: vec![
-                NirBinding {
+                DirBinding {
                     name: "arg_tmp".to_string(),
                     ty: generic_uint(32),
                     surface_type_name: None,
                     origin: Some(NirBindingOrigin::Temp),
                     initializer: None,
                 },
-                NirBinding {
+                DirBinding {
                     name: "arg_tmp2".to_string(),
                     ty: generic_uint(64),
                     surface_type_name: None,
@@ -1646,20 +1646,20 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("arg_tmp".to_string()),
-                    rhs: HirExpr::Var("param_1".to_string()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("arg_tmp".to_string()),
+                    rhs: DirExpr::Var("param_1".to_string()),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("arg_tmp2".to_string()),
-                    rhs: HirExpr::Var("param_2".to_string()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("arg_tmp2".to_string()),
+                    rhs: DirExpr::Var("param_2".to_string()),
                 },
-                HirStmt::Expr(HirExpr::Call {
+                DirStmt::Expr(DirExpr::Call {
                     target: "printf".to_string(),
                     args: vec![
-                        HirExpr::AddressOfGlobal("\"value=%d name=%s\\n\"".to_string()),
-                        HirExpr::Var("arg_tmp".to_string()),
-                        HirExpr::Var("arg_tmp2".to_string()),
+                        DirExpr::AddressOfGlobal("\"value=%d name=%s\\n\"".to_string()),
+                        DirExpr::Var("arg_tmp".to_string()),
+                        DirExpr::Var("arg_tmp2".to_string()),
                     ],
                     ty: NirType::Unknown,
                 }),
@@ -1696,10 +1696,10 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_self_recursive_args_to_function_arity() {
         reset_normalize_wave_stats();
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "fib".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1712,13 +1712,13 @@ mod tests {
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Call {
+            body: vec![DirStmt::Expr(DirExpr::Call {
                 target: "fib".to_string(),
                 args: vec![
-                    HirExpr::Const(1, NirType::Unknown),
-                    HirExpr::Const(2, NirType::Unknown),
-                    HirExpr::Const(3, NirType::Unknown),
-                    HirExpr::Const(4, NirType::Unknown),
+                    DirExpr::Const(1, NirType::Unknown),
+                    DirExpr::Const(2, NirType::Unknown),
+                    DirExpr::Const(3, NirType::Unknown),
+                    DirExpr::Const(4, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1734,7 +1734,7 @@ mod tests {
         assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 0);
         assert_eq!(stats.call_signature_refined_count, 3);
         match &func.body[0] {
-            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
+            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }
@@ -1742,21 +1742,21 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_wrapper_args_after_resolving_import_summary() {
         reset_normalize_wave_stats();
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Call {
+            body: vec![DirStmt::Expr(DirExpr::Call {
                 target: "wrapper_message_box".to_string(),
                 args: vec![
-                    HirExpr::Const(0, NirType::Unknown),
-                    HirExpr::Const(1, NirType::Unknown),
-                    HirExpr::Const(2, NirType::Unknown),
-                    HirExpr::Const(3, NirType::Unknown),
-                    HirExpr::Const(4, NirType::Unknown),
+                    DirExpr::Const(0, NirType::Unknown),
+                    DirExpr::Const(1, NirType::Unknown),
+                    DirExpr::Const(2, NirType::Unknown),
+                    DirExpr::Const(3, NirType::Unknown),
+                    DirExpr::Const(4, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1808,7 +1808,7 @@ mod tests {
         assert_eq!(stats.call_prototype_signature_missing_count, 0);
         assert_eq!(stats.call_prototype_unknown_target_kept_count, 0);
         match &func.body[0] {
-            HirStmt::Expr(HirExpr::Call { target, args, .. }) => {
+            DirStmt::Expr(DirExpr::Call { target, args, .. }) => {
                 assert_eq!(target, "MessageBoxA");
                 assert_eq!(args.len(), 4);
             }
@@ -1819,19 +1819,19 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_locked_internal_callee_arity() {
         reset_normalize_wave_stats();
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Call {
+            body: vec![DirStmt::Expr(DirExpr::Call {
                 target: "recursive_fib".to_string(),
                 args: vec![
-                    HirExpr::Const(0, NirType::Unknown),
-                    HirExpr::Const(1, NirType::Unknown),
-                    HirExpr::Const(2, NirType::Unknown),
+                    DirExpr::Const(0, NirType::Unknown),
+                    DirExpr::Const(1, NirType::Unknown),
+                    DirExpr::Const(2, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1874,7 +1874,7 @@ mod tests {
         let stats = take_normalize_wave_stats();
         assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 2);
         match &func.body[0] {
-            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
+            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }
@@ -1882,18 +1882,18 @@ mod tests {
     #[test]
     fn callsite_type_prop_keeps_args_when_summary_signature_missing() {
         reset_normalize_wave_stats();
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Call {
+            body: vec![DirStmt::Expr(DirExpr::Call {
                 target: "known_without_signature".to_string(),
                 args: vec![
-                    HirExpr::Const(0, NirType::Unknown),
-                    HirExpr::Const(1, NirType::Unknown),
+                    DirExpr::Const(0, NirType::Unknown),
+                    DirExpr::Const(1, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1939,7 +1939,7 @@ mod tests {
         assert_eq!(stats.call_prototype_signature_missing_count, 1);
         assert_eq!(stats.call_prototype_unknown_target_kept_count, 0);
         match &func.body[0] {
-            HirStmt::Expr(HirExpr::Call { args, .. }) => assert_eq!(args.len(), 2),
+            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 2),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }

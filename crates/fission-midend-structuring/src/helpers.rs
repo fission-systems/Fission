@@ -1,9 +1,10 @@
 //! Shared pure helpers for residual structuring free functions.
 
 use fission_midend_core::ir::{
-    DispatcherProofUnit, HirBinaryOp, HirExpr, HirStmt, HirSwitchCase, HirUnaryOp,
+    DispatcherProofUnit, DirBinaryOp, DirExpr, DirStmt, DirSwitchCase, DirUnaryOp,
 };
-use fission_midend_core::{strip_casts, SWITCH_FALLTHROUGH_SENTINEL};
+use fission_midend_core::util_dir::strip_casts;
+use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
 use crate::regions::EmitReadyDecision;
 
 /// Label name for a block target key / address (matches pcode midend cfg helper).
@@ -57,8 +58,8 @@ pub fn proof_supports_direct_emit(proof: &DispatcherProofUnit) -> bool {
         && proof.recovered_cases.len() >= proof.selector_cardinality
 }
 
-pub fn merge_equivalent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
-    let mut merged: Vec<HirSwitchCase> = Vec::with_capacity(cases.len());
+pub fn merge_equivalent_switch_cases(cases: &mut Vec<DirSwitchCase>) {
+    let mut merged: Vec<DirSwitchCase> = Vec::with_capacity(cases.len());
     for case in cases.drain(..) {
         if let Some(existing) = merged
             .iter_mut()
@@ -72,7 +73,7 @@ pub fn merge_equivalent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
     *cases = merged;
 }
 
-pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<HirSwitchCase>) -> usize {
+pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<DirSwitchCase>) -> usize {
     let mut patched = 0usize;
     let n = cases.len();
     if n < 2 {
@@ -81,7 +82,7 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<HirSwitchCase>) -> usiz
     let next_labels: Vec<Option<String>> = (0..n)
         .map(|i| {
             cases[i].body.iter().find_map(|s| {
-                if let HirStmt::Label(l) = s {
+                if let DirStmt::Label(l) = s {
                     Some(l.clone())
                 } else {
                     None
@@ -97,8 +98,8 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<HirSwitchCase>) -> usiz
             .body
             .iter_mut()
             .rev()
-            .find(|s| !matches!(s, HirStmt::Label(_)));
-        if let Some(HirStmt::Goto(label)) = last_stmt {
+            .find(|s| !matches!(s, DirStmt::Label(_)));
+        if let Some(DirStmt::Goto(label)) = last_stmt {
             if label == next_label {
                 *label = SWITCH_FALLTHROUGH_SENTINEL.to_string();
                 patched += 1;
@@ -108,23 +109,23 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<HirSwitchCase>) -> usiz
     patched
 }
 
-pub fn extract_eq_const_for_case(expr: &HirExpr, case_on_true: bool) -> Option<(HirExpr, i64)> {
+pub fn extract_eq_const_for_case(expr: &DirExpr, case_on_true: bool) -> Option<(DirExpr, i64)> {
     let expr = strip_casts(expr);
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Eq,
+        DirExpr::Binary {
+            op: DirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if case_on_true => extract_eq_const_operands(lhs.as_ref(), rhs.as_ref()),
-        HirExpr::Binary {
-            op: HirBinaryOp::Ne,
+        DirExpr::Binary {
+            op: DirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } if !case_on_true => extract_eq_const_operands(lhs.as_ref(), rhs.as_ref()),
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } => extract_eq_const_for_case(expr.as_ref(), !case_on_true),
@@ -132,29 +133,29 @@ pub fn extract_eq_const_for_case(expr: &HirExpr, case_on_true: bool) -> Option<(
     }
 }
 
-pub fn extract_eq_const_operands(lhs: &HirExpr, rhs: &HirExpr) -> Option<(HirExpr, i64)> {
+pub fn extract_eq_const_operands(lhs: &DirExpr, rhs: &DirExpr) -> Option<(DirExpr, i64)> {
     match (strip_casts(lhs), strip_casts(rhs)) {
-        (HirExpr::Const(value, _), other) => normalize_affine_case_expr(&other, value),
-        (other, HirExpr::Const(value, _)) => normalize_affine_case_expr(&other, value),
+        (DirExpr::Const(value, _), other) => normalize_affine_case_expr(&other, value),
+        (other, DirExpr::Const(value, _)) => normalize_affine_case_expr(&other, value),
         _ => None,
     }
 }
 
-pub fn extract_range_guard_for_chain(expr: &HirExpr, chain_on_true: bool) -> Option<HirExpr> {
+pub fn extract_range_guard_for_chain(expr: &DirExpr, chain_on_true: bool) -> Option<DirExpr> {
     let expr = strip_casts(expr);
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe,
+        DirExpr::Binary {
+            op: DirBinaryOp::Lt | DirBinaryOp::Le | DirBinaryOp::SLt | DirBinaryOp::SLe,
             lhs,
             rhs,
             ..
         } => match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
-            (other, HirExpr::Const(_, _)) if chain_on_true => normalize_affine_bound_expr(&other),
-            (HirExpr::Const(_, _), other) if !chain_on_true => normalize_affine_bound_expr(&other),
+            (other, DirExpr::Const(_, _)) if chain_on_true => normalize_affine_bound_expr(&other),
+            (DirExpr::Const(_, _), other) if !chain_on_true => normalize_affine_bound_expr(&other),
             _ => None,
         },
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } => extract_range_guard_for_chain(expr.as_ref(), !chain_on_true),
@@ -162,48 +163,48 @@ pub fn extract_range_guard_for_chain(expr: &HirExpr, chain_on_true: bool) -> Opt
     }
 }
 
-fn normalize_affine_bound_expr(expr: &HirExpr) -> Option<HirExpr> {
+fn normalize_affine_bound_expr(expr: &DirExpr) -> Option<DirExpr> {
     let expr = strip_casts(expr);
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         }
-        | HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        | DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs,
             rhs,
             ..
-        } if matches!(strip_casts(rhs.as_ref()), HirExpr::Const(_, _)) => Some(*lhs.clone()),
+        } if matches!(strip_casts(rhs.as_ref()), DirExpr::Const(_, _)) => Some(*lhs.clone()),
         _ => Some(expr.clone()),
     }
 }
 
-fn normalize_affine_case_expr(expr: &HirExpr, value: i64) -> Option<(HirExpr, i64)> {
+fn normalize_affine_case_expr(expr: &DirExpr, value: i64) -> Option<(DirExpr, i64)> {
     let expr = strip_casts(expr);
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
             ref lhs,
             ref rhs,
             ..
         } => {
-            let HirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
+            let DirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
                 return Some((expr.clone(), value));
             };
             value
                 .checked_add(offset)
                 .map(|normalized| ((*lhs.clone()), normalized))
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
             ref lhs,
             ref rhs,
             ..
         } => {
-            let HirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
+            let DirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
                 return Some((expr.clone(), value));
             };
             value

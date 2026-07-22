@@ -1,6 +1,6 @@
 use fission_midend_core::ir::{
-    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef, HirExpr, HirFunction,
-    HirLValue, HirStmt, ProcedureCallShape, ProcedureControlEffect, ProcedureMemoryEffect,
+    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef, DirExpr, DirFunction,
+    DirLValue, DirStmt, ProcedureCallShape, ProcedureControlEffect, ProcedureMemoryEffect,
     ProcedureReturnShape, ProcedureStackEffect, ProcedureSummary, SummarySoundness, WrapperClass,
     WrapperContractionProof, parse_call_target_address,
 };
@@ -24,13 +24,13 @@ fn summary_seed(target: &str) -> CallTargetRef {
     }
 }
 
-pub fn summarize_wrapper_hir_function(func: &HirFunction) -> Option<ProcedureSummary> {
+pub fn summarize_wrapper_hir_function(func: &DirFunction) -> Option<ProcedureSummary> {
     let (target, wrapper_class, forwarded_param_indices, confidence) = match func.body.as_slice() {
-        [HirStmt::Return(Some(HirExpr::Call { target, args, .. }))] => {
+        [DirStmt::Return(Some(DirExpr::Call { target, args, .. }))] => {
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                    DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
                         func.params.iter().position(|param| param.name == *name)
                     }
                     _ => None,
@@ -44,16 +44,16 @@ pub fn summarize_wrapper_hir_function(func: &HirFunction) -> Option<ProcedureSum
             )
         }
         [
-            HirStmt::Assign {
-                lhs: HirLValue::Var(temp),
-                rhs: HirExpr::Call { target, args, .. },
+            DirStmt::Assign {
+                lhs: DirLValue::Var(temp),
+                rhs: DirExpr::Call { target, args, .. },
             },
-            HirStmt::Return(Some(HirExpr::Var(ret))),
+            DirStmt::Return(Some(DirExpr::Var(ret))),
         ] if temp == ret => {
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                    DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
                         func.params.iter().position(|param| param.name == *name)
                     }
                     _ => None,
@@ -100,11 +100,11 @@ pub fn summary_soundness_for_wrapper(summary: &ProcedureSummary) -> SummarySound
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_midend_core::ir::{HirExpr, HirFunction, HirStmt, NirBinding, NirType};
+    use fission_midend_core::ir::{DirExpr, DirFunction, DirStmt, DirBinding, NirType};
         use fission_core::CallingConvention;
 
-    fn empty_binding(name: &str) -> NirBinding {
-        NirBinding {
+    fn empty_binding(name: &str) -> DirBinding {
+        DirBinding {
             name: name.to_string(),
             ty: NirType::Unknown,
             surface_type_name: None,
@@ -115,16 +115,16 @@ mod tests {
 
     #[test]
     fn summarize_wrapper_hir_function_detects_tail_forwarder() {
-        let func = HirFunction {
+        let func = DirFunction {
             name: "wrapper".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![empty_binding("param_1")],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Return(Some(HirExpr::Call {
+            body: vec![DirStmt::Return(Some(DirExpr::Call {
                 target: "sub_140010000".to_string(),
-                args: vec![HirExpr::Var("param_1".to_string())],
+                args: vec![DirExpr::Var("param_1".to_string())],
                 ty: NirType::Unknown,
             }))],
             calling_convention: CallingConvention::default(),

@@ -75,9 +75,9 @@ fn output_nonlocal_use_detection_matches_overlapping_register_aliases() {
 
 #[test]
 fn low_cost_builder_inline_accepts_single_use_load_chain() {
-    let expr = HirExpr::Load {
-        ptr: Box::new(HirExpr::PtrOffset {
-            base: Box::new(HirExpr::Var("param_1".to_string())),
+    let expr = DirExpr::Load {
+        ptr: Box::new(DirExpr::PtrOffset {
+            base: Box::new(DirExpr::Var("param_1".to_string())),
             offset: 0x20,
         }),
         ty: int(64),
@@ -90,9 +90,9 @@ fn low_cost_builder_inline_accepts_single_use_load_chain() {
 
 #[test]
 fn low_cost_builder_inline_rejects_calls() {
-    let expr = HirExpr::Call {
+    let expr = DirExpr::Call {
         target: "helper".to_string(),
-        args: vec![HirExpr::Var("param_1".to_string())],
+        args: vec![DirExpr::Var("param_1".to_string())],
         ty: int(32),
     };
 
@@ -103,9 +103,9 @@ fn low_cost_builder_inline_rejects_calls() {
 
 #[test]
 fn low_cost_builder_inline_accepts_pcodeop_intrinsics() {
-    let expr = HirExpr::Call {
+    let expr = DirExpr::Call {
         target: "__pcodeop_294".to_string(),
-        args: vec![HirExpr::Var("param_1".to_string())],
+        args: vec![DirExpr::Var("param_1".to_string())],
         ty: int(32),
     };
 
@@ -198,9 +198,9 @@ fn carry_intrinsic_consumers_are_predicate_consumers() {
 
 #[test]
 fn lzcnt_intrinsic_rhs_is_low_cost_builder_inline_candidate() {
-    let expr = HirExpr::Call {
+    let expr = DirExpr::Call {
         target: "__lzcnt".to_string(),
-        args: vec![HirExpr::Var("tmp_1".to_string())],
+        args: vec![DirExpr::Var("tmp_1".to_string())],
         ty: int(32),
     };
 
@@ -211,8 +211,8 @@ fn lzcnt_intrinsic_rhs_is_low_cost_builder_inline_candidate() {
 
 #[test]
 fn memory_backed_single_use_inline_requires_passthrough_consumer() {
-    let expr = HirExpr::Load {
-        ptr: Box::new(HirExpr::Var("param_1".to_string())),
+    let expr = DirExpr::Load {
+        ptr: Box::new(DirExpr::Var("param_1".to_string())),
         ty: int(64),
     };
 
@@ -231,7 +231,7 @@ fn memory_backed_single_use_inline_requires_passthrough_consumer() {
 
 #[test]
 fn plain_leaf_single_use_inline_can_flow_into_data_consumer() {
-    let expr = HirExpr::Var("tmp_1".to_string());
+    let expr = DirExpr::Var("tmp_1".to_string());
     assert!(!PreviewBuilder::expr_requires_passthrough_single_use_inline(&expr));
     assert!(PreviewBuilder::use_opcode_allows_single_use_builder_inline(
         PcodeOpcode::IntAdd
@@ -240,10 +240,10 @@ fn plain_leaf_single_use_inline_can_flow_into_data_consumer() {
 
 #[test]
 fn arithmetic_single_use_inline_can_flow_into_data_consumer() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("x".to_string())),
-        rhs: Box::new(HirExpr::Const(1, int(32))),
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("x".to_string())),
+        rhs: Box::new(DirExpr::Const(1, int(32))),
         ty: int(32),
     };
 
@@ -255,10 +255,10 @@ fn arithmetic_single_use_inline_can_flow_into_data_consumer() {
 
 #[test]
 fn predicate_single_use_inline_requires_passthrough_consumer() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Eq,
-        lhs: Box::new(HirExpr::Var("x".to_string())),
-        rhs: Box::new(HirExpr::Const(1, int(32))),
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Eq,
+        lhs: Box::new(DirExpr::Var("x".to_string())),
+        rhs: Box::new(DirExpr::Const(1, int(32))),
         ty: NirType::Bool,
     };
 
@@ -274,8 +274,8 @@ fn predicate_single_use_inline_requires_passthrough_consumer() {
 
 #[test]
 fn predicate_sensitive_reads_require_stable_representative_for_nontrivial_rhs() {
-    let expr = HirExpr::Load {
-        ptr: Box::new(HirExpr::Var("param_1".to_string())),
+    let expr = DirExpr::Load {
+        ptr: Box::new(DirExpr::Var("param_1".to_string())),
         ty: int(64),
     };
     assert!(
@@ -294,7 +294,7 @@ fn predicate_sensitive_reads_require_stable_representative_for_nontrivial_rhs() 
 
 #[test]
 fn predicate_sensitive_reads_allow_direct_leaf_replacement() {
-    let expr = HirExpr::Var("tmp_1".to_string());
+    let expr = DirExpr::Var("tmp_1".to_string());
     assert!(
         !PreviewBuilder::replacement_read_requires_stable_representative(
             ReplacementReadClass::PredicateSensitive,
@@ -311,16 +311,16 @@ fn predicate_sensitive_reads_allow_direct_leaf_replacement() {
 
 #[test]
 fn same_block_replacement_keeps_nonleaf_representatives() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("x".to_string())),
-        rhs: Box::new(HirExpr::Const(1, int(32))),
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("x".to_string())),
+        rhs: Box::new(DirExpr::Const(1, int(32))),
         ty: int(32),
     };
 
     assert!(PreviewBuilder::same_block_replacement_requires_stable_representative(&expr));
     assert!(
-        !PreviewBuilder::same_block_replacement_requires_stable_representative(&HirExpr::Var(
+        !PreviewBuilder::same_block_replacement_requires_stable_representative(&DirExpr::Var(
             "tmp_1".to_string()
         ))
     );
@@ -350,7 +350,7 @@ fn alias_unsafe_hazard_prefers_call_between_def_and_use() {
         0,
         None,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     );
 
     assert_eq!(hazard.kind, AliasUnsafeHazardKind::CallBetweenDefUse);
@@ -394,7 +394,7 @@ fn alias_unsafe_hazard_detects_load_after_store_chain() {
         0,
         None,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     );
 
     assert_eq!(hazard.kind, AliasUnsafeHazardKind::LoadAfterStore);
@@ -432,7 +432,7 @@ fn alias_unsafe_hazard_falls_back_to_multiple_consumers() {
         0,
         None,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     );
 
     assert_eq!(
@@ -462,7 +462,7 @@ fn alias_unsafe_hazard_marks_disallowed_single_consumer() {
         0,
         None,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     );
 
     assert_eq!(hazard.kind, AliasUnsafeHazardKind::DisallowedSingleConsumer);
@@ -493,7 +493,7 @@ fn disallowed_single_consumer_proof_marks_predicate_reason() {
         &block,
         0,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     )
     .expect("disallowed single consumer proof");
 
@@ -533,8 +533,8 @@ fn disallowed_single_consumer_proof_marks_load_rhs_reason() {
         &block,
         0,
         &output,
-        &HirExpr::Load {
-            ptr: Box::new(HirExpr::Var("ptr".to_string())),
+        &DirExpr::Load {
+            ptr: Box::new(DirExpr::Var("ptr".to_string())),
             ty: int(32),
         },
     )
@@ -568,7 +568,7 @@ fn disallowed_single_consumer_proof_marks_call_arg_reason() {
         &block,
         0,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     )
     .expect("disallowed single consumer proof");
 
@@ -603,9 +603,9 @@ fn single_consumer_call_rhs_proof_marks_known_pure_intrinsic() {
     let pcode = pcode_function(vec![block.clone()]);
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "__popcount".to_string(),
-        args: vec![HirExpr::Var("tmp_1".to_string())],
+        args: vec![DirExpr::Var("tmp_1".to_string())],
         ty: int(32),
     };
 
@@ -654,9 +654,9 @@ fn single_consumer_call_rhs_proof_marks_preview_unsafe_internal_call() {
         },
     );
     let builder = PreviewBuilder::new(&pcode, &options, Some(&type_context));
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "FUN_0x140043d30".to_string(),
-        args: vec![HirExpr::Var("arg_1".to_string())],
+        args: vec![DirExpr::Var("arg_1".to_string())],
         ty: int(32),
     };
 
@@ -705,9 +705,9 @@ fn carry_intrinsic_predicate_proof_marks_boolor_branch_chain() {
     let pcode = pcode_function(vec![block.clone()]);
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "__carry".to_string(),
-        args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+        args: vec![DirExpr::Var("a".to_string()), DirExpr::Var("b".to_string())],
         ty: int(1),
     };
 
@@ -750,9 +750,9 @@ fn carry_intrinsic_predicate_proof_marks_compare_zero_chain() {
     let pcode = pcode_function(vec![block.clone()]);
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "__scarry".to_string(),
-        args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+        args: vec![DirExpr::Var("a".to_string()), DirExpr::Var("b".to_string())],
         ty: int(1),
     };
 
@@ -791,9 +791,9 @@ fn intrinsic_compare_only_proof_marks_sborrow_compare_zero() {
     let pcode = pcode_function(vec![block.clone()]);
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "__sborrow".to_string(),
-        args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+        args: vec![DirExpr::Var("a".to_string()), DirExpr::Var("b".to_string())],
         ty: int(1),
     };
 
@@ -830,9 +830,9 @@ fn intrinsic_compare_only_proof_marks_carry_compare_nonzero() {
     let pcode = pcode_function(vec![block.clone()]);
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "__carry".to_string(),
-        args: vec![HirExpr::Var("a".to_string()), HirExpr::Var("b".to_string())],
+        args: vec![DirExpr::Var("a".to_string()), DirExpr::Var("b".to_string())],
         ty: int(1),
     };
 
@@ -870,7 +870,7 @@ fn unknown_consumer_kind_proof_marks_address_computation() {
         &block,
         0,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     )
     .expect("unknown consumer proof");
 
@@ -904,7 +904,7 @@ fn unknown_consumer_kind_proof_marks_multiple_matched_inputs() {
         &block,
         0,
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     )
     .expect("unknown consumer proof");
 
@@ -945,7 +945,7 @@ fn popcount_consumer_proof_marks_compare_zero_downstream_use() {
     let builder = PreviewBuilder::new(&pcode, &options, None);
 
     let proof = builder
-        .describe_popcount_consumer_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+        .describe_popcount_consumer_proof(&block, 0, &output, &DirExpr::Var("tmp_1".into()))
         .expect("popcount proof");
 
     assert_eq!(proof.input_width, 8);
@@ -986,7 +986,7 @@ fn popcount_consumer_proof_marks_unused_result() {
     let builder = PreviewBuilder::new(&pcode, &options, None);
 
     let proof = builder
-        .describe_popcount_consumer_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+        .describe_popcount_consumer_proof(&block, 0, &output, &DirExpr::Var("tmp_1".into()))
         .expect("popcount proof");
 
     assert_eq!(
@@ -1032,7 +1032,7 @@ fn popcount_intand_chain_proof_marks_and_one_compare_zero() {
     let builder = PreviewBuilder::new(&pcode, &options, None);
 
     let proof = builder
-        .describe_popcount_intand_chain_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+        .describe_popcount_intand_chain_proof(&block, 0, &output, &DirExpr::Var("tmp_1".into()))
         .expect("popcount intand proof");
 
     assert_eq!(proof.popcount_consumer_op_seq, 1);
@@ -1087,7 +1087,7 @@ fn popcount_intand_chain_proof_marks_byte_mask_arithmetic() {
     let builder = PreviewBuilder::new(&pcode, &options, None);
 
     let proof = builder
-        .describe_popcount_intand_chain_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+        .describe_popcount_intand_chain_proof(&block, 0, &output, &DirExpr::Var("tmp_1".into()))
         .expect("popcount intand proof");
 
     assert_eq!(proof.intand_mask, Some(0xff));
@@ -1135,7 +1135,7 @@ fn parity_chain_proof_marks_popcount_input_role() {
     let builder = PreviewBuilder::new(&pcode, &options, None);
 
     let proof = builder
-        .describe_parity_chain_proof(&block, 0, &output, &HirExpr::Var("tmp_1".into()))
+        .describe_parity_chain_proof(&block, 0, &output, &DirExpr::Var("tmp_1".into()))
         .expect("parity chain result")
         .expect("parity chain proof");
 
@@ -1175,9 +1175,9 @@ fn parity_chain_proof_marks_popcount_result_role() {
     let pcode = pcode_function(vec![block.clone()]);
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "__popcount".into(),
-        args: vec![HirExpr::Var("tmp_1".into())],
+        args: vec![DirExpr::Var("tmp_1".into())],
         ty: int(32),
     };
 
@@ -1220,14 +1220,14 @@ fn parity_chain_proof_marks_intand_result_role() {
     let pcode = pcode_function(vec![block.clone()]);
     let options = test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Binary {
-        op: HirBinaryOp::And,
-        lhs: Box::new(HirExpr::Call {
+    let rhs = DirExpr::Binary {
+        op: DirBinaryOp::And,
+        lhs: Box::new(DirExpr::Call {
             target: "__popcount".into(),
-            args: vec![HirExpr::Var("tmp_1".into())],
+            args: vec![DirExpr::Var("tmp_1".into())],
             ty: int(32),
         }),
-        rhs: Box::new(HirExpr::Const(1, int(32))),
+        rhs: Box::new(DirExpr::Const(1, int(32))),
         ty: int(32),
     };
 
@@ -1271,7 +1271,7 @@ fn parity_chain_proof_rejects_non_one_mask() {
     let builder = PreviewBuilder::new(&pcode, &options, None);
 
     let result = builder
-        .describe_parity_chain_proof(&block, 0, &input, &HirExpr::Var("tmp_1".into()))
+        .describe_parity_chain_proof(&block, 0, &input, &DirExpr::Var("tmp_1".into()))
         .expect("parity chain result");
 
     assert_eq!(result, Err(ParityChainKeepReason::IntAndMaskNotOne));
@@ -1299,10 +1299,10 @@ fn single_consumer_predicate_proof_marks_compare_zero_same_guard() {
         &block,
         0,
         &output,
-        &HirExpr::Binary {
-            op: HirBinaryOp::Eq,
-            lhs: Box::new(HirExpr::Var("tmp_1".to_string())),
-            rhs: Box::new(HirExpr::Const(0, int(32))),
+        &DirExpr::Binary {
+            op: DirBinaryOp::Eq,
+            lhs: Box::new(DirExpr::Var("tmp_1".to_string())),
+            rhs: Box::new(DirExpr::Const(0, int(32))),
             ty: int(1),
         },
     )
@@ -1342,9 +1342,9 @@ fn single_consumer_predicate_proof_marks_negated_flag_same_guard() {
         &block,
         0,
         &output,
-        &HirExpr::Unary {
-            op: HirUnaryOp::Not,
-            expr: Box::new(HirExpr::Var("tmp_1".to_string())),
+        &DirExpr::Unary {
+            op: DirUnaryOp::Not,
+            expr: Box::new(DirExpr::Var("tmp_1".to_string())),
             ty: int(1),
         },
     )
@@ -1383,10 +1383,10 @@ fn single_consumer_predicate_proof_marks_compare_other_var_guard_mismatch() {
         &block,
         0,
         &output,
-        &HirExpr::Binary {
-            op: HirBinaryOp::Eq,
-            lhs: Box::new(HirExpr::Var("lhs".to_string())),
-            rhs: Box::new(HirExpr::Var("rhs".to_string())),
+        &DirExpr::Binary {
+            op: DirBinaryOp::Eq,
+            lhs: Box::new(DirExpr::Var("lhs".to_string())),
+            rhs: Box::new(DirExpr::Var("rhs".to_string())),
             ty: int(1),
         },
     )
@@ -1426,10 +1426,10 @@ fn arithmetic_predicate_proof_marks_low_bit_and_one() {
         &block,
         0,
         &output,
-        &HirExpr::Binary {
-            op: HirBinaryOp::And,
-            lhs: Box::new(HirExpr::Var("flag_bits".to_string())),
-            rhs: Box::new(HirExpr::Const(1, int(32))),
+        &DirExpr::Binary {
+            op: DirBinaryOp::And,
+            lhs: Box::new(DirExpr::Var("flag_bits".to_string())),
+            rhs: Box::new(DirExpr::Const(1, int(32))),
             ty: int(32),
         },
     )
@@ -1467,15 +1467,15 @@ fn arithmetic_predicate_proof_marks_shift_and_mask() {
         &block,
         0,
         &output,
-        &HirExpr::Binary {
-            op: HirBinaryOp::And,
-            lhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Shr,
-                lhs: Box::new(HirExpr::Var("flags".to_string())),
-                rhs: Box::new(HirExpr::Const(3, int(32))),
+        &DirExpr::Binary {
+            op: DirBinaryOp::And,
+            lhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Shr,
+                lhs: Box::new(DirExpr::Var("flags".to_string())),
+                rhs: Box::new(DirExpr::Const(3, int(32))),
                 ty: int(32),
             }),
-            rhs: Box::new(HirExpr::Const(1, int(32))),
+            rhs: Box::new(DirExpr::Const(1, int(32))),
             ty: int(32),
         },
     )
@@ -1508,15 +1508,15 @@ fn low_bit_mask_predicate_proof_marks_compare_origin() {
         &block,
         0,
         &output,
-        &HirExpr::Binary {
-            op: HirBinaryOp::And,
-            lhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Eq,
-                lhs: Box::new(HirExpr::Var("x".to_string())),
-                rhs: Box::new(HirExpr::Const(0, int(32))),
+        &DirExpr::Binary {
+            op: DirBinaryOp::And,
+            lhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Eq,
+                lhs: Box::new(DirExpr::Var("x".to_string())),
+                rhs: Box::new(DirExpr::Const(0, int(32))),
                 ty: NirType::Bool,
             }),
-            rhs: Box::new(HirExpr::Const(1, int(32))),
+            rhs: Box::new(DirExpr::Const(1, int(32))),
             ty: int(32),
         },
     )
@@ -1553,15 +1553,15 @@ fn low_bit_mask_predicate_proof_marks_arithmetic_origin() {
         &block,
         0,
         &output,
-        &HirExpr::Binary {
-            op: HirBinaryOp::And,
-            lhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Add,
-                lhs: Box::new(HirExpr::Var("x".to_string())),
-                rhs: Box::new(HirExpr::Const(1, int(32))),
+        &DirExpr::Binary {
+            op: DirBinaryOp::And,
+            lhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Add,
+                lhs: Box::new(DirExpr::Var("x".to_string())),
+                rhs: Box::new(DirExpr::Const(1, int(32))),
                 ty: int(32),
             }),
-            rhs: Box::new(HirExpr::Const(1, int(32))),
+            rhs: Box::new(DirExpr::Const(1, int(32))),
             ty: int(32),
         },
     )
@@ -1597,7 +1597,7 @@ fn alias_unsafe_unknown_subtyping_marks_no_consumer_found() {
         0,
         None,
         &output,
-        &HirExpr::Const(1, int(32)),
+        &DirExpr::Const(1, int(32)),
     );
 
     assert_eq!(hazard.kind, AliasUnsafeHazardKind::UnknownNoConsumerFound);
@@ -1628,7 +1628,7 @@ fn alias_unsafe_unknown_subtyping_marks_redefinition_before_consumer() {
         0,
         None,
         &output,
-        &HirExpr::Const(1, int(32)),
+        &DirExpr::Const(1, int(32)),
     );
 
     assert_eq!(
@@ -1663,9 +1663,9 @@ fn alias_unsafe_unknown_subtyping_marks_allowed_consumer_but_non_low_cost_rhs() 
         0,
         None,
         &output,
-        &HirExpr::Call {
+        &DirExpr::Call {
             target: "helper".to_string(),
-            args: vec![HirExpr::Var("tmp_1".to_string())],
+            args: vec![DirExpr::Var("tmp_1".to_string())],
             ty: int(32),
         },
     );
@@ -1703,7 +1703,7 @@ fn alias_unsafe_unknown_subtyping_marks_after_terminator_single_consumer() {
         0,
         Some(1),
         &output,
-        &HirExpr::Var("tmp_1".to_string()),
+        &DirExpr::Var("tmp_1".to_string()),
     );
 
     assert_eq!(
@@ -1882,13 +1882,13 @@ fn address_stable_required_family_falls_back_to_unknown_base() {
 #[test]
 fn address_stable_required_base_kind_recognizes_stack_like_names() {
     assert_eq!(
-        PreviewBuilder::classify_address_stable_required_base_kind(&HirExpr::Var(
+        PreviewBuilder::classify_address_stable_required_base_kind(&DirExpr::Var(
             "home_20".to_string()
         )),
         AddressStableRequiredBaseKind::StackRelative
     );
     assert_eq!(
-        PreviewBuilder::classify_address_stable_required_base_kind(&HirExpr::Var(
+        PreviewBuilder::classify_address_stable_required_base_kind(&DirExpr::Var(
             "rsp".to_string()
         )),
         AddressStableRequiredBaseKind::StackRelative
@@ -1898,7 +1898,7 @@ fn address_stable_required_base_kind_recognizes_stack_like_names() {
 #[test]
 fn address_stable_required_base_kind_recognizes_dat_global() {
     assert_eq!(
-        PreviewBuilder::classify_address_stable_required_base_kind(&HirExpr::Var(
+        PreviewBuilder::classify_address_stable_required_base_kind(&DirExpr::Var(
             "DAT_140008000".to_string()
         )),
         AddressStableRequiredBaseKind::GlobalRelative
@@ -1907,9 +1907,9 @@ fn address_stable_required_base_kind_recognizes_dat_global() {
 
 #[test]
 fn address_stable_required_expr_kind_recognizes_nested_load() {
-    let expr = HirExpr::PtrOffset {
-        base: Box::new(HirExpr::Load {
-            ptr: Box::new(HirExpr::Var("param_1".to_string())),
+    let expr = DirExpr::PtrOffset {
+        base: Box::new(DirExpr::Load {
+            ptr: Box::new(DirExpr::Var("param_1".to_string())),
             ty: NirType::Unknown,
         }),
         offset: 8,
@@ -1922,14 +1922,14 @@ fn address_stable_required_expr_kind_recognizes_nested_load() {
 
 #[test]
 fn address_stable_required_expr_kind_recognizes_nested_call() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Call {
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Call {
             target: "sub_140001000".to_string(),
-            args: vec![HirExpr::Var("param_1".to_string())],
+            args: vec![DirExpr::Var("param_1".to_string())],
             ty: NirType::Unknown,
         }),
-        rhs: Box::new(HirExpr::Const(4, NirType::Unknown)),
+        rhs: Box::new(DirExpr::Const(4, NirType::Unknown)),
         ty: NirType::Unknown,
     };
     assert_eq!(
@@ -1940,11 +1940,11 @@ fn address_stable_required_expr_kind_recognizes_nested_call() {
 
 #[test]
 fn address_stable_required_expr_kind_recognizes_pure_ptr_arithmetic() {
-    let expr = HirExpr::PtrOffset {
-        base: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Add,
-            lhs: Box::new(HirExpr::Var("local_10".to_string())),
-            rhs: Box::new(HirExpr::Const(8, NirType::Unknown)),
+    let expr = DirExpr::PtrOffset {
+        base: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Add,
+            lhs: Box::new(DirExpr::Var("local_10".to_string())),
+            rhs: Box::new(DirExpr::Const(8, NirType::Unknown)),
             ty: NirType::Unknown,
         }),
         offset: 4,
@@ -2073,17 +2073,17 @@ fn stack_address_stability_reason_falls_back_to_unknown() {
 #[test]
 fn stack_address_base_reg_recognizes_rsp() {
     assert_eq!(
-        PreviewBuilder::classify_stack_address_base_reg(&HirExpr::Var("rsp".to_string())),
+        PreviewBuilder::classify_stack_address_base_reg(&DirExpr::Var("rsp".to_string())),
         StackAddressBaseReg::Rsp
     );
 }
 
 #[test]
 fn stack_address_base_reg_recognizes_rbp() {
-    let expr = HirExpr::PtrOffset {
-        base: Box::new(HirExpr::Cast {
+    let expr = DirExpr::PtrOffset {
+        base: Box::new(DirExpr::Cast {
             ty: test_ptr(),
-            expr: Box::new(HirExpr::Var("rbp".to_string())),
+            expr: Box::new(DirExpr::Var("rbp".to_string())),
         }),
         offset: 0x20,
     };
@@ -2095,10 +2095,10 @@ fn stack_address_base_reg_recognizes_rbp() {
 
 #[test]
 fn stack_address_offset_extracts_add_const() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("rsp".to_string())),
-        rhs: Box::new(HirExpr::Const(0x28, int(64))),
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("rsp".to_string())),
+        rhs: Box::new(DirExpr::Const(0x28, int(64))),
         ty: test_ptr(),
     };
     assert_eq!(
@@ -2109,10 +2109,10 @@ fn stack_address_offset_extracts_add_const() {
 
 #[test]
 fn stack_address_offset_extracts_sub_const() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Sub,
-        lhs: Box::new(HirExpr::Var("rbp".to_string())),
-        rhs: Box::new(HirExpr::Const(0x18, int(64))),
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Sub,
+        lhs: Box::new(DirExpr::Var("rbp".to_string())),
+        rhs: Box::new(DirExpr::Const(0x18, int(64))),
         ty: test_ptr(),
     };
     assert_eq!(
@@ -2123,10 +2123,10 @@ fn stack_address_offset_extracts_sub_const() {
 
 #[test]
 fn stack_address_frame_relative_candidate_accepts_ptr_offset() {
-    let expr = HirExpr::PtrOffset {
-        base: Box::new(HirExpr::Cast {
+    let expr = DirExpr::PtrOffset {
+        base: Box::new(DirExpr::Cast {
             ty: test_ptr(),
-            expr: Box::new(HirExpr::Var("rsp".to_string())),
+            expr: Box::new(DirExpr::Var("rsp".to_string())),
         }),
         offset: 0x30,
     };
@@ -2137,10 +2137,10 @@ fn stack_address_frame_relative_candidate_accepts_ptr_offset() {
 
 #[test]
 fn stack_address_frame_relative_candidate_rejects_complex_binary() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("rsp".to_string())),
-        rhs: Box::new(HirExpr::Var("xVar31".to_string())),
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("rsp".to_string())),
+        rhs: Box::new(DirExpr::Var("xVar31".to_string())),
         ty: test_ptr(),
     };
     assert!(!PreviewBuilder::stack_address_frame_relative_candidate(

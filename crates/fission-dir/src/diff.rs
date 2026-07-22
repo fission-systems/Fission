@@ -1,13 +1,14 @@
 //! DIR-vs-HIR differential verification harness.
 //!
-//! Runs the same concrete argument tuples through [`crate::interp::interpret`]
-//! against a function's pre-structuring body (DIR) and post-structuring body
-//! (HIR) and reports any input where the two disagree -- a real structuring
-//! bug, with a concrete repro input, not a hand-diffed hunch.
+//! Runs the same concrete argument tuples through [`crate::interp::interpret_dir`]/
+//! [`crate::interp::interpret_hir`] against a function's pre-structuring
+//! form (DIR) and post-structuring form (HIR) and reports any input where
+//! the two disagree -- a real structuring bug, with a concrete repro input,
+//! not a hand-diffed hunch.
 
-use fission_midend_core::ir::{Dir, Hir, NirBinding};
+use fission_midend_core::ir::{DirFunction, HirFunction};
 
-use crate::interp::interpret;
+use crate::interp::{interpret_dir, interpret_hir};
 
 /// One concrete input where DIR and HIR produced different results.
 #[derive(Debug, Clone)]
@@ -30,12 +31,12 @@ pub enum VerifyOutcome {
     Unsupported { reason: String },
 }
 
-/// Differentially interpret `dir` and `hir` (same `params`/`locals`, per
-/// [`interpret`]'s documented assumption) over each tuple in `samples`, in
-/// order, and report the outcome. Taking the distinct [`Dir`]/[`Hir`]
-/// newtypes here (rather than two same-shaped `&[HirStmt]` slices) means an
-/// accidentally swapped argument order is a compile error, not a silent
-/// runtime bug.
+/// Differentially interpret `dir` and `hir` -- the real, independently-typed
+/// [`DirFunction`]/[`HirFunction`] `fission-pcode`'s production pipeline
+/// produces for the same source function -- over each tuple in `samples`,
+/// in order, and report the outcome. Taking the distinct types here (rather
+/// than two same-shaped slices) means an accidentally swapped argument
+/// order is a compile error, not a silent runtime bug.
 ///
 /// A concrete input that makes *both* sides return `Err` (e.g. a shared
 /// division-by-zero) is treated as inconclusive for that sample, not a
@@ -43,19 +44,13 @@ pub enum VerifyOutcome {
 /// behavior along the same expression, which isn't evidence structuring
 /// changed anything. A sample where exactly one side errors *is* reported:
 /// that asymmetry is itself suspicious and worth surfacing.
-pub fn diff_dir_hir(
-    dir: &Dir,
-    hir: &Hir,
-    params: &[NirBinding],
-    locals: &[NirBinding],
-    samples: &[Vec<i64>],
-) -> VerifyOutcome {
+pub fn diff_dir_hir(dir: &DirFunction, hir: &HirFunction, samples: &[Vec<i64>]) -> VerifyOutcome {
     let mut divergences = Vec::new();
     let mut checked = 0usize;
 
     for args in samples {
-        let dir_r = interpret(&dir.0, params, locals, args);
-        let hir_r = interpret(&hir.0, params, locals, args);
+        let dir_r = interpret_dir(&dir.body, &dir.params, &dir.locals, args);
+        let hir_r = interpret_hir(&hir.body, &hir.params, &hir.locals, args);
 
         match (dir_r, hir_r) {
             (Ok(dir_result), Ok(hir_result)) => {
@@ -137,7 +132,10 @@ pub fn default_samples(arity: usize) -> Vec<Vec<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_midend_core::ir::{HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBindingOrigin};
+    use fission_midend_core::ir::{
+        DirBinaryOp, DirBinding, DirExpr, DirLValue, DirStmt, HirBinaryOp, HirExpr, HirLValue,
+        HirStmt, NirBinding, NirBindingOrigin,
+    };
 
     fn i32_ty() -> fission_midend_core::ir::NirType {
         fission_midend_core::ir::NirType::Int {
@@ -150,7 +148,17 @@ mod tests {
         fission_midend_core::ir::NirType::Bool
     }
 
-    fn param(name: &str, idx: usize) -> NirBinding {
+    fn dir_param(name: &str, idx: usize) -> DirBinding {
+        DirBinding {
+            name: name.to_string(),
+            ty: i32_ty(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(idx)),
+            initializer: None,
+        }
+    }
+
+    fn hir_param(name: &str, idx: usize) -> NirBinding {
         NirBinding {
             name: name.to_string(),
             ty: i32_ty(),
@@ -160,60 +168,74 @@ mod tests {
         }
     }
 
-    fn var(name: &str) -> HirExpr {
+    fn dvar(name: &str) -> DirExpr {
+        DirExpr::Var(name.to_string())
+    }
+
+    fn hvar(name: &str) -> HirExpr {
         HirExpr::Var(name.to_string())
     }
 
-    /// `a > b` -- used by both fixtures below.
-    fn a_gt_b() -> HirExpr {
-        HirExpr::Binary {
-            op: HirBinaryOp::SGt,
-            lhs: Box::new(var("a")),
-            rhs: Box::new(var("b")),
+    fn dir_a_gt_b() -> DirExpr {
+        DirExpr::Binary {
+            op: DirBinaryOp::SGt,
+            lhs: Box::new(dvar("a")),
+            rhs: Box::new(dvar("b")),
             ty: bool_ty(),
         }
     }
 
+    fn hir_a_gt_b() -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::SGt,
+            lhs: Box::new(hvar("a")),
+            rhs: Box::new(hvar("b")),
+            ty: bool_ty(),
+        }
+    }
+
+    fn dir_func(body: Vec<DirStmt>) -> DirFunction {
+        DirFunction {
+            params: vec![dir_param("a", 0), dir_param("b", 1)],
+            body,
+            ..Default::default()
+        }
+    }
+
     /// HIR (structured): `if (a > b) { return a; } else { return b; }`.
-    fn max_hir() -> Hir {
-        Hir(vec![HirStmt::If {
-            cond: a_gt_b(),
-            then_body: vec![HirStmt::Return(Some(var("a")))],
-            else_body: vec![HirStmt::Return(Some(var("b")))],
-        }])
+    fn max_hir() -> HirFunction {
+        HirFunction {
+            params: vec![hir_param("a", 0), hir_param("b", 1)],
+            body: vec![HirStmt::If {
+                cond: hir_a_gt_b(),
+                then_body: vec![HirStmt::Return(Some(hvar("a")))],
+                else_body: vec![HirStmt::Return(Some(hvar("b")))],
+            }],
+            ..Default::default()
+        }
     }
 
     /// DIR (flattened goto/label form of the *same* logic): a conditional
     /// jump (`If` with a single `Goto` in `then_body`, no `else_body` --
-    /// this is how a p-code CBranch naturally maps onto `HirStmt` without a
+    /// this is how a p-code CBranch naturally maps onto `DirStmt` without a
     /// dedicated "conditional goto" variant) to a label guarding the
     /// then-arm, with the else-arm falling straight through.
-    fn max_dir() -> Dir {
-        Dir(vec![
-            HirStmt::If {
-                cond: a_gt_b(),
-                then_body: vec![HirStmt::Goto("L_then".to_string())],
+    fn max_dir() -> DirFunction {
+        dir_func(vec![
+            DirStmt::If {
+                cond: dir_a_gt_b(),
+                then_body: vec![DirStmt::Goto("L_then".to_string())],
                 else_body: vec![],
             },
-            HirStmt::Return(Some(var("b"))),
-            HirStmt::Label("L_then".to_string()),
-            HirStmt::Return(Some(var("a"))),
+            DirStmt::Return(Some(dvar("b"))),
+            DirStmt::Label("L_then".to_string()),
+            DirStmt::Return(Some(dvar("a"))),
         ])
-    }
-
-    fn max_params() -> Vec<NirBinding> {
-        vec![param("a", 0), param("b", 1)]
     }
 
     #[test]
     fn equivalent_dir_and_hir_report_equivalent() {
-        let outcome = diff_dir_hir(
-            &max_dir(),
-            &max_hir(),
-            &max_params(),
-            &[],
-            &default_samples(2),
-        );
+        let outcome = diff_dir_hir(&max_dir(), &max_hir(), &default_samples(2));
         match outcome {
             VerifyOutcome::Equivalent { checked } => {
                 assert_eq!(checked, default_samples(2).len());
@@ -228,8 +250,8 @@ mod tests {
     /// trivially reporting everything as equivalent.
     #[test]
     fn diverging_dir_and_hir_are_caught_with_a_concrete_repro() {
-        let buggy_dir = Dir(vec![HirStmt::Return(Some(var("a")))]);
-        let outcome = diff_dir_hir(&buggy_dir, &max_hir(), &max_params(), &[], &default_samples(2));
+        let buggy_dir = dir_func(vec![DirStmt::Return(Some(dvar("a")))]);
+        let outcome = diff_dir_hir(&buggy_dir, &max_hir(), &default_samples(2));
         match outcome {
             VerifyOutcome::Diverged(divs) => {
                 assert!(!divs.is_empty());
@@ -246,7 +268,7 @@ mod tests {
     fn assign_and_while_loop_interpreted_correctly() {
         // sum(n) = 0 + 1 + ... + n, via a while loop -- exercises Assign,
         // While, and the loop-carried accumulator/counter pattern.
-        let params = vec![param("n", 0)];
+        let params = vec![hir_param("n", 0)];
         let locals = vec![
             NirBinding {
                 name: "acc".to_string(),
@@ -267,8 +289,8 @@ mod tests {
             HirStmt::While {
                 cond: HirExpr::Binary {
                     op: HirBinaryOp::SLe,
-                    lhs: Box::new(var("i")),
-                    rhs: Box::new(var("n")),
+                    lhs: Box::new(hvar("i")),
+                    rhs: Box::new(hvar("n")),
                     ty: bool_ty(),
                 },
                 body: vec![
@@ -276,8 +298,8 @@ mod tests {
                         lhs: HirLValue::Var("acc".to_string()),
                         rhs: HirExpr::Binary {
                             op: HirBinaryOp::Add,
-                            lhs: Box::new(var("acc")),
-                            rhs: Box::new(var("i")),
+                            lhs: Box::new(hvar("acc")),
+                            rhs: Box::new(hvar("i")),
                             ty: i32_ty(),
                         },
                     },
@@ -285,16 +307,73 @@ mod tests {
                         lhs: HirLValue::Var("i".to_string()),
                         rhs: HirExpr::Binary {
                             op: HirBinaryOp::Add,
-                            lhs: Box::new(var("i")),
+                            lhs: Box::new(hvar("i")),
                             rhs: Box::new(HirExpr::Const(1, i32_ty())),
                             ty: i32_ty(),
                         },
                     },
                 ],
             },
-            HirStmt::Return(Some(var("acc"))),
+            HirStmt::Return(Some(hvar("acc"))),
         ];
-        let result = interpret(&body, &params, &locals, &[5]).expect("interpret");
+        let result = interpret_hir(&body, &params, &locals, &[5]).expect("interpret");
+        assert_eq!(result, Some(15)); // 0+1+2+3+4+5
+    }
+
+    #[test]
+    fn dir_assign_and_while_loop_interpreted_correctly() {
+        // Same as `assign_and_while_loop_interpreted_correctly` but on the
+        // DIR side -- proves the macro-generated `dir::interpret` isn't
+        // accidentally different from `hir::interpret`.
+        let params = vec![dir_param("n", 0)];
+        let locals = vec![
+            DirBinding {
+                name: "acc".to_string(),
+                ty: i32_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: Some(DirExpr::Const(0, i32_ty())),
+            },
+            DirBinding {
+                name: "i".to_string(),
+                ty: i32_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: Some(DirExpr::Const(0, i32_ty())),
+            },
+        ];
+        let body = vec![
+            DirStmt::While {
+                cond: DirExpr::Binary {
+                    op: DirBinaryOp::SLe,
+                    lhs: Box::new(dvar("i")),
+                    rhs: Box::new(dvar("n")),
+                    ty: bool_ty(),
+                },
+                body: vec![
+                    DirStmt::Assign {
+                        lhs: DirLValue::Var("acc".to_string()),
+                        rhs: DirExpr::Binary {
+                            op: DirBinaryOp::Add,
+                            lhs: Box::new(dvar("acc")),
+                            rhs: Box::new(dvar("i")),
+                            ty: i32_ty(),
+                        },
+                    },
+                    DirStmt::Assign {
+                        lhs: DirLValue::Var("i".to_string()),
+                        rhs: DirExpr::Binary {
+                            op: DirBinaryOp::Add,
+                            lhs: Box::new(dvar("i")),
+                            rhs: Box::new(DirExpr::Const(1, i32_ty())),
+                            ty: i32_ty(),
+                        },
+                    },
+                ],
+            },
+            DirStmt::Return(Some(dvar("acc"))),
+        ];
+        let result = interpret_dir(&body, &params, &locals, &[5]).expect("interpret");
         assert_eq!(result, Some(15)); // 0+1+2+3+4+5
     }
 }

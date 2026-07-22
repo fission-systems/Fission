@@ -1,6 +1,23 @@
 use super::*;
 use crate::pcode::{PcodeBasicBlock, PcodeOp};
 
+/// Test-only helper: several `midend/tests` files build a `DirStmt` fixture
+/// (the shape a normalize/structuring pass actually consumes) and want to
+/// assert on its rendered text via the real printer, which is `HirStmt`-
+/// typed. Converts via `dir_stmt_to_hir_stmt` rather than duplicating
+/// `print_stmt` for `DirStmt`.
+#[allow(dead_code)]
+pub(super) fn print_dir_stmt(stmt: &ir::DirStmt) -> String {
+    print_stmt(&ir::dir_stmt_to_hir_stmt(stmt.clone()))
+}
+
+/// Same rationale as [`print_dir_stmt`], for whole-function fixtures.
+#[allow(dead_code)]
+pub(super) fn print_dir_function(func: &ir::DirFunction) -> String {
+    let hir_body = ir::dir_stmts_to_hir_stmts(func.body.clone());
+    print_hir_function(&func.clone().into_hir_function(hir_body))
+}
+
 mod bootstrap_x86;
 mod calling_convention;
 mod entry_param_promotion;

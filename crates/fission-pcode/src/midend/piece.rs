@@ -5,7 +5,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
             return Err(MlilPreviewError::UnsupportedExprPieceShape);
         }
@@ -20,13 +20,13 @@ impl<'a> PreviewBuilder<'a> {
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
         let shift_bits = i64::from(op.inputs[1].size) * 8;
-        let shifted = HirExpr::Binary {
-            op: HirBinaryOp::Shl,
-            lhs: Box::new(HirExpr::Cast {
+        let shifted = DirExpr::Binary {
+            op: DirBinaryOp::Shl,
+            lhs: Box::new(DirExpr::Cast {
                 ty: output_ty.clone(),
                 expr: Box::new(lhs),
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 shift_bits,
                 NirType::Int {
                     bits: 64,
@@ -35,10 +35,10 @@ impl<'a> PreviewBuilder<'a> {
             )),
             ty: output_ty.clone(),
         };
-        Ok(HirExpr::Binary {
-            op: HirBinaryOp::Or,
+        Ok(DirExpr::Binary {
+            op: DirBinaryOp::Or,
             lhs: Box::new(shifted),
-            rhs: Box::new(HirExpr::Cast {
+            rhs: Box::new(DirExpr::Cast {
                 ty: output_ty.clone(),
                 expr: Box::new(rhs),
             }),
@@ -51,7 +51,7 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         _output_ty: &NirType,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         if op.inputs.len() < 2 {
             return Ok(None);
         }
@@ -81,7 +81,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
             return Err(MlilPreviewError::UnsupportedExprPieceShape);
         }
@@ -114,14 +114,14 @@ impl<'a> PreviewBuilder<'a> {
             // is arithmetic sign-fill — use Sar. Logical Shr would mis-model
             // negative lows and block CDQ residual matching.
             let shift_op = if output_signed {
-                HirBinaryOp::Sar
+                DirBinaryOp::Sar
             } else {
-                HirBinaryOp::Shr
+                DirBinaryOp::Shr
             };
-            HirExpr::Binary {
+            DirExpr::Binary {
                 op: shift_op,
                 lhs: Box::new(base),
-                rhs: Box::new(HirExpr::Const(
+                rhs: Box::new(DirExpr::Const(
                     byte_offset * 8,
                     NirType::Int {
                         bits: 64,
@@ -131,7 +131,7 @@ impl<'a> PreviewBuilder<'a> {
                 ty: type_from_size(op.inputs[0].size, output_signed),
             }
         };
-        Ok(HirExpr::Cast {
+        Ok(DirExpr::Cast {
             ty: output_ty,
             expr: Box::new(shifted),
         })

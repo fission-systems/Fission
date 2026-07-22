@@ -2,7 +2,7 @@ use crate::prelude::*;
 use super::utils::*;
 use crate::HashMap;
 
-pub fn strip_redundant_assign_casts(func: &mut HirFunction) -> bool {
+pub fn strip_redundant_assign_casts(func: &mut DirFunction) -> bool {
     let mut type_map: HashMap<String, NirType> = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
@@ -14,7 +14,7 @@ pub fn strip_redundant_assign_casts(func: &mut HirFunction) -> bool {
 }
 
 fn strip_redundant_casts_in_stmts(
-    stmts: &mut [HirStmt],
+    stmts: &mut [DirStmt],
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
@@ -24,19 +24,19 @@ fn strip_redundant_casts_in_stmts(
     changed
 }
 
-fn strip_redundant_casts_in_stmt(stmt: &mut HirStmt, type_map: &HashMap<String, NirType>) -> bool {
+fn strip_redundant_casts_in_stmt(stmt: &mut DirStmt, type_map: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Assign { rhs, .. } => {
+        DirStmt::Assign { rhs, .. } => {
             changed |= strip_redundant_casts_in_expr(rhs, type_map);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             changed |= strip_redundant_casts_in_expr(expr, type_map);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             changed |= strip_redundant_casts_in_stmts(body, type_map);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             update,
             body,
@@ -53,7 +53,7 @@ fn strip_redundant_casts_in_stmt(stmt: &mut HirStmt, type_map: &HashMap<String, 
             }
             changed |= strip_redundant_casts_in_stmts(body, type_map);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -62,7 +62,7 @@ fn strip_redundant_casts_in_stmt(stmt: &mut HirStmt, type_map: &HashMap<String, 
             changed |= strip_redundant_casts_in_stmts(then_body, type_map);
             changed |= strip_redundant_casts_in_stmts(else_body, type_map);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -78,33 +78,33 @@ fn strip_redundant_casts_in_stmt(stmt: &mut HirStmt, type_map: &HashMap<String, 
     changed
 }
 
-fn strip_redundant_casts_in_expr(expr: &mut HirExpr, type_map: &HashMap<String, NirType>) -> bool {
+fn strip_redundant_casts_in_expr(expr: &mut DirExpr, type_map: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     match expr {
-        HirExpr::Cast { expr: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. } => {
             changed |= strip_redundant_casts_in_expr(inner, type_map);
         }
-        HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             changed |= strip_redundant_casts_in_expr(inner, type_map);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= strip_redundant_casts_in_expr(lhs, type_map);
             changed |= strip_redundant_casts_in_expr(rhs, type_map);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= strip_redundant_casts_in_expr(arg, type_map);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= strip_redundant_casts_in_expr(base, type_map);
             changed |= strip_redundant_casts_in_expr(index, type_map);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -114,23 +114,23 @@ fn strip_redundant_casts_in_expr(expr: &mut HirExpr, type_map: &HashMap<String, 
             changed |= strip_redundant_casts_in_expr(then_expr, type_map);
             changed |= strip_redundant_casts_in_expr(else_expr, type_map);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
-    if let HirExpr::Cast { ty, expr: inner } = expr {
-        if let HirExpr::Var(name) = inner.as_ref() {
+    if let DirExpr::Cast { ty, expr: inner } = expr {
+        if let DirExpr::Var(name) = inner.as_ref() {
             if let Some(var_ty) = type_map.get(name) {
                 if var_ty == ty {
                     *expr = (**inner).clone();
                     changed = true;
                 }
             }
-        } else if let HirExpr::Cast {
+        } else if let DirExpr::Cast {
             ty: inner_ty,
             expr: innermost,
         } = inner.as_ref()
         {
             if inner_ty == ty {
-                *expr = HirExpr::Cast {
+                *expr = DirExpr::Cast {
                     ty: ty.clone(),
                     expr: innermost.clone(),
                 };
@@ -141,8 +141,8 @@ fn strip_redundant_casts_in_expr(expr: &mut HirExpr, type_map: &HashMap<String, 
     changed
 }
 
-pub fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) -> bool {
-    let mut aliases = HashMap::<String, HirExpr>::default();
+pub fn collapse_trivial_pointer_alias_bindings(func: &mut DirFunction) -> bool {
+    let mut aliases = HashMap::<String, DirExpr>::default();
     for binding in &func.locals {
         if !matches!(binding.ty, NirType::Ptr(_)) {
             continue;
@@ -191,7 +191,7 @@ pub fn collapse_trivial_pointer_alias_bindings(func: &mut HirFunction) -> bool {
     before != func.locals.len()
 }
 
-fn should_preserve_slot_alias_binding(func: &HirFunction, binding: &NirBinding) -> bool {
+fn should_preserve_slot_alias_binding(func: &DirFunction, binding: &DirBinding) -> bool {
     binding.surface_type_name.is_some()
         || matches!(
             binding.origin,
@@ -206,33 +206,33 @@ fn should_preserve_slot_alias_binding(func: &HirFunction, binding: &NirBinding) 
         || stmt_list_uses_var_as_index_base(&func.body, &binding.name)
 }
 
-fn ptr_offset_const(expr: &HirExpr) -> Option<i64> {
+fn ptr_offset_const(expr: &DirExpr) -> Option<i64> {
     match expr {
-        HirExpr::PtrOffset { offset, .. } => Some(*offset),
-        HirExpr::Cast { expr, .. } => ptr_offset_const(expr),
+        DirExpr::PtrOffset { offset, .. } => Some(*offset),
+        DirExpr::Cast { expr, .. } => ptr_offset_const(expr),
         _ => Some(0),
     }
 }
 
-fn stmt_list_uses_var_as_index_base(stmts: &[HirStmt], name: &str) -> bool {
+fn stmt_list_uses_var_as_index_base(stmts: &[DirStmt], name: &str) -> bool {
     stmts
         .iter()
         .any(|stmt| stmt_uses_var_as_index_base(stmt, name))
 }
 
-fn stmt_uses_var_as_index_base(stmt: &HirStmt, name: &str) -> bool {
+fn stmt_uses_var_as_index_base(stmt: &DirStmt, name: &str) -> bool {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             lvalue_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
         }
-        HirStmt::Expr(expr)
-        | HirStmt::Return(Some(expr))
-        | HirStmt::VaStart { va_list: expr, .. } => expr_uses_var_as_index_base(expr, name),
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => stmt_list_uses_var_as_index_base(body, name),
-        HirStmt::If {
+        DirStmt::Expr(expr)
+        | DirStmt::Return(Some(expr))
+        | DirStmt::VaStart { va_list: expr, .. } => expr_uses_var_as_index_base(expr, name),
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => stmt_list_uses_var_as_index_base(body, name),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -241,7 +241,7 @@ fn stmt_uses_var_as_index_base(stmt: &HirStmt, name: &str) -> bool {
                 || stmt_list_uses_var_as_index_base(then_body, name)
                 || stmt_list_uses_var_as_index_base(else_body, name)
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -252,47 +252,47 @@ fn stmt_uses_var_as_index_base(stmt: &HirStmt, name: &str) -> bool {
                     .any(|case| stmt_list_uses_var_as_index_base(&case.body, name))
                 || stmt_list_uses_var_as_index_base(default, name)
         }
-        HirStmt::Label(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Return(None)
-        | HirStmt::Break
-        | HirStmt::Continue => false,
+        DirStmt::Label(_)
+        | DirStmt::Goto(_)
+        | DirStmt::Return(None)
+        | DirStmt::Break
+        | DirStmt::Continue => false,
     }
 }
 
-fn lvalue_uses_var_as_index_base(lhs: &HirLValue, name: &str) -> bool {
+fn lvalue_uses_var_as_index_base(lhs: &DirLValue, name: &str) -> bool {
     match lhs {
-        HirLValue::Index { base, index, .. } => {
-            matches!(base.as_ref(), HirExpr::Var(var) if var == name)
+        DirLValue::Index { base, index, .. } => {
+            matches!(base.as_ref(), DirExpr::Var(var) if var == name)
                 || expr_uses_var_as_index_base(base, name)
                 || expr_uses_var_as_index_base(index, name)
         }
-        HirLValue::Deref { ptr, .. } => expr_uses_var_as_index_base(ptr, name),
-        HirLValue::Var(_) => false,
-        HirLValue::FieldAccess { base, .. } => expr_uses_var_as_index_base(base, name),
+        DirLValue::Deref { ptr, .. } => expr_uses_var_as_index_base(ptr, name),
+        DirLValue::Var(_) => false,
+        DirLValue::FieldAccess { base, .. } => expr_uses_var_as_index_base(base, name),
     }
 }
 
-fn expr_uses_var_as_index_base(expr: &HirExpr, name: &str) -> bool {
+fn expr_uses_var_as_index_base(expr: &DirExpr, name: &str) -> bool {
     match expr {
-        HirExpr::Index { base, index, .. } => {
-            matches!(base.as_ref(), HirExpr::Var(var) if var == name)
+        DirExpr::Index { base, index, .. } => {
+            matches!(base.as_ref(), DirExpr::Var(var) if var == name)
                 || expr_uses_var_as_index_base(base, name)
                 || expr_uses_var_as_index_base(index, name)
         }
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => expr_uses_var_as_index_base(expr, name),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => expr_uses_var_as_index_base(expr, name),
+        DirExpr::Binary { lhs, rhs, .. } => {
             expr_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
         }
-        HirExpr::Call { args, .. } => args
+        DirExpr::Call { args, .. } => args
             .iter()
             .any(|arg| expr_uses_var_as_index_base(arg, name)),
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -302,25 +302,25 @@ fn expr_uses_var_as_index_base(expr: &HirExpr, name: &str) -> bool {
                 || expr_uses_var_as_index_base(then_expr, name)
                 || expr_uses_var_as_index_base(else_expr, name)
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
     }
 }
 
-fn pointer_alias_replacement(expr: &HirExpr) -> Option<HirExpr> {
+fn pointer_alias_replacement(expr: &DirExpr) -> Option<DirExpr> {
     match expr {
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => Some(expr.clone()),
-        HirExpr::Cast {
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => Some(expr.clone()),
+        DirExpr::Cast {
             ty: NirType::Ptr(_),
             expr,
         } => match expr.as_ref() {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => Some((**expr).clone()),
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => Some((**expr).clone()),
             _ => None,
         },
         _ => None,
     }
 }
 
-pub fn cast_elision_pass(func: &mut HirFunction) -> bool {
+pub fn cast_elision_pass(func: &mut DirFunction) -> bool {
     let binding_types: crate::HashMap<String, NirType> = func
         .locals
         .iter()
@@ -357,11 +357,11 @@ fn scalar_bit_width(ty: &NirType) -> Option<u32> {
     }
 }
 
-fn redundant_self_cast_assignment(name: &str, rhs: &HirExpr, binding_ty: &NirType) -> bool {
-    let HirExpr::Cast { ty: cast_ty, expr } = rhs else {
+fn redundant_self_cast_assignment(name: &str, rhs: &DirExpr, binding_ty: &NirType) -> bool {
+    let DirExpr::Cast { ty: cast_ty, expr } = rhs else {
         return false;
     };
-    let HirExpr::Var(var) = expr.as_ref() else {
+    let DirExpr::Var(var) = expr.as_ref() else {
         return false;
     };
     if var != name {
@@ -377,7 +377,7 @@ fn redundant_self_cast_assignment(name: &str, rhs: &HirExpr, binding_ty: &NirTyp
 }
 
 fn elide_casts_in_stmts(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     binding_types: &crate::HashMap<String, NirType>,
     return_type: Option<&NirType>,
     changed: &mut bool,
@@ -388,19 +388,19 @@ fn elide_casts_in_stmts(
 }
 
 fn elide_casts_in_stmt(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     binding_types: &crate::HashMap<String, NirType>,
     return_type: Option<&NirType>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } => {
             if let Some(binding_ty) = binding_types.get(name.as_str()) {
                 if redundant_self_cast_assignment(name, rhs, binding_ty) {
-                    *rhs = HirExpr::Var(name.clone());
+                    *rhs = DirExpr::Var(name.clone());
                     *changed = true;
                 } else if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty) {
                     *rhs = stripped;
@@ -408,7 +408,7 @@ fn elide_casts_in_stmt(
                 }
             }
         }
-        HirStmt::Return(Some(expr)) => {
+        DirStmt::Return(Some(expr)) => {
             if let Some(return_type) = return_type
                 && let Some(stripped) = try_strip_return_outer_cast(expr, return_type)
             {
@@ -416,8 +416,8 @@ fn elide_casts_in_stmt(
                 *changed = true;
             }
         }
-        HirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, return_type, changed),
-        HirStmt::If {
+        DirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, return_type, changed),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -425,10 +425,10 @@ fn elide_casts_in_stmt(
             elide_casts_in_stmts(then_body, binding_types, return_type, changed);
             elide_casts_in_stmts(else_body, binding_types, return_type, changed);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             elide_casts_in_stmts(body, binding_types, return_type, changed)
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -439,7 +439,7 @@ fn elide_casts_in_stmt(
             }
             elide_casts_in_stmts(body, binding_types, return_type, changed);
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 elide_casts_in_stmts(&mut case.body, binding_types, return_type, changed);
             }
@@ -449,8 +449,8 @@ fn elide_casts_in_stmt(
     }
 }
 
-fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr> {
-    let HirExpr::Cast {
+fn try_strip_outer_cast(expr: &DirExpr, binding_ty: &NirType) -> Option<DirExpr> {
+    let DirExpr::Cast {
         ty: cast_ty,
         expr: inner,
     } = expr
@@ -488,8 +488,8 @@ fn try_strip_outer_cast(expr: &HirExpr, binding_ty: &NirType) -> Option<HirExpr>
     None
 }
 
-fn try_strip_return_outer_cast(expr: &HirExpr, return_type: &NirType) -> Option<HirExpr> {
-    let HirExpr::Cast {
+fn try_strip_return_outer_cast(expr: &DirExpr, return_type: &NirType) -> Option<DirExpr> {
+    let DirExpr::Cast {
         ty: cast_ty,
         expr: inner,
     } = expr
@@ -513,12 +513,12 @@ fn try_strip_return_outer_cast(expr: &HirExpr, return_type: &NirType) -> Option<
 }
 
 /// ActionSetCasts / RulePushPtr / RuleStructOffset0-style cleanups at expression level.
-pub fn normalize_pointer_and_struct_casts(expr: &HirExpr) -> Option<HirExpr> {
+pub fn normalize_pointer_and_struct_casts(expr: &DirExpr) -> Option<DirExpr> {
     match expr {
-        HirExpr::FieldAccess {
+        DirExpr::FieldAccess {
             offset: 0, base, ..
         } => Some((**base).clone()),
-        HirExpr::PtrOffset { base, offset: 0 } => Some((**base).clone()),
+        DirExpr::PtrOffset { base, offset: 0 } => Some((**base).clone()),
         _ => None,
     }
 }

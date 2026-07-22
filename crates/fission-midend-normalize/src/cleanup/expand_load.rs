@@ -38,7 +38,7 @@ use crate::prelude::*;
 /// Apply the `RuleExpandLoad` simplification to an entire HIR function.
 ///
 /// Returns `true` if any transformation was made.
-pub fn apply_expand_load_pass(func: &mut HirFunction) -> bool {
+pub fn apply_expand_load_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
     for stmt in &mut func.body {
         changed |= expand_load_in_stmt(stmt);
@@ -46,17 +46,17 @@ pub fn apply_expand_load_pass(func: &mut HirFunction) -> bool {
     changed
 }
 
-fn expand_load_in_stmt(stmt: &mut HirStmt) -> bool {
+fn expand_load_in_stmt(stmt: &mut DirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => changed |= expand_load_in_expr(expr),
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => changed |= expand_load_in_expr(expr),
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             for s in body.iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             update,
             cond,
@@ -75,7 +75,7 @@ fn expand_load_in_stmt(stmt: &mut HirStmt) -> bool {
                 changed |= expand_load_in_stmt(s);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -88,7 +88,7 @@ fn expand_load_in_stmt(stmt: &mut HirStmt) -> bool {
                 changed |= expand_load_in_stmt(s);
             }
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -138,7 +138,7 @@ fn is_natural_narrowing(outer: &NirType, inner: &NirType) -> bool {
     }
 }
 
-fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
+fn expand_load_in_expr(expr: &mut DirExpr) -> bool {
     // -----------------------------------------------------------------------
     // Pattern A (AND-comparison form) — checked BEFORE recursion so that
     // Pattern B (below) does not eagerly collapse Cast<small>(Load<large>)
@@ -147,30 +147,30 @@ fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
     //   ((Cast<u{small}>(Load<u{large}>(ptr))) & mask) == cmp_val
     //   → (Load<u{large}>(ptr) & (mask widened to u{large})) == (cmp_val widened)
     // -----------------------------------------------------------------------
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Eq | HirBinaryOp::Ne,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Eq | DirBinaryOp::Ne,
         lhs: cmp_lhs,
         rhs: cmp_rhs,
         ty: cmp_ty,
     } = expr
     {
-        if let HirExpr::Const(cmp_val, _) = cmp_rhs.as_ref() {
+        if let DirExpr::Const(cmp_val, _) = cmp_rhs.as_ref() {
             let cmp_val = *cmp_val;
-            if let HirExpr::Binary {
-                op: HirBinaryOp::And,
+            if let DirExpr::Binary {
+                op: DirBinaryOp::And,
                 lhs: and_lhs,
                 rhs: and_rhs,
                 ty: and_ty,
             } = cmp_lhs.as_mut()
             {
-                if let HirExpr::Const(mask_val, _) = and_rhs.as_ref() {
+                if let DirExpr::Const(mask_val, _) = and_rhs.as_ref() {
                     let mask_val = *mask_val;
-                    if let HirExpr::Cast {
+                    if let DirExpr::Cast {
                         ty: cast_ty,
                         expr: cast_inner,
                     } = and_lhs.as_mut()
                     {
-                        if let HirExpr::Load {
+                        if let DirExpr::Load {
                             ptr: load_ptr,
                             ty: load_ty,
                         } = cast_inner.as_mut()
@@ -181,13 +181,13 @@ fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
                                 if sb_bits < lb_bits {
                                     let wide_ty = load_ty.clone();
                                     let wide_ptr = load_ptr.clone();
-                                    *and_lhs = Box::new(HirExpr::Load {
+                                    *and_lhs = Box::new(DirExpr::Load {
                                         ptr: wide_ptr,
                                         ty: wide_ty.clone(),
                                     });
                                     *and_ty = wide_ty.clone();
-                                    *and_rhs = Box::new(HirExpr::Const(mask_val, wide_ty.clone()));
-                                    *cmp_rhs = Box::new(HirExpr::Const(cmp_val, wide_ty));
+                                    *and_rhs = Box::new(DirExpr::Const(mask_val, wide_ty.clone()));
+                                    *cmp_rhs = Box::new(DirExpr::Const(cmp_val, wide_ty));
                                     *cmp_ty = NirType::Bool;
                                     return true;
                                 }
@@ -203,18 +203,18 @@ fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
     // Pattern B (natural truncation):
     //   Cast<u{small}>(Load<u{large}>(ptr))  →  Load<u{small}>(ptr)
     // -----------------------------------------------------------------------
-    if let HirExpr::Cast {
+    if let DirExpr::Cast {
         ty: cast_ty,
         expr: inner,
     } = expr
     {
-        if let HirExpr::Load {
+        if let DirExpr::Load {
             ptr: load_ptr,
             ty: load_ty,
         } = inner.as_mut()
         {
             if is_natural_narrowing(cast_ty, load_ty) {
-                *expr = HirExpr::Load {
+                *expr = DirExpr::Load {
                     ptr: load_ptr.clone(),
                     ty: cast_ty.clone(),
                 };
@@ -226,30 +226,30 @@ fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
     // Recurse into sub-expressions.
     let mut changed = false;
     match expr {
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= expand_load_in_expr(lhs);
             changed |= expand_load_in_expr(rhs);
         }
-        HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Cast { expr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Cast { expr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             changed |= expand_load_in_expr(inner);
         }
-        HirExpr::Load { ptr, .. } => {
+        DirExpr::Load { ptr, .. } => {
             changed |= expand_load_in_expr(ptr);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args.iter_mut() {
                 changed |= expand_load_in_expr(arg);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= expand_load_in_expr(base);
             changed |= expand_load_in_expr(index);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -259,7 +259,7 @@ fn expand_load_in_expr(expr: &mut HirExpr) -> bool {
             changed |= expand_load_in_expr(then_expr);
             changed |= expand_load_in_expr(else_expr);
         }
-        HirExpr::Var(_) | HirExpr::Const(_, _) | HirExpr::AddressOfGlobal(_) => {}
+        DirExpr::Var(_) | DirExpr::Const(_, _) | DirExpr::AddressOfGlobal(_) => {}
     }
     changed
 }
@@ -283,44 +283,44 @@ mod tests {
         make_int(32, false)
     }
 
-    fn load_expr(ty: NirType) -> HirExpr {
-        HirExpr::Load {
-            ptr: Box::new(HirExpr::Var("ptr".to_string())),
+    fn load_expr(ty: NirType) -> DirExpr {
+        DirExpr::Load {
+            ptr: Box::new(DirExpr::Var("ptr".to_string())),
             ty,
         }
     }
 
-    fn cast_expr(ty: NirType, inner: HirExpr) -> HirExpr {
-        HirExpr::Cast {
+    fn cast_expr(ty: NirType, inner: DirExpr) -> DirExpr {
+        DirExpr::Cast {
             ty,
             expr: Box::new(inner),
         }
     }
 
-    fn empty_func_with_body(body: Vec<HirStmt>) -> HirFunction {
-        HirFunction {
+    fn empty_func_with_body(body: Vec<DirStmt>) -> DirFunction {
+        DirFunction {
             name: "test".to_string(),
             int_param_offsets: Vec::new(),
             body,
-            ..HirFunction::default()
+            ..DirFunction::default()
         }
     }
 
     #[test]
     fn narrow_cast_of_load_is_collapsed() {
         // Cast<u8>(Load<u32>(ptr))  →  Load<u8>(ptr)
-        let stmt = HirStmt::Assign {
-            lhs: HirLValue::Var("x".to_string()),
+        let stmt = DirStmt::Assign {
+            lhs: DirLValue::Var("x".to_string()),
             rhs: cast_expr(u8(), load_expr(u32())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
         let changed = apply_expand_load_pass(&mut func);
         assert!(changed, "expected transformation");
-        if let HirStmt::Assign { rhs, .. } = &func.body[0] {
+        if let DirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(
                 matches!(
                     rhs,
-                    HirExpr::Load {
+                    DirExpr::Load {
                         ty: NirType::Int {
                             bits: 8,
                             signed: false
@@ -338,8 +338,8 @@ mod tests {
     #[test]
     fn no_transform_when_load_is_already_narrow() {
         // Cast<u8>(Load<u8>(ptr)) — no change because bits are equal
-        let stmt = HirStmt::Assign {
-            lhs: HirLValue::Var("x".to_string()),
+        let stmt = DirStmt::Assign {
+            lhs: DirLValue::Var("x".to_string()),
             rhs: cast_expr(u8(), load_expr(u8())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
@@ -350,8 +350,8 @@ mod tests {
     #[test]
     fn no_transform_when_cast_widens() {
         // Cast<u32>(Load<u8>(ptr)) — this would widen, not narrow; no change
-        let stmt = HirStmt::Assign {
-            lhs: HirLValue::Var("x".to_string()),
+        let stmt = DirStmt::Assign {
+            lhs: DirLValue::Var("x".to_string()),
             rhs: cast_expr(u32(), load_expr(u8())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
@@ -363,34 +363,34 @@ mod tests {
     fn and_comparison_load_is_widened() {
         // (Cast<u8>(Load<u32>(ptr)) & 0xFF) == 5
         // → (Load<u32>(ptr) & 0xFF_u32) == 5_u32
-        let and_expr = HirExpr::Binary {
-            op: HirBinaryOp::And,
+        let and_expr = DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs: Box::new(cast_expr(u8(), load_expr(u32()))),
-            rhs: Box::new(HirExpr::Const(0xFF, u8())),
+            rhs: Box::new(DirExpr::Const(0xFF, u8())),
             ty: u8(),
         };
-        let cmp_expr = HirExpr::Binary {
-            op: HirBinaryOp::Eq,
+        let cmp_expr = DirExpr::Binary {
+            op: DirBinaryOp::Eq,
             lhs: Box::new(and_expr),
-            rhs: Box::new(HirExpr::Const(5, u8())),
+            rhs: Box::new(DirExpr::Const(5, u8())),
             ty: NirType::Bool,
         };
-        let stmt = HirStmt::Expr(cmp_expr);
+        let stmt = DirStmt::Expr(cmp_expr);
         let mut func = empty_func_with_body(vec![stmt]);
         let changed = apply_expand_load_pass(&mut func);
         assert!(changed, "expected transformation in AND-comparison form");
-        if let HirStmt::Expr(HirExpr::Binary { lhs, rhs, .. }) = &func.body[0] {
+        if let DirStmt::Expr(DirExpr::Binary { lhs, rhs, .. }) = &func.body[0] {
             // rhs (cmp const) should now have wider type
             assert!(
                 matches!(
                     rhs.as_ref(),
-                    HirExpr::Const(5, NirType::Int { bits: 32, .. })
+                    DirExpr::Const(5, NirType::Int { bits: 32, .. })
                 ),
                 "expected cmp_rhs widened to u32, got: {rhs:?}"
             );
             // lhs should be And(Load<u32>, Const<u32>)
-            if let HirExpr::Binary {
-                op: HirBinaryOp::And,
+            if let DirExpr::Binary {
+                op: DirBinaryOp::And,
                 lhs: and_lhs,
                 rhs: and_rhs,
                 ..
@@ -399,7 +399,7 @@ mod tests {
                 assert!(
                     matches!(
                         and_lhs.as_ref(),
-                        HirExpr::Load {
+                        DirExpr::Load {
                             ty: NirType::Int { bits: 32, .. },
                             ..
                         }
@@ -409,7 +409,7 @@ mod tests {
                 assert!(
                     matches!(
                         and_rhs.as_ref(),
-                        HirExpr::Const(0xFF, NirType::Int { bits: 32, .. })
+                        DirExpr::Const(0xFF, NirType::Int { bits: 32, .. })
                     ),
                     "expected and_rhs widened to u32, got: {and_rhs:?}"
                 );
@@ -424,18 +424,18 @@ mod tests {
     #[test]
     fn narrow_cast_of_u16_load_u32_collapsed() {
         // Cast<u16>(Load<u32>(ptr)) → Load<u16>(ptr)
-        let stmt = HirStmt::Assign {
-            lhs: HirLValue::Var("x".to_string()),
+        let stmt = DirStmt::Assign {
+            lhs: DirLValue::Var("x".to_string()),
             rhs: cast_expr(u16(), load_expr(u32())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
         let changed = apply_expand_load_pass(&mut func);
         assert!(changed, "expected transformation");
-        if let HirStmt::Assign { rhs, .. } = &func.body[0] {
+        if let DirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(
                 matches!(
                     rhs,
-                    HirExpr::Load {
+                    DirExpr::Load {
                         ty: NirType::Int {
                             bits: 16,
                             signed: false

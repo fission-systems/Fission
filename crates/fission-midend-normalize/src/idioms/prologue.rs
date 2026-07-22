@@ -55,23 +55,23 @@ fn looks_like_stack_scaffold_name(name: &str) -> bool {
     name == "sp" || name.starts_with("var_") || name.starts_with("xVar") || name.starts_with("uVar")
 }
 
-fn stack_scaffold_ptr_expr(expr: &HirExpr) -> bool {
+fn stack_scaffold_ptr_expr(expr: &DirExpr) -> bool {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => looks_like_stack_scaffold_name(name),
-        HirExpr::PtrOffset { base, .. }
-        | HirExpr::Cast { expr: base, .. }
-        | HirExpr::Unary { expr: base, .. } => stack_scaffold_ptr_expr(base),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => looks_like_stack_scaffold_name(name),
+        DirExpr::PtrOffset { base, .. }
+        | DirExpr::Cast { expr: base, .. }
+        | DirExpr::Unary { expr: base, .. } => stack_scaffold_ptr_expr(base),
+        DirExpr::Binary { lhs, rhs, .. } => {
             stack_scaffold_ptr_expr(lhs) || stack_scaffold_ptr_expr(rhs)
         }
         _ => false,
     }
 }
 
-fn is_entry_stack_scaffold_store(stmt: &HirStmt) -> bool {
-    let HirStmt::Assign {
-        lhs: HirLValue::Deref { ptr, .. },
-        rhs: HirExpr::Var(_),
+fn is_entry_stack_scaffold_store(stmt: &DirStmt) -> bool {
+    let DirStmt::Assign {
+        lhs: DirLValue::Deref { ptr, .. },
+        rhs: DirExpr::Var(_),
     } = stmt
     else {
         return false;
@@ -79,9 +79,9 @@ fn is_entry_stack_scaffold_store(stmt: &HirStmt) -> bool {
     stack_scaffold_ptr_expr(ptr)
 }
 
-fn is_entry_stack_scaffold_alias_binding(stmt: &HirStmt) -> Option<&str> {
-    let HirStmt::Assign {
-        lhs: HirLValue::Var(lhs),
+fn is_entry_stack_scaffold_alias_binding(stmt: &DirStmt) -> Option<&str> {
+    let DirStmt::Assign {
+        lhs: DirLValue::Var(lhs),
         rhs,
     } = stmt
     else {
@@ -97,22 +97,22 @@ fn looks_like_stack_slot_name(name: &str) -> bool {
     name.starts_with("home_") || name.starts_with("local_") || name.starts_with("ret_scaffold_")
 }
 
-fn var_name_through_cast(expr: &HirExpr) -> Option<&str> {
+fn var_name_through_cast(expr: &DirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name.as_str()),
-        HirExpr::Cast { expr, .. } => var_name_through_cast(expr),
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => Some(name.as_str()),
+        DirExpr::Cast { expr, .. } => var_name_through_cast(expr),
         _ => None,
     }
 }
 
-fn is_entry_stack_slot_scaffold_store(stmt: &HirStmt) -> bool {
+fn is_entry_stack_slot_scaffold_store(stmt: &DirStmt) -> bool {
     entry_stack_slot_scaffold_name(stmt).is_some()
 }
 
-fn entry_stack_slot_scaffold_name(stmt: &HirStmt) -> Option<&str> {
+fn entry_stack_slot_scaffold_name(stmt: &DirStmt) -> Option<&str> {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(lhs),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(lhs),
             rhs,
         } if looks_like_stack_slot_name(lhs) && var_name_through_cast(rhs).is_some() => {
             Some(lhs.as_str())
@@ -121,11 +121,11 @@ fn entry_stack_slot_scaffold_name(stmt: &HirStmt) -> Option<&str> {
     }
 }
 
-fn is_entry_stack_slot_callee_saved_store(stmt: &HirStmt) -> bool {
+fn is_entry_stack_slot_callee_saved_store(stmt: &DirStmt) -> bool {
     matches!(
         stmt,
-        HirStmt::Assign {
-            lhs: HirLValue::Var(lhs),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(lhs),
             rhs,
         } if looks_like_stack_slot_name(lhs)
             && var_name_through_cast(rhs).is_some_and(is_callee_saved)
@@ -137,7 +137,7 @@ fn is_entry_stack_slot_callee_saved_store(stmt: &HirStmt) -> bool {
 /// stores. These are only removed as a contiguous function-entry prefix and
 /// only when the destination pointer is a synthetic stack scaffold name, so
 /// ordinary early stores through parameters or globals are left intact.
-pub fn remove_entry_stack_scaffold_stores(func: &mut HirFunction) -> bool {
+pub fn remove_entry_stack_scaffold_stores(func: &mut DirFunction) -> bool {
     remove_entry_stack_scaffold_stores_from_body(&mut func.body)
 }
 
@@ -147,7 +147,7 @@ struct EntryStackScaffoldRemovalPlan {
 }
 
 impl EntryStackScaffoldRemovalPlan {
-    fn prove(body: &[HirStmt]) -> Option<Self> {
+    fn prove(body: &[DirStmt]) -> Option<Self> {
         let prefix_len = body
             .iter()
             .take_while(|stmt| {
@@ -194,7 +194,7 @@ impl EntryStackScaffoldRemovalPlan {
         })
     }
 
-    fn apply(self, body: &mut Vec<HirStmt>) -> bool {
+    fn apply(self, body: &mut Vec<DirStmt>) -> bool {
         if self.remove_indices.is_empty() {
             return false;
         }
@@ -208,14 +208,14 @@ impl EntryStackScaffoldRemovalPlan {
     }
 }
 
-fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<HirStmt>) -> bool {
+fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<DirStmt>) -> bool {
     if let Some(plan) = EntryStackScaffoldRemovalPlan::prove(body)
         && plan.apply(body)
     {
         return true;
     }
 
-    if let Some(HirStmt::Block(inner)) = body.first_mut() {
+    if let Some(DirStmt::Block(inner)) = body.first_mut() {
         return remove_entry_stack_scaffold_stores_from_body(inner);
     }
 
@@ -228,13 +228,13 @@ fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<HirStmt>) -> bool
 /// `*<ptr_var> = <callee_saved_reg>`
 ///
 /// Returns `(ptr_var_name, reg_name)` on success.
-fn match_prologue_save(stmt: &HirStmt) -> Option<(String, String)> {
-    let HirStmt::Assign { lhs, rhs } = stmt else {
+fn match_prologue_save(stmt: &DirStmt) -> Option<(String, String)> {
+    let DirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
     let ptr_var = match lhs {
-        HirLValue::Deref { ptr, .. } => {
-            if let HirExpr::Var(v) = ptr.as_ref() {
+        DirLValue::Deref { ptr, .. } => {
+            if let DirExpr::Var(v) = ptr.as_ref() {
                 v.as_str()
             } else {
                 return None;
@@ -243,7 +243,7 @@ fn match_prologue_save(stmt: &HirStmt) -> Option<(String, String)> {
         _ => return None,
     };
     let reg = match rhs {
-        HirExpr::Var(r) if is_callee_saved(r) => r.as_str(),
+        DirExpr::Var(r) if is_callee_saved(r) => r.as_str(),
         _ => return None,
     };
     Some((ptr_var.to_string(), reg.to_string()))
@@ -253,26 +253,26 @@ fn match_prologue_save(stmt: &HirStmt) -> Option<(String, String)> {
 /// `<callee_saved_reg> = *<ptr_var>` (or Cast-wrapped variant)
 ///
 /// Returns `(ptr_var_name, reg_name)` on success.
-fn match_epilogue_restore(stmt: &HirStmt) -> Option<(String, String)> {
-    let HirStmt::Assign { lhs, rhs } = stmt else {
+fn match_epilogue_restore(stmt: &DirStmt) -> Option<(String, String)> {
+    let DirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
     let reg = match lhs {
-        HirLValue::Var(r) if is_callee_saved(r) => r.as_str(),
+        DirLValue::Var(r) if is_callee_saved(r) => r.as_str(),
         _ => return None,
     };
     // Match `Load { ptr: Var(v) }` or `Cast { Load { ptr: Var(v) } }`.
     let ptr_var = match rhs {
-        HirExpr::Load { ptr, .. } => {
-            if let HirExpr::Var(v) = ptr.as_ref() {
+        DirExpr::Load { ptr, .. } => {
+            if let DirExpr::Var(v) = ptr.as_ref() {
                 v.as_str()
             } else {
                 return None;
             }
         }
-        HirExpr::Cast { expr: inner, .. } => {
-            if let HirExpr::Load { ptr, .. } = inner.as_ref() {
-                if let HirExpr::Var(v) = ptr.as_ref() {
+        DirExpr::Cast { expr: inner, .. } => {
+            if let DirExpr::Load { ptr, .. } = inner.as_ref() {
+                if let DirExpr::Var(v) = ptr.as_ref() {
                     v.as_str()
                 } else {
                     return None;
@@ -290,36 +290,36 @@ fn match_epilogue_restore(stmt: &HirStmt) -> Option<(String, String)> {
 
 /// Count how many times `ptr_var` appears as an Rvalue reference (i.e., as
 /// `Var(ptr_var)` inside any expression, NOT counting the LHS Deref write).
-fn count_ptr_var_rvalue_uses(stmts: &[HirStmt], ptr_var: &str) -> usize {
+fn count_ptr_var_rvalue_uses(stmts: &[DirStmt], ptr_var: &str) -> usize {
     stmts.iter().map(|s| count_ptr_in_stmt(s, ptr_var)).sum()
 }
 
-fn count_ptr_in_stmt(stmt: &HirStmt, name: &str) -> usize {
+fn count_ptr_in_stmt(stmt: &DirStmt, name: &str) -> usize {
     let count = count_ptr_in_stmt_inner(stmt, name);
     if count > 0 && name == "rbx" {}
     count
 }
 
-fn count_ptr_in_stmt_inner(stmt: &HirStmt, name: &str) -> usize {
+fn count_ptr_in_stmt_inner(stmt: &DirStmt, name: &str) -> usize {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             let lhs_uses = match lhs {
                 // The write itself (`*p = ...`) does NOT count as an rvalue use
                 // of `p` for our purposes — we only care whether `p` is READ
                 // beyond the prologue/epilogue pair.  However, the pointer load
                 // `*p` in `reg = *p` is an rvalue load, counted in `rhs`.
-                HirLValue::Deref { ptr, .. } => count_ptr_in_expr(ptr, name),
-                HirLValue::Index { base, index, .. } => {
+                DirLValue::Deref { ptr, .. } => count_ptr_in_expr(ptr, name),
+                DirLValue::Index { base, index, .. } => {
                     count_ptr_in_expr(base, name) + count_ptr_in_expr(index, name)
                 }
-                HirLValue::Var(_) => 0,
-                HirLValue::FieldAccess { base, .. } => count_ptr_in_expr(base, name),
+                DirLValue::Var(_) => 0,
+                DirLValue::FieldAccess { base, .. } => count_ptr_in_expr(base, name),
             };
             lhs_uses + count_ptr_in_expr(rhs, name)
         }
-        HirStmt::Expr(e) | HirStmt::Return(Some(e)) => count_ptr_in_expr(e, name),
-        HirStmt::VaStart { va_list, .. } => count_ptr_in_expr(va_list, name),
-        HirStmt::If {
+        DirStmt::Expr(e) | DirStmt::Return(Some(e)) => count_ptr_in_expr(e, name),
+        DirStmt::VaStart { va_list, .. } => count_ptr_in_expr(va_list, name),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -328,13 +328,13 @@ fn count_ptr_in_stmt_inner(stmt: &HirStmt, name: &str) -> usize {
                 + count_ptr_var_rvalue_uses(then_body, name)
                 + count_ptr_var_rvalue_uses(else_body, name)
         }
-        HirStmt::While { cond, body } => {
+        DirStmt::While { cond, body } => {
             count_ptr_in_expr(cond, name) + count_ptr_var_rvalue_uses(body, name)
         }
-        HirStmt::DoWhile { body, cond } => {
+        DirStmt::DoWhile { body, cond } => {
             count_ptr_var_rvalue_uses(body, name) + count_ptr_in_expr(cond, name)
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -354,8 +354,8 @@ fn count_ptr_in_stmt_inner(stmt: &HirStmt, name: &str) -> usize {
                 .unwrap_or(0);
             i + c + u + count_ptr_var_rvalue_uses(body, name)
         }
-        HirStmt::Block(body) => count_ptr_var_rvalue_uses(body, name),
-        HirStmt::Switch {
+        DirStmt::Block(body) => count_ptr_var_rvalue_uses(body, name),
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -368,32 +368,32 @@ fn count_ptr_in_stmt_inner(stmt: &HirStmt, name: &str) -> usize {
             let d = count_ptr_var_rvalue_uses(default, name);
             e + c + d
         }
-        HirStmt::Return(None)
-        | HirStmt::Break
-        | HirStmt::Continue
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_) => 0,
+        DirStmt::Return(None)
+        | DirStmt::Break
+        | DirStmt::Continue
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_) => 0,
     }
 }
 
-fn count_ptr_in_expr(expr: &HirExpr, name: &str) -> usize {
+fn count_ptr_in_expr(expr: &DirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(v) | HirExpr::AddressOfGlobal(v) => usize::from(v == name),
-        HirExpr::Const(_, _) => 0,
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => count_ptr_in_expr(inner, name),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Var(v) | DirExpr::AddressOfGlobal(v) => usize::from(v == name),
+        DirExpr::Const(_, _) => 0,
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => count_ptr_in_expr(inner, name),
+        DirExpr::Binary { lhs, rhs, .. } => {
             count_ptr_in_expr(lhs, name) + count_ptr_in_expr(rhs, name)
         }
-        HirExpr::Call { args, .. } => args.iter().map(|a| count_ptr_in_expr(a, name)).sum(),
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Call { args, .. } => args.iter().map(|a| count_ptr_in_expr(a, name)).sum(),
+        DirExpr::Index { base, index, .. } => {
             count_ptr_in_expr(base, name) + count_ptr_in_expr(index, name)
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -411,7 +411,7 @@ fn count_ptr_in_expr(expr: &HirExpr, name: &str) -> usize {
 /// Remove all statements that match the given `(ptr_var, reg)` pairs from
 /// `stmts` at any nesting level (epilogues can appear inside conditional arms).
 fn remove_matching_saves_restores(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     pairs: &HashMap<String, String>, // ptr_var → reg
     changed: &mut bool,
 ) {
@@ -437,10 +437,10 @@ fn remove_matching_saves_restores(
     });
 }
 
-fn remove_nested(stmt: &mut HirStmt, pairs: &HashMap<String, String>, changed: &mut bool) {
+fn remove_nested(stmt: &mut DirStmt, pairs: &HashMap<String, String>, changed: &mut bool) {
     match stmt {
-        HirStmt::Block(body) => remove_matching_saves_restores(body, pairs, changed),
-        HirStmt::If {
+        DirStmt::Block(body) => remove_matching_saves_restores(body, pairs, changed),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -448,11 +448,11 @@ fn remove_nested(stmt: &mut HirStmt, pairs: &HashMap<String, String>, changed: &
             remove_matching_saves_restores(then_body, pairs, changed);
             remove_matching_saves_restores(else_body, pairs, changed);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             remove_matching_saves_restores(body, pairs, changed)
         }
-        HirStmt::For { body, .. } => remove_matching_saves_restores(body, pairs, changed),
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::For { body, .. } => remove_matching_saves_restores(body, pairs, changed),
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 remove_matching_saves_restores(&mut case.body, pairs, changed);
             }
@@ -466,7 +466,7 @@ fn remove_nested(stmt: &mut HirStmt, pairs: &HashMap<String, String>, changed: &
 
 /// Remove callee-saved register prologue/epilogue save-restore pairs from
 /// `func`.  Returns `true` if any statements were removed.
-pub fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bool {
+pub fn remove_callee_save_prologue_epilogue(func: &mut DirFunction) -> bool {
     // ── Step 1: Discover prologue saves in the first few top-level statements.
     let max_prologue_scan = 16usize;
     let mut candidate_pairs: HashMap<String, String> = HashMap::default(); // ptr_var → reg
@@ -551,14 +551,14 @@ pub fn remove_callee_save_prologue_epilogue(func: &mut HirFunction) -> bool {
 
 // ── Helper: collect all epilogue restores ────────────────────────────────────
 
-fn collect_restores(stmts: &[HirStmt], restores: &mut HashMap<String, String>) {
+fn collect_restores(stmts: &[DirStmt], restores: &mut HashMap<String, String>) {
     for stmt in stmts {
         if let Some((ptr, reg)) = match_epilogue_restore(stmt) {
             restores.entry(ptr).or_insert(reg);
         }
         match stmt {
-            HirStmt::Block(body) => collect_restores(body, restores),
-            HirStmt::If {
+            DirStmt::Block(body) => collect_restores(body, restores),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -566,11 +566,11 @@ fn collect_restores(stmts: &[HirStmt], restores: &mut HashMap<String, String>) {
                 collect_restores(then_body, restores);
                 collect_restores(else_body, restores);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 collect_restores(body, restores)
             }
-            HirStmt::For { body, .. } => collect_restores(body, restores),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::For { body, .. } => collect_restores(body, restores),
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_restores(&case.body, restores);
                 }
@@ -581,7 +581,7 @@ fn collect_restores(stmts: &[HirStmt], restores: &mut HashMap<String, String>) {
     }
 }
 
-fn count_restores_for_ptr(stmts: &[HirStmt], ptr: &str) -> usize {
+fn count_restores_for_ptr(stmts: &[DirStmt], ptr: &str) -> usize {
     let mut count = 0;
     for stmt in stmts {
         if let Some((p, _)) = match_epilogue_restore(stmt) {
@@ -590,8 +590,8 @@ fn count_restores_for_ptr(stmts: &[HirStmt], ptr: &str) -> usize {
             }
         }
         match stmt {
-            HirStmt::Block(body) => count += count_restores_for_ptr(body, ptr),
-            HirStmt::If {
+            DirStmt::Block(body) => count += count_restores_for_ptr(body, ptr),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -599,11 +599,11 @@ fn count_restores_for_ptr(stmts: &[HirStmt], ptr: &str) -> usize {
                 count += count_restores_for_ptr(then_body, ptr);
                 count += count_restores_for_ptr(else_body, ptr);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 count += count_restores_for_ptr(body, ptr)
             }
-            HirStmt::For { body, .. } => count += count_restores_for_ptr(body, ptr),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::For { body, .. } => count += count_restores_for_ptr(body, ptr),
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     count += count_restores_for_ptr(&case.body, ptr);
                 }
@@ -625,18 +625,18 @@ fn count_restores_for_ptr(stmts: &[HirStmt], ptr: &str) -> usize {
 
 /// Match `callee_saved_reg = home_slot_var` (plain `Var` on RHS, no deref).
 /// Returns `(slot_var_name, reg_name)` on success.
-fn match_slot_epilogue_restore(stmt: &HirStmt) -> Option<(String, String)> {
-    let HirStmt::Assign { lhs, rhs } = stmt else {
+fn match_slot_epilogue_restore(stmt: &DirStmt) -> Option<(String, String)> {
+    let DirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
     let reg = match lhs {
-        HirLValue::Var(r) if is_callee_saved(r) => r.as_str(),
+        DirLValue::Var(r) if is_callee_saved(r) => r.as_str(),
         _ => return None,
     };
     let slot_var = match rhs {
-        HirExpr::Var(v) if looks_like_stack_slot_name(v) => v.as_str(),
-        HirExpr::Cast { expr: inner, .. } => match inner.as_ref() {
-            HirExpr::Var(v) if looks_like_stack_slot_name(v) => v.as_str(),
+        DirExpr::Var(v) if looks_like_stack_slot_name(v) => v.as_str(),
+        DirExpr::Cast { expr: inner, .. } => match inner.as_ref() {
+            DirExpr::Var(v) if looks_like_stack_slot_name(v) => v.as_str(),
             _ => return None,
         },
         _ => return None,
@@ -644,14 +644,14 @@ fn match_slot_epilogue_restore(stmt: &HirStmt) -> Option<(String, String)> {
     Some((slot_var.to_string(), reg.to_string()))
 }
 
-fn collect_slot_restores(stmts: &[HirStmt], out: &mut Vec<(String, String)>) {
+fn collect_slot_restores(stmts: &[DirStmt], out: &mut Vec<(String, String)>) {
     for stmt in stmts {
         if let Some(pair) = match_slot_epilogue_restore(stmt) {
             out.push(pair);
         }
         match stmt {
-            HirStmt::Block(body) => collect_slot_restores(body, out),
-            HirStmt::If {
+            DirStmt::Block(body) => collect_slot_restores(body, out),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -659,11 +659,11 @@ fn collect_slot_restores(stmts: &[HirStmt], out: &mut Vec<(String, String)>) {
                 collect_slot_restores(then_body, out);
                 collect_slot_restores(else_body, out);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 collect_slot_restores(body, out)
             }
-            HirStmt::For { body, .. } => collect_slot_restores(body, out),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::For { body, .. } => collect_slot_restores(body, out),
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_slot_restores(&case.body, out);
                 }
@@ -675,26 +675,26 @@ fn collect_slot_restores(stmts: &[HirStmt], out: &mut Vec<(String, String)>) {
 }
 
 /// Count how many times `var` appears as the `Var` LHS of an assignment.
-fn count_var_definitions(stmts: &[HirStmt], var: &str) -> usize {
+fn count_var_definitions(stmts: &[DirStmt], var: &str) -> usize {
     stmts.iter().map(|s| count_var_defs_in_stmt(s, var)).sum()
 }
 
-fn count_var_defs_in_stmt(stmt: &HirStmt, var: &str) -> usize {
+fn count_var_defs_in_stmt(stmt: &DirStmt, var: &str) -> usize {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(lhs),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(lhs),
             ..
         } if lhs == var => 1,
-        HirStmt::Block(body) => count_var_definitions(body, var),
-        HirStmt::If {
+        DirStmt::Block(body) => count_var_definitions(body, var),
+        DirStmt::If {
             then_body,
             else_body,
             ..
         } => count_var_definitions(then_body, var) + count_var_definitions(else_body, var),
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             count_var_definitions(body, var)
         }
-        HirStmt::For {
+        DirStmt::For {
             init, body, update, ..
         } => {
             let i = init
@@ -707,7 +707,7 @@ fn count_var_defs_in_stmt(stmt: &HirStmt, var: &str) -> usize {
                 .unwrap_or(0);
             i + u + count_var_definitions(body, var)
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             let c: usize = cases
                 .iter()
                 .map(|c| count_var_definitions(&c.body, var))
@@ -719,7 +719,7 @@ fn count_var_defs_in_stmt(stmt: &HirStmt, var: &str) -> usize {
 }
 
 fn remove_orphaned_slot_restores_from_stmts(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     slots: &HashSet<String>,
     changed: &mut bool,
 ) {
@@ -738,13 +738,13 @@ fn remove_orphaned_slot_restores_from_stmts(
 }
 
 fn remove_orphaned_slot_restore_nested(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     slots: &HashSet<String>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Block(body) => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
-        HirStmt::If {
+        DirStmt::Block(body) => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -752,11 +752,11 @@ fn remove_orphaned_slot_restore_nested(
             remove_orphaned_slot_restores_from_stmts(then_body, slots, changed);
             remove_orphaned_slot_restores_from_stmts(else_body, slots, changed);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             remove_orphaned_slot_restores_from_stmts(body, slots, changed)
         }
-        HirStmt::For { body, .. } => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::For { body, .. } => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 remove_orphaned_slot_restores_from_stmts(&mut case.body, slots, changed);
             }
@@ -769,7 +769,7 @@ fn remove_orphaned_slot_restore_nested(
 /// Remove epilogue restores of the form `callee_saved_reg = home_slot_var` where
 /// `home_slot_var` has no remaining definition in the function body (its prologue
 /// save was already stripped by `remove_entry_stack_scaffold_stores`).
-fn remove_orphaned_slot_epilogue_restores(func: &mut HirFunction) -> bool {
+fn remove_orphaned_slot_epilogue_restores(func: &mut DirFunction) -> bool {
     let mut candidates: Vec<(String, String)> = Vec::new();
     collect_slot_restores(&func.body, &mut candidates);
 
@@ -795,7 +795,7 @@ fn remove_orphaned_slot_epilogue_restores(func: &mut HirFunction) -> bool {
 
 /// Remove dead assignments `callee_saved_reg = expr` where:
 /// 1. `callee_saved_reg` is a known callee-saved register name.
-/// 2. `callee_saved_reg` has no `NirBinding` in `func.locals` (was never
+/// 2. `callee_saved_reg` has no `DirBinding` in `func.locals` (was never
 ///    materialized as a named local).
 /// 3. `callee_saved_reg` has zero rvalue uses anywhere in the function body.
 ///
@@ -803,7 +803,7 @@ fn remove_orphaned_slot_epilogue_restores(func: &mut HirFunction) -> bool {
 /// (`rbx = param_3`) to keep it across calls, but a copy-propagation pass
 /// later replaces every use of `rbx` with the original parameter, leaving the
 /// initial assignment dead and the register name undeclared in the output.
-pub fn remove_dead_callee_saved_param_loads(func: &mut HirFunction) -> bool {
+pub fn remove_dead_callee_saved_param_loads(func: &mut DirFunction) -> bool {
     let mut candidates: HashSet<String> = HashSet::default();
     collect_callee_assign_targets_no_slot_rhs(&func.body, &mut candidates);
 
@@ -830,7 +830,7 @@ pub fn remove_dead_callee_saved_param_loads(func: &mut HirFunction) -> bool {
     let mut changed = false;
     remove_dead_callee_assigns_from_stmts(&mut func.body, &candidates, &mut changed);
 
-    // Also remove any corresponding NirBinding from locals (may have been
+    // Also remove any corresponding DirBinding from locals (may have been
     // declared but later recognized as write-only by a prior pass).
     let before_locals = func.locals.len();
     func.locals.retain(|b| !candidates.contains(&b.name));
@@ -843,11 +843,11 @@ pub fn remove_dead_callee_saved_param_loads(func: &mut HirFunction) -> bool {
 
 /// Collect all top-level `callee_reg = expr` assignments where the RHS is
 /// NOT a stack-slot variable (to avoid touching epilogue-restore patterns).
-fn collect_callee_assign_targets_no_slot_rhs(stmts: &[HirStmt], out: &mut HashSet<String>) {
+fn collect_callee_assign_targets_no_slot_rhs(stmts: &[DirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } if is_callee_saved(name) => {
                 let rhs_is_slot =
@@ -856,7 +856,7 @@ fn collect_callee_assign_targets_no_slot_rhs(stmts: &[HirStmt], out: &mut HashSe
                     out.insert(name.clone());
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -864,13 +864,13 @@ fn collect_callee_assign_targets_no_slot_rhs(stmts: &[HirStmt], out: &mut HashSe
                 collect_callee_assign_targets_no_slot_rhs(then_body, out);
                 collect_callee_assign_targets_no_slot_rhs(else_body, out);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 collect_callee_assign_targets_no_slot_rhs(body, out);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_callee_assign_targets_no_slot_rhs(&case.body, out);
                 }
@@ -882,13 +882,13 @@ fn collect_callee_assign_targets_no_slot_rhs(stmts: &[HirStmt], out: &mut HashSe
 }
 
 fn remove_dead_callee_assigns_from_stmts(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     dead: &HashSet<String>,
     changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -896,13 +896,13 @@ fn remove_dead_callee_assigns_from_stmts(
                 remove_dead_callee_assigns_from_stmts(then_body, dead, changed);
                 remove_dead_callee_assigns_from_stmts(else_body, dead, changed);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 remove_dead_callee_assigns_from_stmts(body, dead, changed);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     remove_dead_callee_assigns_from_stmts(&mut case.body, dead, changed);
                 }
@@ -913,7 +913,7 @@ fn remove_dead_callee_assigns_from_stmts(
     }
     let before = stmts.len();
     stmts.retain(|stmt| {
-        !matches!(stmt, HirStmt::Assign { lhs: HirLValue::Var(name), .. } if dead.contains(name))
+        !matches!(stmt, DirStmt::Assign { lhs: DirLValue::Var(name), .. } if dead.contains(name))
     });
     if stmts.len() < before {
         *changed = true;
@@ -924,7 +924,7 @@ fn remove_dead_callee_assigns_from_stmts(
 mod tests {
     use super::*;
 // prelude via parent
-    use fission_midend_core::ir::NirBinding;
+    use fission_midend_core::ir::DirBinding;
 
     fn u64_ty() -> NirType {
         NirType::Int {
@@ -940,64 +940,64 @@ mod tests {
         }
     }
 
-    fn scaffold_store(ptr: &str, rhs: &str) -> HirStmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Deref {
-                ptr: Box::new(HirExpr::PtrOffset {
-                    base: Box::new(HirExpr::Var(ptr.to_owned())),
+    fn scaffold_store(ptr: &str, rhs: &str) -> DirStmt {
+        DirStmt::Assign {
+            lhs: DirLValue::Deref {
+                ptr: Box::new(DirExpr::PtrOffset {
+                    base: Box::new(DirExpr::Var(ptr.to_owned())),
                     offset: -8,
                 }),
                 ty: u64_ty(),
             },
-            rhs: HirExpr::Var(rhs.to_owned()),
+            rhs: DirExpr::Var(rhs.to_owned()),
         }
     }
 
     #[test]
     fn removes_contiguous_entry_stack_scaffold_stores() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
                 scaffold_store("var_20", "var_38"),
                 scaffold_store("xVar0", "param_2"),
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
             ..Default::default()
         };
 
         assert!(remove_entry_stack_scaffold_stores(&mut func));
-        assert_eq!(func.body, vec![HirStmt::Return(None)]);
+        assert_eq!(func.body, vec![DirStmt::Return(None)]);
     }
 
     #[test]
     fn removes_aarch64_sp_based_entry_callee_saved_scaffold() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
                 scaffold_store("sp", "x29"),
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::PtrOffset {
-                            base: Box::new(HirExpr::Var("sp".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::PtrOffset {
+                            base: Box::new(DirExpr::Var("sp".to_owned())),
                             offset: 8,
                         }),
                         ty: u64_ty(),
                     },
-                    rhs: HirExpr::Var("x30".to_owned()),
+                    rhs: DirExpr::Var("x30".to_owned()),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::PtrOffset {
-                            base: Box::new(HirExpr::Var("sp".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::PtrOffset {
+                            base: Box::new(DirExpr::Var("sp".to_owned())),
                             offset: 16,
                         }),
                         ty: u64_ty(),
                     },
-                    rhs: HirExpr::Var("x20".to_owned()),
+                    rhs: DirExpr::Var("x20".to_owned()),
                 },
-                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+                DirStmt::Return(Some(DirExpr::Var("param_1".to_owned()))),
             ],
             ..Default::default()
         };
@@ -1005,31 +1005,31 @@ mod tests {
         assert!(remove_entry_stack_scaffold_stores(&mut func));
         assert_eq!(
             func.body,
-            vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_owned())))]
+            vec![DirStmt::Return(Some(DirExpr::Var("param_1".to_owned())))]
         );
     }
 
     #[test]
     fn removes_aarch64_entry_stack_alias_callee_saved_scaffold() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("xVar2".to_owned()),
-                    rhs: HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("sp".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("xVar2".to_owned()),
+                    rhs: DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("sp".to_owned())),
                         offset: 16,
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::Var("xVar2".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::Var("xVar2".to_owned())),
                         ty: u64_ty(),
                     },
-                    rhs: HirExpr::Var("x20".to_owned()),
+                    rhs: DirExpr::Var("x20".to_owned()),
                 },
-                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+                DirStmt::Return(Some(DirExpr::Var("param_1".to_owned()))),
             ],
             ..Default::default()
         };
@@ -1037,49 +1037,49 @@ mod tests {
         assert!(remove_entry_stack_scaffold_stores(&mut func));
         assert_eq!(
             func.body,
-            vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_owned())))]
+            vec![DirStmt::Return(Some(DirExpr::Var("param_1".to_owned())))]
         );
     }
 
     #[test]
     fn removes_arm32_uvar_stack_alias_callee_saved_scaffold() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("uVar0".to_owned()),
-                    rhs: HirExpr::Binary {
-                        op: HirBinaryOp::Sub,
-                        lhs: Box::new(HirExpr::Var("sp".to_owned())),
-                        rhs: Box::new(HirExpr::Const(4, u32_ty())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("uVar0".to_owned()),
+                    rhs: DirExpr::Binary {
+                        op: DirBinaryOp::Sub,
+                        lhs: Box::new(DirExpr::Var("sp".to_owned())),
+                        rhs: Box::new(DirExpr::Const(4, u32_ty())),
                         ty: u32_ty(),
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::Var("uVar0".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::Var("uVar0".to_owned())),
                         ty: u32_ty(),
                     },
-                    rhs: HirExpr::Var("lr".to_owned()),
+                    rhs: DirExpr::Var("lr".to_owned()),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("uVar1".to_owned()),
-                    rhs: HirExpr::Binary {
-                        op: HirBinaryOp::Sub,
-                        lhs: Box::new(HirExpr::Var("uVar0".to_owned())),
-                        rhs: Box::new(HirExpr::Const(1, u32_ty())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("uVar1".to_owned()),
+                    rhs: DirExpr::Binary {
+                        op: DirBinaryOp::Sub,
+                        lhs: Box::new(DirExpr::Var("uVar0".to_owned())),
+                        rhs: Box::new(DirExpr::Const(1, u32_ty())),
                         ty: u32_ty(),
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::Var("uVar1".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::Var("uVar1".to_owned())),
                         ty: u32_ty(),
                     },
-                    rhs: HirExpr::Var("r11".to_owned()),
+                    rhs: DirExpr::Var("r11".to_owned()),
                 },
-                HirStmt::Return(Some(HirExpr::Var("param_1".to_owned()))),
+                DirStmt::Return(Some(DirExpr::Var("param_1".to_owned()))),
             ],
             ..Default::default()
         };
@@ -1087,31 +1087,31 @@ mod tests {
         assert!(remove_entry_stack_scaffold_stores(&mut func));
         assert_eq!(
             func.body,
-            vec![HirStmt::Return(Some(HirExpr::Var("param_1".to_owned())))]
+            vec![DirStmt::Return(Some(DirExpr::Var("param_1".to_owned())))]
         );
     }
 
     #[test]
     fn keeps_entry_stack_alias_when_used_after_prefix() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("xVar2".to_owned()),
-                    rhs: HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("sp".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("xVar2".to_owned()),
+                    rhs: DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("sp".to_owned())),
                         offset: 16,
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::Var("xVar2".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::Var("xVar2".to_owned())),
                         ty: u64_ty(),
                     },
-                    rhs: HirExpr::Var("x20".to_owned()),
+                    rhs: DirExpr::Var("x20".to_owned()),
                 },
-                HirStmt::Expr(HirExpr::Var("xVar2".to_owned())),
+                DirStmt::Expr(DirExpr::Var("xVar2".to_owned())),
             ],
             ..Default::default()
         };
@@ -1122,42 +1122,42 @@ mod tests {
 
     #[test]
     fn removes_contiguous_entry_stack_slot_callee_saved_saves() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("home_0".to_owned()),
-                    rhs: HirExpr::Var("r15".to_owned()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("home_0".to_owned()),
+                    rhs: DirExpr::Var("r15".to_owned()),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("home_0".to_owned()),
-                    rhs: HirExpr::Var("param_1".to_owned()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("home_0".to_owned()),
+                    rhs: DirExpr::Var("param_1".to_owned()),
                 },
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
             ..Default::default()
         };
 
         assert!(remove_entry_stack_scaffold_stores(&mut func));
-        assert_eq!(func.body, vec![HirStmt::Return(None)]);
+        assert_eq!(func.body, vec![DirStmt::Return(None)]);
     }
 
     #[test]
     fn keeps_live_stack_slot_initializers_after_callee_saved_prefix() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("home_0".to_owned()),
-                    rhs: HirExpr::Var("r15".to_owned()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("home_0".to_owned()),
+                    rhs: DirExpr::Var("r15".to_owned()),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("local_8".to_owned()),
-                    rhs: HirExpr::Var("param_1".to_owned()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("local_8".to_owned()),
+                    rhs: DirExpr::Var("param_1".to_owned()),
                 },
-                HirStmt::Return(Some(HirExpr::Var("local_8".to_owned()))),
+                DirStmt::Return(Some(DirExpr::Var("local_8".to_owned()))),
             ],
             ..Default::default()
         };
@@ -1166,47 +1166,47 @@ mod tests {
         assert_eq!(func.body.len(), 2);
         assert!(matches!(
             &func.body[0],
-            HirStmt::Assign {
-                lhs: HirLValue::Var(lhs),
-                rhs: HirExpr::Var(rhs),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(lhs),
+                rhs: DirExpr::Var(rhs),
             } if lhs == "local_8" && rhs == "param_1"
         ));
     }
 
     #[test]
     fn removes_entry_stack_slot_callee_saved_saves_inside_entry_block() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
-            body: vec![HirStmt::Block(vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("home_0".to_owned()),
-                    rhs: HirExpr::Var("r15".to_owned()),
+            body: vec![DirStmt::Block(vec![
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("home_0".to_owned()),
+                    rhs: DirExpr::Var("r15".to_owned()),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("home_0".to_owned()),
-                    rhs: HirExpr::Var("param_1".to_owned()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("home_0".to_owned()),
+                    rhs: DirExpr::Var("param_1".to_owned()),
                 },
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ])],
             ..Default::default()
         };
 
         assert!(remove_entry_stack_scaffold_stores(&mut func));
-        assert_eq!(func.body, vec![HirStmt::Block(vec![HirStmt::Return(None)])]);
+        assert_eq!(func.body, vec![DirStmt::Block(vec![DirStmt::Return(None)])]);
     }
 
     #[test]
     fn keeps_entry_stack_slot_initializers_without_callee_saved_evidence() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("local_8".to_owned()),
-                    rhs: HirExpr::Var("param_1".to_owned()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("local_8".to_owned()),
+                    rhs: DirExpr::Var("param_1".to_owned()),
                 },
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
             ..Default::default()
         };
@@ -1217,18 +1217,18 @@ mod tests {
 
     #[test]
     fn keeps_non_entry_and_non_scaffold_stores() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Expr(HirExpr::Const(1, u64_ty())),
+                DirStmt::Expr(DirExpr::Const(1, u64_ty())),
                 scaffold_store("var_20", "var_38"),
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref {
-                        ptr: Box::new(HirExpr::Var("param_1".to_owned())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref {
+                        ptr: Box::new(DirExpr::Var("param_1".to_owned())),
                         ty: u64_ty(),
                     },
-                    rhs: HirExpr::Var("param_2".to_owned()),
+                    rhs: DirExpr::Var("param_2".to_owned()),
                 },
             ],
             ..Default::default()
@@ -1240,24 +1240,24 @@ mod tests {
 
     // ── Orphaned stack-slot epilogue restore tests ─────────────────────────────
 
-    fn slot_restore(reg: &str, slot: &str) -> HirStmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(reg.to_owned()),
-            rhs: HirExpr::Var(slot.to_owned()),
+    fn slot_restore(reg: &str, slot: &str) -> DirStmt {
+        DirStmt::Assign {
+            lhs: DirLValue::Var(reg.to_owned()),
+            rhs: DirExpr::Var(slot.to_owned()),
         }
     }
 
     #[test]
     fn removes_orphaned_slot_epilogue_restore_with_uppercase_register() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "fill_matrix".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Expr(HirExpr::Const(42, u64_ty())),
+                DirStmt::Expr(DirExpr::Const(42, u64_ty())),
                 slot_restore("RDI", "home_0"),
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
-            locals: vec![NirBinding {
+            locals: vec![DirBinding {
                 name: "home_0".to_owned(),
                 ty: u64_ty(),
                 surface_type_name: None,
@@ -1280,15 +1280,15 @@ mod tests {
     fn removes_orphaned_slot_epilogue_restore_when_no_definition() {
         // home_0 has no definition — its prologue save was already stripped.
         // `rbx = home_0` is an orphaned epilogue restore and should be removed.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Expr(HirExpr::Const(42, u64_ty())),
+                DirStmt::Expr(DirExpr::Const(42, u64_ty())),
                 slot_restore("rbx", "home_0"),
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
-            locals: vec![NirBinding {
+            locals: vec![DirBinding {
                 name: "home_0".to_owned(),
                 ty: u64_ty(),
                 surface_type_name: None,
@@ -1309,24 +1309,24 @@ mod tests {
     #[test]
     fn removes_multiple_orphaned_slot_restores() {
         // Both home_0 and home_8 have no definitions (prologue saves stripped).
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Expr(HirExpr::Const(1, u64_ty())),
+                DirStmt::Expr(DirExpr::Const(1, u64_ty())),
                 slot_restore("rbx", "home_0"),
                 slot_restore("rsi", "home_8"),
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
             locals: vec![
-                NirBinding {
+                DirBinding {
                     name: "home_0".to_owned(),
                     ty: u64_ty(),
                     surface_type_name: None,
                     origin: None,
                     initializer: None,
                 },
-                NirBinding {
+                DirBinding {
                     name: "home_8".to_owned(),
                     ty: u64_ty(),
                     surface_type_name: None,
@@ -1349,18 +1349,18 @@ mod tests {
     #[test]
     fn keeps_slot_restore_when_slot_has_definition() {
         // home_0 IS defined in the body — not orphaned, must NOT be removed.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("home_0".to_owned()),
-                    rhs: HirExpr::Var("param_1".to_owned()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("home_0".to_owned()),
+                    rhs: DirExpr::Var("param_1".to_owned()),
                 },
                 slot_restore("rbx", "home_0"),
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
-            locals: vec![NirBinding {
+            locals: vec![DirBinding {
                 name: "home_0".to_owned(),
                 ty: u64_ty(),
                 surface_type_name: None,
@@ -1381,18 +1381,18 @@ mod tests {
     #[test]
     fn removes_orphaned_slot_restore_inside_nested_block() {
         // Orphaned restores inside nested blocks are also removed.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                HirStmt::If {
-                    cond: HirExpr::Const(1, u64_ty()),
+                DirStmt::If {
+                    cond: DirExpr::Const(1, u64_ty()),
                     then_body: vec![slot_restore("rsi", "home_0")],
                     else_body: vec![],
                 },
-                HirStmt::Return(None),
+                DirStmt::Return(None),
             ],
-            locals: vec![NirBinding {
+            locals: vec![DirBinding {
                 name: "home_0".to_owned(),
                 ty: u64_ty(),
                 surface_type_name: None,
@@ -1403,7 +1403,7 @@ mod tests {
         };
 
         assert!(remove_callee_save_prologue_epilogue(&mut func));
-        if let HirStmt::If { then_body, .. } = &func.body[0] {
+        if let DirStmt::If { then_body, .. } = &func.body[0] {
             assert!(
                 then_body.is_empty(),
                 "orphaned restore inside if-branch should be removed"
@@ -1413,43 +1413,43 @@ mod tests {
 
     // ── remove_dead_callee_saved_param_loads ──────────────────────────────────
 
-    fn assign_var(lhs: &str, rhs: HirExpr) -> HirStmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(lhs.to_owned()),
+    fn assign_var(lhs: &str, rhs: DirExpr) -> DirStmt {
+        DirStmt::Assign {
+            lhs: DirLValue::Var(lhs.to_owned()),
             rhs,
         }
     }
 
-    fn var(name: &str) -> HirExpr {
-        HirExpr::Var(name.to_owned())
+    fn var(name: &str) -> DirExpr {
+        DirExpr::Var(name.to_owned())
     }
 
     #[test]
     fn removes_dead_undeclared_callee_saved_assignment() {
         // rbx = param_3  but rbx has no binding and is never read → remove.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
-            body: vec![assign_var("rbx", var("param_3")), HirStmt::Return(None)],
-            locals: vec![], // rbx has no NirBinding
+            body: vec![assign_var("rbx", var("param_3")), DirStmt::Return(None)],
+            locals: vec![], // rbx has no DirBinding
             ..Default::default()
         };
 
         assert!(remove_callee_save_prologue_epilogue(&mut func));
-        assert_eq!(func.body, vec![HirStmt::Return(None)]);
+        assert_eq!(func.body, vec![DirStmt::Return(None)]);
     }
 
     #[test]
     fn keeps_live_callee_saved_assignment_that_is_read() {
         // rsi = param_2, but rsi IS read in the condition → keep.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
                 assign_var("rsi", var("param_2")),
-                HirStmt::If {
+                DirStmt::If {
                     cond: var("rsi"),
-                    then_body: vec![HirStmt::Return(None)],
+                    then_body: vec![DirStmt::Return(None)],
                     else_body: vec![],
                 },
             ],
@@ -1465,11 +1465,11 @@ mod tests {
     fn removes_declared_callee_saved_assignment_when_dead() {
         // rbx = param_3, rbx IS declared in locals but is never read.
         // The new strategy: 0 rvalue uses → remove assignment AND binding.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
-            body: vec![assign_var("rbx", var("param_3")), HirStmt::Return(None)],
-            locals: vec![NirBinding {
+            body: vec![assign_var("rbx", var("param_3")), DirStmt::Return(None)],
+            locals: vec![DirBinding {
                 name: "rbx".to_owned(),
                 ty: u64_ty(),
                 surface_type_name: None,
@@ -1482,7 +1482,7 @@ mod tests {
         assert!(remove_callee_save_prologue_epilogue(&mut func));
         assert_eq!(
             func.body,
-            vec![HirStmt::Return(None)],
+            vec![DirStmt::Return(None)],
             "dead assignment removed"
         );
         assert!(
@@ -1495,11 +1495,11 @@ mod tests {
     fn removes_declared_dead_callee_saved_assignment_already_deleted_by_prior_pass() {
         // rbx has already been deleted from body, but remains in locals.
         // It has 0 rvalue uses and should be pruned.
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "fill_matrix".to_owned(),
             int_param_offsets: Vec::new(),
-            body: vec![HirStmt::Return(None)],
-            locals: vec![NirBinding {
+            body: vec![DirStmt::Return(None)],
+            locals: vec![DirBinding {
                 name: "rbx".to_owned(),
                 ty: u64_ty(),
                 surface_type_name: None,

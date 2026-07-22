@@ -415,7 +415,7 @@ mod tests {
         builder.terminator_cache.insert(
             0,
             LoweredTerminator::Switch {
-                expr: HirExpr::Var("selector".to_string()),
+                expr: DirExpr::Var("selector".to_string()),
                 targets: vec![0x1100],
                 default_target: Some(0x1300),
                 min_val: 0,

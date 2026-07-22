@@ -1,6 +1,6 @@
 //! Action groups and fixpoint repeat semantics.
 
-use crate::ir::HirFunction;
+use crate::ir::DirFunction;
 use super::budget::hir_shape;
 use super::concept::GhidraActionConcept;
 use super::pass::{Pass, PassCtx, PassOutcome, run_pass_logged};
@@ -16,11 +16,11 @@ pub enum Repeat {
 pub enum Gate {
     Always,
     NotLargeFunction,
-    Custom(fn(&HirFunction) -> bool),
+    Custom(fn(&DirFunction) -> bool),
 }
 
 impl Gate {
-    pub fn allows(self, func: &HirFunction) -> bool {
+    pub fn allows(self, func: &DirFunction) -> bool {
         match self {
             Gate::Always => true,
             Gate::NotLargeFunction => !super::budget::is_large_hir_function(func),

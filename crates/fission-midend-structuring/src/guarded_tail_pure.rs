@@ -1,25 +1,25 @@
 //! Pure HIR rewrite helpers used by guarded-tail promotion/execution.
 
-use fission_midend_core::ir::{HirExpr, HirLValue, HirStmt};
+use fission_midend_core::ir::{DirExpr, DirLValue, DirStmt};
 
-pub fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
+pub fn expr_contains_var(expr: &DirExpr, name: &str) -> bool {
         match expr {
-            HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => var == name,
-            HirExpr::Const(_, _) => false,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::FieldAccess { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, name),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Var(var) | DirExpr::AddressOfGlobal(var) => var == name,
+            DirExpr::Const(_, _) => false,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::PtrOffset { base: expr, .. }
+            | DirExpr::FieldAccess { base: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => expr_contains_var(expr, name),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 expr_contains_var(lhs, name) || expr_contains_var(rhs, name)
             }
-            HirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, name)),
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, name)),
+            DirExpr::Index { base, index, .. } => {
                 expr_contains_var(base, name) || expr_contains_var(index, name)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -32,43 +32,43 @@ pub fn expr_contains_var(expr: &HirExpr, name: &str) -> bool {
         }
     }
 
-pub fn lvalue_contains_var(lhs: &HirLValue, name: &str) -> bool {
+pub fn lvalue_contains_var(lhs: &DirLValue, name: &str) -> bool {
         match lhs {
-            HirLValue::Var(_) => false,
-            HirLValue::Deref { ptr, .. } => expr_contains_var(ptr, name),
-            HirLValue::Index { base, index, .. } => {
+            DirLValue::Var(_) => false,
+            DirLValue::Deref { ptr, .. } => expr_contains_var(ptr, name),
+            DirLValue::Index { base, index, .. } => {
                 expr_contains_var(base, name) || expr_contains_var(index, name)
             }
-            HirLValue::FieldAccess { base, .. } => expr_contains_var(base, name),
+            DirLValue::FieldAccess { base, .. } => expr_contains_var(base, name),
         }
     }
 
-pub fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr) {
+pub fn replace_var_in_expr(expr: &mut DirExpr, name: &str, replacement: &DirExpr) {
         match expr {
-            HirExpr::Var(var) if var == name => *expr = replacement.clone(),
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::FieldAccess { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => {
+            DirExpr::Var(var) if var == name => *expr = replacement.clone(),
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::PtrOffset { base: expr, .. }
+            | DirExpr::FieldAccess { base: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => {
                 replace_var_in_expr(expr, name, replacement);
             }
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Binary { lhs, rhs, .. } => {
                 replace_var_in_expr(lhs, name, replacement);
                 replace_var_in_expr(rhs, name, replacement);
             }
-            HirExpr::Call { args, .. } => {
+            DirExpr::Call { args, .. } => {
                 for arg in args {
                     replace_var_in_expr(arg, name, replacement);
                 }
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 replace_var_in_expr(base, name, replacement);
                 replace_var_in_expr(index, name, replacement);
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -81,48 +81,48 @@ pub fn replace_var_in_expr(expr: &mut HirExpr, name: &str, replacement: &HirExpr
         }
     }
 
-pub fn replace_var_in_lvalue(lhs: &mut HirLValue, name: &str, replacement: &HirExpr) {
+pub fn replace_var_in_lvalue(lhs: &mut DirLValue, name: &str, replacement: &DirExpr) {
         match lhs {
-            HirLValue::Var(_) => {}
-            HirLValue::Deref { ptr, .. } => replace_var_in_expr(ptr, name, replacement),
-            HirLValue::Index { base, index, .. } => {
+            DirLValue::Var(_) => {}
+            DirLValue::Deref { ptr, .. } => replace_var_in_expr(ptr, name, replacement),
+            DirLValue::Index { base, index, .. } => {
                 replace_var_in_expr(base, name, replacement);
                 replace_var_in_expr(index, name, replacement);
             }
-            HirLValue::FieldAccess { base, .. } => {
+            DirLValue::FieldAccess { base, .. } => {
                 replace_var_in_expr(base, name, replacement);
             }
         }
     }
 
-pub fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr) {
+pub fn replace_var_in_stmt(stmt: &mut DirStmt, name: &str, replacement: &DirExpr) {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 replace_var_in_lvalue(lhs, name, replacement);
                 replace_var_in_expr(rhs, name, replacement);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 replace_var_in_expr(va_list, name, replacement)
             }
-            HirStmt::Expr(expr) => replace_var_in_expr(expr, name, replacement),
-            HirStmt::Block(stmts) => {
+            DirStmt::Expr(expr) => replace_var_in_expr(expr, name, replacement),
+            DirStmt::Block(stmts) => {
                 for stmt in stmts {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
-            HirStmt::While { cond, body } => {
+            DirStmt::While { cond, body } => {
                 replace_var_in_expr(cond, name, replacement);
                 for stmt in body {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
-            HirStmt::DoWhile { body, cond } => {
+            DirStmt::DoWhile { body, cond } => {
                 for stmt in body {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
                 replace_var_in_expr(cond, name, replacement);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -137,7 +137,7 @@ pub fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -150,7 +150,7 @@ pub fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -169,27 +169,27 @@ pub fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
-            HirStmt::Return(Some(expr)) => replace_var_in_expr(expr, name, replacement),
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Return(Some(expr)) => replace_var_in_expr(expr, name, replacement),
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(None)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
 
-pub fn count_var_defs_stmt(stmt: &HirStmt, target: &str) -> usize {
+pub fn count_var_defs_stmt(stmt: &DirStmt, target: &str) -> usize {
         match stmt {
-            HirStmt::Assign { lhs, .. } => {
-                usize::from(matches!(lhs, HirLValue::Var(name) if name == target))
+            DirStmt::Assign { lhs, .. } => {
+                usize::from(matches!(lhs, DirLValue::Var(name) if name == target))
             }
-            HirStmt::Block(stmts)
-            | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => stmts
+            DirStmt::Block(stmts)
+            | DirStmt::While { body: stmts, .. }
+            | DirStmt::DoWhile { body: stmts, .. } => stmts
                 .iter()
                 .map(|stmt| count_var_defs_stmt(stmt, target))
                 .sum(),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 cases
                     .iter()
                     .map(|case| {
@@ -204,7 +204,7 @@ pub fn count_var_defs_stmt(stmt: &HirStmt, target: &str) -> usize {
                         .map(|stmt| count_var_defs_stmt(stmt, target))
                         .sum::<usize>()
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -218,7 +218,7 @@ pub fn count_var_defs_stmt(stmt: &HirStmt, target: &str) -> usize {
                         .map(|stmt| count_var_defs_stmt(stmt, target))
                         .sum::<usize>()
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, update, body, ..
             } => {
                 init.iter()
@@ -233,37 +233,37 @@ pub fn count_var_defs_stmt(stmt: &HirStmt, target: &str) -> usize {
                         .map(|stmt| count_var_defs_stmt(stmt, target))
                         .sum::<usize>()
             }
-            HirStmt::VaStart { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => 0,
+            DirStmt::VaStart { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => 0,
         }
     }
 
-pub fn count_var_reads_expr(expr: &HirExpr, name: &str) -> usize {
+pub fn count_var_reads_expr(expr: &DirExpr, name: &str) -> usize {
         match expr {
-            HirExpr::Var(var) | HirExpr::AddressOfGlobal(var) => usize::from(var == name),
-            HirExpr::Const(_, _) => 0,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::FieldAccess { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => count_var_reads_expr(expr, name),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Var(var) | DirExpr::AddressOfGlobal(var) => usize::from(var == name),
+            DirExpr::Const(_, _) => 0,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::PtrOffset { base: expr, .. }
+            | DirExpr::FieldAccess { base: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => count_var_reads_expr(expr, name),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 count_var_reads_expr(lhs, name) + count_var_reads_expr(rhs, name)
             }
-            HirExpr::Call { args, .. } => args
+            DirExpr::Call { args, .. } => args
                 .iter()
                 .map(|arg| count_var_reads_expr(arg, name))
                 .sum(),
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 count_var_reads_expr(base, name) + count_var_reads_expr(index, name)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -276,35 +276,35 @@ pub fn count_var_reads_expr(expr: &HirExpr, name: &str) -> usize {
         }
     }
 
-pub fn count_var_reads_lvalue(lhs: &HirLValue, name: &str) -> usize {
+pub fn count_var_reads_lvalue(lhs: &DirLValue, name: &str) -> usize {
         match lhs {
-            HirLValue::Var(_) => 0,
-            HirLValue::Deref { ptr, .. } => count_var_reads_expr(ptr, name),
-            HirLValue::Index { base, index, .. } => {
+            DirLValue::Var(_) => 0,
+            DirLValue::Deref { ptr, .. } => count_var_reads_expr(ptr, name),
+            DirLValue::Index { base, index, .. } => {
                 count_var_reads_expr(base, name) + count_var_reads_expr(index, name)
             }
-            HirLValue::FieldAccess { base, .. } => count_var_reads_expr(base, name),
+            DirLValue::FieldAccess { base, .. } => count_var_reads_expr(base, name),
         }
     }
 
-pub fn count_var_reads_stmt(stmt: &HirStmt, name: &str) -> usize {
+pub fn count_var_reads_stmt(stmt: &DirStmt, name: &str) -> usize {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 count_var_reads_lvalue(lhs, name) + count_var_reads_expr(rhs, name)
             }
-            HirStmt::VaStart { va_list, .. } => count_var_reads_expr(va_list, name),
-            HirStmt::Expr(expr) => count_var_reads_expr(expr, name),
-            HirStmt::Block(stmts) | HirStmt::While { body: stmts, .. } => stmts
+            DirStmt::VaStart { va_list, .. } => count_var_reads_expr(va_list, name),
+            DirStmt::Expr(expr) => count_var_reads_expr(expr, name),
+            DirStmt::Block(stmts) | DirStmt::While { body: stmts, .. } => stmts
                 .iter()
                 .map(|stmt| count_var_reads_stmt(stmt, name))
                 .sum(),
-            HirStmt::DoWhile { body, cond } => {
+            DirStmt::DoWhile { body, cond } => {
                 body.iter()
                     .map(|stmt| count_var_reads_stmt(stmt, name))
                     .sum::<usize>()
                     + count_var_reads_expr(cond, name)
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -324,7 +324,7 @@ pub fn count_var_reads_stmt(stmt: &HirStmt, name: &str) -> usize {
                         .map(|stmt| count_var_reads_stmt(stmt, name))
                         .sum::<usize>()
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -339,7 +339,7 @@ pub fn count_var_reads_stmt(stmt: &HirStmt, name: &str) -> usize {
                         .map(|stmt| count_var_reads_stmt(stmt, name))
                         .sum::<usize>()
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -361,11 +361,11 @@ pub fn count_var_reads_stmt(stmt: &HirStmt, name: &str) -> usize {
                         .map(|stmt| count_var_reads_stmt(stmt, name))
                         .sum::<usize>()
             }
-            HirStmt::Return(Some(expr)) => count_var_reads_expr(expr, name),
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => 0,
+            DirStmt::Return(Some(expr)) => count_var_reads_expr(expr, name),
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(None)
+            | DirStmt::Break
+            | DirStmt::Continue => 0,
         }
     }

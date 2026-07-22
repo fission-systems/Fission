@@ -1,7 +1,7 @@
 use crate::prelude::*; // For accessing normalizer helpers
 use crate::HashMap;
 
-pub fn apply_double_precision_reconstruction_pass(func: &mut HirFunction) -> bool {
+pub fn apply_double_precision_reconstruction_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
 
     // Phase 1: Collapse contiguous loads and stores in the function body
@@ -21,28 +21,28 @@ pub fn apply_double_precision_reconstruction_pass(func: &mut HirFunction) -> boo
     changed
 }
 
-fn collect_single_defs(stmts: &[HirStmt], defs: &mut HashMap<String, HirExpr>) {
+fn collect_single_defs(stmts: &[DirStmt], defs: &mut HashMap<String, DirExpr>) {
     let mut def_counts = HashMap::default();
     count_defs_recursive(stmts, &mut def_counts);
     collect_defs_recursive(stmts, &def_counts, defs);
 }
 
-fn count_defs_recursive(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) {
+fn count_defs_recursive(stmts: &[DirStmt], counts: &mut HashMap<String, usize>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 ..
             } => {
                 *counts.entry(name.clone()).or_insert(0) += 1;
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 count_defs_recursive(body, counts);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -50,7 +50,7 @@ fn count_defs_recursive(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) 
                 count_defs_recursive(then_body, counts);
                 count_defs_recursive(else_body, counts);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     count_defs_recursive(&case.body, counts);
                 }
@@ -62,27 +62,27 @@ fn count_defs_recursive(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) 
 }
 
 fn collect_defs_recursive(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     counts: &HashMap<String, usize>,
-    defs: &mut HashMap<String, HirExpr>,
+    defs: &mut HashMap<String, DirExpr>,
 ) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } => {
                 if counts.get(name).copied().unwrap_or(0) == 1 {
                     defs.insert(name.clone(), rhs.clone());
                 }
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 collect_defs_recursive(body, counts, defs);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -90,7 +90,7 @@ fn collect_defs_recursive(
                 collect_defs_recursive(then_body, counts, defs);
                 collect_defs_recursive(else_body, counts, defs);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_defs_recursive(&case.body, counts, defs);
                 }
@@ -103,27 +103,27 @@ fn collect_defs_recursive(
 
 // ── Expression Rewriting ──────────────────────────────────────────────────
 
-fn rewrite_recombine_exprs(stmts: &mut [HirStmt], defs: &HashMap<String, HirExpr>) -> bool {
+fn rewrite_recombine_exprs(stmts: &mut [DirStmt], defs: &HashMap<String, DirExpr>) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 changed |= rewrite_lvalue(lhs, defs);
                 changed |= rewrite_expr(rhs, defs);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 changed |= rewrite_expr(va_list, defs);
             }
-            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
                 changed |= rewrite_expr(expr, defs);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 changed |= rewrite_recombine_exprs(body, defs);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -134,7 +134,7 @@ fn rewrite_recombine_exprs(stmts: &mut [HirStmt], defs: &HashMap<String, HirExpr
                 }
                 changed |= rewrite_recombine_exprs(default, defs);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -149,42 +149,42 @@ fn rewrite_recombine_exprs(stmts: &mut [HirStmt], defs: &HashMap<String, HirExpr
     changed
 }
 
-fn rewrite_lvalue(lval: &mut HirLValue, defs: &HashMap<String, HirExpr>) -> bool {
+fn rewrite_lvalue(lval: &mut DirLValue, defs: &HashMap<String, DirExpr>) -> bool {
     match lval {
-        HirLValue::Var(_) => false,
-        HirLValue::Deref { ptr, .. } => rewrite_expr(ptr, defs),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(_) => false,
+        DirLValue::Deref { ptr, .. } => rewrite_expr(ptr, defs),
+        DirLValue::Index { base, index, .. } => {
             let mut changed = rewrite_expr(base, defs);
             changed |= rewrite_expr(index, defs);
             changed
         }
-        HirLValue::FieldAccess { base, .. } => rewrite_expr(base, defs),
+        DirLValue::FieldAccess { base, .. } => rewrite_expr(base, defs),
     }
 }
 
-fn rewrite_expr(expr: &mut HirExpr, defs: &HashMap<String, HirExpr>) -> bool {
+fn rewrite_expr(expr: &mut DirExpr, defs: &HashMap<String, DirExpr>) -> bool {
     let mut changed = false;
 
     // Recursively rewrite sub-expressions first
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             changed |= rewrite_expr(inner, defs);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= rewrite_expr(lhs, defs);
             changed |= rewrite_expr(rhs, defs);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= rewrite_expr(arg, defs);
             }
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -194,11 +194,11 @@ fn rewrite_expr(expr: &mut HirExpr, defs: &HashMap<String, HirExpr>) -> bool {
             changed |= rewrite_expr(then_expr, defs);
             changed |= rewrite_expr(else_expr, defs);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= rewrite_expr(base, defs);
             changed |= rewrite_expr(index, defs);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
 
     // Try to recombine hi/lo pairs at this node
@@ -214,10 +214,10 @@ fn rewrite_expr(expr: &mut HirExpr, defs: &HashMap<String, HirExpr>) -> bool {
     changed
 }
 
-fn match_recombine(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
+fn match_recombine(expr: &DirExpr) -> Option<(DirExpr, DirExpr)> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Or | HirBinaryOp::Add,
+        DirExpr::Binary {
+            op: DirBinaryOp::Or | DirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -234,35 +234,35 @@ fn match_recombine(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
     }
 }
 
-fn match_hi_shift(expr: &HirExpr) -> Option<HirExpr> {
+fn match_hi_shift(expr: &DirExpr) -> Option<DirExpr> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Shl,
+        DirExpr::Binary {
+            op: DirBinaryOp::Shl,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Const(32, _) = rhs.as_ref() {
+            if let DirExpr::Const(32, _) = rhs.as_ref() {
                 Some(*lhs.clone())
             } else {
                 None
             }
         }
-        HirExpr::Cast { expr: inner, .. } => match_hi_shift(inner),
+        DirExpr::Cast { expr: inner, .. } => match_hi_shift(inner),
         _ => None,
     }
 }
 
-fn strip_casts(expr: &HirExpr) -> &HirExpr {
+fn strip_casts(expr: &DirExpr) -> &DirExpr {
     match expr {
-        HirExpr::Cast { expr: inner, .. } => strip_casts(inner),
+        DirExpr::Cast { expr: inner, .. } => strip_casts(inner),
         _ => expr,
     }
 }
 
-fn get_var_name(expr: &HirExpr) -> Option<String> {
+fn get_var_name(expr: &DirExpr) -> Option<String> {
     match strip_casts(expr) {
-        HirExpr::Var(name) => Some(name.clone()),
+        DirExpr::Var(name) => Some(name.clone()),
         _ => None,
     }
 }
@@ -270,20 +270,20 @@ fn get_var_name(expr: &HirExpr) -> Option<String> {
 fn try_reconstruct(
     hi_name: &str,
     lo_name: &str,
-    defs: &HashMap<String, HirExpr>,
-) -> Option<HirExpr> {
+    defs: &HashMap<String, DirExpr>,
+) -> Option<DirExpr> {
     let hi_def = defs.get(hi_name)?;
     let lo_def = defs.get(lo_name)?;
 
     // 1. Logical operations: AND, OR, XOR
     if let (
-        HirExpr::Binary {
+        DirExpr::Binary {
             op: op_hi,
             lhs: lhs_hi,
             rhs: rhs_hi,
             ty: ty_hi,
         },
-        HirExpr::Binary {
+        DirExpr::Binary {
             op: op_lo,
             lhs: lhs_lo,
             rhs: rhs_lo,
@@ -291,11 +291,11 @@ fn try_reconstruct(
         },
     ) = (hi_def, lo_def)
     {
-        if op_hi == op_lo && matches!(op_hi, HirBinaryOp::And | HirBinaryOp::Or | HirBinaryOp::Xor)
+        if op_hi == op_lo && matches!(op_hi, DirBinaryOp::And | DirBinaryOp::Or | DirBinaryOp::Xor)
         {
             let val1 = make_recombine((**lhs_hi).clone(), (**lhs_lo).clone(), ty_hi);
             let val2 = make_recombine((**rhs_hi).clone(), (**rhs_lo).clone(), ty_hi);
-            return Some(HirExpr::Binary {
+            return Some(DirExpr::Binary {
                 op: *op_hi,
                 lhs: Box::new(val1),
                 rhs: Box::new(val2),
@@ -308,8 +308,8 @@ fn try_reconstruct(
     }
 
     // 2. Add with carry
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Add,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Add,
         lhs: lo1,
         rhs: lo2,
         ..
@@ -333,8 +333,8 @@ fn try_reconstruct(
                         signed: false,
                     },
                 );
-                return Some(HirExpr::Binary {
-                    op: HirBinaryOp::Add,
+                return Some(DirExpr::Binary {
+                    op: DirBinaryOp::Add,
                     lhs: Box::new(val1),
                     rhs: Box::new(val2),
                     ty: NirType::Int {
@@ -347,8 +347,8 @@ fn try_reconstruct(
     }
 
     // 3. Sub with borrow
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Sub,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Sub,
         lhs: lo1,
         rhs: lo2,
         ..
@@ -372,8 +372,8 @@ fn try_reconstruct(
                         signed: false,
                     },
                 );
-                return Some(HirExpr::Binary {
-                    op: HirBinaryOp::Sub,
+                return Some(DirExpr::Binary {
+                    op: DirBinaryOp::Sub,
                     lhs: Box::new(val1),
                     rhs: Box::new(val2),
                     ty: NirType::Int {
@@ -386,14 +386,14 @@ fn try_reconstruct(
     }
 
     // 4. Shift Left
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Shl,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Shl,
         lhs: lo_src,
         rhs: lo_shift,
         ..
     } = lo_def
     {
-        if let HirExpr::Const(shift_amt, _) = lo_shift.as_ref() {
+        if let DirExpr::Const(shift_amt, _) = lo_shift.as_ref() {
             if let Some((hi_src, hi_shift_amt)) = match_hi_shl_mix(hi_def, lo_src, *shift_amt) {
                 if hi_shift_amt == *shift_amt {
                     let val_src = make_recombine(
@@ -404,8 +404,8 @@ fn try_reconstruct(
                             signed: false,
                         },
                     );
-                    return Some(HirExpr::Binary {
-                        op: HirBinaryOp::Shl,
+                    return Some(DirExpr::Binary {
+                        op: DirBinaryOp::Shl,
                         lhs: Box::new(val_src),
                         rhs: lo_shift.clone(),
                         ty: NirType::Int {
@@ -419,14 +419,14 @@ fn try_reconstruct(
     }
 
     // 5. Shift Right
-    if let HirExpr::Binary {
-        op: op_hi @ (HirBinaryOp::Shr | HirBinaryOp::Sar),
+    if let DirExpr::Binary {
+        op: op_hi @ (DirBinaryOp::Shr | DirBinaryOp::Sar),
         lhs: hi_src,
         rhs: hi_shift,
         ..
     } = hi_def
     {
-        if let HirExpr::Const(shift_amt, _) = hi_shift.as_ref() {
+        if let DirExpr::Const(shift_amt, _) = hi_shift.as_ref() {
             if let Some((lo_src, lo_shift_amt)) = match_lo_shr_mix(lo_def, hi_src, *shift_amt) {
                 if lo_shift_amt == *shift_amt {
                     let val_src = make_recombine(
@@ -437,7 +437,7 @@ fn try_reconstruct(
                             signed: false,
                         },
                     );
-                    return Some(HirExpr::Binary {
+                    return Some(DirExpr::Binary {
                         op: *op_hi,
                         lhs: Box::new(val_src),
                         rhs: hi_shift.clone(),
@@ -454,19 +454,19 @@ fn try_reconstruct(
     None
 }
 
-fn make_recombine(hi: HirExpr, lo: HirExpr, _ty: &NirType) -> HirExpr {
-    HirExpr::Binary {
-        op: HirBinaryOp::Or,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Shl,
-            lhs: Box::new(HirExpr::Cast {
+fn make_recombine(hi: DirExpr, lo: DirExpr, _ty: &NirType) -> DirExpr {
+    DirExpr::Binary {
+        op: DirBinaryOp::Or,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Shl,
+            lhs: Box::new(DirExpr::Cast {
                 ty: NirType::Int {
                     bits: 64,
                     signed: false,
                 },
                 expr: Box::new(hi),
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 32,
                 NirType::Int {
                     bits: 32,
@@ -478,7 +478,7 @@ fn make_recombine(hi: HirExpr, lo: HirExpr, _ty: &NirType) -> HirExpr {
                 signed: false,
             },
         }),
-        rhs: Box::new(HirExpr::Cast {
+        rhs: Box::new(DirExpr::Cast {
             ty: NirType::Int {
                 bits: 64,
                 signed: false,
@@ -492,16 +492,16 @@ fn make_recombine(hi: HirExpr, lo: HirExpr, _ty: &NirType) -> HirExpr {
     }
 }
 
-fn match_hi_add_carry(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirExpr)> {
+fn match_hi_add_carry(expr: &DirExpr) -> Option<(DirExpr, DirExpr, DirExpr)> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Binary {
-                op: HirBinaryOp::Add,
+            if let DirExpr::Binary {
+                op: DirBinaryOp::Add,
                 lhs: hi1,
                 rhs: hi2,
                 ..
@@ -513,8 +513,8 @@ fn match_hi_add_carry(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirExpr)> {
                     rhs.as_ref().clone(),
                 ));
             }
-            if let HirExpr::Binary {
-                op: HirBinaryOp::Add,
+            if let DirExpr::Binary {
+                op: DirBinaryOp::Add,
                 lhs: hi2,
                 rhs: carry,
                 ..
@@ -533,15 +533,15 @@ fn match_hi_add_carry(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirExpr)> {
 }
 
 fn is_carry_of(
-    carry_expr: &HirExpr,
-    lo1: &HirExpr,
-    lo2: &HirExpr,
+    carry_expr: &DirExpr,
+    lo1: &DirExpr,
+    lo2: &DirExpr,
     lo_name: &str,
-    defs: &HashMap<String, HirExpr>,
+    defs: &HashMap<String, DirExpr>,
 ) -> bool {
     let expr = strip_casts(carry_expr);
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Lt | HirBinaryOp::SLt,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Lt | DirBinaryOp::SLt,
         lhs,
         rhs,
         ..
@@ -553,7 +553,7 @@ fn is_carry_of(
             return true;
         }
     }
-    if let HirExpr::Call { target, args, .. } = expr {
+    if let DirExpr::Call { target, args, .. } = expr {
         if target == "__carry" && args.len() >= 2 {
             let a = get_var_name(&args[0]);
             let b = get_var_name(&args[1]);
@@ -564,7 +564,7 @@ fn is_carry_of(
             }
         }
     }
-    if let HirExpr::Var(name) = expr {
+    if let DirExpr::Var(name) = expr {
         if let Some(def) = defs.get(name) {
             return is_carry_of(def, lo1, lo2, lo_name, defs);
         }
@@ -572,16 +572,16 @@ fn is_carry_of(
     false
 }
 
-fn match_hi_sub_borrow(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirExpr)> {
+fn match_hi_sub_borrow(expr: &DirExpr) -> Option<(DirExpr, DirExpr, DirExpr)> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Binary {
-                op: HirBinaryOp::Sub,
+            if let DirExpr::Binary {
+                op: DirBinaryOp::Sub,
                 lhs: hi1,
                 rhs: hi2,
                 ..
@@ -600,15 +600,15 @@ fn match_hi_sub_borrow(expr: &HirExpr) -> Option<(HirExpr, HirExpr, HirExpr)> {
 }
 
 fn is_borrow_of(
-    borrow_expr: &HirExpr,
-    lo1: &HirExpr,
-    lo2: &HirExpr,
+    borrow_expr: &DirExpr,
+    lo1: &DirExpr,
+    lo2: &DirExpr,
     lo_name: &str,
-    defs: &HashMap<String, HirExpr>,
+    defs: &HashMap<String, DirExpr>,
 ) -> bool {
     let expr = strip_casts(borrow_expr);
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Lt | HirBinaryOp::SLt,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Lt | DirBinaryOp::SLt,
         lhs,
         rhs,
         ..
@@ -620,7 +620,7 @@ fn is_borrow_of(
             return true;
         }
     }
-    if let HirExpr::Call { target, args, .. } = expr {
+    if let DirExpr::Call { target, args, .. } = expr {
         if target == "__sborrow" && args.len() >= 2 {
             let a = get_var_name(&args[0]);
             let b = get_var_name(&args[1]);
@@ -629,7 +629,7 @@ fn is_borrow_of(
             }
         }
     }
-    if let HirExpr::Var(name) = expr {
+    if let DirExpr::Var(name) = expr {
         if let Some(def) = defs.get(name) {
             return is_borrow_of(def, lo1, lo2, lo_name, defs);
         }
@@ -637,32 +637,32 @@ fn is_borrow_of(
     false
 }
 
-fn match_shl(expr: &HirExpr) -> Option<(HirExpr, i64)> {
+fn match_shl(expr: &DirExpr) -> Option<(DirExpr, i64)> {
     let expr = strip_casts(expr);
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Shl,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Shl,
         lhs,
         rhs,
         ..
     } = expr
     {
-        if let HirExpr::Const(shift, _) = rhs.as_ref() {
+        if let DirExpr::Const(shift, _) = rhs.as_ref() {
             return Some((lhs.as_ref().clone(), *shift));
         }
     }
     None
 }
 
-fn match_shr(expr: &HirExpr) -> Option<(HirExpr, i64)> {
+fn match_shr(expr: &DirExpr) -> Option<(DirExpr, i64)> {
     let expr = strip_casts(expr);
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Shr | DirBinaryOp::Sar,
         lhs,
         rhs,
         ..
     } = expr
     {
-        if let HirExpr::Const(shift, _) = rhs.as_ref() {
+        if let DirExpr::Const(shift, _) = rhs.as_ref() {
             return Some((lhs.as_ref().clone(), *shift));
         }
     }
@@ -670,13 +670,13 @@ fn match_shr(expr: &HirExpr) -> Option<(HirExpr, i64)> {
 }
 
 fn match_hi_shl_mix(
-    expr: &HirExpr,
-    expected_lo_src: &HirExpr,
+    expr: &DirExpr,
+    expected_lo_src: &DirExpr,
     expected_shift: i64,
-) -> Option<(HirExpr, i64)> {
+) -> Option<(DirExpr, i64)> {
     let expr = strip_casts(expr);
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Or,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -707,13 +707,13 @@ fn match_hi_shl_mix(
 }
 
 fn match_lo_shr_mix(
-    expr: &HirExpr,
-    expected_hi_src: &HirExpr,
+    expr: &DirExpr,
+    expected_hi_src: &DirExpr,
     expected_shift: i64,
-) -> Option<(HirExpr, i64)> {
+) -> Option<(DirExpr, i64)> {
     let expr = strip_casts(expr);
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Or,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -745,19 +745,19 @@ fn match_lo_shr_mix(
 
 // ── Contiguous Loads & Stores collapsing ───────────────────────────────────
 
-fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBinding>) -> bool {
+fn collapse_contiguous_mem_ops(stmts: &mut Vec<DirStmt>, locals: &mut Vec<DirBinding>) -> bool {
     let mut changed = false;
 
     // First recurse into nested blocks
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 changed |= collapse_contiguous_mem_ops(body, locals);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -765,7 +765,7 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
                 changed |= collapse_contiguous_mem_ops(then_body, locals);
                 changed |= collapse_contiguous_mem_ops(else_body, locals);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= collapse_contiguous_mem_ops(&mut case.body, locals);
                 }
@@ -781,18 +781,18 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
     while i < stmts.len() {
         if i + 1 < stmts.len() {
             if let (
-                HirStmt::Assign {
-                    lhs: HirLValue::Var(lo_var),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var(lo_var),
                     rhs:
-                        HirExpr::Load {
+                        DirExpr::Load {
                             ptr: lo_ptr,
                             ty: lo_ty,
                         },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var(hi_var),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var(hi_var),
                     rhs:
-                        HirExpr::Load {
+                        DirExpr::Load {
                             ptr: hi_ptr,
                             ty: hi_ty,
                         },
@@ -803,7 +803,7 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
                 {
                     // Contiguous load!
                     let temp_64_name = format!("uVar_dp_{}", locals.len());
-                    locals.push(NirBinding {
+                    locals.push(DirBinding {
                         name: temp_64_name.clone(),
                         ty: NirType::Int {
                             bits: 64,
@@ -815,9 +815,9 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
                     });
 
                     // Add: temp_64 = load(lo_ptr)
-                    new_stmts.push(HirStmt::Assign {
-                        lhs: HirLValue::Var(temp_64_name.clone()),
-                        rhs: HirExpr::Load {
+                    new_stmts.push(DirStmt::Assign {
+                        lhs: DirLValue::Var(temp_64_name.clone()),
+                        rhs: DirExpr::Load {
                             ptr: lo_ptr.clone(),
                             ty: NirType::Int {
                                 bits: 64,
@@ -826,22 +826,22 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
                         },
                     });
                     // lo_var = cast(temp_64)
-                    new_stmts.push(HirStmt::Assign {
-                        lhs: HirLValue::Var(lo_var.clone()),
-                        rhs: HirExpr::Cast {
+                    new_stmts.push(DirStmt::Assign {
+                        lhs: DirLValue::Var(lo_var.clone()),
+                        rhs: DirExpr::Cast {
                             ty: lo_ty.clone(),
-                            expr: Box::new(HirExpr::Var(temp_64_name.clone())),
+                            expr: Box::new(DirExpr::Var(temp_64_name.clone())),
                         },
                     });
                     // hi_var = cast(temp_64 >> 32)
-                    new_stmts.push(HirStmt::Assign {
-                        lhs: HirLValue::Var(hi_var.clone()),
-                        rhs: HirExpr::Cast {
+                    new_stmts.push(DirStmt::Assign {
+                        lhs: DirLValue::Var(hi_var.clone()),
+                        rhs: DirExpr::Cast {
                             ty: hi_ty.clone(),
-                            expr: Box::new(HirExpr::Binary {
-                                op: HirBinaryOp::Shr,
-                                lhs: Box::new(HirExpr::Var(temp_64_name.clone())),
-                                rhs: Box::new(HirExpr::Const(
+                            expr: Box::new(DirExpr::Binary {
+                                op: DirBinaryOp::Shr,
+                                lhs: Box::new(DirExpr::Var(temp_64_name.clone())),
+                                rhs: Box::new(DirExpr::Const(
                                     32,
                                     NirType::Int {
                                         bits: 32,
@@ -866,17 +866,17 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
             // *ptr = cast(val_64)
             // *(ptr + 4) = cast(val_64 >> 32)
             if let (
-                HirStmt::Assign {
+                DirStmt::Assign {
                     lhs:
-                        HirLValue::Deref {
+                        DirLValue::Deref {
                             ptr: lo_ptr,
                             ty: lo_ty,
                         },
                     rhs: lo_val,
                 },
-                HirStmt::Assign {
+                DirStmt::Assign {
                     lhs:
-                        HirLValue::Deref {
+                        DirLValue::Deref {
                             ptr: hi_ptr,
                             ty: hi_ty,
                         },
@@ -887,8 +887,8 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<HirStmt>, locals: &mut Vec<NirBin
                 if is_32bit_int(lo_ty) && is_32bit_int(hi_ty) && is_ptr_offset_by_4(hi_ptr, lo_ptr)
                 {
                     if let Some(val_64) = match_split_stores(lo_val, hi_val) {
-                        new_stmts.push(HirStmt::Assign {
-                            lhs: HirLValue::Deref {
+                        new_stmts.push(DirStmt::Assign {
+                            lhs: DirLValue::Deref {
                                 ptr: lo_ptr.clone(),
                                 ty: NirType::Int {
                                     bits: 64,
@@ -920,16 +920,16 @@ fn is_32bit_int(ty: &NirType) -> bool {
     matches!(ty, NirType::Int { bits: 32, .. })
 }
 
-fn is_ptr_offset_by_4(hi_ptr: &HirExpr, lo_ptr: &HirExpr) -> bool {
+fn is_ptr_offset_by_4(hi_ptr: &DirExpr, lo_ptr: &DirExpr) -> bool {
     match hi_ptr {
-        HirExpr::PtrOffset { base, offset: 4 } => base.as_ref() == lo_ptr,
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        DirExpr::PtrOffset { base, offset: 4 } => base.as_ref() == lo_ptr,
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Const(4, _) = rhs.as_ref() {
+            if let DirExpr::Const(4, _) = rhs.as_ref() {
                 lhs.as_ref() == lo_ptr
             } else {
                 false
@@ -939,19 +939,19 @@ fn is_ptr_offset_by_4(hi_ptr: &HirExpr, lo_ptr: &HirExpr) -> bool {
     }
 }
 
-fn match_split_stores(lo_val: &HirExpr, hi_val: &HirExpr) -> Option<HirExpr> {
+fn match_split_stores(lo_val: &DirExpr, hi_val: &DirExpr) -> Option<DirExpr> {
     // lo_val is Cast(val_64) or subpiece
     // hi_val is Cast(val_64 >> 32)
     let lo_inner = strip_casts(lo_val);
     let hi_inner = strip_casts(hi_val);
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Shr | DirBinaryOp::Sar,
         lhs: hi_src,
         rhs: shift,
         ..
     } = hi_inner
     {
-        if let HirExpr::Const(32, _) = shift.as_ref() {
+        if let DirExpr::Const(32, _) = shift.as_ref() {
             if get_var_name(lo_inner) == get_var_name(hi_src) {
                 return Some(hi_src.as_ref().clone());
             }

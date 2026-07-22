@@ -9,7 +9,7 @@ use crate::{HashMap, HashSet};
 /// to versioned virtual SSA register variables in `func.locals`, replacing all
 /// memory load/store operations on them with direct variable accesses and inserting
 /// phi-assignments at block merges.
-pub fn apply_memory_heritage(func: &mut HirFunction) -> bool {
+pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
     let mem_ssa = build_mem_ssa(func);
 
     // Identify candidate AliasKeys that are promotable stack slots (non-escaping)
@@ -74,7 +74,7 @@ pub fn apply_memory_heritage(func: &mut HirFunction) -> bool {
     // Register all new versioned variables in func.locals
     let mut new_locals = Vec::new();
     for (name, ty) in &var_types {
-        new_locals.push(NirBinding {
+        new_locals.push(DirBinding {
             name: name.clone(),
             ty: ty.clone(),
             surface_type_name: None,
@@ -117,7 +117,7 @@ struct Rewriter<'a> {
 }
 
 impl<'a> Rewriter<'a> {
-    fn rewrite_stmts(&mut self, stmts: &mut Vec<HirStmt>) {
+    fn rewrite_stmts(&mut self, stmts: &mut Vec<DirStmt>) {
         let mut i = 0;
         while i < stmts.len() {
             let to_insert = self.rewrite_stmt(&mut stmts[i]);
@@ -132,10 +132,10 @@ impl<'a> Rewriter<'a> {
         }
     }
 
-    fn rewrite_stmt(&mut self, stmt: &mut HirStmt) -> Vec<HirStmt> {
+    fn rewrite_stmt(&mut self, stmt: &mut DirStmt) -> Vec<DirStmt> {
         let mut pre_insert = Vec::new();
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 // Rewrite rhs uses first
                 self.rewrite_expr(rhs);
 
@@ -144,7 +144,7 @@ impl<'a> Rewriter<'a> {
                 let mut new_var_name = None;
 
                 match lhs {
-                    HirLValue::Deref { ptr, ty } => {
+                    DirLValue::Deref { ptr, ty } => {
                         let size = nir_byte_size(ty);
                         let key = alias_key_for_ptr(ptr, size);
                         if self.promotable_keys.contains(&key) {
@@ -164,7 +164,7 @@ impl<'a> Rewriter<'a> {
                             }
                         }
                     }
-                    HirLValue::Index {
+                    DirLValue::Index {
                         base,
                         index: _,
                         elem_ty,
@@ -192,17 +192,17 @@ impl<'a> Rewriter<'a> {
 
                 if is_promoted {
                     if let Some(var_name) = new_var_name {
-                        *lhs = HirLValue::Var(var_name);
+                        *lhs = DirLValue::Var(var_name);
                     }
                 }
             }
-            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
                 self.rewrite_expr(expr);
             }
-            HirStmt::Block(body) => {
+            DirStmt::Block(body) => {
                 self.rewrite_stmts(body);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -236,9 +236,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     then_body,
-                                    HirStmt::Assign {
-                                        lhs: HirLValue::Var(phi_var.clone()),
-                                        rhs: HirExpr::Var(then_var.clone()),
+                                    DirStmt::Assign {
+                                        lhs: DirLValue::Var(phi_var.clone()),
+                                        rhs: DirExpr::Var(then_var.clone()),
                                     },
                                 );
                             }
@@ -248,9 +248,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     else_body,
-                                    HirStmt::Assign {
-                                        lhs: HirLValue::Var(phi_var.clone()),
-                                        rhs: HirExpr::Var(else_var.clone()),
+                                    DirStmt::Assign {
+                                        lhs: DirLValue::Var(phi_var.clone()),
+                                        rhs: DirExpr::Var(else_var.clone()),
                                     },
                                 );
                             }
@@ -258,7 +258,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            HirStmt::While { cond, body } => {
+            DirStmt::While { cond, body } => {
                 self.rewrite_expr(cond);
 
                 let mut merge_phis = Vec::new();
@@ -282,9 +282,9 @@ impl<'a> Rewriter<'a> {
                             // Pre-loop: phi_var = pre_input_var
                             if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
                             {
-                                pre_insert.push(HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(pre_var.clone()),
+                                pre_insert.push(DirStmt::Assign {
+                                    lhs: DirLValue::Var(phi_var.clone()),
+                                    rhs: DirExpr::Var(pre_var.clone()),
                                 });
                             }
                             // Loop end: phi_var = body_input_var
@@ -293,9 +293,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     body,
-                                    HirStmt::Assign {
-                                        lhs: HirLValue::Var(phi_var.clone()),
-                                        rhs: HirExpr::Var(body_var.clone()),
+                                    DirStmt::Assign {
+                                        lhs: DirLValue::Var(phi_var.clone()),
+                                        rhs: DirExpr::Var(body_var.clone()),
                                     },
                                 );
                             }
@@ -303,7 +303,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            HirStmt::DoWhile { body, cond } => {
+            DirStmt::DoWhile { body, cond } => {
                 let mut merge_phis = Vec::new();
                 while self.current_phi_idx < self.phis.len() {
                     let phi = &self.phis[self.current_phi_idx];
@@ -324,9 +324,9 @@ impl<'a> Rewriter<'a> {
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
                             if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
                             {
-                                pre_insert.push(HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(pre_var.clone()),
+                                pre_insert.push(DirStmt::Assign {
+                                    lhs: DirLValue::Var(phi_var.clone()),
+                                    rhs: DirExpr::Var(pre_var.clone()),
                                 });
                             }
                             if let Some(body_var) =
@@ -334,9 +334,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     body,
-                                    HirStmt::Assign {
-                                        lhs: HirLValue::Var(phi_var.clone()),
-                                        rhs: HirExpr::Var(body_var.clone()),
+                                    DirStmt::Assign {
+                                        lhs: DirLValue::Var(phi_var.clone()),
+                                        rhs: DirExpr::Var(body_var.clone()),
                                     },
                                 );
                             }
@@ -344,7 +344,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -356,7 +356,7 @@ impl<'a> Rewriter<'a> {
                     if dummy.len() == 1 {
                         *s = Box::new(dummy.remove(0));
                     } else if !dummy.is_empty() {
-                        *s = Box::new(HirStmt::Block(dummy));
+                        *s = Box::new(DirStmt::Block(dummy));
                     }
                 }
                 if let Some(e) = cond {
@@ -380,7 +380,7 @@ impl<'a> Rewriter<'a> {
                     if dummy.len() == 1 {
                         *s = Box::new(dummy.remove(0));
                     } else if !dummy.is_empty() {
-                        *s = Box::new(HirStmt::Block(dummy));
+                        *s = Box::new(DirStmt::Block(dummy));
                     }
                 }
 
@@ -392,9 +392,9 @@ impl<'a> Rewriter<'a> {
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
                             if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
                             {
-                                pre_insert.push(HirStmt::Assign {
-                                    lhs: HirLValue::Var(phi_var.clone()),
-                                    rhs: HirExpr::Var(pre_var.clone()),
+                                pre_insert.push(DirStmt::Assign {
+                                    lhs: DirLValue::Var(phi_var.clone()),
+                                    rhs: DirExpr::Var(pre_var.clone()),
                                 });
                             }
                             if let Some(body_var) =
@@ -402,9 +402,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     body,
-                                    HirStmt::Assign {
-                                        lhs: HirLValue::Var(phi_var.clone()),
-                                        rhs: HirExpr::Var(body_var.clone()),
+                                    DirStmt::Assign {
+                                        lhs: DirLValue::Var(phi_var.clone()),
+                                        rhs: DirExpr::Var(body_var.clone()),
                                     },
                                 );
                             }
@@ -412,7 +412,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -463,9 +463,9 @@ impl<'a> Rewriter<'a> {
                                     if let Some(v) = arm_var {
                                         append_to_body_before_cf(
                                             &mut case.body,
-                                            HirStmt::Assign {
-                                                lhs: HirLValue::Var(phi_var.clone()),
-                                                rhs: HirExpr::Var(v),
+                                            DirStmt::Assign {
+                                                lhs: DirLValue::Var(phi_var.clone()),
+                                                rhs: DirExpr::Var(v),
                                             },
                                         );
                                     }
@@ -476,9 +476,9 @@ impl<'a> Rewriter<'a> {
                                 if let Some(v) = default_var {
                                     append_to_body_before_cf(
                                         default,
-                                        HirStmt::Assign {
-                                            lhs: HirLValue::Var(phi_var.clone()),
-                                            rhs: HirExpr::Var(v),
+                                        DirStmt::Assign {
+                                            lhs: DirLValue::Var(phi_var.clone()),
+                                            rhs: DirExpr::Var(v),
                                         },
                                     );
                                 }
@@ -492,9 +492,9 @@ impl<'a> Rewriter<'a> {
         pre_insert
     }
 
-    fn rewrite_expr(&mut self, expr: &mut HirExpr) {
+    fn rewrite_expr(&mut self, expr: &mut DirExpr) {
         match expr {
-            HirExpr::Load { ptr, ty } => {
+            DirExpr::Load { ptr, ty } => {
                 let size = nir_byte_size(ty);
                 let key = alias_key_for_ptr(ptr, size);
 
@@ -523,23 +523,23 @@ impl<'a> Rewriter<'a> {
 
                 if is_promoted {
                     if let Some(var_name) = promoted_var {
-                        *expr = HirExpr::Var(var_name);
+                        *expr = DirExpr::Var(var_name);
                     }
                 } else {
                     self.rewrite_expr(ptr);
                 }
             }
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => {
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::PtrOffset { base: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => {
                 self.rewrite_expr(expr);
             }
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Binary { lhs, rhs, .. } => {
                 self.rewrite_expr(lhs);
                 self.rewrite_expr(rhs);
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -549,12 +549,12 @@ impl<'a> Rewriter<'a> {
                 self.rewrite_expr(then_expr);
                 self.rewrite_expr(else_expr);
             }
-            HirExpr::Call { args, .. } => {
+            DirExpr::Call { args, .. } => {
                 for arg in args {
                     self.rewrite_expr(arg);
                 }
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 self.rewrite_expr(base);
                 self.rewrite_expr(index);
             }
@@ -563,7 +563,7 @@ impl<'a> Rewriter<'a> {
     }
 }
 
-fn alias_key_for_ptr(ptr: &HirExpr, size: u32) -> AliasKey {
+fn alias_key_for_ptr(ptr: &DirExpr, size: u32) -> AliasKey {
     let access_ty = NirType::Aggregate {
         size,
         fields: vec![],
@@ -573,22 +573,22 @@ fn alias_key_for_ptr(ptr: &HirExpr, size: u32) -> AliasKey {
         .unwrap_or(AliasKey::Unknown)
 }
 
-fn find_last_def_in_stmts(stmts: &[HirStmt], base_name: &str) -> Option<String> {
+fn find_last_def_in_stmts(stmts: &[DirStmt], base_name: &str) -> Option<String> {
     for stmt in stmts.iter().rev() {
         match stmt {
-            HirStmt::Assign { lhs, .. } => {
-                if let HirLValue::Var(name) = lhs {
+            DirStmt::Assign { lhs, .. } => {
+                if let DirLValue::Var(name) = lhs {
                     if name.starts_with(&format!("vVar_{}_", base_name)) {
                         return Some(name.clone());
                     }
                 }
             }
-            HirStmt::Block(body) => {
+            DirStmt::Block(body) => {
                 if let Some(name) = find_last_def_in_stmts(body, base_name) {
                     return Some(name);
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -600,14 +600,14 @@ fn find_last_def_in_stmts(stmts: &[HirStmt], base_name: &str) -> Option<String> 
                     return Some(name);
                 }
             }
-            HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 if let Some(name) = find_last_def_in_stmts(body, base_name) {
                     return Some(name);
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 if let Some(name) = find_last_def_in_stmts(default, base_name) {
                     return Some(name);
                 }
@@ -623,11 +623,11 @@ fn find_last_def_in_stmts(stmts: &[HirStmt], base_name: &str) -> Option<String> 
     None
 }
 
-fn append_to_body_before_cf(body: &mut Vec<HirStmt>, stmt: HirStmt) {
+fn append_to_body_before_cf(body: &mut Vec<DirStmt>, stmt: DirStmt) {
     if let Some(last) = body.last() {
         if matches!(
             last,
-            HirStmt::Break | HirStmt::Continue | HirStmt::Goto(_) | HirStmt::Return(_)
+            DirStmt::Break | DirStmt::Continue | DirStmt::Goto(_) | DirStmt::Return(_)
         ) {
             let idx = body.len() - 1;
             body.insert(idx, stmt);

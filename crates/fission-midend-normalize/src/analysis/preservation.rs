@@ -4,10 +4,10 @@
 //! copy-propagation, and pipeline orchestration do not each carry slightly
 //! different policy checks.
 
-use fission_midend_core::{NirBinding, NirBindingOrigin};
+use fission_midend_core::{DirBinding, NirBindingOrigin};
 use crate::HashSet;
 
-pub fn preserved_materialization_names(bindings: &[NirBinding]) -> HashSet<&str> {
+pub fn preserved_materialization_names(bindings: &[DirBinding]) -> HashSet<&str> {
     bindings
         .iter()
         .filter(|binding| binding.preserves_materialization())
@@ -61,8 +61,8 @@ mod tests {
         }
     }
 
-    fn temp_binding(name: &str, origin: NirBindingOrigin) -> NirBinding {
-        NirBinding {
+    fn temp_binding(name: &str, origin: NirBindingOrigin) -> DirBinding {
+        DirBinding {
             name: name.to_string(),
             ty: int(32),
             surface_type_name: None,

@@ -1,19 +1,19 @@
 use crate::prelude::*;
 use crate::HashSet;
 
-pub fn apply_for_loop_folding(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn apply_for_loop_folding(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
 
     // Apply to children first
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 changed |= apply_for_loop_folding(body);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -21,7 +21,7 @@ pub fn apply_for_loop_folding(stmts: &mut Vec<HirStmt>) -> bool {
                 changed |= apply_for_loop_folding(then_body);
                 changed |= apply_for_loop_folding(else_body);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= apply_for_loop_folding(&mut case.body);
                 }
@@ -47,7 +47,7 @@ pub fn apply_for_loop_folding(stmts: &mut Vec<HirStmt>) -> bool {
                 }
             }
 
-            new_stmts.push(HirStmt::For {
+            new_stmts.push(DirStmt::For {
                 init: inits.pop(),
                 cond: Some(cond),
                 update: update.map(Box::new),
@@ -64,19 +64,19 @@ pub fn apply_for_loop_folding(stmts: &mut Vec<HirStmt>) -> bool {
 }
 
 fn try_collapse_while_to_for_algorithmic(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     idx: usize,
 ) -> Option<(
-    Vec<Box<HirStmt>>,
-    HirExpr,
-    Option<HirStmt>,
-    Vec<HirStmt>,
+    Vec<Box<DirStmt>>,
+    DirExpr,
+    Option<DirStmt>,
+    Vec<DirStmt>,
     usize,
 )> {
     let stmt = &stmts[idx];
 
     let (cond, mut body) = match stmt {
-        HirStmt::While { cond, body } => (cond.clone(), body.clone()),
+        DirStmt::While { cond, body } => (cond.clone(), body.clone()),
         _ => return None,
     };
 
@@ -130,20 +130,20 @@ fn try_collapse_while_to_for_algorithmic(
     Some((inits, cond, update, body, consumed_idx))
 }
 
-pub(super) fn stmt_list_contains_continue_pub(stmts: &[HirStmt]) -> bool {
+pub(super) fn stmt_list_contains_continue_pub(stmts: &[DirStmt]) -> bool {
     stmt_list_contains_continue(stmts)
 }
 
-fn stmt_list_contains_continue(stmts: &[HirStmt]) -> bool {
+fn stmt_list_contains_continue(stmts: &[DirStmt]) -> bool {
     for stmt in stmts {
         match stmt {
-            HirStmt::Continue => return true,
-            HirStmt::Block(b) => {
+            DirStmt::Continue => return true,
+            DirStmt::Block(b) => {
                 if stmt_list_contains_continue(b) {
                     return true;
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -153,7 +153,7 @@ fn stmt_list_contains_continue(stmts: &[HirStmt]) -> bool {
                     return true;
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for c in cases {
                     if stmt_list_contains_continue(&c.body) {
                         return true;
@@ -164,28 +164,28 @@ fn stmt_list_contains_continue(stmts: &[HirStmt]) -> bool {
                 }
             }
             // `Continue` in a nested loop refers to the nested loop, not the outer one.
-            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {}
+            DirStmt::While { .. } | DirStmt::DoWhile { .. } | DirStmt::For { .. } => {}
             _ => {}
         }
     }
     false
 }
 
-fn collect_cond_vars(expr: &HirExpr, vars: &mut HashSet<String>) {
+fn collect_cond_vars(expr: &DirExpr, vars: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
             vars.insert(name.clone());
         }
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. } => collect_cond_vars(expr, vars),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. } => collect_cond_vars(expr, vars),
+        DirExpr::Binary { lhs, rhs, .. } => {
             collect_cond_vars(lhs, vars);
             collect_cond_vars(rhs, vars);
         }
-        HirExpr::PtrOffset { base, .. } => collect_cond_vars(base, vars),
-        HirExpr::Call { args, .. } => {
+        DirExpr::PtrOffset { base, .. } => collect_cond_vars(base, vars),
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 collect_cond_vars(arg, vars);
             }
@@ -194,11 +194,11 @@ fn collect_cond_vars(expr: &HirExpr, vars: &mut HashSet<String>) {
     }
 }
 
-fn is_var_modification(stmt: &HirStmt, vars: &HashSet<String>) -> bool {
-    let HirStmt::Assign { lhs, .. } = stmt else {
+fn is_var_modification(stmt: &DirStmt, vars: &HashSet<String>) -> bool {
+    let DirStmt::Assign { lhs, .. } = stmt else {
         return false;
     };
-    let HirLValue::Var(name) = lhs else {
+    let DirLValue::Var(name) = lhs else {
         return false;
     };
     vars.contains(name)

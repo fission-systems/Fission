@@ -12,20 +12,20 @@ pub(crate) use fission_midend_structuring::apply_blockgraph_collapse_admission_g
 
 impl<'a> PreviewBuilder<'a> {
     #[cfg(test)]
-    fn is_switch_scaffold_stmt(stmt: &HirStmt) -> bool {
+    fn is_switch_scaffold_stmt(stmt: &DirStmt) -> bool {
         fission_midend_structuring::is_switch_scaffold_stmt(stmt)
     }
 
     #[cfg(test)]
-    fn switch_stmt_has_scaffold_only_arms(stmt: &HirStmt) -> bool {
+    fn switch_stmt_has_scaffold_only_arms(stmt: &DirStmt) -> bool {
         fission_midend_structuring::switch_stmt_has_scaffold_only_arms(stmt)
     }
 
-    fn region_kind_for_stmt(stmt: &HirStmt) -> Option<RegionKind> {
+    fn region_kind_for_stmt(stmt: &DirStmt) -> Option<RegionKind> {
         fission_midend_structuring::region_kind_for_stmt(stmt)
     }
 
-    fn region_selector_or_condition(stmt: &HirStmt) -> Option<String> {
+    fn region_selector_or_condition(stmt: &DirStmt) -> Option<String> {
         fission_midend_structuring::region_selector_or_condition(stmt)
     }
 
@@ -33,7 +33,7 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         start_idx: usize,
         skip_to: usize,
-        stmt: &HirStmt,
+        stmt: &DirStmt,
     ) -> Option<RegionProof> {
         let kind = Self::region_kind_for_stmt(stmt)?;
         Some(RegionProof::structured(
@@ -72,7 +72,7 @@ impl<'a> PreviewBuilder<'a> {
         targeted: &HashSet<u64>,
         last_structuring_failure: &mut Option<MlilPreviewError>,
         candidates: &mut Vec<CollapseCandidate>,
-        result: Result<Option<(HirStmt, usize)>, MlilPreviewError>,
+        result: Result<Option<(DirStmt, usize)>, MlilPreviewError>,
     ) -> Result<(), MlilPreviewError> {
         fission_midend_structuring::sese_driver::consider_structured_candidate(
             self,
@@ -92,11 +92,11 @@ impl<'a> PreviewBuilder<'a> {
         fission_midend_structuring::sese_driver::select_structured_candidate(candidates)
     }
 
-    pub(super) fn promote_guarded_tail_regions_until_stable(&mut self, body: &mut Vec<HirStmt>) {
+    pub(super) fn promote_guarded_tail_regions_until_stable(&mut self, body: &mut Vec<DirStmt>) {
         fission_midend_structuring::promote_guarded_tail_regions_until_stable(self, body)
     }
 
-    pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
+    pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<DirStmt>, MlilPreviewError> {
         CollapseDriver::run(self)
     }
 
@@ -114,8 +114,8 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         entry: usize,
         exit: usize,
-        child_map: crate::fast_hash::FastMap<usize, (Vec<HirStmt>, usize, RegionProof)>,
-    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        child_map: crate::fast_hash::FastMap<usize, (Vec<DirStmt>, usize, RegionProof)>,
+    ) -> Result<Vec<DirStmt>, MlilPreviewError> {
         let child_map_std: HashMap<_, _> = child_map.into_iter().collect();
         fission_midend_structuring::sese_driver::build_sese_region_body(
             self, entry, exit, child_map_std,
@@ -153,7 +153,7 @@ pub(crate) use fission_midend_structuring::structuring_diag_enabled;
 
 #[cfg(test)]
 pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
-    body: &mut Vec<HirStmt>,
+    body: &mut Vec<DirStmt>,
 ) -> PreviewBuildStats {
     let dummy = PcodeFunction { blocks: Vec::new() };
     let options = MlilPreviewOptions {
@@ -191,11 +191,11 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
 }
 
 #[cfg(test)]
-pub(crate) fn discover_guarded_tail_candidates_for_test(body: &[HirStmt]) -> PreviewBuildStats {
+pub(crate) fn discover_guarded_tail_candidates_for_test(body: &[DirStmt]) -> PreviewBuildStats {
     discover_guarded_tail_candidates_for_stats(body)
 }
 
-pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> PreviewBuildStats {
+pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[DirStmt]) -> PreviewBuildStats {
     let dummy = PcodeFunction { blocks: Vec::new() };
     let options = MlilPreviewOptions {
         pe_x64_only: true,
@@ -239,12 +239,12 @@ mod tests {
     };
     use crate::PcodeFunction;
     use crate::midend::ir::{
-        HirExpr, HirStmt, HirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
+        DirExpr, DirStmt, DirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
     };
     use crate::midend::{CollapseCandidate, CollapseRule, RegionKind, RegionProof, StructureNode};
 
-    fn const_expr(value: i64) -> HirExpr {
-        HirExpr::Const(
+    fn const_expr(value: i64) -> DirExpr {
+        DirExpr::Const(
             value,
             NirType::Int {
                 bits: 32,
@@ -255,30 +255,30 @@ mod tests {
 
     #[test]
     fn switch_scaffold_detection_accepts_goto_only_arms() {
-        let stmt = HirStmt::Switch {
+        let stmt = DirStmt::Switch {
             expr: const_expr(0),
             cases: vec![
-                HirSwitchCase {
+                DirSwitchCase {
                     values: vec![0],
-                    body: vec![HirStmt::Goto("case_0".to_string())],
+                    body: vec![DirStmt::Goto("case_0".to_string())],
                 },
-                HirSwitchCase {
+                DirSwitchCase {
                     values: vec![1],
-                    body: vec![HirStmt::Goto("case_1".to_string())],
+                    body: vec![DirStmt::Goto("case_1".to_string())],
                 },
             ],
-            default: vec![HirStmt::Goto("default".to_string())],
+            default: vec![DirStmt::Goto("default".to_string())],
         };
         assert!(PreviewBuilder::switch_stmt_has_scaffold_only_arms(&stmt));
     }
 
     #[test]
     fn switch_scaffold_detection_rejects_payload_arms() {
-        let stmt = HirStmt::Switch {
+        let stmt = DirStmt::Switch {
             expr: const_expr(0),
-            cases: vec![HirSwitchCase {
+            cases: vec![DirSwitchCase {
                 values: vec![0],
-                body: vec![HirStmt::Expr(const_expr(1))],
+                body: vec![DirStmt::Expr(const_expr(1))],
             }],
             default: vec![],
         };
@@ -324,7 +324,7 @@ mod tests {
             rule,
             node: StructureNode::region(
                 usize::MAX,
-                HirStmt::If {
+                DirStmt::If {
                     cond: const_expr(1),
                     then_body: vec![],
                     else_body: vec![],

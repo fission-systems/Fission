@@ -1,5 +1,5 @@
 use crate::regions::{RegionKind, RegionProof};
-use fission_midend_core::ir::{HirStmt, MlilPreviewError};
+use fission_midend_core::ir::{DirStmt, MlilPreviewError};
 use fission_midend_core::ir::*;
 use crate::HashMap;
 use crate::HashSet;
@@ -43,14 +43,14 @@ pub struct StructureNode {
     pub id: StructureNodeId,
     pub kind: StructureNodeKind,
     pub skip_to: usize,
-    pub statements: Vec<HirStmt>,
+    pub statements: Vec<DirStmt>,
     pub proof: Option<RegionProof>,
 }
 
 impl StructureNode {
     pub fn region(
         id: StructureNodeId,
-        stmt: HirStmt,
+        stmt: DirStmt,
         skip_to: usize,
         proof: RegionProof,
     ) -> Self {
@@ -63,7 +63,7 @@ impl StructureNode {
         }
     }
 
-    pub fn basic(id: StructureNodeId, statements: Vec<HirStmt>, skip_to: usize) -> Self {
+    pub fn basic(id: StructureNodeId, statements: Vec<DirStmt>, skip_to: usize) -> Self {
         Self {
             id,
             kind: StructureNodeKind::Basic,
@@ -75,7 +75,7 @@ impl StructureNode {
 
     pub fn unstructured(
         id: StructureNodeId,
-        statements: Vec<HirStmt>,
+        statements: Vec<DirStmt>,
         skip_to: usize,
     ) -> Self {
         Self {
@@ -124,7 +124,7 @@ impl StructureGraph {
 }
 
 
-pub fn surface_structure_graph(graph: StructureGraph) -> Vec<HirStmt> {
+pub fn surface_structure_graph(graph: StructureGraph) -> Vec<DirStmt> {
     graph
         .into_nodes()
         .into_iter()

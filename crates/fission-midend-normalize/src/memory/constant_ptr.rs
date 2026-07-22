@@ -2,7 +2,7 @@ use crate::prelude::*;
 use crate::pipeline::GLOBAL_SYMBOL_CONTEXT;
 use crate::pipeline::GlobalSymbolContext;
 
-pub fn apply_constant_ptr_recovery_pass(func: &mut HirFunction) -> bool {
+pub fn apply_constant_ptr_recovery_pass(func: &mut DirFunction) -> bool {
     let mut context = None;
     GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         if let Some(c) = ctx.borrow().as_ref() {
@@ -24,7 +24,7 @@ pub fn apply_constant_ptr_recovery_pass(func: &mut HirFunction) -> bool {
 }
 
 fn process_statement_list(
-    stmts: &mut [HirStmt],
+    stmts: &mut [DirStmt],
     context: &GlobalSymbolContext,
     changed: &mut bool,
 ) {
@@ -33,22 +33,22 @@ fn process_statement_list(
     }
 }
 
-fn process_stmt(stmt: &mut HirStmt, context: &GlobalSymbolContext, changed: &mut bool) {
+fn process_stmt(stmt: &mut DirStmt, context: &GlobalSymbolContext, changed: &mut bool) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             process_lvalue(lhs, context, changed);
             process_expr(rhs, context, changed);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             process_expr(expr, context, changed);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             process_expr(va_list, context, changed);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             process_statement_list(body, context, changed);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -57,7 +57,7 @@ fn process_stmt(stmt: &mut HirStmt, context: &GlobalSymbolContext, changed: &mut
             process_statement_list(then_body, context, changed);
             process_statement_list(else_body, context, changed);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -68,7 +68,7 @@ fn process_stmt(stmt: &mut HirStmt, context: &GlobalSymbolContext, changed: &mut
             }
             process_statement_list(default, context, changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -85,43 +85,43 @@ fn process_stmt(stmt: &mut HirStmt, context: &GlobalSymbolContext, changed: &mut
             }
             process_statement_list(body, context, changed);
         }
-        HirStmt::Return(None)
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Break
-        | HirStmt::Continue => {}
+        DirStmt::Return(None)
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_)
+        | DirStmt::Break
+        | DirStmt::Continue => {}
     }
 }
 
-fn process_lvalue(lval: &mut HirLValue, context: &GlobalSymbolContext, changed: &mut bool) {
+fn process_lvalue(lval: &mut DirLValue, context: &GlobalSymbolContext, changed: &mut bool) {
     match lval {
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Deref { ptr, .. } => {
             process_expr(ptr, context, changed);
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             process_expr(base, context, changed);
             process_expr(index, context, changed);
         }
-        HirLValue::Var(_) => {}
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::FieldAccess { base, .. } => {
             process_expr(base, context, changed);
         }
     }
 }
 
-fn process_expr(expr: &mut HirExpr, context: &GlobalSymbolContext, changed: &mut bool) {
+fn process_expr(expr: &mut DirExpr, context: &GlobalSymbolContext, changed: &mut bool) {
     // Walk inner expressions first
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             process_expr(inner, context, changed);
         }
-        HirExpr::Binary { lhs, rhs, .. }
-        | HirExpr::Index {
+        DirExpr::Binary { lhs, rhs, .. }
+        | DirExpr::Index {
             base: lhs,
             index: rhs,
             ..
@@ -129,12 +129,12 @@ fn process_expr(expr: &mut HirExpr, context: &GlobalSymbolContext, changed: &mut
             process_expr(lhs, context, changed);
             process_expr(rhs, context, changed);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 process_expr(arg, context, changed);
             }
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -144,20 +144,20 @@ fn process_expr(expr: &mut HirExpr, context: &GlobalSymbolContext, changed: &mut
             process_expr(then_expr, context, changed);
             process_expr(else_expr, context, changed);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
 
     // Rewrite constant pointers if applicable
-    if let HirExpr::Const(val, _) = expr {
+    if let DirExpr::Const(val, _) = expr {
         let addr = *val as u64;
         if addr != 0 {
             if let Some((global_addr, global_name)) = find_global_symbol(addr, context) {
                 if addr == global_addr {
-                    *expr = HirExpr::AddressOfGlobal(global_name);
+                    *expr = DirExpr::AddressOfGlobal(global_name);
                 } else {
                     let offset = (addr - global_addr) as i64;
-                    *expr = HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::AddressOfGlobal(global_name)),
+                    *expr = DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::AddressOfGlobal(global_name)),
                         offset,
                     };
                 }

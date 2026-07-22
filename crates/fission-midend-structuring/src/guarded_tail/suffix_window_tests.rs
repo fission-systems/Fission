@@ -10,21 +10,21 @@ mod tests {
     use fission_midend_core::ir::*;
     use super::super::*;
 
-    fn test_if_goto(label: &str) -> HirStmt {
-        HirStmt::If {
-            cond: HirExpr::Var("cond".to_string()),
-            then_body: vec![HirStmt::Goto(label.to_string())],
+    fn test_if_goto(label: &str) -> DirStmt {
+        DirStmt::If {
+            cond: DirExpr::Var("cond".to_string()),
+            then_body: vec![DirStmt::Goto(label.to_string())],
             else_body: Vec::new(),
         }
     }
 
     fn assert_suffix_accepts(
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         start_label_idx: usize,
         terminal_label_idx: usize,
     ) {
-        let HirStmt::Label(start_label) = &body[start_label_idx] else {
+        let DirStmt::Label(start_label) = &body[start_label_idx] else {
             panic!("start label missing at {start_label_idx}");
         };
         let referenced = collect_referenced_label_counts(body);
@@ -40,7 +40,7 @@ mod tests {
     }
 
     fn assert_classify_suffix_stmt_ok(
-        body: &[HirStmt],
+        body: &[DirStmt],
         stmt_idx: usize,
         current_label_idx: usize,
         terminal_label_idx: usize,
@@ -58,7 +58,7 @@ mod tests {
     }
 
     fn assert_classify_suffix_stmt_rejection(
-        body: &[HirStmt],
+        body: &[DirStmt],
         stmt_idx: usize,
         current_label_idx: usize,
         terminal_label_idx: usize,
@@ -77,7 +77,7 @@ mod tests {
     }
 
     fn assert_nested_suffix_shape_kind(
-        body: &[HirStmt],
+        body: &[DirStmt],
         stmt_idx: usize,
         current_label_idx: usize,
         terminal_label_idx: usize,
@@ -95,18 +95,18 @@ mod tests {
         assert_eq!(kind, expected);
     }
 
-    fn assert_suffix_side_effect_shape_kind(stmt: HirStmt, expected: SuffixSideEffectShapeKind) {
+    fn assert_suffix_side_effect_shape_kind(stmt: DirStmt, expected: SuffixSideEffectShapeKind) {
         let kind = pure_hir::classify_suffix_side_effect_shape(&stmt);
         assert_eq!(kind, expected);
     }
 
-    fn assert_suffix_call_effect_shape_kind(stmt: HirStmt, expected: SuffixCallEffectShapeKind) {
+    fn assert_suffix_call_effect_shape_kind(stmt: DirStmt, expected: SuffixCallEffectShapeKind) {
         let kind = pure_hir::classify_suffix_call_effect_shape(&stmt);
         assert_eq!(kind, expected);
     }
 
     fn assert_suffix_external_budget(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         current_label_idx: usize,
@@ -129,7 +129,7 @@ mod tests {
     }
 
     fn assert_external_entry_ref_kind(
-        body: &[HirStmt],
+        body: &[DirStmt],
         label: &str,
         anchor_idx: usize,
         terminal_label_idx: usize,
@@ -148,13 +148,13 @@ mod tests {
     fn earliest_owned_join_window_accepts_sink_safe_terminal_tail() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("join1".to_string()),
-            HirStmt::Label("join1".to_string()),
-            HirStmt::Goto("sink".to_string()),
-            HirStmt::Label("sink".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("join1".to_string()),
+            DirStmt::Label("join1".to_string()),
+            DirStmt::Goto("sink".to_string()),
+            DirStmt::Label("sink".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let referenced = collect_referenced_label_counts(&body);
 
@@ -168,12 +168,12 @@ mod tests {
     fn earliest_owned_join_window_accepts_empty_block_alias_tail() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Block(Vec::new()),
-            HirStmt::Goto("sink".to_string()),
-            HirStmt::Label("sink".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Block(Vec::new()),
+            DirStmt::Goto("sink".to_string()),
+            DirStmt::Label("sink".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let referenced = collect_referenced_label_counts(&body);
 
@@ -187,15 +187,15 @@ mod tests {
     fn earliest_owned_join_window_accepts_alias_redirect_only_suffix() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("join1".to_string()),
-            HirStmt::Label("join1".to_string()),
-            HirStmt::Goto("join2".to_string()),
-            HirStmt::Label("join2".to_string()),
-            HirStmt::Goto("sink".to_string()),
-            HirStmt::Label("sink".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("join1".to_string()),
+            DirStmt::Label("join1".to_string()),
+            DirStmt::Goto("join2".to_string()),
+            DirStmt::Label("join2".to_string()),
+            DirStmt::Goto("sink".to_string()),
+            DirStmt::Label("sink".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let referenced = collect_referenced_label_counts(&body);
 
@@ -209,12 +209,12 @@ mod tests {
     fn earliest_owned_join_window_rejects_side_effectful_suffix() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Expr(HirExpr::Var("not_safe".to_string())),
-            HirStmt::Goto("sink".to_string()),
-            HirStmt::Label("sink".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Expr(DirExpr::Var("not_safe".to_string())),
+            DirStmt::Goto("sink".to_string()),
+            DirStmt::Label("sink".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let referenced = collect_referenced_label_counts(&body);
 
@@ -227,13 +227,13 @@ mod tests {
     #[test]
     fn earliest_owned_join_window_rejects_external_entry_in_suffix() {
         let body = vec![
-            HirStmt::Goto("join0".to_string()),
+            DirStmt::Goto("join0".to_string()),
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("sink".to_string()),
-            HirStmt::Label("sink".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("sink".to_string()),
+            DirStmt::Label("sink".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let referenced = collect_referenced_label_counts(&body);
 
@@ -247,15 +247,15 @@ mod tests {
     fn earliest_owned_join_window_rejects_nested_nonlocal_suffix_ref() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("nested".to_string()),
-                then_body: vec![HirStmt::Goto("sink".to_string())],
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("nested".to_string()),
+                then_body: vec![DirStmt::Goto("sink".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("sink".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("sink".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let referenced = collect_referenced_label_counts(&body);
 
@@ -269,9 +269,9 @@ mod tests {
     fn earliest_owned_join_window_rejects_when_terminal_join_is_already_owned() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let referenced = collect_referenced_label_counts(&body);
 
@@ -285,12 +285,12 @@ mod tests {
     fn suffix_accepts_ignorable_and_empty_block_only() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Block(Vec::new()),
-            HirStmt::Goto("sink".to_string()),
-            HirStmt::Label("sink".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Block(Vec::new()),
+            DirStmt::Goto("sink".to_string()),
+            DirStmt::Label("sink".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_accepts(&body, 0, 2, 5);
@@ -299,12 +299,12 @@ mod tests {
     #[test]
     fn suffix_accepts_trivial_redirect_chain_to_next_label() {
         let body = vec![
-            HirStmt::Goto("skip".to_string()),
-            HirStmt::Label("alias".to_string()),
-            HirStmt::Expr(HirExpr::Var("pure_gap".to_string())),
-            HirStmt::Label("skip".to_string()),
-            HirStmt::Expr(HirExpr::Var("redirect_gap".to_string())),
-            HirStmt::Goto("alias".to_string()),
+            DirStmt::Goto("skip".to_string()),
+            DirStmt::Label("alias".to_string()),
+            DirStmt::Expr(DirExpr::Var("pure_gap".to_string())),
+            DirStmt::Label("skip".to_string()),
+            DirStmt::Expr(DirExpr::Var("redirect_gap".to_string())),
+            DirStmt::Goto("alias".to_string()),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 0, 0, 3, "alias");
@@ -313,14 +313,14 @@ mod tests {
     #[test]
     fn suffix_accepts_trivial_redirect_chain_to_terminal_return() {
         let body = vec![
-            HirStmt::Goto("skip".to_string()),
-            HirStmt::Label("alias".to_string()),
-            HirStmt::Expr(HirExpr::Var("pure_gap".to_string())),
-            HirStmt::Label("skip".to_string()),
-            HirStmt::Expr(HirExpr::Var("redirect_gap".to_string())),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("done".to_string()))),
+            DirStmt::Goto("skip".to_string()),
+            DirStmt::Label("alias".to_string()),
+            DirStmt::Expr(DirExpr::Var("pure_gap".to_string())),
+            DirStmt::Label("skip".to_string()),
+            DirStmt::Expr(DirExpr::Var("redirect_gap".to_string())),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("done".to_string()))),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 0, 0, 6, "alias");
@@ -330,19 +330,19 @@ mod tests {
     fn suffix_accepts_self_terminal_join_goto_with_pure_tail() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Expr(HirExpr::Var("pure_gap".to_string())),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("tmp".to_string()),
-                rhs: HirExpr::Var("value".to_string()),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Expr(DirExpr::Var("pure_gap".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("tmp".to_string()),
+                rhs: DirExpr::Var("value".to_string()),
             },
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("next".to_string()),
-            HirStmt::Expr(HirExpr::Var("after".to_string())),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("next".to_string()),
+            DirStmt::Expr(DirExpr::Var("after".to_string())),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_accepts(&body, 0, 2, 9);
@@ -352,11 +352,11 @@ mod tests {
     fn suffix_budget_counts_candidate_internal_top_level_refs_inside_window() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("join0".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("join0".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_external_budget(
@@ -382,15 +382,15 @@ mod tests {
     fn suffix_budget_keeps_nested_candidate_ref_external() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("nested".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("nested".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_external_budget(
@@ -416,21 +416,21 @@ mod tests {
     fn suffix_budget_internalizes_same_guard_family_nested_conditional_entry() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_external_budget(
@@ -456,25 +456,25 @@ mod tests {
     fn suffix_budget_does_not_internalize_different_guard_family_nested_entry() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::If {
-                cond: HirExpr::Var("other_cond".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Var("other_cond".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_external_budget(
@@ -499,22 +499,22 @@ mod tests {
     #[test]
     fn suffix_budget_internalizes_paired_same_guard_nested_boundary() {
         let body = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Expr(HirExpr::Var("body".to_string())),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Expr(DirExpr::Var("body".to_string())),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_external_budget(
@@ -539,22 +539,22 @@ mod tests {
     #[test]
     fn suffix_budget_does_not_internalize_paired_nested_boundary_with_guard_mismatch() {
         let body = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::If {
-                cond: HirExpr::Var("other".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Var("other".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Expr(HirExpr::Var("body".to_string())),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Expr(DirExpr::Var("body".to_string())),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_external_budget(
@@ -579,18 +579,18 @@ mod tests {
     #[test]
     fn suffix_budget_does_not_internalize_paired_boundary_when_ref_kind_is_not_nested() {
         let body = vec![
-            HirStmt::Goto("join0".to_string()),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::Goto("join0".to_string()),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Expr(HirExpr::Var("body".to_string())),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Expr(DirExpr::Var("body".to_string())),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_suffix_external_budget(
@@ -615,25 +615,25 @@ mod tests {
     #[test]
     fn suffix_nested_shape_classifies_single_goto_then() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("next".to_string())],
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("next".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("next".to_string()),
-            HirStmt::Expr(HirExpr::Var("after".to_string())),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("next".to_string()),
+            DirStmt::Expr(DirExpr::Var("after".to_string())),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_nested_suffix_shape_kind(
@@ -649,25 +649,25 @@ mod tests {
     #[test]
     fn suffix_nested_shape_classifies_guard_family_mismatch() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("other".to_string()),
-                then_body: vec![HirStmt::Goto("next".to_string())],
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("other".to_string()),
+                then_body: vec![DirStmt::Goto("next".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("next".to_string()),
-            HirStmt::Expr(HirExpr::Var("after".to_string())),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("next".to_string()),
+            DirStmt::Expr(DirExpr::Var("after".to_string())),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_nested_suffix_shape_kind(
@@ -683,20 +683,20 @@ mod tests {
     #[test]
     fn suffix_nested_shape_classifies_crosses_terminal_join() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("next".to_string()),
-            HirStmt::Expr(HirExpr::Var("after".to_string())),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("next".to_string()),
+            DirStmt::Expr(DirExpr::Var("after".to_string())),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_nested_suffix_shape_kind(
@@ -712,24 +712,24 @@ mod tests {
     #[test]
     fn suffix_accepts_nested_terminal_join_tail_same_guard_family_then_branch() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 1, 0, 4, "next");
@@ -738,24 +738,24 @@ mod tests {
     #[test]
     fn suffix_accepts_nested_terminal_join_tail_negated_guard_match_else_branch() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
                 then_body: Vec::new(),
-                else_body: vec![HirStmt::Goto("terminal".to_string())],
+                else_body: vec![DirStmt::Goto("terminal".to_string())],
             },
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 1, 0, 4, "next");
@@ -764,20 +764,20 @@ mod tests {
     #[test]
     fn suffix_rejects_nested_terminal_join_tail_different_guard_family() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
-            HirStmt::If {
-                cond: HirExpr::Var("other".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Var("other".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -793,25 +793,25 @@ mod tests {
     #[test]
     fn suffix_rejects_nested_terminal_join_tail_nonterminal_target() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("next".to_string())],
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("next".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("next".to_string()),
-            HirStmt::Expr(HirExpr::Var("after".to_string())),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("next".to_string()),
+            DirStmt::Expr(DirExpr::Var("after".to_string())),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -827,23 +827,23 @@ mod tests {
     #[test]
     fn suffix_rejects_nested_terminal_join_tail_with_nonempty_else_payload() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
-                else_body: vec![HirStmt::Expr(HirExpr::Var("payload".to_string()))],
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
+                else_body: vec![DirStmt::Expr(DirExpr::Var("payload".to_string()))],
             },
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -859,30 +859,30 @@ mod tests {
     #[test]
     fn suffix_rejects_nested_terminal_join_tail_with_side_effectful_branch() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
                 then_body: vec![
-                    HirStmt::Expr(HirExpr::Call {
+                    DirStmt::Expr(DirExpr::Call {
                         target: "helper".to_string(),
                         args: vec![],
                         ty: NirType::Unknown,
                     }),
-                    HirStmt::Goto("terminal".to_string()),
+                    DirStmt::Goto("terminal".to_string()),
                 ],
                 else_body: Vec::new(),
             },
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("cond".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -898,10 +898,10 @@ mod tests {
     #[test]
     fn suffix_side_effect_shape_classifies_memory_read_only_assign() {
         assert_suffix_side_effect_shape_kind(
-            HirStmt::Assign {
-                lhs: HirLValue::Var("xVar116".to_string()),
-                rhs: HirExpr::Load {
-                    ptr: Box::new(HirExpr::Var("xVar43".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("xVar116".to_string()),
+                rhs: DirExpr::Load {
+                    ptr: Box::new(DirExpr::Var("xVar43".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
@@ -915,7 +915,7 @@ mod tests {
     #[test]
     fn suffix_side_effect_shape_classifies_call_expr_side_effect() {
         assert_suffix_side_effect_shape_kind(
-            HirStmt::Expr(HirExpr::Call {
+            DirStmt::Expr(DirExpr::Call {
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -927,7 +927,7 @@ mod tests {
     #[test]
     fn suffix_call_effect_shape_classifies_void_unknown_call() {
         assert_suffix_call_effect_shape_kind(
-            HirStmt::Expr(HirExpr::Call {
+            DirStmt::Expr(DirExpr::Call {
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -939,7 +939,7 @@ mod tests {
     #[test]
     fn suffix_call_effect_shape_classifies_return_value_ignored_call() {
         assert_suffix_call_effect_shape_kind(
-            HirStmt::Expr(HirExpr::Call {
+            DirStmt::Expr(DirExpr::Call {
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Int {
@@ -954,11 +954,11 @@ mod tests {
     #[test]
     fn suffix_call_effect_shape_classifies_return_value_assigned_local() {
         assert_suffix_call_effect_shape_kind(
-            HirStmt::Assign {
-                lhs: HirLValue::Var("tmp".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("tmp".to_string()),
+                rhs: DirExpr::Call {
                     target: "helper".to_string(),
-                    args: vec![HirExpr::Var("arg".to_string())],
+                    args: vec![DirExpr::Var("arg".to_string())],
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
@@ -972,11 +972,11 @@ mod tests {
     #[test]
     fn suffix_call_effect_shape_classifies_pure_known_helper_call() {
         assert_suffix_call_effect_shape_kind(
-            HirStmt::Assign {
-                lhs: HirLValue::Var("tmp".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("tmp".to_string()),
+                rhs: DirExpr::Call {
                     target: "__popcount".to_string(),
-                    args: vec![HirExpr::Var("value".to_string())],
+                    args: vec![DirExpr::Var("value".to_string())],
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
@@ -991,13 +991,13 @@ mod tests {
     fn suffix_call_effect_shape_classifies_flag_intrinsics_as_pure_helpers() {
         for target in ["__carry", "__scarry", "__sborrow"] {
             assert_suffix_call_effect_shape_kind(
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("tmp".to_string()),
-                    rhs: HirExpr::Call {
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("tmp".to_string()),
+                    rhs: DirExpr::Call {
                         target: target.to_string(),
                         args: vec![
-                            HirExpr::Var("lhs".to_string()),
-                            HirExpr::Const(
+                            DirExpr::Var("lhs".to_string()),
+                            DirExpr::Const(
                                 1,
                                 NirType::Int {
                                     bits: 32,
@@ -1016,11 +1016,11 @@ mod tests {
     #[test]
     fn guarded_tail_pure_value_accepts_flag_intrinsic_exprs() {
         for target in ["__carry", "__scarry", "__sborrow"] {
-            assert!(pure_hir::expr_is_pure_value(&HirExpr::Call {
+            assert!(pure_hir::expr_is_pure_value(&DirExpr::Call {
                 target: target.to_string(),
                 args: vec![
-                    HirExpr::Var("lhs".to_string()),
-                    HirExpr::Const(
+                    DirExpr::Var("lhs".to_string()),
+                    DirExpr::Const(
                         1,
                         NirType::Int {
                             bits: 32,
@@ -1036,11 +1036,11 @@ mod tests {
     #[test]
     fn suffix_call_effect_shape_classifies_memory_mutating_call() {
         assert_suffix_call_effect_shape_kind(
-            HirStmt::Expr(HirExpr::Call {
+            DirStmt::Expr(DirExpr::Call {
                 target: "memcpy".to_string(),
                 args: vec![
-                    HirExpr::Var("dst".to_string()),
-                    HirExpr::Var("src".to_string()),
+                    DirExpr::Var("dst".to_string()),
+                    DirExpr::Var("src".to_string()),
                 ],
                 ty: NirType::Ptr(Box::new(NirType::Int {
                     bits: 8,
@@ -1054,7 +1054,7 @@ mod tests {
     #[test]
     fn suffix_call_effect_shape_classifies_control_effect_call() {
         assert_suffix_call_effect_shape_kind(
-            HirStmt::Expr(HirExpr::Call {
+            DirStmt::Expr(DirExpr::Call {
                 target: "abort".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -1066,11 +1066,11 @@ mod tests {
     #[test]
     fn suffix_call_effect_shape_classifies_nested_call_as_unknown_effect() {
         assert_suffix_call_effect_shape_kind(
-            HirStmt::Assign {
-                lhs: HirLValue::Var("tmp".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Add,
-                    lhs: Box::new(HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("tmp".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Add,
+                    lhs: Box::new(DirExpr::Call {
                         target: "helper".to_string(),
                         args: vec![],
                         ty: NirType::Int {
@@ -1078,7 +1078,7 @@ mod tests {
                             signed: false,
                         },
                     }),
-                    rhs: Box::new(HirExpr::Const(
+                    rhs: Box::new(DirExpr::Const(
                         1,
                         NirType::Int {
                             bits: 32,
@@ -1098,15 +1098,15 @@ mod tests {
     #[test]
     fn suffix_side_effect_shape_classifies_memory_write() {
         assert_suffix_side_effect_shape_kind(
-            HirStmt::Assign {
-                lhs: HirLValue::Deref {
-                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Deref {
+                    ptr: Box::new(DirExpr::Var("ptr".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
                     },
                 },
-                rhs: HirExpr::Var("value".to_string()),
+                rhs: DirExpr::Var("value".to_string()),
             },
             SuffixSideEffectShapeKind::MemoryWrite,
         );
@@ -1115,8 +1115,8 @@ mod tests {
     #[test]
     fn suffix_side_effect_shape_classifies_volatile_or_unknown_load() {
         assert_suffix_side_effect_shape_kind(
-            HirStmt::Expr(HirExpr::Load {
-                ptr: Box::new(HirExpr::Call {
+            DirStmt::Expr(DirExpr::Load {
+                ptr: Box::new(DirExpr::Call {
                     target: "addr_provider".to_string(),
                     args: vec![],
                     ty: NirType::Ptr(Box::new(NirType::Int {
@@ -1136,24 +1136,24 @@ mod tests {
     #[test]
     fn suffix_accepts_memory_read_only_assign_with_condition_use() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("loaded".to_string()),
-                rhs: HirExpr::Load {
-                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("loaded".to_string()),
+                rhs: DirExpr::Load {
+                    ptr: Box::new(DirExpr::Var("ptr".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
                     },
                 },
             },
-            HirStmt::If {
-                cond: HirExpr::Var("loaded".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("loaded".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
@@ -1162,12 +1162,12 @@ mod tests {
     #[test]
     fn suffix_accepts_memory_read_only_assign_with_pure_ptroffset() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("loaded".to_string()),
-                rhs: HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("base".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("loaded".to_string()),
+                rhs: DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("base".to_string())),
                         offset: 8,
                     }),
                     ty: NirType::Int {
@@ -1176,13 +1176,13 @@ mod tests {
                     },
                 },
             },
-            HirStmt::Expr(HirExpr::Unary {
-                op: HirUnaryOp::Not,
-                expr: Box::new(HirExpr::Var("loaded".to_string())),
+            DirStmt::Expr(DirExpr::Unary {
+                op: DirUnaryOp::Not,
+                expr: Box::new(DirExpr::Var("loaded".to_string())),
                 ty: NirType::Bool,
             }),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
@@ -1191,21 +1191,21 @@ mod tests {
     #[test]
     fn suffix_rejects_memory_read_only_assign_with_unknown_load_type() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("loaded".to_string()),
-                rhs: HirExpr::Load {
-                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("loaded".to_string()),
+                rhs: DirExpr::Load {
+                    ptr: Box::new(DirExpr::Var("ptr".to_string())),
                     ty: NirType::Unknown,
                 },
             },
-            HirStmt::If {
-                cond: HirExpr::Var("loaded".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("loaded".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1221,19 +1221,19 @@ mod tests {
     #[test]
     fn suffix_rejects_memory_read_only_assign_reused_in_return() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("loaded".to_string()),
-                rhs: HirExpr::Load {
-                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("loaded".to_string()),
+                rhs: DirExpr::Load {
+                    ptr: Box::new(DirExpr::Var("ptr".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
                     },
                 },
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("loaded".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("loaded".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1249,11 +1249,11 @@ mod tests {
     #[test]
     fn suffix_rejects_memory_read_only_assign_when_ptr_contains_call() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("loaded".to_string()),
-                rhs: HirExpr::Load {
-                    ptr: Box::new(HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("loaded".to_string()),
+                rhs: DirExpr::Load {
+                    ptr: Box::new(DirExpr::Call {
                         target: "ptr_source".to_string(),
                         args: vec![],
                         ty: NirType::Ptr(Box::new(NirType::Int {
@@ -1267,13 +1267,13 @@ mod tests {
                     },
                 },
             },
-            HirStmt::If {
-                cond: HirExpr::Var("loaded".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("loaded".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1289,29 +1289,29 @@ mod tests {
     #[test]
     fn suffix_rejects_memory_read_only_assign_with_memory_visible_alias_risk() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("loaded".to_string()),
-                rhs: HirExpr::Load {
-                    ptr: Box::new(HirExpr::Var("ptr".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("loaded".to_string()),
+                rhs: DirExpr::Load {
+                    ptr: Box::new(DirExpr::Var("ptr".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
                     },
                 },
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Deref {
-                    ptr: Box::new(HirExpr::Var("loaded".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Deref {
+                    ptr: Box::new(DirExpr::Var("loaded".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
                     },
                 },
-                rhs: HirExpr::Var("value".to_string()),
+                rhs: DirExpr::Var("value".to_string()),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1327,25 +1327,25 @@ mod tests {
     #[test]
     fn suffix_accepts_known_pure_helper_call_with_condition_use() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("count".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("count".to_string()),
+                rhs: DirExpr::Call {
                     target: "__popcount".to_string(),
-                    args: vec![HirExpr::Var("value".to_string())],
+                    args: vec![DirExpr::Var("value".to_string())],
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
             },
-            HirStmt::If {
-                cond: HirExpr::Var("count".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("count".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
@@ -1354,22 +1354,22 @@ mod tests {
     #[test]
     fn suffix_accepts_known_pure_helper_call_with_pure_expr_use() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("count".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("count".to_string()),
+                rhs: DirExpr::Call {
                     target: "__popcount".to_string(),
-                    args: vec![HirExpr::Var("value".to_string())],
+                    args: vec![DirExpr::Var("value".to_string())],
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
             },
-            HirStmt::Expr(HirExpr::Binary {
-                op: HirBinaryOp::Add,
-                lhs: Box::new(HirExpr::Var("count".to_string())),
-                rhs: Box::new(HirExpr::Const(
+            DirStmt::Expr(DirExpr::Binary {
+                op: DirBinaryOp::Add,
+                lhs: Box::new(DirExpr::Var("count".to_string())),
+                rhs: Box::new(DirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -1381,8 +1381,8 @@ mod tests {
                     signed: false,
                 },
             }),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_ok(&body, 1, 0, 3, "next");
@@ -1391,25 +1391,25 @@ mod tests {
     #[test]
     fn suffix_rejects_known_pure_helper_call_with_unknown_target() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("count".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("count".to_string()),
+                rhs: DirExpr::Call {
                     target: "__popcount64".to_string(),
-                    args: vec![HirExpr::Var("value".to_string())],
+                    args: vec![DirExpr::Var("value".to_string())],
                     ty: NirType::Int {
                         bits: 64,
                         signed: false,
                     },
                 },
             },
-            HirStmt::If {
-                cond: HirExpr::Var("count".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("count".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1425,12 +1425,12 @@ mod tests {
     #[test]
     fn suffix_rejects_known_pure_helper_call_with_call_arg() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("count".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("count".to_string()),
+                rhs: DirExpr::Call {
                     target: "__popcount".to_string(),
-                    args: vec![HirExpr::Call {
+                    args: vec![DirExpr::Call {
                         target: "value_provider".to_string(),
                         args: vec![],
                         ty: NirType::Int {
@@ -1444,13 +1444,13 @@ mod tests {
                     },
                 },
             },
-            HirStmt::If {
-                cond: HirExpr::Var("count".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("count".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1466,20 +1466,20 @@ mod tests {
     #[test]
     fn suffix_rejects_known_pure_helper_call_reused_in_return() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("count".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("count".to_string()),
+                rhs: DirExpr::Call {
                     target: "__popcount".to_string(),
-                    args: vec![HirExpr::Var("value".to_string())],
+                    args: vec![DirExpr::Var("value".to_string())],
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("count".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("count".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1495,30 +1495,30 @@ mod tests {
     #[test]
     fn suffix_rejects_known_pure_helper_call_with_memory_visible_alias_risk() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Assign {
-                lhs: HirLValue::Var("count".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("count".to_string()),
+                rhs: DirExpr::Call {
                     target: "__popcount".to_string(),
-                    args: vec![HirExpr::Var("value".to_string())],
+                    args: vec![DirExpr::Var("value".to_string())],
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Deref {
-                    ptr: Box::new(HirExpr::Var("count".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Deref {
+                    ptr: Box::new(DirExpr::Var("count".to_string())),
                     ty: NirType::Int {
                         bits: 8,
                         signed: false,
                     },
                 },
-                rhs: HirExpr::Var("value".to_string()),
+                rhs: DirExpr::Var("value".to_string()),
             },
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1534,17 +1534,17 @@ mod tests {
     #[test]
     fn suffix_rejects_known_pure_helper_call_with_ignored_result() {
         let body = vec![
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Expr(HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Expr(DirExpr::Call {
                 target: "__popcount".to_string(),
-                args: vec![HirExpr::Var("value".to_string())],
+                args: vec![DirExpr::Var("value".to_string())],
                 ty: NirType::Int {
                     bits: 32,
                     signed: false,
                 },
             }),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1560,10 +1560,10 @@ mod tests {
     #[test]
     fn external_entry_kind_classifies_top_level_external_goto() {
         let body = vec![
-            HirStmt::Goto("join0".to_string()),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Goto("join0".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_external_entry_ref_kind(
@@ -1578,14 +1578,14 @@ mod tests {
     #[test]
     fn external_entry_kind_classifies_nested_conditional_goto() {
         let body = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_external_entry_ref_kind(
@@ -1600,13 +1600,13 @@ mod tests {
     #[test]
     fn external_entry_kind_classifies_loop_switch_derived_goto() {
         let body = vec![
-            HirStmt::While {
-                cond: HirExpr::Var("cond".to_string()),
-                body: vec![HirStmt::Goto("join0".to_string())],
+            DirStmt::While {
+                cond: DirExpr::Var("cond".to_string()),
+                body: vec![DirStmt::Goto("join0".to_string())],
             },
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_external_entry_ref_kind(
@@ -1622,10 +1622,10 @@ mod tests {
     fn external_entry_kind_skips_candidate_internal_top_level_goto() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("join0".to_string()),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("join0".to_string()),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_external_entry_ref_kind(&body, "join0", 0, 4, None);
@@ -1635,16 +1635,16 @@ mod tests {
     fn suffix_rejects_self_terminal_join_goto_with_nested_tail_stmt() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("terminal".to_string())],
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("terminal".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("next".to_string()),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("next".to_string()),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1661,14 +1661,14 @@ mod tests {
     fn suffix_rejects_side_effectful_stmt() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Expr(HirExpr::Call {
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Expr(DirExpr::Call {
                 target: "helper".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
             }),
-            HirStmt::Label("terminal".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("terminal".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1685,11 +1685,11 @@ mod tests {
     fn suffix_rejects_nonterminal_goto() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("other".to_string()),
-            HirStmt::Label("next".to_string()),
-            HirStmt::Expr(HirExpr::Var("after".to_string())),
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("other".to_string()),
+            DirStmt::Label("next".to_string()),
+            DirStmt::Expr(DirExpr::Var("after".to_string())),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1709,13 +1709,13 @@ mod tests {
     fn suffix_rejects_nested_nonlocal_ref() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("other".to_string())],
+            DirStmt::Label("join0".to_string()),
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("other".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1732,8 +1732,8 @@ mod tests {
     fn suffix_rejects_label_crossing() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Expr(DirExpr::Var("payload".to_string())),
         ];
         let referenced = collect_referenced_label_counts(&body);
         let result = pure_hir::candidate_window_can_shrink_to_label(
@@ -1756,11 +1756,11 @@ mod tests {
     #[test]
     fn suffix_rejects_external_entry() {
         let body = vec![
-            HirStmt::Goto("join0".to_string()),
+            DirStmt::Goto("join0".to_string()),
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("terminal".to_string()),
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
         let referenced = collect_referenced_label_counts(&body);
         let result = pure_hir::candidate_window_can_shrink_to_label(
@@ -1784,12 +1784,12 @@ mod tests {
     fn suffix_rejects_loop_or_switch_crossing() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::While {
-                cond: HirExpr::Var("cond".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::While {
+                cond: DirExpr::Var("cond".to_string()),
                 body: vec![],
             },
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_classify_suffix_stmt_rejection(
@@ -1806,9 +1806,9 @@ mod tests {
     fn suffix_rejects_unresolved_alias_redirect() {
         let body = vec![
             test_if_goto("join0"),
-            HirStmt::Label("join0".to_string()),
-            HirStmt::Goto("unknown".to_string()),
-            HirStmt::Label("terminal".to_string()),
+            DirStmt::Label("join0".to_string()),
+            DirStmt::Goto("unknown".to_string()),
+            DirStmt::Label("terminal".to_string()),
         ];
 
         assert_classify_suffix_stmt_rejection(

@@ -1,13 +1,13 @@
 use super::util::*;
 use crate::prelude::*;
 
-pub fn canonicalize_flag_intrinsics(expr: &HirExpr) -> Option<HirExpr> {
+pub fn canonicalize_flag_intrinsics(expr: &DirExpr) -> Option<DirExpr> {
     canonicalize_flag_intrinsic_call(expr)
         .or_else(|| canonicalize_sborrow_compare(expr))
         .or_else(|| canonicalize_arm_compound_flag_condition(expr))
 }
 
-pub fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
+pub fn normalize_boolean_logic(expr: &DirExpr) -> Option<DirExpr> {
     fold_signed_zero_or_negative(expr)
         .or_else(|| fold_signed_zero_or_positive(expr))
         .or_else(|| normalize_boolean_logic_core(expr))
@@ -15,9 +15,9 @@ pub fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
 
 /// `(x == 0 || x < 0)` / either order → `x <= 0` (signed compares only).
 /// Measured on power-class loops that test `exp > 0` as `!(exp == 0 || exp < 0)`.
-fn fold_signed_zero_or_negative(expr: &HirExpr) -> Option<HirExpr> {
-    let HirExpr::Binary {
-        op: HirBinaryOp::LogicalOr | HirBinaryOp::Or,
+fn fold_signed_zero_or_negative(expr: &DirExpr) -> Option<DirExpr> {
+    let DirExpr::Binary {
+        op: DirBinaryOp::LogicalOr | DirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -37,18 +37,18 @@ fn fold_signed_zero_or_negative(expr: &HirExpr) -> Option<HirExpr> {
     };
     let ty = expr_type(&x);
     // Original arm used SLt so signed order is intended.
-    Some(HirExpr::Binary {
-        op: HirBinaryOp::SLe,
+    Some(DirExpr::Binary {
+        op: DirBinaryOp::SLe,
         lhs: Box::new(x),
-        rhs: Box::new(HirExpr::Const(0, ty)),
+        rhs: Box::new(DirExpr::Const(0, ty)),
         ty: NirType::Bool,
     })
 }
 
 /// `(x == 0 || x > 0)` with signed SGt → `x >= 0` (SGe).
-fn fold_signed_zero_or_positive(expr: &HirExpr) -> Option<HirExpr> {
-    let HirExpr::Binary {
-        op: HirBinaryOp::LogicalOr | HirBinaryOp::Or,
+fn fold_signed_zero_or_positive(expr: &DirExpr) -> Option<DirExpr> {
+    let DirExpr::Binary {
+        op: DirBinaryOp::LogicalOr | DirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -67,17 +67,17 @@ fn fold_signed_zero_or_positive(expr: &HirExpr) -> Option<HirExpr> {
         _ => return None,
     };
     let ty = expr_type(&x);
-    Some(HirExpr::Binary {
-        op: HirBinaryOp::SGe,
+    Some(DirExpr::Binary {
+        op: DirBinaryOp::SGe,
         lhs: Box::new(x),
-        rhs: Box::new(HirExpr::Const(0, ty)),
+        rhs: Box::new(DirExpr::Const(0, ty)),
         ty: NirType::Bool,
     })
 }
 
-fn is_eq_zero_of(expr: &HirExpr) -> Option<HirExpr> {
-    let HirExpr::Binary {
-        op: HirBinaryOp::Eq,
+fn is_eq_zero_of(expr: &DirExpr) -> Option<DirExpr> {
+    let DirExpr::Binary {
+        op: DirBinaryOp::Eq,
         lhs,
         rhs,
         ..
@@ -94,9 +94,9 @@ fn is_eq_zero_of(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
-fn is_signed_lt_zero_of(expr: &HirExpr) -> Option<HirExpr> {
-    let HirExpr::Binary {
-        op: HirBinaryOp::SLt,
+fn is_signed_lt_zero_of(expr: &DirExpr) -> Option<DirExpr> {
+    let DirExpr::Binary {
+        op: DirBinaryOp::SLt,
         lhs,
         rhs,
         ..
@@ -111,9 +111,9 @@ fn is_signed_lt_zero_of(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
-fn is_signed_gt_zero_of(expr: &HirExpr) -> Option<HirExpr> {
-    let HirExpr::Binary {
-        op: HirBinaryOp::SGt,
+fn is_signed_gt_zero_of(expr: &DirExpr) -> Option<DirExpr> {
+    let DirExpr::Binary {
+        op: DirBinaryOp::SGt,
         lhs,
         rhs,
         ..
@@ -128,34 +128,34 @@ fn is_signed_gt_zero_of(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
-fn normalize_boolean_logic_core(expr: &HirExpr) -> Option<HirExpr> {
+fn normalize_boolean_logic_core(expr: &DirExpr) -> Option<DirExpr> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Eq,
+        DirExpr::Binary {
+            op: DirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
             Some(bool_true_expr())
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Ne,
+        DirExpr::Binary {
+            op: DirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
             Some(bool_false_expr())
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Ne,
+        DirExpr::Binary {
+            op: DirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) && matches!(expr_type(lhs), NirType::Bool) => {
             Some((**lhs).clone())
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Ne,
+        DirExpr::Binary {
+            op: DirBinaryOp::Ne,
             lhs,
             rhs,
             ..
@@ -163,16 +163,16 @@ fn normalize_boolean_logic_core(expr: &HirExpr) -> Option<HirExpr> {
             // `0 != bool` → bool
             Some((**rhs).clone())
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Eq,
+        DirExpr::Binary {
+            op: DirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) && matches!(expr_type(lhs), NirType::Bool) => {
             Some(negate_expr((**lhs).clone()))
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Eq,
+        DirExpr::Binary {
+            op: DirBinaryOp::Eq,
             lhs,
             rhs,
             ..
@@ -180,56 +180,56 @@ fn normalize_boolean_logic_core(expr: &HirExpr) -> Option<HirExpr> {
             // `0 == (a < 0)` → `!(a < 0)` → further folds to `a >= 0`
             Some(negate_expr((**rhs).clone()))
         }
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } => match expr.as_ref() {
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
+            DirExpr::Unary {
+                op: DirUnaryOp::Not,
                 expr: inner,
                 ..
             } => Some((**inner).clone()),
-            HirExpr::Binary {
-                op: HirBinaryOp::LogicalAnd,
+            DirExpr::Binary {
+                op: DirBinaryOp::LogicalAnd,
                 lhs,
                 rhs,
                 ..
-            } => Some(HirExpr::Binary {
-                op: HirBinaryOp::LogicalOr,
+            } => Some(DirExpr::Binary {
+                op: DirBinaryOp::LogicalOr,
                 lhs: Box::new(negate_expr((**lhs).clone())),
                 rhs: Box::new(negate_expr((**rhs).clone())),
                 ty: NirType::Bool,
             }),
-            HirExpr::Binary {
-                op: HirBinaryOp::LogicalOr,
+            DirExpr::Binary {
+                op: DirBinaryOp::LogicalOr,
                 lhs,
                 rhs,
                 ..
-            } => Some(HirExpr::Binary {
-                op: HirBinaryOp::LogicalAnd,
+            } => Some(DirExpr::Binary {
+                op: DirBinaryOp::LogicalAnd,
                 lhs: Box::new(negate_expr((**lhs).clone())),
                 rhs: Box::new(negate_expr((**rhs).clone())),
                 ty: NirType::Bool,
             }),
             // Negate comparison operators: !(a == b) → a != b, !(a < b) → b <= a, etc.
-            HirExpr::Binary { op, lhs, rhs, ty } => {
+            DirExpr::Binary { op, lhs, rhs, ty } => {
                 let negated_op = match op {
-                    HirBinaryOp::Eq => Some(HirBinaryOp::Ne),
-                    HirBinaryOp::Ne => Some(HirBinaryOp::Eq),
+                    DirBinaryOp::Eq => Some(DirBinaryOp::Ne),
+                    DirBinaryOp::Ne => Some(DirBinaryOp::Eq),
                     // !(a < b)  →  b <= a
-                    HirBinaryOp::Lt => None, // handled below with swapped operands
-                    HirBinaryOp::Le => None,
-                    HirBinaryOp::Gt => None,
-                    HirBinaryOp::Ge => None,
-                    HirBinaryOp::SLt => None,
-                    HirBinaryOp::SLe => None,
-                    HirBinaryOp::SGt => None,
-                    HirBinaryOp::SGe => None,
+                    DirBinaryOp::Lt => None, // handled below with swapped operands
+                    DirBinaryOp::Le => None,
+                    DirBinaryOp::Gt => None,
+                    DirBinaryOp::Ge => None,
+                    DirBinaryOp::SLt => None,
+                    DirBinaryOp::SLe => None,
+                    DirBinaryOp::SGt => None,
+                    DirBinaryOp::SGe => None,
                     _ => None,
                 };
                 if let Some(op2) = negated_op {
-                    return Some(HirExpr::Binary {
+                    return Some(DirExpr::Binary {
                         op: op2,
                         lhs: lhs.clone(),
                         rhs: rhs.clone(),
@@ -242,50 +242,50 @@ fn normalize_boolean_logic_core(expr: &HirExpr) -> Option<HirExpr> {
                 // !(a <s b) →  b <=s a
                 // !(a <=s b) → b <s a
                 match op {
-                    HirBinaryOp::Lt => Some(HirExpr::Binary {
-                        op: HirBinaryOp::Le,
+                    DirBinaryOp::Lt => Some(DirExpr::Binary {
+                        op: DirBinaryOp::Le,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    HirBinaryOp::Le => Some(HirExpr::Binary {
-                        op: HirBinaryOp::Lt,
+                    DirBinaryOp::Le => Some(DirExpr::Binary {
+                        op: DirBinaryOp::Lt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    HirBinaryOp::Gt => Some(HirExpr::Binary {
-                        op: HirBinaryOp::Ge,
+                    DirBinaryOp::Gt => Some(DirExpr::Binary {
+                        op: DirBinaryOp::Ge,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    HirBinaryOp::Ge => Some(HirExpr::Binary {
-                        op: HirBinaryOp::Gt,
+                    DirBinaryOp::Ge => Some(DirExpr::Binary {
+                        op: DirBinaryOp::Gt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    HirBinaryOp::SLt => Some(HirExpr::Binary {
-                        op: HirBinaryOp::SLe,
+                    DirBinaryOp::SLt => Some(DirExpr::Binary {
+                        op: DirBinaryOp::SLe,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    HirBinaryOp::SLe => Some(HirExpr::Binary {
-                        op: HirBinaryOp::SLt,
+                    DirBinaryOp::SLe => Some(DirExpr::Binary {
+                        op: DirBinaryOp::SLt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    HirBinaryOp::SGt => Some(HirExpr::Binary {
-                        op: HirBinaryOp::SGe,
+                    DirBinaryOp::SGt => Some(DirExpr::Binary {
+                        op: DirBinaryOp::SGe,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    HirBinaryOp::SGe => Some(HirExpr::Binary {
-                        op: HirBinaryOp::SGt,
+                    DirBinaryOp::SGe => Some(DirExpr::Binary {
+                        op: DirBinaryOp::SGt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
@@ -295,8 +295,8 @@ fn normalize_boolean_logic_core(expr: &HirExpr) -> Option<HirExpr> {
             }
             _ => None,
         },
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
             lhs,
             rhs,
             ..
@@ -313,8 +313,8 @@ fn normalize_boolean_logic_core(expr: &HirExpr) -> Option<HirExpr> {
                 None
             }
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalOr,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalOr,
             lhs,
             rhs,
             ..
@@ -341,23 +341,23 @@ enum SignedDiffSignTest {
     Positive,
 }
 
-fn canonicalize_flag_intrinsic_call(expr: &HirExpr) -> Option<HirExpr> {
+fn canonicalize_flag_intrinsic_call(expr: &DirExpr) -> Option<DirExpr> {
     match expr {
-        HirExpr::Call { target, args, .. } if target == "__carry" => {
+        DirExpr::Call { target, args, .. } if target == "__carry" => {
             canonicalize_carry_intrinsic_call(args)
         }
-        HirExpr::Call { target, args, .. } if target == "__scarry" || target == "__sborrow" => {
+        DirExpr::Call { target, args, .. } if target == "__scarry" || target == "__sborrow" => {
             canonicalize_zero_fold_flag_call(args)
         }
         _ => None,
     }
 }
 
-fn canonicalize_carry_intrinsic_call(args: &[HirExpr]) -> Option<HirExpr> {
+fn canonicalize_carry_intrinsic_call(args: &[DirExpr]) -> Option<DirExpr> {
     let [lhs, rhs] = args else {
         return None;
     };
-    let HirExpr::Const(value, _) = rhs else {
+    let DirExpr::Const(value, _) = rhs else {
         return None;
     };
     if *value == 0 {
@@ -365,9 +365,9 @@ fn canonicalize_carry_intrinsic_call(args: &[HirExpr]) -> Option<HirExpr> {
     }
     let bits = int_type_bits(&expr_type(rhs)).or_else(|| int_type_bits(&expr_type(lhs)))?;
     let threshold = wrap_negated_const(*value, bits)?;
-    Some(HirExpr::Binary {
-        op: HirBinaryOp::Le,
-        lhs: Box::new(HirExpr::Const(
+    Some(DirExpr::Binary {
+        op: DirBinaryOp::Le,
+        lhs: Box::new(DirExpr::Const(
             threshold,
             NirType::Int {
                 bits,
@@ -379,16 +379,16 @@ fn canonicalize_carry_intrinsic_call(args: &[HirExpr]) -> Option<HirExpr> {
     })
 }
 
-fn canonicalize_zero_fold_flag_call(args: &[HirExpr]) -> Option<HirExpr> {
+fn canonicalize_zero_fold_flag_call(args: &[DirExpr]) -> Option<DirExpr> {
     let [_, rhs] = args else {
         return None;
     };
     is_zero_const(rhs).then_some(bool_false_expr())
 }
 
-fn canonicalize_sborrow_compare(expr: &HirExpr) -> Option<HirExpr> {
-    let HirExpr::Binary {
-        op: op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+fn canonicalize_sborrow_compare(expr: &DirExpr) -> Option<DirExpr> {
+    let DirExpr::Binary {
+        op: op @ (DirBinaryOp::Eq | DirBinaryOp::Ne),
         lhs,
         rhs,
         ..
@@ -406,14 +406,14 @@ fn canonicalize_sborrow_compare(expr: &HirExpr) -> Option<HirExpr> {
     };
 
     let (cmp_lhs, cmp_rhs, cmp_op) = match (op, sign_test) {
-        (HirBinaryOp::Ne, SignedDiffSignTest::Negative) => (a.clone(), b.clone(), HirBinaryOp::SLt),
-        (HirBinaryOp::Ne, SignedDiffSignTest::Positive) => (b.clone(), a.clone(), HirBinaryOp::SLt),
-        (HirBinaryOp::Eq, SignedDiffSignTest::Positive) => (a.clone(), b.clone(), HirBinaryOp::SLe),
-        (HirBinaryOp::Eq, SignedDiffSignTest::Negative) => (b.clone(), a.clone(), HirBinaryOp::SLe),
+        (DirBinaryOp::Ne, SignedDiffSignTest::Negative) => (a.clone(), b.clone(), DirBinaryOp::SLt),
+        (DirBinaryOp::Ne, SignedDiffSignTest::Positive) => (b.clone(), a.clone(), DirBinaryOp::SLt),
+        (DirBinaryOp::Eq, SignedDiffSignTest::Positive) => (a.clone(), b.clone(), DirBinaryOp::SLe),
+        (DirBinaryOp::Eq, SignedDiffSignTest::Negative) => (b.clone(), a.clone(), DirBinaryOp::SLe),
         _ => return None,
     };
 
-    Some(HirExpr::Binary {
+    Some(DirExpr::Binary {
         op: cmp_op,
         lhs: Box::new(cmp_lhs),
         rhs: Box::new(cmp_rhs),
@@ -421,8 +421,8 @@ fn canonicalize_sborrow_compare(expr: &HirExpr) -> Option<HirExpr> {
     })
 }
 
-fn match_sborrow_call(expr: &HirExpr) -> Option<(&HirExpr, &HirExpr)> {
-    let HirExpr::Call { target, args, .. } = expr else {
+fn match_sborrow_call(expr: &DirExpr) -> Option<(&DirExpr, &DirExpr)> {
+    let DirExpr::Call { target, args, .. } = expr else {
         return None;
     };
     if target != "__sborrow" {
@@ -435,12 +435,12 @@ fn match_sborrow_call(expr: &HirExpr) -> Option<(&HirExpr, &HirExpr)> {
 }
 
 fn match_signed_diff_sign_test(
-    expr: &HirExpr,
-    a: &HirExpr,
-    b: &HirExpr,
+    expr: &DirExpr,
+    a: &DirExpr,
+    b: &DirExpr,
 ) -> Option<SignedDiffSignTest> {
-    let HirExpr::Binary {
-        op: HirBinaryOp::SLt,
+    let DirExpr::Binary {
+        op: DirBinaryOp::SLt,
         lhs,
         rhs,
         ..
@@ -457,16 +457,16 @@ fn match_signed_diff_sign_test(
     None
 }
 
-fn matches_signed_difference(expr: &HirExpr, a: &HirExpr, b: &HirExpr) -> bool {
+fn matches_signed_difference(expr: &DirExpr, a: &DirExpr, b: &DirExpr) -> bool {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         } => lhs.as_ref() == a && rhs.as_ref() == b,
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -475,15 +475,15 @@ fn matches_signed_difference(expr: &HirExpr, a: &HirExpr, b: &HirExpr) -> bool {
     }
 }
 
-fn matches_negated_expr(expr: &HirExpr, inner: &HirExpr) -> bool {
+fn matches_negated_expr(expr: &DirExpr, inner: &DirExpr) -> bool {
     match expr {
-        HirExpr::Unary {
-            op: HirUnaryOp::Neg,
+        DirExpr::Unary {
+            op: DirUnaryOp::Neg,
             expr,
             ..
         } => expr.as_ref() == inner,
-        HirExpr::Binary {
-            op: HirBinaryOp::Mul,
+        DirExpr::Binary {
+            op: DirBinaryOp::Mul,
             lhs,
             rhs,
             ..
@@ -502,34 +502,34 @@ fn is_truthy_condition_type(ty: &NirType) -> bool {
     )
 }
 
-pub fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
+pub fn canonicalize_condition_expr(expr: &DirExpr) -> Option<DirExpr> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Ne | HirBinaryOp::Eq,
+        DirExpr::Binary {
+            op: DirBinaryOp::Ne | DirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => {
             let is_eq = matches!(
                 expr,
-                HirExpr::Binary {
-                    op: HirBinaryOp::Eq,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Eq,
                     ..
                 }
             );
             match lhs.as_ref() {
-                HirExpr::Binary {
-                    op: inner_op @ (HirBinaryOp::Sub | HirBinaryOp::Xor),
+                DirExpr::Binary {
+                    op: inner_op @ (DirBinaryOp::Sub | DirBinaryOp::Xor),
                     lhs: inner_lhs,
                     rhs: inner_rhs,
                     ty: inner_ty,
                 } => {
                     let new_op = if is_eq {
-                        HirBinaryOp::Eq
+                        DirBinaryOp::Eq
                     } else {
-                        HirBinaryOp::Ne
+                        DirBinaryOp::Ne
                     };
-                    return Some(HirExpr::Binary {
+                    return Some(DirExpr::Binary {
                         op: new_op,
                         lhs: inner_lhs.clone(),
                         rhs: inner_rhs.clone(),
@@ -552,9 +552,9 @@ pub fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
-pub fn canonicalize_arm_compound_flag_condition(expr: &HirExpr) -> Option<HirExpr> {
-    let HirExpr::Binary {
-        op: HirBinaryOp::LogicalAnd,
+pub fn canonicalize_arm_compound_flag_condition(expr: &DirExpr) -> Option<DirExpr> {
+    let DirExpr::Binary {
+        op: DirBinaryOp::LogicalAnd,
         lhs,
         rhs,
         ..
@@ -567,8 +567,8 @@ pub fn canonicalize_arm_compound_flag_condition(expr: &HirExpr) -> Option<HirExp
     if let Some((ne_a, ne_b)) = match_ne_comparison(lhs) {
         if let Some((sle_a, sle_b)) = match_sle_comparison(rhs) {
             if (ne_a == sle_a && ne_b == sle_b) || (ne_a == sle_b && ne_b == sle_a) {
-                return Some(HirExpr::Binary {
-                    op: HirBinaryOp::SLt,
+                return Some(DirExpr::Binary {
+                    op: DirBinaryOp::SLt,
                     lhs: Box::new(sle_a.clone()),
                     rhs: Box::new(sle_b.clone()),
                     ty: NirType::Bool,
@@ -579,8 +579,8 @@ pub fn canonicalize_arm_compound_flag_condition(expr: &HirExpr) -> Option<HirExp
     if let Some((ne_a, ne_b)) = match_ne_comparison(rhs) {
         if let Some((sle_a, sle_b)) = match_sle_comparison(lhs) {
             if (ne_a == sle_a && ne_b == sle_b) || (ne_a == sle_b && ne_b == sle_a) {
-                return Some(HirExpr::Binary {
-                    op: HirBinaryOp::SLt,
+                return Some(DirExpr::Binary {
+                    op: DirBinaryOp::SLt,
                     lhs: Box::new(sle_a.clone()),
                     rhs: Box::new(sle_b.clone()),
                     ty: NirType::Bool,
@@ -592,17 +592,17 @@ pub fn canonicalize_arm_compound_flag_condition(expr: &HirExpr) -> Option<HirExp
     None
 }
 
-fn match_ne_comparison<'a>(expr: &'a HirExpr) -> Option<(&'a HirExpr, &'a HirExpr)> {
+fn match_ne_comparison<'a>(expr: &'a DirExpr) -> Option<(&'a DirExpr, &'a DirExpr)> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Ne,
+        DirExpr::Binary {
+            op: DirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } => {
             if is_zero_const(rhs.as_ref()) {
-                if let HirExpr::Binary {
-                    op: HirBinaryOp::Sub,
+                if let DirExpr::Binary {
+                    op: DirBinaryOp::Sub,
                     lhs: inner_lhs,
                     rhs: inner_rhs,
                     ..
@@ -617,16 +617,16 @@ fn match_ne_comparison<'a>(expr: &'a HirExpr) -> Option<(&'a HirExpr, &'a HirExp
     }
 }
 
-fn match_sle_comparison<'a>(expr: &'a HirExpr) -> Option<(&'a HirExpr, &'a HirExpr)> {
+fn match_sle_comparison<'a>(expr: &'a DirExpr) -> Option<(&'a DirExpr, &'a DirExpr)> {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::SLe,
+        DirExpr::Binary {
+            op: DirBinaryOp::SLe,
             lhs,
             rhs,
             ..
         } => Some((lhs.as_ref(), rhs.as_ref())),
-        HirExpr::Binary {
-            op: op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+        DirExpr::Binary {
+            op: op @ (DirBinaryOp::Eq | DirBinaryOp::Ne),
             lhs,
             rhs,
             ..
@@ -638,9 +638,9 @@ fn match_sle_comparison<'a>(expr: &'a HirExpr) -> Option<(&'a HirExpr, &'a HirEx
             } else {
                 return None;
             };
-            if *op == HirBinaryOp::Eq && sign_test == SignedDiffSignTest::Positive {
+            if *op == DirBinaryOp::Eq && sign_test == SignedDiffSignTest::Positive {
                 Some((a, b))
-            } else if *op == HirBinaryOp::Eq && sign_test == SignedDiffSignTest::Negative {
+            } else if *op == DirBinaryOp::Eq && sign_test == SignedDiffSignTest::Negative {
                 Some((b, a))
             } else {
                 None

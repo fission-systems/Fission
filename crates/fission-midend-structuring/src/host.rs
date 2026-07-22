@@ -14,7 +14,7 @@
 //! | Telemetry | bump helpers |
 //! | Diagnostics | optional traces |
 //!
-//! Pure helpers that only touch `HirStmt`/`HirExpr` do **not** use this trait.
+//! Pure helpers that only touch `DirStmt`/`DirExpr` do **not** use this trait.
 
 use crate::cfg_analysis::{CfgFactCache, DomTree, SccAnalysis};
 use crate::guarded_tail::types::{
@@ -27,7 +27,7 @@ use crate::linear_types::{
     LinearBodyRejectReason, LinearExit, LoweredTerminator,
 };
 use crate::loop_analysis::LoopBody;
-use fission_midend_core::ir::{HirExpr, HirStmt, MlilPreviewError, MlilPreviewOptions};
+use fission_midend_core::ir::{DirExpr, DirStmt, MlilPreviewError, MlilPreviewOptions};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -85,7 +85,7 @@ pub trait StructuringHost {
     fn pcode_block_idx(&self, idx: usize) -> usize;
 
     // ── Lowering hooks (HIR-only surface; p-code stays in the host) ────────
-    fn lower_block_stmts(&mut self, block_idx: usize) -> Result<Vec<HirStmt>, MlilPreviewError>;
+    fn lower_block_stmts(&mut self, block_idx: usize) -> Result<Vec<DirStmt>, MlilPreviewError>;
     fn lower_block_terminator(
         &mut self,
         block_idx: usize,
@@ -94,18 +94,18 @@ pub trait StructuringHost {
         &mut self,
         pred_idx: usize,
         join_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError>;
+    ) -> Result<Option<DirExpr>, MlilPreviewError>;
     fn lower_linear_body(
         &mut self,
         start_idx: usize,
         exit: LinearExit,
-    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError>;
+    ) -> Result<Option<(Vec<DirStmt>, usize)>, MlilPreviewError>;
     fn lower_linear_body_with_budget(
         &mut self,
         start_idx: usize,
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError>;
+    ) -> Result<Option<(Vec<DirStmt>, usize)>, MlilPreviewError>;
     fn linear_exit(
         &mut self,
         idx: usize,
@@ -180,7 +180,7 @@ pub trait StructuringHost {
     /// `cleanup_redundant_labels`/`collect_referenced_labels` treat any
     /// label with zero referencing `Goto` as dead and drop it -- correct
     /// for ordinary code, wrong here, since the label is a real entry point
-    /// that just has no `HirStmt::Goto` anywhere pointing at it. Callers
+    /// that just has no `DirStmt::Goto` anywhere pointing at it. Callers
     /// that clean up labels must union this set into their "referenced"
     /// set rather than relying on `collect_referenced_labels` alone.
     fn lsda_landing_pad_labels(&self) -> HashSet<String>;
@@ -258,32 +258,32 @@ pub trait StructuringHost {
     /// Free-fn pipeline entry (implemented by calling midend free owners).
     fn try_build_guarded_tail_trial(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         idx: usize,
         referenced: &HashMap<String, usize>,
     ) -> Option<Result<GuardedTailTrial, crate::guarded_tail::types::GuardedTailWitnessRejection>>;
     fn verify_guarded_tail_trial(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         idx: usize,
         trial: &GuardedTailTrial,
     ) -> GuardedTailVerification;
     fn build_guarded_tail_execution_plan(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         idx: usize,
         trial: &GuardedTailTrial,
         verification: &GuardedTailVerification,
     ) -> Result<GuardedTailExecutionPlan, GuardedTailExecutionRejection>;
     fn execute_guarded_tail_plan(
         &mut self,
-        body: &mut Vec<HirStmt>,
+        body: &mut Vec<DirStmt>,
         idx: usize,
         trial: GuardedTailTrial,
         plan: GuardedTailExecutionPlan,
-        cond: HirExpr,
+        cond: DirExpr,
     );
-    fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]);
+    fn discover_guarded_tail_candidates_in_body(&mut self, body: &[DirStmt]);
     fn mark_promotion_shape_rejection(&mut self, reason: PromotionShapeRejection);
     fn mark_promotion_gate_rejection(&mut self, reason: PromotionGateRejection);
     fn mark_guarded_tail_execution_rejection(&mut self, reason: GuardedTailExecutionRejection);
@@ -302,7 +302,7 @@ pub trait StructuringHost {
     );
     fn resolve_terminal_join_target(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         target_label: &str,
         referenced: &HashMap<String, usize>,
@@ -315,7 +315,7 @@ pub trait StructuringHost {
         legality_reason: crate::regions::BlockGraphLegalityReason,
     );
     fn guarded_tail_function_address(&self) -> u64;
-    fn guarded_tail_trace_emit_snapshot(&self, prefix: &str, stmts: &[HirStmt], limit: usize);
+    fn guarded_tail_trace_emit_snapshot(&self, prefix: &str, stmts: &[DirStmt], limit: usize);
     fn bump_structuring_counter(
         &mut self,
         counter: crate::guarded_tail::bodies::StructuringCounter,
@@ -328,7 +328,7 @@ pub trait StructuringHost {
     ) -> String;
     fn find_earliest_owned_join_label_with_diag(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
@@ -336,9 +336,9 @@ pub trait StructuringHost {
     ) -> Option<(String, usize)>;
 
     /// Residual: preview callee-analysis summary for unsafe suffix call reject.
-    fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &HirStmt) -> Option<String>;
+    fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &DirStmt) -> Option<String>;
     /// Residual: optional GT-TRACE provenance dump for unknown suffix calls.
-    fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &HirStmt);
+    fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &DirStmt);
     /// Residual: look up NIR call-effect summary by callee name.
     fn call_effect_summary_for_target(
         &self,
@@ -361,8 +361,8 @@ pub trait StructuringHost {
     fn emit_unsupported_control_surface(
         &mut self,
         evidence: fission_midend_core::ir::UnsupportedControlEvidence,
-        target_expr: Option<HirExpr>,
-    ) -> HirStmt;
+        target_expr: Option<DirExpr>,
+    ) -> DirStmt;
 
     // ── Derived CFG helpers ────────────────────────────────────────────────
     fn analyze_cfg_scc(&self) -> SccAnalysis {

@@ -18,7 +18,6 @@ use fission_decompiler::pipeline::rust_sleigh::{
 };
 use fission_decompiler::{take_last_dir_snapshot, take_last_hir_function_snapshot};
 use fission_loader::loader::LoadedBinary;
-use fission_midend_core::ir::Hir;
 
 use fission_dir::diff::{VerifyOutcome, default_samples, diff_dir_hir};
 
@@ -36,10 +35,9 @@ fn max2_dir_and_hir_are_equivalent_on_a_real_compiled_function() {
     let dir = take_last_dir_snapshot().expect("DIR snapshot captured during decompile");
     let hir_func =
         take_last_hir_function_snapshot().expect("HIR function snapshot captured during decompile");
-    let hir = Hir(hir_func.body.clone());
 
     let samples = default_samples(hir_func.params.len());
-    let outcome = diff_dir_hir(&dir, &hir, &hir_func.params, &hir_func.locals, &samples);
+    let outcome = diff_dir_hir(&dir, &hir_func, &samples);
 
     match outcome {
         VerifyOutcome::Equivalent { checked } => {

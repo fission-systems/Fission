@@ -48,13 +48,13 @@ use fission_midend_core::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
     fn_pass, gated_followup, group,
 };
-use fission_midend_core::ir::HirFunction;
+use fission_midend_core::ir::DirFunction;
 use std::time::Instant;
 
 struct CanonicalStagePass {
     stage: &'static str,
     concept: GhidraActionConcept,
-    run: fn(&mut HirFunction, bool, bool),
+    run: fn(&mut DirFunction, bool, bool),
 }
 
 impl Pass for CanonicalStagePass {
@@ -75,7 +75,7 @@ impl Pass for CanonicalStagePass {
 fn stage_pass(
     stage: &'static str,
     concept: GhidraActionConcept,
-    run: fn(&mut HirFunction, bool, bool),
+    run: fn(&mut DirFunction, bool, bool),
 ) -> Box<dyn Pass> {
     Box::new(CanonicalStagePass {
         stage,
@@ -609,7 +609,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
         .group(group("cleanup", concept).pass(stage_pass("cleanup", concept, run_stage_cleanup)))
 }
 
-pub fn run_normalize_pipeline(func: &mut HirFunction, diag: bool, perf: bool) {
+pub fn run_normalize_pipeline(func: &mut DirFunction, diag: bool, perf: bool) {
     let total_start = Instant::now();
     wave_stats::reset_normalize_wave_stats();
 

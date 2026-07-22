@@ -7,7 +7,7 @@ mod tests {
     use super::super::super::cleanup::{has_orphan_goto_labels, orphan_goto_labels};
     use crate::PcodeFunction;
     use crate::midend::PreviewBuilder;
-    use crate::midend::ir::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
+    use crate::midend::ir::{DirStmt, MlilPreviewOptions, StructuringEngineKind};
     use fission_midend_structuring::try_repair_orphan_gotos;
 
     fn test_options() -> MlilPreviewOptions {
@@ -47,7 +47,7 @@ mod tests {
         let dummy = PcodeFunction { blocks: Vec::new() };
         let options = test_options();
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
-        let body = vec![HirStmt::Goto("block_deadbeef".to_string())];
+        let body = vec![DirStmt::Goto("block_deadbeef".to_string())];
         assert!(orphan_goto_labels(&body).contains(&"block_deadbeef".to_string()));
         assert!(try_repair_orphan_gotos(&mut builder, body).is_none());
     }
@@ -58,8 +58,8 @@ mod tests {
         let options = test_options();
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
         let body = vec![
-            HirStmt::Label("block_100".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Label("block_100".to_string()),
+            DirStmt::Return(None),
         ];
         assert!(!has_orphan_goto_labels(&body));
         let repaired = try_repair_orphan_gotos(&mut builder, body.clone()).expect("noop repair");

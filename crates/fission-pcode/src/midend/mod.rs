@@ -85,6 +85,19 @@ pub(crate) use crate::render::{
     print_hir_function_with_profile, print_stmt, print_type, recover_global_symbol_accesses,
     render_hir_function_with_global_decls, render_layered_pseudocode,
 };
+
+/// Builder-side (DIR) counterpart to [`print_expr`] -- builder embeds
+/// rendered text of `DirExpr` values into diagnostics and evidence/summary
+/// string fields (target-expression descriptions, dispatcher proof units,
+/// `[DIAG]` traces), not into the AST itself, so reusing the real printer
+/// via [`ir::dir_expr_to_hir_expr`] is correct and avoids duplicating
+/// printer.rs's rendering logic for DIR. Not on any hot path -- every call
+/// site is diagnostic-ish or a one-shot summary field, not per-node
+/// expression evaluation.
+pub(crate) fn print_dir_expr(expr: &ir::DirExpr) -> String {
+    print_expr(&ir::dir_expr_to_hir_expr(expr.clone()))
+}
+
 pub use fission_core::CallingConvention;
 
 pub use self::abi::infer_entry_register_param_arity;

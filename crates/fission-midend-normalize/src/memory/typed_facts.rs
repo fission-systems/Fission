@@ -79,7 +79,7 @@ fn merge_field_ty(current: &NirType, candidate: &NirType) -> NirType {
     }
 }
 
-fn infer_storage_class(binding: &NirBinding) -> StorageClass {
+fn infer_storage_class(binding: &DirBinding) -> StorageClass {
     match binding.origin {
         Some(NirBindingOrigin::ParamIndex(_)) => StorageClass::Param,
         Some(
@@ -101,7 +101,7 @@ fn stable_name_root(name: &str) -> ObjectRootId {
     hash.saturating_neg().saturating_sub(1)
 }
 
-fn object_root_id(binding: &NirBinding) -> ObjectRootId {
+fn object_root_id(binding: &DirBinding) -> ObjectRootId {
     match binding.origin {
         Some(NirBindingOrigin::ParamIndex(index)) => 1_000_000 + index as i64,
         Some(NirBindingOrigin::StackOffset(offset))
@@ -204,7 +204,7 @@ fn infer_struct_name_from_offsets(
     }
 }
 
-fn allows_ambient_windows_struct_inference(func: &HirFunction) -> bool {
+fn allows_ambient_windows_struct_inference(func: &DirFunction) -> bool {
     func.is_64bit && func.calling_convention == CallingConvention::WindowsX64
 }
 
@@ -225,7 +225,7 @@ pub(super) fn should_infer_aggregate(accesses: &BTreeMap<u32, TypedAccessFacts>)
 }
 
 pub(super) fn collect_typed_fact_inventory(
-    func: &HirFunction,
+    func: &DirFunction,
     record_stats: bool,
 ) -> TypedFactInventory {
     let structures = WindowsStructures::try_new().ok();
@@ -244,7 +244,7 @@ pub(super) fn collect_typed_fact_inventory(
     let mut inventory = TypedFactInventory::default();
 
     for access in collect_partitioned_memory_accesses(&func.body) {
-        let HirExpr::Var(name) = &access.base else {
+        let DirExpr::Var(name) = &access.base else {
             continue;
         };
         let Some(binding) = tracked.get(name.as_str()) else {
@@ -452,10 +452,10 @@ mod tests {
 
     #[test]
     fn typed_fact_inventory_keeps_escaped_root_coarse() {
-        let func = HirFunction {
+        let func = DirFunction {
             name: "escaped".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
                 surface_type_name: None,
@@ -465,9 +465,9 @@ mod tests {
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![HirStmt::Expr(HirExpr::Load {
-                ptr: Box::new(HirExpr::PtrOffset {
-                    base: Box::new(HirExpr::Var("param_1".to_string())),
+            body: vec![DirStmt::Expr(DirExpr::Load {
+                ptr: Box::new(DirExpr::PtrOffset {
+                    base: Box::new(DirExpr::Var("param_1".to_string())),
                     offset: 4,
                 }),
                 ty: NirType::Int {
@@ -484,10 +484,10 @@ mod tests {
 
     #[test]
     fn typed_fact_inventory_prefers_explicit_surface_type() {
-        let func = HirFunction {
+        let func = DirFunction {
             name: "rect".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
                 surface_type_name: Some("LPRECT".to_string()),
@@ -498,9 +498,9 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 0,
                     }),
                     ty: NirType::Int {
@@ -508,9 +508,9 @@ mod tests {
                         signed: true,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 8,
                     }),
                     ty: NirType::Int {
@@ -529,10 +529,10 @@ mod tests {
 
     #[test]
     fn typed_fact_inventory_does_not_apply_ambient_windows_shapes_to_aarch64() {
-        let func = HirFunction {
+        let func = DirFunction {
             name: "anonymous_aarch64_shape".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![NirBinding {
+            params: vec![DirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
                 surface_type_name: None,
@@ -540,9 +540,9 @@ mod tests {
                 initializer: None,
             }],
             body: vec![
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 0,
                     }),
                     ty: NirType::Int {
@@ -550,9 +550,9 @@ mod tests {
                         signed: false,
                     },
                 }),
-                HirStmt::Expr(HirExpr::Load {
-                    ptr: Box::new(HirExpr::PtrOffset {
-                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                DirStmt::Expr(DirExpr::Load {
+                    ptr: Box::new(DirExpr::PtrOffset {
+                        base: Box::new(DirExpr::Var("param_1".to_string())),
                         offset: 12,
                     }),
                     ty: NirType::Int {

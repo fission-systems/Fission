@@ -36,23 +36,23 @@ fn preview_prints_direct_srem_as_mod() {
 
 #[test]
 fn signed_mod_idiom_recognition_collapses_to_percent() {
-    let base = HirExpr::Var("param_1".to_string());
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Sub,
+    let base = DirExpr::Var("param_1".to_string());
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Sub,
         lhs: Box::new(base.clone()),
-        rhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Shl,
-            lhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Sar,
-                lhs: Box::new(HirExpr::Binary {
-                    op: HirBinaryOp::Add,
+        rhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Shl,
+            lhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Sar,
+                lhs: Box::new(DirExpr::Binary {
+                    op: DirBinaryOp::Add,
                     lhs: Box::new(base.clone()),
-                    rhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::And,
-                        lhs: Box::new(HirExpr::Binary {
-                            op: HirBinaryOp::Shr,
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::And,
+                        lhs: Box::new(DirExpr::Binary {
+                            op: DirBinaryOp::Shr,
                             lhs: Box::new(base.clone()),
-                            rhs: Box::new(HirExpr::Const(
+                            rhs: Box::new(DirExpr::Const(
                                 63,
                                 NirType::Int {
                                     bits: 64,
@@ -64,7 +64,7 @@ fn signed_mod_idiom_recognition_collapses_to_percent() {
                                 signed: false,
                             },
                         }),
-                        rhs: Box::new(HirExpr::Const(
+                        rhs: Box::new(DirExpr::Const(
                             1,
                             NirType::Int {
                                 bits: 64,
@@ -81,7 +81,7 @@ fn signed_mod_idiom_recognition_collapses_to_percent() {
                         signed: true,
                     },
                 }),
-                rhs: Box::new(HirExpr::Const(
+                rhs: Box::new(DirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 64,
@@ -93,7 +93,7 @@ fn signed_mod_idiom_recognition_collapses_to_percent() {
                     signed: true,
                 },
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 64,
@@ -110,31 +110,31 @@ fn signed_mod_idiom_recognition_collapses_to_percent() {
             signed: true,
         },
     };
-    let mut stmt = HirStmt::Return(Some(expr));
+    let mut stmt = DirStmt::Return(Some(expr));
     normalize_stmt(&mut stmt);
-    let rendered = print_stmt(&stmt);
+    let rendered = print_dir_stmt(&stmt);
     assert_eq!(rendered, "return param_1 % 2;");
 }
 
 #[test]
 fn signed_mod_idiom_with_invalid_shift_does_not_panic() {
-    let base = HirExpr::Var("param_1".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Sub,
+    let base = DirExpr::Var("param_1".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Sub,
         lhs: Box::new(base.clone()),
-        rhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Shl,
-            lhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Sar,
-                lhs: Box::new(HirExpr::Binary {
-                    op: HirBinaryOp::Add,
+        rhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Shl,
+            lhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Sar,
+                lhs: Box::new(DirExpr::Binary {
+                    op: DirBinaryOp::Add,
                     lhs: Box::new(base.clone()),
-                    rhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::And,
-                        lhs: Box::new(HirExpr::Binary {
-                            op: HirBinaryOp::Shr,
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::And,
+                        lhs: Box::new(DirExpr::Binary {
+                            op: DirBinaryOp::Shr,
                             lhs: Box::new(base.clone()),
-                            rhs: Box::new(HirExpr::Const(
+                            rhs: Box::new(DirExpr::Const(
                                 63,
                                 NirType::Int {
                                     bits: 64,
@@ -146,7 +146,7 @@ fn signed_mod_idiom_with_invalid_shift_does_not_panic() {
                                 signed: false,
                             },
                         }),
-                        rhs: Box::new(HirExpr::Const(
+                        rhs: Box::new(DirExpr::Const(
                             0,
                             NirType::Int {
                                 bits: 64,
@@ -163,7 +163,7 @@ fn signed_mod_idiom_with_invalid_shift_does_not_panic() {
                         signed: true,
                     },
                 }),
-                rhs: Box::new(HirExpr::Const(
+                rhs: Box::new(DirExpr::Const(
                     -1,
                     NirType::Int {
                         bits: 64,
@@ -175,7 +175,7 @@ fn signed_mod_idiom_with_invalid_shift_does_not_panic() {
                     signed: true,
                 },
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 -1,
                 NirType::Int {
                     bits: 64,
@@ -193,15 +193,15 @@ fn signed_mod_idiom_with_invalid_shift_does_not_panic() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert!(print_stmt(&stmt).contains("<< -1"));
+    assert!(print_dir_stmt(&stmt).contains("<< -1"));
 }
 
 #[test]
 fn unsigned_mod_mask_recognition_collapses_to_percent() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::And,
-        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
-        rhs: Box::new(HirExpr::Const(
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::And,
+        lhs: Box::new(DirExpr::Var("uVar1".to_string())),
+        rhs: Box::new(DirExpr::Const(
             3,
             NirType::Int {
                 bits: 32,
@@ -214,15 +214,15 @@ fn unsigned_mod_mask_recognition_collapses_to_percent() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return uVar1 % 4;");
+    assert_eq!(print_dir_stmt(&stmt), "return uVar1 % 4;");
 }
 
 #[test]
 fn unsigned_div_shift_recognition_collapses_to_div() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Shr,
-        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
-        rhs: Box::new(HirExpr::Const(
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Shr,
+        lhs: Box::new(DirExpr::Var("uVar1".to_string())),
+        rhs: Box::new(DirExpr::Const(
             2,
             NirType::Int {
                 bits: 32,
@@ -235,15 +235,15 @@ fn unsigned_div_shift_recognition_collapses_to_div() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return uVar1 / 4;");
+    assert_eq!(print_dir_stmt(&stmt), "return uVar1 / 4;");
 }
 
 #[test]
 fn arithmetic_identity_removes_div_by_one() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Div,
-        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
-        rhs: Box::new(HirExpr::Const(
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Div,
+        lhs: Box::new(DirExpr::Var("uVar1".to_string())),
+        rhs: Box::new(DirExpr::Const(
             1,
             NirType::Int {
                 bits: 32,
@@ -256,15 +256,15 @@ fn arithmetic_identity_removes_div_by_one() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return uVar1;");
+    assert_eq!(print_dir_stmt(&stmt), "return uVar1;");
 }
 
 #[test]
 fn arithmetic_identity_collapses_mod_by_one_to_zero() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Mod,
-        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
-        rhs: Box::new(HirExpr::Const(
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Mod,
+        lhs: Box::new(DirExpr::Var("uVar1".to_string())),
+        rhs: Box::new(DirExpr::Const(
             1,
             NirType::Int {
                 bits: 32,
@@ -277,23 +277,23 @@ fn arithmetic_identity_collapses_mod_by_one_to_zero() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return 0;");
+    assert_eq!(print_dir_stmt(&stmt), "return 0;");
 }
 
 #[test]
 fn signed_div_idiom_recognition_collapses_to_slash() {
-    let base = HirExpr::Var("param_1".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Sar,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Add,
+    let base = DirExpr::Var("param_1".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Sar,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs: Box::new(base.clone()),
-            rhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::And,
-                lhs: Box::new(HirExpr::Binary {
-                    op: HirBinaryOp::Shr,
+            rhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::And,
+                lhs: Box::new(DirExpr::Binary {
+                    op: DirBinaryOp::Shr,
                     lhs: Box::new(base.clone()),
-                    rhs: Box::new(HirExpr::Const(
+                    rhs: Box::new(DirExpr::Const(
                         63,
                         NirType::Int {
                             bits: 64,
@@ -305,7 +305,7 @@ fn signed_div_idiom_recognition_collapses_to_slash() {
                         signed: false,
                     },
                 }),
-                rhs: Box::new(HirExpr::Const(
+                rhs: Box::new(DirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 64,
@@ -322,7 +322,7 @@ fn signed_div_idiom_recognition_collapses_to_slash() {
                 signed: true,
             },
         }),
-        rhs: Box::new(HirExpr::Const(
+        rhs: Box::new(DirExpr::Const(
             1,
             NirType::Int {
                 bits: 64,
@@ -335,20 +335,20 @@ fn signed_div_idiom_recognition_collapses_to_slash() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return param_1 / 2;");
+    assert_eq!(print_dir_stmt(&stmt), "return param_1 / 2;");
 }
 
 #[test]
 fn high_part_extract_canonicalizes_to_shift_and_cast() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Cast {
+    let mut stmt = DirStmt::Return(Some(DirExpr::Cast {
         ty: NirType::Int {
             bits: 32,
             signed: false,
         },
-        expr: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Shr,
-            lhs: Box::new(HirExpr::Var("wide".to_string())),
-            rhs: Box::new(HirExpr::Const(
+        expr: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Shr,
+            lhs: Box::new(DirExpr::Var("wide".to_string())),
+            rhs: Box::new(DirExpr::Const(
                 32,
                 NirType::Int {
                     bits: 64,
@@ -362,25 +362,25 @@ fn high_part_extract_canonicalizes_to_shift_and_cast() {
         }),
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (uint)(wide >> 32);");
+    assert_eq!(print_dir_stmt(&stmt), "return (uint)(wide >> 32);");
 }
 
 #[test]
 fn wide_recombine_from_shifted_hi_and_cast_lo_collapses_to_source() {
-    let source = HirExpr::Var("wide".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Or,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Shl,
-            lhs: Box::new(HirExpr::Cast {
+    let source = DirExpr::Var("wide".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Or,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Shl,
+            lhs: Box::new(DirExpr::Cast {
                 ty: NirType::Int {
                     bits: 32,
                     signed: false,
                 },
-                expr: Box::new(HirExpr::Binary {
-                    op: HirBinaryOp::Shr,
+                expr: Box::new(DirExpr::Binary {
+                    op: DirBinaryOp::Shr,
                     lhs: Box::new(source.clone()),
-                    rhs: Box::new(HirExpr::Const(
+                    rhs: Box::new(DirExpr::Const(
                         32,
                         NirType::Int {
                             bits: 64,
@@ -393,7 +393,7 @@ fn wide_recombine_from_shifted_hi_and_cast_lo_collapses_to_source() {
                     },
                 }),
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 32,
                 NirType::Int {
                     bits: 64,
@@ -405,7 +405,7 @@ fn wide_recombine_from_shifted_hi_and_cast_lo_collapses_to_source() {
                 signed: false,
             },
         }),
-        rhs: Box::new(HirExpr::Cast {
+        rhs: Box::new(DirExpr::Cast {
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
@@ -418,25 +418,25 @@ fn wide_recombine_from_shifted_hi_and_cast_lo_collapses_to_source() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (ulonglong)wide;");
+    assert_eq!(print_dir_stmt(&stmt), "return (ulonglong)wide;");
 }
 
 #[test]
 fn wide_recombine_from_shifted_hi_and_masked_lo_collapses_to_source() {
-    let source = HirExpr::Var("wide".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Or,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Shl,
-            lhs: Box::new(HirExpr::Cast {
+    let source = DirExpr::Var("wide".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Or,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Shl,
+            lhs: Box::new(DirExpr::Cast {
                 ty: NirType::Int {
                     bits: 32,
                     signed: false,
                 },
-                expr: Box::new(HirExpr::Binary {
-                    op: HirBinaryOp::Shr,
+                expr: Box::new(DirExpr::Binary {
+                    op: DirBinaryOp::Shr,
                     lhs: Box::new(source.clone()),
-                    rhs: Box::new(HirExpr::Const(
+                    rhs: Box::new(DirExpr::Const(
                         32,
                         NirType::Int {
                             bits: 64,
@@ -449,7 +449,7 @@ fn wide_recombine_from_shifted_hi_and_masked_lo_collapses_to_source() {
                     },
                 }),
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 32,
                 NirType::Int {
                     bits: 64,
@@ -461,10 +461,10 @@ fn wide_recombine_from_shifted_hi_and_masked_lo_collapses_to_source() {
                 signed: false,
             },
         }),
-        rhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::And,
+        rhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs: Box::new(source.clone()),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 0xffff_ffff,
                 NirType::Int {
                     bits: 64,
@@ -482,79 +482,79 @@ fn wide_recombine_from_shifted_hi_and_masked_lo_collapses_to_source() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (ulonglong)wide;");
+    assert_eq!(print_dir_stmt(&stmt), "return (ulonglong)wide;");
 }
 
 #[test]
 fn cast_canonicalizer_removes_duplicate_same_type_cast() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Cast {
+    let mut stmt = DirStmt::Return(Some(DirExpr::Cast {
         ty: NirType::Int {
             bits: 32,
             signed: false,
         },
-        expr: Box::new(HirExpr::Cast {
+        expr: Box::new(DirExpr::Cast {
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
             },
-            expr: Box::new(HirExpr::Var("uVar1".to_string())),
+            expr: Box::new(DirExpr::Var("uVar1".to_string())),
         }),
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (uint)uVar1;");
+    assert_eq!(print_dir_stmt(&stmt), "return (uint)uVar1;");
 }
 
 #[test]
 fn cast_canonicalizer_drops_redundant_widen_before_narrow() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Cast {
+    let mut stmt = DirStmt::Return(Some(DirExpr::Cast {
         ty: NirType::Int {
             bits: 64,
             signed: true,
         },
-        expr: Box::new(HirExpr::Cast {
+        expr: Box::new(DirExpr::Cast {
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
             },
-            expr: Box::new(HirExpr::Cast {
+            expr: Box::new(DirExpr::Cast {
                 ty: NirType::Int {
                     bits: 64,
                     signed: false,
                 },
-                expr: Box::new(HirExpr::Var("var1".to_string())),
+                expr: Box::new(DirExpr::Var("var1".to_string())),
             }),
         }),
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (longlong)(uint)var1;");
+    assert_eq!(print_dir_stmt(&stmt), "return (longlong)(uint)var1;");
 }
 
 #[test]
 fn cast_canonicalizer_preserves_sign_extension_chain() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Cast {
+    let mut stmt = DirStmt::Return(Some(DirExpr::Cast {
         ty: NirType::Int {
             bits: 64,
             signed: true,
         },
-        expr: Box::new(HirExpr::Cast {
+        expr: Box::new(DirExpr::Cast {
             ty: NirType::Int {
                 bits: 32,
                 signed: true,
             },
-            expr: Box::new(HirExpr::Var("iVar1".to_string())),
+            expr: Box::new(DirExpr::Var("iVar1".to_string())),
         }),
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (longlong)(int)iVar1;");
+    assert_eq!(print_dir_stmt(&stmt), "return (longlong)(int)iVar1;");
 }
 
 #[test]
 fn condition_canonicalizer_turns_nonzero_compare_into_truthy_value() {
-    let mut stmt = HirStmt::If {
-        cond: HirExpr::Binary {
-            op: HirBinaryOp::Ne,
-            lhs: Box::new(HirExpr::Var("flag".to_string())),
-            rhs: Box::new(HirExpr::Const(
+    let mut stmt = DirStmt::If {
+        cond: DirExpr::Binary {
+            op: DirBinaryOp::Ne,
+            lhs: Box::new(DirExpr::Var("flag".to_string())),
+            rhs: Box::new(DirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
@@ -563,7 +563,7 @@ fn condition_canonicalizer_turns_nonzero_compare_into_truthy_value() {
             )),
             ty: NirType::Bool,
         },
-        then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+        then_body: vec![DirStmt::Return(Some(DirExpr::Const(
             1,
             NirType::Int {
                 bits: 32,
@@ -574,39 +574,39 @@ fn condition_canonicalizer_turns_nonzero_compare_into_truthy_value() {
     };
     normalize_stmt(&mut stmt);
     match stmt {
-        HirStmt::If { cond, .. } => assert_eq!(print_expr(&cond), "flag"),
+        DirStmt::If { cond, .. } => assert_eq!(print_dir_expr(&cond), "flag"),
         _ => panic!("expected if statement"),
     }
 }
 
 #[test]
 fn printer_uses_precedence_aware_parentheses() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::LogicalOr,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
-            lhs: Box::new(HirExpr::Var("a".to_string())),
-            rhs: Box::new(HirExpr::Var("b".to_string())),
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::LogicalOr,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
+            lhs: Box::new(DirExpr::Var("a".to_string())),
+            rhs: Box::new(DirExpr::Var("b".to_string())),
             ty: NirType::Bool,
         }),
-        rhs: Box::new(HirExpr::Unary {
-            op: HirUnaryOp::Not,
-            expr: Box::new(HirExpr::Var("c".to_string())),
+        rhs: Box::new(DirExpr::Unary {
+            op: DirUnaryOp::Not,
+            expr: Box::new(DirExpr::Var("c".to_string())),
             ty: NirType::Bool,
         }),
         ty: NirType::Bool,
     };
-    assert_eq!(print_expr(&expr), "a && b || !c");
+    assert_eq!(print_dir_expr(&expr), "a && b || !c");
 }
 
 #[test]
 fn printer_preserves_needed_parentheses_for_mul_over_add() {
-    let expr = HirExpr::Binary {
-        op: HirBinaryOp::Mul,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Add,
-            lhs: Box::new(HirExpr::Var("x".to_string())),
-            rhs: Box::new(HirExpr::Const(
+    let expr = DirExpr::Binary {
+        op: DirBinaryOp::Mul,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Add,
+            lhs: Box::new(DirExpr::Var("x".to_string())),
+            rhs: Box::new(DirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 32,
@@ -618,26 +618,26 @@ fn printer_preserves_needed_parentheses_for_mul_over_add() {
                 signed: true,
             },
         }),
-        rhs: Box::new(HirExpr::Var("y".to_string())),
+        rhs: Box::new(DirExpr::Var("y".to_string())),
         ty: NirType::Int {
             bits: 32,
             signed: true,
         },
     };
-    assert_eq!(print_expr(&expr), "(x + 1) * y");
+    assert_eq!(print_dir_expr(&expr), "(x + 1) * y");
 }
 
 #[test]
 fn normalize_bool_compare_to_zero() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Ne,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
-            lhs: Box::new(HirExpr::Var("flag_a".to_string())),
-            rhs: Box::new(HirExpr::Var("flag_b".to_string())),
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Ne,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
+            lhs: Box::new(DirExpr::Var("flag_a".to_string())),
+            rhs: Box::new(DirExpr::Var("flag_b".to_string())),
             ty: NirType::Bool,
         }),
-        rhs: Box::new(HirExpr::Const(
+        rhs: Box::new(DirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -647,15 +647,15 @@ fn normalize_bool_compare_to_zero() {
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return flag_a && flag_b;");
+    assert_eq!(print_dir_stmt(&stmt), "return flag_a && flag_b;");
 }
 
 #[test]
 fn normalize_trivial_integer_identities() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("param_1".to_string())),
-        rhs: Box::new(HirExpr::Const(
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("param_1".to_string())),
+        rhs: Box::new(DirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -668,21 +668,21 @@ fn normalize_trivial_integer_identities() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return param_1;");
+    assert_eq!(print_dir_stmt(&stmt), "return param_1;");
 }
 
 #[test]
 fn normalize_full_mask_and_wrapper() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::And,
-        lhs: Box::new(HirExpr::Cast {
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::And,
+        lhs: Box::new(DirExpr::Cast {
             ty: NirType::Int {
                 bits: 16,
                 signed: false,
             },
-            expr: Box::new(HirExpr::Var("uVar1".to_string())),
+            expr: Box::new(DirExpr::Var("uVar1".to_string())),
         }),
-        rhs: Box::new(HirExpr::Const(
+        rhs: Box::new(DirExpr::Const(
             0xffff,
             NirType::Int {
                 bits: 32,
@@ -695,17 +695,17 @@ fn normalize_full_mask_and_wrapper() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (ushort)uVar1;");
+    assert_eq!(print_dir_stmt(&stmt), "return (ushort)uVar1;");
 }
 
 #[test]
 fn flag_intrinsics_zero_fold_to_false() {
     for target in ["__carry", "__scarry", "__sborrow"] {
-        let mut stmt = HirStmt::Return(Some(HirExpr::Call {
+        let mut stmt = DirStmt::Return(Some(DirExpr::Call {
             target: target.to_string(),
             args: vec![
-                HirExpr::Var("x".to_string()),
-                HirExpr::Const(
+                DirExpr::Var("x".to_string()),
+                DirExpr::Const(
                     0,
                     NirType::Int {
                         bits: 32,
@@ -716,17 +716,17 @@ fn flag_intrinsics_zero_fold_to_false() {
             ty: NirType::Bool,
         }));
         normalize_stmt(&mut stmt);
-        assert_eq!(print_stmt(&stmt), "return 0;");
+        assert_eq!(print_dir_stmt(&stmt), "return 0;");
     }
 }
 
 #[test]
 fn carry_intrinsic_constant_canonicalizes_to_unsigned_compare() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Call {
+    let mut stmt = DirStmt::Return(Some(DirExpr::Call {
         target: "__carry".to_string(),
         args: vec![
-            HirExpr::Var("uVar1".to_string()),
-            HirExpr::Const(
+            DirExpr::Var("uVar1".to_string()),
+            DirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 32,
@@ -737,24 +737,24 @@ fn carry_intrinsic_constant_canonicalizes_to_unsigned_compare() {
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return 4294967292 <= uVar1;");
+    assert_eq!(print_dir_stmt(&stmt), "return 4294967292 <= uVar1;");
 }
 
 #[test]
 fn sborrow_compare_canonicalizes_to_signed_less_than() {
-    let a = HirExpr::Var("a".to_string());
-    let b = HirExpr::Var("b".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Ne,
-        lhs: Box::new(HirExpr::Call {
+    let a = DirExpr::Var("a".to_string());
+    let b = DirExpr::Var("b".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Ne,
+        lhs: Box::new(DirExpr::Call {
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
         }),
-        rhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::SLt,
-            lhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Sub,
+        rhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::SLt,
+            lhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Sub,
                 lhs: Box::new(a.clone()),
                 rhs: Box::new(b.clone()),
                 ty: NirType::Int {
@@ -762,7 +762,7 @@ fn sborrow_compare_canonicalizes_to_signed_less_than() {
                     signed: true,
                 },
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
@@ -774,31 +774,31 @@ fn sborrow_compare_canonicalizes_to_signed_less_than() {
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return a < b;");
+    assert_eq!(print_dir_stmt(&stmt), "return a < b;");
 }
 
 #[test]
 fn sborrow_compare_canonicalizes_to_signed_less_equal() {
-    let a = HirExpr::Var("a".to_string());
-    let b = HirExpr::Var("b".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Eq,
-        lhs: Box::new(HirExpr::Call {
+    let a = DirExpr::Var("a".to_string());
+    let b = DirExpr::Var("b".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Eq,
+        lhs: Box::new(DirExpr::Call {
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
         }),
-        rhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::SLt,
-            lhs: Box::new(HirExpr::Const(
+        rhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::SLt,
+            lhs: Box::new(DirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
                     signed: true,
                 },
             )),
-            rhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Sub,
+            rhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Sub,
                 lhs: Box::new(a.clone()),
                 rhs: Box::new(b.clone()),
                 ty: NirType::Int {
@@ -811,35 +811,35 @@ fn sborrow_compare_canonicalizes_to_signed_less_equal() {
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return a <= b;");
+    assert_eq!(print_dir_stmt(&stmt), "return a <= b;");
 }
 
 #[test]
 fn carry_intrinsic_with_non_constant_rhs_is_preserved() {
-    let mut stmt = HirStmt::Return(Some(HirExpr::Call {
+    let mut stmt = DirStmt::Return(Some(DirExpr::Call {
         target: "__carry".to_string(),
-        args: vec![HirExpr::Var("x".to_string()), HirExpr::Var("y".to_string())],
+        args: vec![DirExpr::Var("x".to_string()), DirExpr::Var("y".to_string())],
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return __carry(x, y);");
+    assert_eq!(print_dir_stmt(&stmt), "return __carry(x, y);");
 }
 
 #[test]
 fn sborrow_compare_non_matching_shape_is_preserved() {
-    let a = HirExpr::Var("a".to_string());
-    let b = HirExpr::Var("b".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Ne,
-        lhs: Box::new(HirExpr::Call {
+    let a = DirExpr::Var("a".to_string());
+    let b = DirExpr::Var("b".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Ne,
+        lhs: Box::new(DirExpr::Call {
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
         }),
-        rhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::SLt,
-            lhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Add,
+        rhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::SLt,
+            lhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Add,
                 lhs: Box::new(a.clone()),
                 rhs: Box::new(b.clone()),
                 ty: NirType::Int {
@@ -847,7 +847,7 @@ fn sborrow_compare_non_matching_shape_is_preserved() {
                     signed: true,
                 },
             }),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
@@ -859,16 +859,16 @@ fn sborrow_compare_non_matching_shape_is_preserved() {
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return __sborrow(a, b) != (a + b < 0);");
+    assert_eq!(print_dir_stmt(&stmt), "return __sborrow(a, b) != (a + b < 0);");
 }
 
 #[test]
 fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "flag_temp_cleanup".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
-        locals: vec![NirBinding {
+        locals: vec![DirBinding {
             name: "xVar1".to_string(),
             ty: NirType::Bool,
             surface_type_name: None,
@@ -878,13 +878,13 @@ fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![
-            HirStmt::Assign {
-                lhs: HirLValue::Var("xVar1".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("xVar1".to_string()),
+                rhs: DirExpr::Call {
                     target: "__scarry".to_string(),
                     args: vec![
-                        HirExpr::Var("eax".to_string()),
-                        HirExpr::Const(
+                        DirExpr::Var("eax".to_string()),
+                        DirExpr::Const(
                             4,
                             NirType::Int {
                                 bits: 32,
@@ -895,7 +895,7 @@ fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
                     ty: NirType::Bool,
                 },
             },
-            HirStmt::Return(None),
+            DirStmt::Return(None),
         ],
         ..Default::default()
     };
@@ -903,64 +903,64 @@ fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
     normalize_hir_function(&mut func);
 
     assert!(func.locals.is_empty());
-    assert_eq!(func.body, vec![HirStmt::Return(None)]);
+    assert_eq!(func.body, vec![DirStmt::Return(None)]);
 }
 
 #[test]
 fn self_equality_on_integer_like_value_collapses_to_true() {
-    let reg = HirExpr::Var("reg".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Eq,
+    let reg = DirExpr::Var("reg".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Eq,
         lhs: Box::new(reg.clone()),
         rhs: Box::new(reg),
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return 1;");
+    assert_eq!(print_dir_stmt(&stmt), "return 1;");
 }
 
 #[test]
 fn self_inequality_on_integer_like_value_collapses_to_false() {
-    let reg = HirExpr::Var("reg".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Ne,
+    let reg = DirExpr::Var("reg".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Ne,
         lhs: Box::new(reg.clone()),
         rhs: Box::new(reg),
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return 0;");
+    assert_eq!(print_dir_stmt(&stmt), "return 0;");
 }
 
 #[test]
 fn logical_and_with_self_equality_tautology_collapses() {
-    let reg = HirExpr::Var("reg".to_string());
-    let mut stmt = HirStmt::If {
-        cond: HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
-            lhs: Box::new(HirExpr::Unary {
-                op: HirUnaryOp::Not,
+    let reg = DirExpr::Var("reg".to_string());
+    let mut stmt = DirStmt::If {
+        cond: DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
+            lhs: Box::new(DirExpr::Unary {
+                op: DirUnaryOp::Not,
                 expr: Box::new(reg.clone()),
                 ty: NirType::Bool,
             }),
-            rhs: Box::new(HirExpr::Binary {
-                op: HirBinaryOp::Eq,
+            rhs: Box::new(DirExpr::Binary {
+                op: DirBinaryOp::Eq,
                 lhs: Box::new(reg.clone()),
                 rhs: Box::new(reg),
                 ty: NirType::Bool,
             }),
             ty: NirType::Bool,
         },
-        then_body: vec![HirStmt::Return(None)],
+        then_body: vec![DirStmt::Return(None)],
         else_body: vec![],
     };
     normalize_stmt(&mut stmt);
     match stmt {
-        HirStmt::If { cond, .. } => assert_eq!(
+        DirStmt::If { cond, .. } => assert_eq!(
             cond,
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
-                expr: Box::new(HirExpr::Var("reg".to_string())),
+            DirExpr::Unary {
+                op: DirUnaryOp::Not,
+                expr: Box::new(DirExpr::Var("reg".to_string())),
                 ty: NirType::Bool,
             }
         ),
@@ -970,30 +970,30 @@ fn logical_and_with_self_equality_tautology_collapses() {
 
 #[test]
 fn float_self_equality_is_not_folded() {
-    let x = HirExpr::Var("fVar1".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Eq,
-        lhs: Box::new(HirExpr::Cast {
+    let x = DirExpr::Var("fVar1".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Eq,
+        lhs: Box::new(DirExpr::Cast {
             ty: NirType::Float { bits: 32 },
             expr: Box::new(x.clone()),
         }),
-        rhs: Box::new(HirExpr::Cast {
+        rhs: Box::new(DirExpr::Cast {
             ty: NirType::Float { bits: 32 },
             expr: Box::new(x),
         }),
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return (float)fVar1 == (float)fVar1;");
+    assert_eq!(print_dir_stmt(&stmt), "return (float)fVar1 == (float)fVar1;");
 }
 
 #[test]
 fn repeated_integer_bitwise_identity_simplifies() {
-    let x = HirExpr::Var("eax".to_string());
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::Eq,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::And,
+    let x = DirExpr::Var("eax".to_string());
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::Eq,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs: Box::new(x.clone()),
             rhs: Box::new(x),
             ty: NirType::Int {
@@ -1001,7 +1001,7 @@ fn repeated_integer_bitwise_identity_simplifies() {
                 signed: false,
             },
         }),
-        rhs: Box::new(HirExpr::Const(
+        rhs: Box::new(DirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -1011,15 +1011,15 @@ fn repeated_integer_bitwise_identity_simplifies() {
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return eax == 0;");
+    assert_eq!(print_dir_stmt(&stmt), "return eax == 0;");
 }
 
 #[test]
 fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "inline_condition_temp".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![NirBinding {
+        params: vec![DirBinding {
             name: "eax".to_string(),
             ty: NirType::Int {
                 bits: 32,
@@ -1029,7 +1029,7 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
             origin: None,
             initializer: None,
         }],
-        locals: vec![NirBinding {
+        locals: vec![DirBinding {
             name: "uVar1".to_string(),
             ty: NirType::Int {
                 bits: 32,
@@ -1042,17 +1042,17 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![
-            HirStmt::Assign {
-                lhs: HirLValue::Var("uVar1".to_string()),
-                rhs: HirExpr::Var("eax".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("uVar1".to_string()),
+                rhs: DirExpr::Var("eax".to_string()),
             },
-            HirStmt::If {
-                cond: HirExpr::Binary {
-                    op: HirBinaryOp::LogicalAnd,
-                    lhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Ne,
-                        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
-                        rhs: Box::new(HirExpr::Const(
+            DirStmt::If {
+                cond: DirExpr::Binary {
+                    op: DirBinaryOp::LogicalAnd,
+                    lhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Ne,
+                        lhs: Box::new(DirExpr::Var("uVar1".to_string())),
+                        rhs: Box::new(DirExpr::Const(
                             0,
                             NirType::Int {
                                 bits: 32,
@@ -1061,15 +1061,15 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
                         )),
                         ty: NirType::Bool,
                     }),
-                    rhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Eq,
-                        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
-                        rhs: Box::new(HirExpr::Var("uVar1".to_string())),
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Eq,
+                        lhs: Box::new(DirExpr::Var("uVar1".to_string())),
+                        rhs: Box::new(DirExpr::Var("uVar1".to_string())),
                         ty: NirType::Bool,
                     }),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Return(None)],
+                then_body: vec![DirStmt::Return(None)],
                 else_body: vec![],
             },
         ],
@@ -1079,16 +1079,16 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
     normalize_hir_function(&mut func);
 
     assert!(func.locals.is_empty());
-    let rendered = print_hir_function(&func);
+    let rendered = print_dir_function(&func);
     assert!(rendered.contains("if (eax)"), "rendered:\n{}", rendered);
 }
 
 #[test]
 fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
-    let a = HirExpr::Var("a".to_string());
-    let b = HirExpr::Var("b".to_string());
-    let sub = HirExpr::Binary {
-        op: HirBinaryOp::Sub,
+    let a = DirExpr::Var("a".to_string());
+    let b = DirExpr::Var("b".to_string());
+    let sub = DirExpr::Binary {
+        op: DirBinaryOp::Sub,
         lhs: Box::new(a.clone()),
         rhs: Box::new(b.clone()),
         ty: NirType::Int {
@@ -1096,10 +1096,10 @@ fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
             signed: true,
         },
     };
-    let ne = HirExpr::Binary {
-        op: HirBinaryOp::Ne,
+    let ne = DirExpr::Binary {
+        op: DirBinaryOp::Ne,
         lhs: Box::new(sub.clone()),
-        rhs: Box::new(HirExpr::Const(
+        rhs: Box::new(DirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -1108,12 +1108,12 @@ fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
         )),
         ty: NirType::Bool,
     };
-    let eq = HirExpr::Binary {
-        op: HirBinaryOp::Eq,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::SLt,
+    let eq = DirExpr::Binary {
+        op: DirBinaryOp::Eq,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::SLt,
             lhs: Box::new(sub.clone()),
-            rhs: Box::new(HirExpr::Const(
+            rhs: Box::new(DirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
@@ -1122,31 +1122,31 @@ fn compound_arm_flag_canonicalizes_to_signed_greater_than() {
             )),
             ty: NirType::Bool,
         }),
-        rhs: Box::new(HirExpr::Call {
+        rhs: Box::new(DirExpr::Call {
             target: "__sborrow".to_string(),
             args: vec![a.clone(), b.clone()],
             ty: NirType::Bool,
         }),
         ty: NirType::Bool,
     };
-    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
-        op: HirBinaryOp::LogicalAnd,
+    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
+        op: DirBinaryOp::LogicalAnd,
         lhs: Box::new(ne),
         rhs: Box::new(eq),
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_stmt(&stmt), "return b < a;");
+    assert_eq!(print_dir_stmt(&stmt), "return b < a;");
 }
 
 #[test]
 fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_dp".to_string(),
         int_param_offsets: Vec::new(),
         params: Vec::new(),
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "lo".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1156,7 +1156,7 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "hi".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1166,7 +1166,7 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "lo1".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1176,7 +1176,7 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "lo2".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1186,7 +1186,7 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "hi1".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1196,7 +1196,7 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "hi2".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1206,14 +1206,14 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "carry".to_string(),
                 ty: NirType::Bool,
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "val_64".to_string(),
                 ty: NirType::Int {
                     bits: 64,
@@ -1225,46 +1225,46 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
             },
         ],
         body: vec![
-            HirStmt::Assign {
-                lhs: HirLValue::Var("lo".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Add,
-                    lhs: Box::new(HirExpr::Var("lo1".to_string())),
-                    rhs: Box::new(HirExpr::Var("lo2".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("lo".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Add,
+                    lhs: Box::new(DirExpr::Var("lo1".to_string())),
+                    rhs: Box::new(DirExpr::Var("lo2".to_string())),
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Var("carry".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Lt,
-                    lhs: Box::new(HirExpr::Var("lo".to_string())),
-                    rhs: Box::new(HirExpr::Var("lo1".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("carry".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Lt,
+                    lhs: Box::new(DirExpr::Var("lo".to_string())),
+                    rhs: Box::new(DirExpr::Var("lo1".to_string())),
                     ty: NirType::Bool,
                 },
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Var("hi".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Add,
-                    lhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Var("hi1".to_string())),
-                        rhs: Box::new(HirExpr::Var("hi2".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("hi".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Add,
+                    lhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Add,
+                        lhs: Box::new(DirExpr::Var("hi1".to_string())),
+                        rhs: Box::new(DirExpr::Var("hi2".to_string())),
                         ty: NirType::Int {
                             bits: 32,
                             signed: false,
                         },
                     }),
-                    rhs: Box::new(HirExpr::Cast {
+                    rhs: Box::new(DirExpr::Cast {
                         ty: NirType::Int {
                             bits: 32,
                             signed: false,
                         },
-                        expr: Box::new(HirExpr::Var("carry".to_string())),
+                        expr: Box::new(DirExpr::Var("carry".to_string())),
                     }),
                     ty: NirType::Int {
                         bits: 32,
@@ -1272,20 +1272,20 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                     },
                 },
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Var("val_64".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Or,
-                    lhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Shl,
-                        lhs: Box::new(HirExpr::Cast {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("val_64".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Or,
+                    lhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Shl,
+                        lhs: Box::new(DirExpr::Cast {
                             ty: NirType::Int {
                                 bits: 64,
                                 signed: false,
                             },
-                            expr: Box::new(HirExpr::Var("hi".to_string())),
+                            expr: Box::new(DirExpr::Var("hi".to_string())),
                         }),
-                        rhs: Box::new(HirExpr::Const(
+                        rhs: Box::new(DirExpr::Const(
                             32,
                             NirType::Int {
                                 bits: 32,
@@ -1297,12 +1297,12 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                             signed: false,
                         },
                     }),
-                    rhs: Box::new(HirExpr::Cast {
+                    rhs: Box::new(DirExpr::Cast {
                         ty: NirType::Int {
                             bits: 64,
                             signed: false,
                         },
-                        expr: Box::new(HirExpr::Var("lo".to_string())),
+                        expr: Box::new(DirExpr::Var("lo".to_string())),
                     }),
                     ty: NirType::Int {
                         bits: 64,
@@ -1310,14 +1310,14 @@ fn normalize_double_precision_reconstructs_32bit_arith_to_64bit() {
                     },
                 },
             },
-            HirStmt::Return(Some(HirExpr::Var("val_64".to_string()))),
+            DirStmt::Return(Some(DirExpr::Var("val_64".to_string()))),
         ],
         is_64bit: false,
         ..Default::default()
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_hir_function(&func);
+    let rendered = print_dir_function(&func);
     // Should collapse the carry addition lo1+lo2 and hi1+hi2+carry into a single 64-bit addition!
     assert!(rendered.contains("+"), "rendered:\n{}", rendered);
 }
@@ -1342,7 +1342,7 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
         bits: 32,
         signed: false,
     };
-    let make_binding = |name: &str| NirBinding {
+    let make_binding = |name: &str| DirBinding {
         name: name.to_string(),
         ty: u32_ty.clone(),
         surface_type_name: None,
@@ -1351,18 +1351,18 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
     };
 
     // Use opaque calls so constant-folding can't trivially eliminate the temps.
-    let call_f = || HirExpr::Call {
+    let call_f = || DirExpr::Call {
         target: "f".to_string(),
         args: vec![],
         ty: u32_ty.clone(),
     };
-    let call_g = || HirExpr::Call {
+    let call_g = || DirExpr::Call {
         target: "g".to_string(),
         args: vec![],
         ty: u32_ty.clone(),
     };
 
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_merge".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
@@ -1373,32 +1373,32 @@ fn normalize_variable_merge_coalesces_disjoint_variables() {
         ],
         body: vec![
             // stmt 0: temp1 = f()
-            HirStmt::Assign {
-                lhs: HirLValue::Var("temp1".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("temp1".to_string()),
                 rhs: call_f(),
             },
             // stmt 1: result = temp1  (temp1's last use)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("result".to_string()),
-                rhs: HirExpr::Var("temp1".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("result".to_string()),
+                rhs: DirExpr::Var("temp1".to_string()),
             },
             // stmt 2: temp2 = g()  (temp2's first use)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("temp2".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("temp2".to_string()),
                 rhs: call_g(),
             },
             // stmt 3: result = result + temp2  (temp2's last use)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("result".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Add,
-                    lhs: Box::new(HirExpr::Var("result".to_string())),
-                    rhs: Box::new(HirExpr::Var("temp2".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("result".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Add,
+                    lhs: Box::new(DirExpr::Var("result".to_string())),
+                    rhs: Box::new(DirExpr::Var("temp2".to_string())),
                     ty: u32_ty.clone(),
                 },
             },
             // stmt 4: return result
-            HirStmt::Return(Some(HirExpr::Var("result".to_string()))),
+            DirStmt::Return(Some(DirExpr::Var("result".to_string()))),
         ],
         is_64bit: false,
         ..Default::default()
@@ -1434,19 +1434,19 @@ fn normalize_conditional_const_propagates_equality_branches() {
         bits: 32,
         signed: false,
     };
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_cond_const".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "x".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "y".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
@@ -1454,20 +1454,20 @@ fn normalize_conditional_const_propagates_equality_branches() {
                 initializer: None,
             },
         ],
-        body: vec![HirStmt::If {
-            cond: HirExpr::Binary {
-                op: HirBinaryOp::Eq,
-                lhs: Box::new(HirExpr::Var("x".to_string())),
-                rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
+        body: vec![DirStmt::If {
+            cond: DirExpr::Binary {
+                op: DirBinaryOp::Eq,
+                lhs: Box::new(DirExpr::Var("x".to_string())),
+                rhs: Box::new(DirExpr::Const(5, u32_ty.clone())),
                 ty: NirType::Bool,
             },
-            then_body: vec![HirStmt::Assign {
-                lhs: HirLValue::Var("y".to_string()),
-                rhs: HirExpr::Var("x".to_string()),
+            then_body: vec![DirStmt::Assign {
+                lhs: DirLValue::Var("y".to_string()),
+                rhs: DirExpr::Var("x".to_string()),
             }],
-            else_body: vec![HirStmt::Assign {
-                lhs: HirLValue::Var("y".to_string()),
-                rhs: HirExpr::Var("x".to_string()),
+            else_body: vec![DirStmt::Assign {
+                lhs: DirLValue::Var("y".to_string()),
+                rhs: DirExpr::Var("x".to_string()),
             }],
         }],
         is_64bit: false,
@@ -1478,19 +1478,19 @@ fn normalize_conditional_const_propagates_equality_branches() {
     assert!(changed);
 
     // In then_body, y = x should become y = 5
-    if let HirStmt::If {
+    if let DirStmt::If {
         then_body,
         else_body,
         ..
     } = &func.body[0]
     {
-        if let HirStmt::Assign { rhs, .. } = &then_body[0] {
-            assert!(matches!(rhs, HirExpr::Const(5, _)));
+        if let DirStmt::Assign { rhs, .. } = &then_body[0] {
+            assert!(matches!(rhs, DirExpr::Const(5, _)));
         } else {
             panic!("Expected Assign in then_body");
         }
-        if let HirStmt::Assign { rhs, .. } = &else_body[0] {
-            assert!(matches!(rhs, HirExpr::Var(name) if name == "x"));
+        if let DirStmt::Assign { rhs, .. } = &else_body[0] {
+            assert!(matches!(rhs, DirExpr::Var(name) if name == "x"));
         } else {
             panic!("Expected Assign in else_body");
         }
@@ -1508,26 +1508,26 @@ fn normalize_three_way_compare_simplifies_to_relational() {
         signed: false,
     };
     // Pattern: (zext(a < b) + zext(a <= b) - 1) == 0  =>  a == b
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_three_way".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "a".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "b".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "result".to_string(),
                 ty: NirType::Bool,
                 surface_type_name: None,
@@ -1535,38 +1535,38 @@ fn normalize_three_way_compare_simplifies_to_relational() {
                 initializer: None,
             },
         ],
-        body: vec![HirStmt::Assign {
-            lhs: HirLValue::Var("result".to_string()),
-            rhs: HirExpr::Binary {
-                op: HirBinaryOp::Eq,
-                lhs: Box::new(HirExpr::Binary {
-                    op: HirBinaryOp::Add,
-                    lhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Cast {
-                            expr: Box::new(HirExpr::Binary {
-                                op: HirBinaryOp::Lt,
-                                lhs: Box::new(HirExpr::Var("a".to_string())),
-                                rhs: Box::new(HirExpr::Var("b".to_string())),
+        body: vec![DirStmt::Assign {
+            lhs: DirLValue::Var("result".to_string()),
+            rhs: DirExpr::Binary {
+                op: DirBinaryOp::Eq,
+                lhs: Box::new(DirExpr::Binary {
+                    op: DirBinaryOp::Add,
+                    lhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Add,
+                        lhs: Box::new(DirExpr::Cast {
+                            expr: Box::new(DirExpr::Binary {
+                                op: DirBinaryOp::Lt,
+                                lhs: Box::new(DirExpr::Var("a".to_string())),
+                                rhs: Box::new(DirExpr::Var("b".to_string())),
                                 ty: NirType::Bool,
                             }),
                             ty: u32_ty.clone(),
                         }),
-                        rhs: Box::new(HirExpr::Cast {
-                            expr: Box::new(HirExpr::Binary {
-                                op: HirBinaryOp::Le,
-                                lhs: Box::new(HirExpr::Var("a".to_string())),
-                                rhs: Box::new(HirExpr::Var("b".to_string())),
+                        rhs: Box::new(DirExpr::Cast {
+                            expr: Box::new(DirExpr::Binary {
+                                op: DirBinaryOp::Le,
+                                lhs: Box::new(DirExpr::Var("a".to_string())),
+                                rhs: Box::new(DirExpr::Var("b".to_string())),
                                 ty: NirType::Bool,
                             }),
                             ty: u32_ty.clone(),
                         }),
                         ty: u32_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Const(-1, u32_ty.clone())),
+                    rhs: Box::new(DirExpr::Const(-1, u32_ty.clone())),
                     ty: u32_ty.clone(),
                 }),
-                rhs: Box::new(HirExpr::Const(0, u32_ty.clone())),
+                rhs: Box::new(DirExpr::Const(0, u32_ty.clone())),
                 ty: NirType::Bool,
             },
         }],
@@ -1577,16 +1577,16 @@ fn normalize_three_way_compare_simplifies_to_relational() {
     let changed = apply_three_way_compare_pass(&mut func);
     assert!(changed);
 
-    if let HirStmt::Assign { rhs, .. } = &func.body[0] {
-        if let HirExpr::Binary {
-            op: HirBinaryOp::Eq,
+    if let DirStmt::Assign { rhs, .. } = &func.body[0] {
+        if let DirExpr::Binary {
+            op: DirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } = rhs
         {
-            assert!(matches!(lhs.as_ref(), HirExpr::Var(name) if name == "a"));
-            assert!(matches!(rhs.as_ref(), HirExpr::Var(name) if name == "b"));
+            assert!(matches!(lhs.as_ref(), DirExpr::Var(name) if name == "a"));
+            assert!(matches!(rhs.as_ref(), DirExpr::Var(name) if name == "b"));
         } else {
             panic!("Expected Eq binary expression");
         }
@@ -1599,11 +1599,11 @@ fn normalize_three_way_compare_simplifies_to_relational() {
 fn normalize_conditional_move() {
     use crate::midend::normalize::arith::apply_conditional_move_pass;
 
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_cmov".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
-        locals: vec![NirBinding {
+        locals: vec![DirBinding {
             name: "x".to_string(),
             ty: NirType::Int {
                 bits: 32,
@@ -1615,11 +1615,11 @@ fn normalize_conditional_move() {
         }],
         body: vec![
             // Scenario 1: If-Then-Else
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Assign {
-                    lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Const(
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Assign {
+                    lhs: DirLValue::Var("x".to_string()),
+                    rhs: DirExpr::Const(
                         10,
                         NirType::Int {
                             bits: 32,
@@ -1627,9 +1627,9 @@ fn normalize_conditional_move() {
                         },
                     ),
                 }],
-                else_body: vec![HirStmt::Assign {
-                    lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Const(
+                else_body: vec![DirStmt::Assign {
+                    lhs: DirLValue::Var("x".to_string()),
+                    rhs: DirExpr::Const(
                         20,
                         NirType::Int {
                             bits: 32,
@@ -1639,9 +1639,9 @@ fn normalize_conditional_move() {
                 }],
             },
             // Scenario 2: Default-Override
-            HirStmt::Assign {
-                lhs: HirLValue::Var("x".to_string()),
-                rhs: HirExpr::Const(
+            DirStmt::Assign {
+                lhs: DirLValue::Var("x".to_string()),
+                rhs: DirExpr::Const(
                     20,
                     NirType::Int {
                         bits: 32,
@@ -1649,11 +1649,11 @@ fn normalize_conditional_move() {
                     },
                 ),
             },
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Assign {
-                    lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Const(
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Assign {
+                    lhs: DirLValue::Var("x".to_string()),
+                    rhs: DirExpr::Const(
                         10,
                         NirType::Int {
                             bits: 32,
@@ -1673,18 +1673,18 @@ fn normalize_conditional_move() {
     assert_eq!(func.body.len(), 2);
 
     // Verify Scenario 1 became Select
-    if let HirStmt::Assign { lhs, rhs } = &func.body[0] {
-        assert!(matches!(lhs, HirLValue::Var(name) if name == "x"));
-        if let HirExpr::Select {
+    if let DirStmt::Assign { lhs, rhs } = &func.body[0] {
+        assert!(matches!(lhs, DirLValue::Var(name) if name == "x"));
+        if let DirExpr::Select {
             cond,
             then_expr,
             else_expr,
             ..
         } = rhs
         {
-            assert!(matches!(cond.as_ref(), HirExpr::Var(name) if name == "cond"));
-            assert!(matches!(then_expr.as_ref(), HirExpr::Const(10, _)));
-            assert!(matches!(else_expr.as_ref(), HirExpr::Const(20, _)));
+            assert!(matches!(cond.as_ref(), DirExpr::Var(name) if name == "cond"));
+            assert!(matches!(then_expr.as_ref(), DirExpr::Const(10, _)));
+            assert!(matches!(else_expr.as_ref(), DirExpr::Const(20, _)));
         } else {
             panic!("Expected Select expression for scenario 1");
         }
@@ -1693,18 +1693,18 @@ fn normalize_conditional_move() {
     }
 
     // Verify Scenario 2 became Select
-    if let HirStmt::Assign { lhs, rhs } = &func.body[1] {
-        assert!(matches!(lhs, HirLValue::Var(name) if name == "x"));
-        if let HirExpr::Select {
+    if let DirStmt::Assign { lhs, rhs } = &func.body[1] {
+        assert!(matches!(lhs, DirLValue::Var(name) if name == "x"));
+        if let DirExpr::Select {
             cond,
             then_expr,
             else_expr,
             ..
         } = rhs
         {
-            assert!(matches!(cond.as_ref(), HirExpr::Var(name) if name == "cond"));
-            assert!(matches!(then_expr.as_ref(), HirExpr::Const(10, _)));
-            assert!(matches!(else_expr.as_ref(), HirExpr::Const(20, _)));
+            assert!(matches!(cond.as_ref(), DirExpr::Var(name) if name == "cond"));
+            assert!(matches!(then_expr.as_ref(), DirExpr::Const(10, _)));
+            assert!(matches!(else_expr.as_ref(), DirExpr::Const(20, _)));
         } else {
             panic!("Expected Select expression for scenario 2");
         }
@@ -1720,18 +1720,18 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
     let float32 = NirType::Float { bits: 32 };
     let float64 = NirType::Float { bits: 64 };
 
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_subfloat".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![
-            NirBinding {
+            DirBinding {
                 name: "x".to_string(),
                 ty: float32.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "y".to_string(),
                 ty: float32.clone(),
                 surface_type_name: None,
@@ -1739,7 +1739,7 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
                 initializer: None,
             },
         ],
-        locals: vec![NirBinding {
+        locals: vec![DirBinding {
             name: "res".to_string(),
             ty: float32.clone(),
             surface_type_name: None,
@@ -1748,19 +1748,19 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
         }],
         body: vec![
             // res = (float)((double)x + (double)y)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res".to_string()),
-                rhs: HirExpr::Cast {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res".to_string()),
+                rhs: DirExpr::Cast {
                     ty: float32.clone(),
-                    expr: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Cast {
+                    expr: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Add,
+                        lhs: Box::new(DirExpr::Cast {
                             ty: float64.clone(),
-                            expr: Box::new(HirExpr::Var("x".to_string())),
+                            expr: Box::new(DirExpr::Var("x".to_string())),
                         }),
-                        rhs: Box::new(HirExpr::Cast {
+                        rhs: Box::new(DirExpr::Cast {
                             ty: float64.clone(),
-                            expr: Box::new(HirExpr::Var("y".to_string())),
+                            expr: Box::new(DirExpr::Var("y".to_string())),
                         }),
                         ty: float64.clone(),
                     }),
@@ -1780,14 +1780,14 @@ fn subfloat_flow_narrowing_elides_redundant_casts() {
     assert_eq!(func.body.len(), 1);
 
     // Expected: res = x + y (all casts elided, math is float32)
-    let HirStmt::Assign { rhs, .. } = &func.body[0] else {
+    let DirStmt::Assign { rhs, .. } = &func.body[0] else {
         panic!();
     };
-    if let HirExpr::Binary { op, lhs, rhs, ty } = rhs {
-        assert_eq!(*op, HirBinaryOp::Add);
+    if let DirExpr::Binary { op, lhs, rhs, ty } = rhs {
+        assert_eq!(*op, DirBinaryOp::Add);
         assert_eq!(ty, &float32);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("x".to_string()));
-        assert_eq!(rhs.as_ref(), &HirExpr::Var("y".to_string()));
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("x".to_string()));
+        assert_eq!(rhs.as_ref(), &DirExpr::Var("y".to_string()));
     } else {
         panic!(
             "expected direct float addition without casts, got {:?}",
@@ -1806,47 +1806,47 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     };
     let bool_ty = NirType::Bool;
 
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_or_compare".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "a".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "b".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "c".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res1".to_string(),
                 ty: bool_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res2".to_string(),
                 ty: bool_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res3".to_string(),
                 ty: bool_ty.clone(),
                 surface_type_name: None,
@@ -1856,52 +1856,52 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         ],
         body: vec![
             // res1 = ((a | b) == 0)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res1".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Eq,
-                    lhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Or,
-                        lhs: Box::new(HirExpr::Var("a".to_string())),
-                        rhs: Box::new(HirExpr::Var("b".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res1".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Eq,
+                    lhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Or,
+                        lhs: Box::new(DirExpr::Var("a".to_string())),
+                        rhs: Box::new(DirExpr::Var("b".to_string())),
                         ty: u32_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Const(0, u32_ty.clone())),
+                    rhs: Box::new(DirExpr::Const(0, u32_ty.clone())),
                     ty: bool_ty.clone(),
                 },
             },
             // res2 = (0 != (a | b))
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res2".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Ne,
-                    lhs: Box::new(HirExpr::Const(0, u32_ty.clone())),
-                    rhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Or,
-                        lhs: Box::new(HirExpr::Var("a".to_string())),
-                        rhs: Box::new(HirExpr::Var("b".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res2".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Ne,
+                    lhs: Box::new(DirExpr::Const(0, u32_ty.clone())),
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Or,
+                        lhs: Box::new(DirExpr::Var("a".to_string())),
+                        rhs: Box::new(DirExpr::Var("b".to_string())),
                         ty: u32_ty.clone(),
                     }),
                     ty: bool_ty.clone(),
                 },
             },
             // res3 = (((a | b) | c) == 0)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res3".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Eq,
-                    lhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Or,
-                        lhs: Box::new(HirExpr::Binary {
-                            op: HirBinaryOp::Or,
-                            lhs: Box::new(HirExpr::Var("a".to_string())),
-                            rhs: Box::new(HirExpr::Var("b".to_string())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res3".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Eq,
+                    lhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Or,
+                        lhs: Box::new(DirExpr::Binary {
+                            op: DirBinaryOp::Or,
+                            lhs: Box::new(DirExpr::Var("a".to_string())),
+                            rhs: Box::new(DirExpr::Var("b".to_string())),
                             ty: u32_ty.clone(),
                         }),
-                        rhs: Box::new(HirExpr::Var("c".to_string())),
+                        rhs: Box::new(DirExpr::Var("c".to_string())),
                         ty: u32_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Const(0, u32_ty.clone())),
+                    rhs: Box::new(DirExpr::Const(0, u32_ty.clone())),
                     ty: bool_ty.clone(),
                 },
             },
@@ -1919,14 +1919,14 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
     assert_eq!(func.body.len(), 3);
 
     // Verify first simplification: res1 = ((a == 0) && (b == 0))
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
+    let DirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
         panic!();
     };
-    if let HirExpr::Binary { op, lhs, rhs, ty } = rhs1 {
-        assert_eq!(*op, HirBinaryOp::LogicalAnd);
+    if let DirExpr::Binary { op, lhs, rhs, ty } = rhs1 {
+        assert_eq!(*op, DirBinaryOp::LogicalAnd);
         assert_eq!(ty, &bool_ty);
 
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_l,
             lhs: lhs_l,
             rhs: rhs_l,
@@ -1935,12 +1935,12 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_l, HirBinaryOp::Eq);
-        assert_eq!(lhs_l.as_ref(), &HirExpr::Var("a".to_string()));
-        assert!(matches!(rhs_l.as_ref(), HirExpr::Const(0, _)));
+        assert_eq!(*op_l, DirBinaryOp::Eq);
+        assert_eq!(lhs_l.as_ref(), &DirExpr::Var("a".to_string()));
+        assert!(matches!(rhs_l.as_ref(), DirExpr::Const(0, _)));
         assert_eq!(ty_l, &bool_ty);
 
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_r,
             lhs: lhs_r,
             rhs: rhs_r,
@@ -1949,23 +1949,23 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_r, HirBinaryOp::Eq);
-        assert_eq!(lhs_r.as_ref(), &HirExpr::Var("b".to_string()));
-        assert!(matches!(rhs_r.as_ref(), HirExpr::Const(0, _)));
+        assert_eq!(*op_r, DirBinaryOp::Eq);
+        assert_eq!(lhs_r.as_ref(), &DirExpr::Var("b".to_string()));
+        assert!(matches!(rhs_r.as_ref(), DirExpr::Const(0, _)));
         assert_eq!(ty_r, &bool_ty);
     } else {
         panic!("expected logical AND, got {:?}", rhs1);
     }
 
     // Verify second simplification: res2 = ((a != 0) || (b != 0))
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
+    let DirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
         panic!();
     };
-    if let HirExpr::Binary { op, lhs, rhs, ty } = rhs2 {
-        assert_eq!(*op, HirBinaryOp::LogicalOr);
+    if let DirExpr::Binary { op, lhs, rhs, ty } = rhs2 {
+        assert_eq!(*op, DirBinaryOp::LogicalOr);
         assert_eq!(ty, &bool_ty);
 
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_l,
             lhs: lhs_l,
             rhs: rhs_l,
@@ -1974,12 +1974,12 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_l, HirBinaryOp::Ne);
-        assert_eq!(lhs_l.as_ref(), &HirExpr::Var("a".to_string()));
-        assert!(matches!(rhs_l.as_ref(), HirExpr::Const(0, _)));
+        assert_eq!(*op_l, DirBinaryOp::Ne);
+        assert_eq!(lhs_l.as_ref(), &DirExpr::Var("a".to_string()));
+        assert!(matches!(rhs_l.as_ref(), DirExpr::Const(0, _)));
         assert_eq!(ty_l, &bool_ty);
 
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_r,
             lhs: lhs_r,
             rhs: rhs_r,
@@ -1988,24 +1988,24 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_r, HirBinaryOp::Ne);
-        assert_eq!(lhs_r.as_ref(), &HirExpr::Var("b".to_string()));
-        assert!(matches!(rhs_r.as_ref(), HirExpr::Const(0, _)));
+        assert_eq!(*op_r, DirBinaryOp::Ne);
+        assert_eq!(lhs_r.as_ref(), &DirExpr::Var("b".to_string()));
+        assert!(matches!(rhs_r.as_ref(), DirExpr::Const(0, _)));
         assert_eq!(ty_r, &bool_ty);
     } else {
         panic!("expected logical OR, got {:?}", rhs2);
     }
 
     // Verify third simplification (nested OR): res3 = (((a == 0) && (b == 0)) && (c == 0))
-    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
+    let DirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
         panic!();
     };
-    if let HirExpr::Binary { op, lhs, rhs, ty } = rhs3 {
-        assert_eq!(*op, HirBinaryOp::LogicalAnd);
+    if let DirExpr::Binary { op, lhs, rhs, ty } = rhs3 {
+        assert_eq!(*op, DirBinaryOp::LogicalAnd);
         assert_eq!(ty, &bool_ty);
 
         // Right side should be (c == 0)
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_r,
             lhs: lhs_r,
             rhs: rhs_r,
@@ -2014,13 +2014,13 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_r, HirBinaryOp::Eq);
-        assert_eq!(lhs_r.as_ref(), &HirExpr::Var("c".to_string()));
-        assert!(matches!(rhs_r.as_ref(), HirExpr::Const(0, _)));
+        assert_eq!(*op_r, DirBinaryOp::Eq);
+        assert_eq!(lhs_r.as_ref(), &DirExpr::Var("c".to_string()));
+        assert!(matches!(rhs_r.as_ref(), DirExpr::Const(0, _)));
         assert_eq!(ty_r, &bool_ty);
 
         // Left side should be ((a == 0) && (b == 0))
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_l,
             lhs: lhs_l,
             rhs: rhs_l,
@@ -2029,10 +2029,10 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_l, HirBinaryOp::LogicalAnd);
+        assert_eq!(*op_l, DirBinaryOp::LogicalAnd);
         assert_eq!(ty_l, &bool_ty);
 
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_ll,
             lhs: lhs_ll,
             rhs: rhs_ll,
@@ -2041,12 +2041,12 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_ll, HirBinaryOp::Eq);
-        assert_eq!(lhs_ll.as_ref(), &HirExpr::Var("a".to_string()));
-        assert!(matches!(rhs_ll.as_ref(), HirExpr::Const(0, _)));
+        assert_eq!(*op_ll, DirBinaryOp::Eq);
+        assert_eq!(lhs_ll.as_ref(), &DirExpr::Var("a".to_string()));
+        assert!(matches!(rhs_ll.as_ref(), DirExpr::Const(0, _)));
         assert_eq!(ty_ll, &bool_ty);
 
-        let HirExpr::Binary {
+        let DirExpr::Binary {
             op: op_lr,
             lhs: lhs_lr,
             rhs: rhs_lr,
@@ -2055,9 +2055,9 @@ fn normalize_or_compare_simplifies_zero_comparisons() {
         else {
             panic!();
         };
-        assert_eq!(*op_lr, HirBinaryOp::Eq);
-        assert_eq!(lhs_lr.as_ref(), &HirExpr::Var("b".to_string()));
-        assert!(matches!(rhs_lr.as_ref(), HirExpr::Const(0, _)));
+        assert_eq!(*op_lr, DirBinaryOp::Eq);
+        assert_eq!(lhs_lr.as_ref(), &DirExpr::Var("b".to_string()));
+        assert!(matches!(rhs_lr.as_ref(), DirExpr::Const(0, _)));
         assert_eq!(ty_lr, &bool_ty);
     } else {
         panic!("expected nested logical AND, got {:?}", rhs3);
@@ -2074,33 +2074,33 @@ fn normalize_or_compare_simplifies_or_of_zero() {
     };
     let bool_ty = NirType::Bool;
 
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_or_of_zero".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "cond".to_string(),
                 ty: bool_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "val".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "other".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res".to_string(),
                 ty: u32_ty.clone(),
                 surface_type_name: None,
@@ -2110,17 +2110,17 @@ fn normalize_or_compare_simplifies_or_of_zero() {
         ],
         body: vec![
             // res = (cond ? val : 0) | other
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Or,
-                    lhs: Box::new(HirExpr::Select {
-                        cond: Box::new(HirExpr::Var("cond".to_string())),
-                        then_expr: Box::new(HirExpr::Var("val".to_string())),
-                        else_expr: Box::new(HirExpr::Const(0, u32_ty.clone())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Or,
+                    lhs: Box::new(DirExpr::Select {
+                        cond: Box::new(DirExpr::Var("cond".to_string())),
+                        then_expr: Box::new(DirExpr::Var("val".to_string())),
+                        else_expr: Box::new(DirExpr::Const(0, u32_ty.clone())),
                         ty: u32_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Var("other".to_string())),
+                    rhs: Box::new(DirExpr::Var("other".to_string())),
                     ty: u32_ty.clone(),
                 },
             },
@@ -2132,10 +2132,10 @@ fn normalize_or_compare_simplifies_or_of_zero() {
     assert_eq!(func.body.len(), 1);
 
     // Expected: res = cond ? (val | other) : other
-    let HirStmt::Assign { rhs, .. } = &func.body[0] else {
+    let DirStmt::Assign { rhs, .. } = &func.body[0] else {
         panic!();
     };
-    if let HirExpr::Select {
+    if let DirExpr::Select {
         cond,
         then_expr,
         else_expr,
@@ -2143,20 +2143,20 @@ fn normalize_or_compare_simplifies_or_of_zero() {
     } = rhs
     {
         assert_eq!(ty, &u32_ty);
-        assert_eq!(cond.as_ref(), &HirExpr::Var("cond".to_string()));
-        assert_eq!(else_expr.as_ref(), &HirExpr::Var("other".to_string()));
+        assert_eq!(cond.as_ref(), &DirExpr::Var("cond".to_string()));
+        assert_eq!(else_expr.as_ref(), &DirExpr::Var("other".to_string()));
 
-        if let HirExpr::Binary {
+        if let DirExpr::Binary {
             op,
             lhs,
             rhs,
             ty: or_ty,
         } = then_expr.as_ref()
         {
-            assert_eq!(*op, HirBinaryOp::Or);
+            assert_eq!(*op, DirBinaryOp::Or);
             assert_eq!(or_ty, &u32_ty);
-            assert_eq!(lhs.as_ref(), &HirExpr::Var("val".to_string()));
-            assert_eq!(rhs.as_ref(), &HirExpr::Var("other".to_string()));
+            assert_eq!(lhs.as_ref(), &DirExpr::Var("val".to_string()));
+            assert_eq!(rhs.as_ref(), &DirExpr::Var("other".to_string()));
         } else {
             panic!("expected Or expression in then branch, got {:?}", then_expr);
         }
@@ -2175,43 +2175,43 @@ fn normalize_nested_adds_subs_simplifies_constants() {
     };
 
     // Case 1: (a + 10) + 20 => a + 30
-    let expr1 = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Add,
-            lhs: Box::new(HirExpr::Var("a".to_string())),
-            rhs: Box::new(HirExpr::Const(10, u32_ty.clone())),
+    let expr1 = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Add,
+            lhs: Box::new(DirExpr::Var("a".to_string())),
+            rhs: Box::new(DirExpr::Const(10, u32_ty.clone())),
             ty: u32_ty.clone(),
         }),
-        rhs: Box::new(HirExpr::Const(20, u32_ty.clone())),
+        rhs: Box::new(DirExpr::Const(20, u32_ty.clone())),
         ty: u32_ty.clone(),
     };
     let res1 = simplify_nested_adds_subs(&expr1).unwrap();
-    if let HirExpr::Binary { op, lhs, rhs, .. } = res1 {
-        assert_eq!(op, HirBinaryOp::Add);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
-        assert!(matches!(rhs.as_ref(), HirExpr::Const(30, _)));
+    if let DirExpr::Binary { op, lhs, rhs, .. } = res1 {
+        assert_eq!(op, DirBinaryOp::Add);
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), DirExpr::Const(30, _)));
     } else {
         panic!("expected add, got {:?}", res1);
     }
 
     // Case 2: (a - 10) + 30 => a + 20
-    let expr2 = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Sub,
-            lhs: Box::new(HirExpr::Var("a".to_string())),
-            rhs: Box::new(HirExpr::Const(10, u32_ty.clone())),
+    let expr2 = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Sub,
+            lhs: Box::new(DirExpr::Var("a".to_string())),
+            rhs: Box::new(DirExpr::Const(10, u32_ty.clone())),
             ty: u32_ty.clone(),
         }),
-        rhs: Box::new(HirExpr::Const(30, u32_ty.clone())),
+        rhs: Box::new(DirExpr::Const(30, u32_ty.clone())),
         ty: u32_ty.clone(),
     };
     let res2 = simplify_nested_adds_subs(&expr2).unwrap();
-    if let HirExpr::Binary { op, lhs, rhs, .. } = res2 {
-        assert_eq!(op, HirBinaryOp::Add);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
-        assert!(matches!(rhs.as_ref(), HirExpr::Const(20, _)));
+    if let DirExpr::Binary { op, lhs, rhs, .. } = res2 {
+        assert_eq!(op, DirBinaryOp::Add);
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), DirExpr::Const(20, _)));
     } else {
         panic!("expected add, got {:?}", res2);
     }
@@ -2227,48 +2227,48 @@ fn normalize_collect_mul_terms_simplifies_constants() {
     };
 
     // Case 1: (a * 5) + (a * 2) => a * 7
-    let expr1 = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Mul,
-            lhs: Box::new(HirExpr::Var("a".to_string())),
-            rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
+    let expr1 = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Mul,
+            lhs: Box::new(DirExpr::Var("a".to_string())),
+            rhs: Box::new(DirExpr::Const(5, u32_ty.clone())),
             ty: u32_ty.clone(),
         }),
-        rhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Mul,
-            lhs: Box::new(HirExpr::Var("a".to_string())),
-            rhs: Box::new(HirExpr::Const(2, u32_ty.clone())),
+        rhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Mul,
+            lhs: Box::new(DirExpr::Var("a".to_string())),
+            rhs: Box::new(DirExpr::Const(2, u32_ty.clone())),
             ty: u32_ty.clone(),
         }),
         ty: u32_ty.clone(),
     };
     let res1 = simplify_collect_mul_terms(&expr1).unwrap();
-    if let HirExpr::Binary { op, lhs, rhs, .. } = res1 {
-        assert_eq!(op, HirBinaryOp::Mul);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
-        assert!(matches!(rhs.as_ref(), HirExpr::Const(7, _)));
+    if let DirExpr::Binary { op, lhs, rhs, .. } = res1 {
+        assert_eq!(op, DirBinaryOp::Mul);
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), DirExpr::Const(7, _)));
     } else {
         panic!("expected mul, got {:?}", res1);
     }
 
     // Case 2: (a * 5) - a => a * 4
-    let expr2 = HirExpr::Binary {
-        op: HirBinaryOp::Sub,
-        lhs: Box::new(HirExpr::Binary {
-            op: HirBinaryOp::Mul,
-            lhs: Box::new(HirExpr::Var("a".to_string())),
-            rhs: Box::new(HirExpr::Const(5, u32_ty.clone())),
+    let expr2 = DirExpr::Binary {
+        op: DirBinaryOp::Sub,
+        lhs: Box::new(DirExpr::Binary {
+            op: DirBinaryOp::Mul,
+            lhs: Box::new(DirExpr::Var("a".to_string())),
+            rhs: Box::new(DirExpr::Const(5, u32_ty.clone())),
             ty: u32_ty.clone(),
         }),
-        rhs: Box::new(HirExpr::Var("a".to_string())),
+        rhs: Box::new(DirExpr::Var("a".to_string())),
         ty: u32_ty.clone(),
     };
     let res2 = simplify_collect_mul_terms(&expr2).unwrap();
-    if let HirExpr::Binary { op, lhs, rhs, .. } = res2 {
-        assert_eq!(op, HirBinaryOp::Mul);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("a".to_string()));
-        assert!(matches!(rhs.as_ref(), HirExpr::Const(4, _)));
+    if let DirExpr::Binary { op, lhs, rhs, .. } = res2 {
+        assert_eq!(op, DirBinaryOp::Mul);
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("a".to_string()));
+        assert!(matches!(rhs.as_ref(), DirExpr::Const(4, _)));
     } else {
         panic!("expected mul, got {:?}", res2);
     }
@@ -2289,47 +2289,47 @@ fn normalize_float_sign_simplifies_manipulations() {
         signed: false,
     };
 
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_float_sign".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "f32_var".to_string(),
                 ty: f32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "f64_var".to_string(),
                 ty: f64_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res1".to_string(),
                 ty: f32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res2".to_string(),
                 ty: f32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res3".to_string(),
                 ty: f64_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res4".to_string(),
                 ty: f64_ty.clone(),
                 surface_type_name: None,
@@ -2339,42 +2339,42 @@ fn normalize_float_sign_simplifies_manipulations() {
         ],
         body: vec![
             // res1 = (f32_var & 0x7fffffff)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res1".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::And,
-                    lhs: Box::new(HirExpr::Var("f32_var".to_string())),
-                    rhs: Box::new(HirExpr::Const(0x7fffffff, i32_ty.clone())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res1".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::And,
+                    lhs: Box::new(DirExpr::Var("f32_var".to_string())),
+                    rhs: Box::new(DirExpr::Const(0x7fffffff, i32_ty.clone())),
                     ty: i32_ty.clone(),
                 },
             },
             // res2 = (f32_var ^ 0x80000000)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res2".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Xor,
-                    lhs: Box::new(HirExpr::Var("f32_var".to_string())),
-                    rhs: Box::new(HirExpr::Const(0x80000000, i32_ty.clone())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res2".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Xor,
+                    lhs: Box::new(DirExpr::Var("f32_var".to_string())),
+                    rhs: Box::new(DirExpr::Const(0x80000000, i32_ty.clone())),
                     ty: i32_ty.clone(),
                 },
             },
             // res3 = (f64_var & 0x7fffffffffffffff)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res3".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::And,
-                    lhs: Box::new(HirExpr::Var("f64_var".to_string())),
-                    rhs: Box::new(HirExpr::Const(0x7fffffffffffffff, i64_ty.clone())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res3".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::And,
+                    lhs: Box::new(DirExpr::Var("f64_var".to_string())),
+                    rhs: Box::new(DirExpr::Const(0x7fffffffffffffff, i64_ty.clone())),
                     ty: i64_ty.clone(),
                 },
             },
             // res4 = (f64_var ^ 0x8000000000000000)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res4".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Xor,
-                    lhs: Box::new(HirExpr::Var("f64_var".to_string())),
-                    rhs: Box::new(HirExpr::Const(i64::MIN, i64_ty.clone())),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res4".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Xor,
+                    lhs: Box::new(DirExpr::Var("f64_var".to_string())),
+                    rhs: Box::new(DirExpr::Const(i64::MIN, i64_ty.clone())),
                     ty: i64_ty.clone(),
                 },
             },
@@ -2385,50 +2385,50 @@ fn normalize_float_sign_simplifies_manipulations() {
     assert!(apply_float_sign_pass(&mut func));
 
     // Verify first simplification: res1 = fabsf(f32_var)
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
+    let DirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
         panic!();
     };
-    if let HirExpr::Call { target, args, ty } = rhs1 {
+    if let DirExpr::Call { target, args, ty } = rhs1 {
         assert_eq!(target, "fabsf");
         assert_eq!(args.len(), 1);
-        assert_eq!(args[0], HirExpr::Var("f32_var".to_string()));
+        assert_eq!(args[0], DirExpr::Var("f32_var".to_string()));
         assert_eq!(ty, &f32_ty);
     } else {
         panic!("expected call, got {:?}", rhs1);
     }
 
     // Verify second simplification: res2 = -f32_var
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
+    let DirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
         panic!();
     };
-    if let HirExpr::Unary { op, expr, ty } = rhs2 {
-        assert_eq!(*op, HirUnaryOp::Neg);
-        assert_eq!(expr.as_ref(), &HirExpr::Var("f32_var".to_string()));
+    if let DirExpr::Unary { op, expr, ty } = rhs2 {
+        assert_eq!(*op, DirUnaryOp::Neg);
+        assert_eq!(expr.as_ref(), &DirExpr::Var("f32_var".to_string()));
         assert_eq!(ty, &f32_ty);
     } else {
         panic!("expected unary, got {:?}", rhs2);
     }
 
     // Verify third simplification: res3 = fabs(f64_var)
-    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
+    let DirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
         panic!();
     };
-    if let HirExpr::Call { target, args, ty } = rhs3 {
+    if let DirExpr::Call { target, args, ty } = rhs3 {
         assert_eq!(target, "fabs");
         assert_eq!(args.len(), 1);
-        assert_eq!(args[0], HirExpr::Var("f64_var".to_string()));
+        assert_eq!(args[0], DirExpr::Var("f64_var".to_string()));
         assert_eq!(ty, &f64_ty);
     } else {
         panic!("expected call, got {:?}", rhs3);
     }
 
     // Verify fourth simplification: res4 = -f64_var
-    let HirStmt::Assign { rhs: rhs4, .. } = &func.body[3] else {
+    let DirStmt::Assign { rhs: rhs4, .. } = &func.body[3] else {
         panic!();
     };
-    if let HirExpr::Unary { op, expr, ty } = rhs4 {
-        assert_eq!(*op, HirUnaryOp::Neg);
-        assert_eq!(expr.as_ref(), &HirExpr::Var("f64_var".to_string()));
+    if let DirExpr::Unary { op, expr, ty } = rhs4 {
+        assert_eq!(*op, DirUnaryOp::Neg);
+        assert_eq!(expr.as_ref(), &DirExpr::Var("f64_var".to_string()));
         assert_eq!(ty, &f64_ty);
     } else {
         panic!("expected unary, got {:?}", rhs4);
@@ -2443,40 +2443,40 @@ fn normalize_ignore_nan_simplifies_comparisons() {
     let f64_ty = NirType::Float { bits: 64 };
     let bool_ty = NirType::Bool;
 
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "test_ignore_nan".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "f32_var".to_string(),
                 ty: f32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "f64_var".to_string(),
                 ty: f64_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res1".to_string(),
                 ty: bool_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res2".to_string(),
                 ty: bool_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "res3".to_string(),
                 ty: bool_ty.clone(),
                 surface_type_name: None,
@@ -2486,78 +2486,78 @@ fn normalize_ignore_nan_simplifies_comparisons() {
         ],
         body: vec![
             // res1 = !__isnan(f32_var) && (f32_var < 5.0f)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res1".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::LogicalAnd,
-                    lhs: Box::new(HirExpr::Unary {
-                        op: HirUnaryOp::Not,
-                        expr: Box::new(HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res1".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::LogicalAnd,
+                    lhs: Box::new(DirExpr::Unary {
+                        op: DirUnaryOp::Not,
+                        expr: Box::new(DirExpr::Call {
                             target: "__isnan".to_string(),
-                            args: vec![HirExpr::Var("f32_var".to_string())],
+                            args: vec![DirExpr::Var("f32_var".to_string())],
                             ty: bool_ty.clone(),
                         }),
                         ty: bool_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Lt,
-                        lhs: Box::new(HirExpr::Var("f32_var".to_string())),
-                        rhs: Box::new(HirExpr::Const(5, f32_ty.clone())),
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Lt,
+                        lhs: Box::new(DirExpr::Var("f32_var".to_string())),
+                        rhs: Box::new(DirExpr::Const(5, f32_ty.clone())),
                         ty: bool_ty.clone(),
                     }),
                     ty: bool_ty.clone(),
                 },
             },
             // res2 = __isnan(f32_var) || (f32_var != 5.0f)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res2".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::LogicalOr,
-                    lhs: Box::new(HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res2".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::LogicalOr,
+                    lhs: Box::new(DirExpr::Call {
                         target: "__isnan".to_string(),
-                        args: vec![HirExpr::Var("f32_var".to_string())],
+                        args: vec![DirExpr::Var("f32_var".to_string())],
                         ty: bool_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Ne,
-                        lhs: Box::new(HirExpr::Var("f32_var".to_string())),
-                        rhs: Box::new(HirExpr::Const(5, f32_ty.clone())),
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Ne,
+                        lhs: Box::new(DirExpr::Var("f32_var".to_string())),
+                        rhs: Box::new(DirExpr::Const(5, f32_ty.clone())),
                         ty: bool_ty.clone(),
                     }),
                     ty: bool_ty.clone(),
                 },
             },
             // res3 = !__isnan(f32_var) && !__isnan(f64_var) && (f32_var < f64_var)
-            HirStmt::Assign {
-                lhs: HirLValue::Var("res3".to_string()),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::LogicalAnd,
-                    lhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::LogicalAnd,
-                        lhs: Box::new(HirExpr::Unary {
-                            op: HirUnaryOp::Not,
-                            expr: Box::new(HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("res3".to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::LogicalAnd,
+                    lhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::LogicalAnd,
+                        lhs: Box::new(DirExpr::Unary {
+                            op: DirUnaryOp::Not,
+                            expr: Box::new(DirExpr::Call {
                                 target: "__isnan".to_string(),
-                                args: vec![HirExpr::Var("f32_var".to_string())],
+                                args: vec![DirExpr::Var("f32_var".to_string())],
                                 ty: bool_ty.clone(),
                             }),
                             ty: bool_ty.clone(),
                         }),
-                        rhs: Box::new(HirExpr::Unary {
-                            op: HirUnaryOp::Not,
-                            expr: Box::new(HirExpr::Call {
+                        rhs: Box::new(DirExpr::Unary {
+                            op: DirUnaryOp::Not,
+                            expr: Box::new(DirExpr::Call {
                                 target: "__isnan".to_string(),
-                                args: vec![HirExpr::Var("f64_var".to_string())],
+                                args: vec![DirExpr::Var("f64_var".to_string())],
                                 ty: bool_ty.clone(),
                             }),
                             ty: bool_ty.clone(),
                         }),
                         ty: bool_ty.clone(),
                     }),
-                    rhs: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::Lt,
-                        lhs: Box::new(HirExpr::Var("f32_var".to_string())),
-                        rhs: Box::new(HirExpr::Var("f64_var".to_string())),
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Lt,
+                        lhs: Box::new(DirExpr::Var("f32_var".to_string())),
+                        rhs: Box::new(DirExpr::Var("f64_var".to_string())),
                         ty: bool_ty.clone(),
                     }),
                     ty: bool_ty.clone(),
@@ -2570,39 +2570,39 @@ fn normalize_ignore_nan_simplifies_comparisons() {
     assert!(apply_ignore_nan_pass(&mut func));
 
     // Verify first simplification: res1 = (f32_var < 5.0f)
-    let HirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
+    let DirStmt::Assign { rhs: rhs1, .. } = &func.body[0] else {
         panic!();
     };
-    if let HirExpr::Binary { op, lhs, rhs, ty } = rhs1 {
-        assert_eq!(*op, HirBinaryOp::Lt);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("f32_var".to_string()));
-        assert_eq!(rhs.as_ref(), &HirExpr::Const(5, f32_ty.clone()));
+    if let DirExpr::Binary { op, lhs, rhs, ty } = rhs1 {
+        assert_eq!(*op, DirBinaryOp::Lt);
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("f32_var".to_string()));
+        assert_eq!(rhs.as_ref(), &DirExpr::Const(5, f32_ty.clone()));
         assert_eq!(ty, &bool_ty);
     } else {
         panic!("expected binary op, got {:?}", rhs1);
     }
 
     // Verify second simplification: res2 = (f32_var != 5.0f)
-    let HirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
+    let DirStmt::Assign { rhs: rhs2, .. } = &func.body[1] else {
         panic!();
     };
-    if let HirExpr::Binary { op, lhs, rhs, ty } = rhs2 {
-        assert_eq!(*op, HirBinaryOp::Ne);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("f32_var".to_string()));
-        assert_eq!(rhs.as_ref(), &HirExpr::Const(5, f32_ty.clone()));
+    if let DirExpr::Binary { op, lhs, rhs, ty } = rhs2 {
+        assert_eq!(*op, DirBinaryOp::Ne);
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("f32_var".to_string()));
+        assert_eq!(rhs.as_ref(), &DirExpr::Const(5, f32_ty.clone()));
         assert_eq!(ty, &bool_ty);
     } else {
         panic!("expected binary op, got {:?}", rhs2);
     }
 
     // Verify third simplification: res3 = (f32_var < f64_var)
-    let HirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
+    let DirStmt::Assign { rhs: rhs3, .. } = &func.body[2] else {
         panic!();
     };
-    if let HirExpr::Binary { op, lhs, rhs, ty } = rhs3 {
-        assert_eq!(*op, HirBinaryOp::Lt);
-        assert_eq!(lhs.as_ref(), &HirExpr::Var("f32_var".to_string()));
-        assert_eq!(rhs.as_ref(), &HirExpr::Var("f64_var".to_string()));
+    if let DirExpr::Binary { op, lhs, rhs, ty } = rhs3 {
+        assert_eq!(*op, DirBinaryOp::Lt);
+        assert_eq!(lhs.as_ref(), &DirExpr::Var("f32_var".to_string()));
+        assert_eq!(rhs.as_ref(), &DirExpr::Var("f64_var".to_string()));
         assert_eq!(ty, &bool_ty);
     } else {
         panic!("expected binary op, got {:?}", rhs3);
@@ -2611,24 +2611,24 @@ fn normalize_ignore_nan_simplifies_comparisons() {
 
 // ── Relational branch implication (conditional_const range tracking) ─────────
 
-fn cond_const_test_func(body: Vec<HirStmt>) -> HirFunction {
+fn cond_const_test_func(body: Vec<DirStmt>) -> DirFunction {
     let i32_ty = NirType::Int {
         bits: 32,
         signed: true,
     };
-    HirFunction {
+    DirFunction {
         name: "test_range_cond".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            NirBinding {
+            DirBinding {
                 name: "x".to_string(),
                 ty: i32_ty.clone(),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            NirBinding {
+            DirBinding {
                 name: "y".to_string(),
                 ty: i32_ty.clone(),
                 surface_type_name: None,
@@ -2642,27 +2642,27 @@ fn cond_const_test_func(body: Vec<HirStmt>) -> HirFunction {
     }
 }
 
-fn cmp_x(op: HirBinaryOp, val: i64) -> HirExpr {
+fn cmp_x(op: DirBinaryOp, val: i64) -> DirExpr {
     let i32_ty = NirType::Int {
         bits: 32,
         signed: true,
     };
-    HirExpr::Binary {
+    DirExpr::Binary {
         op,
-        lhs: Box::new(HirExpr::Var("x".to_string())),
-        rhs: Box::new(HirExpr::Const(val, i32_ty)),
+        lhs: Box::new(DirExpr::Var("x".to_string())),
+        rhs: Box::new(DirExpr::Const(val, i32_ty)),
         ty: NirType::Bool,
     }
 }
 
-fn assign_y(val: i64) -> HirStmt {
+fn assign_y(val: i64) -> DirStmt {
     let i32_ty = NirType::Int {
         bits: 32,
         signed: true,
     };
-    HirStmt::Assign {
-        lhs: HirLValue::Var("y".to_string()),
-        rhs: HirExpr::Const(val, i32_ty),
+    DirStmt::Assign {
+        lhs: DirLValue::Var("y".to_string()),
+        rhs: DirExpr::Const(val, i32_ty),
     }
 }
 
@@ -2671,10 +2671,10 @@ fn normalize_conditional_const_folds_implied_true_nested_cond() {
     use crate::midend::normalize::global_opt::apply_conditional_const_pass;
 
     // if (x > 0) { if (x >= 0) y=1 else y=2 }  →  inner cond decided true
-    let mut func = cond_const_test_func(vec![HirStmt::If {
-        cond: cmp_x(HirBinaryOp::SGt, 0),
-        then_body: vec![HirStmt::If {
-            cond: cmp_x(HirBinaryOp::SGe, 0),
+    let mut func = cond_const_test_func(vec![DirStmt::If {
+        cond: cmp_x(DirBinaryOp::SGt, 0),
+        then_body: vec![DirStmt::If {
+            cond: cmp_x(DirBinaryOp::SGe, 0),
             then_body: vec![assign_y(1)],
             else_body: vec![assign_y(2)],
         }],
@@ -2682,14 +2682,14 @@ fn normalize_conditional_const_folds_implied_true_nested_cond() {
     }]);
 
     assert!(apply_conditional_const_pass(&mut func));
-    let HirStmt::If { then_body, .. } = &func.body[0] else {
+    let DirStmt::If { then_body, .. } = &func.body[0] else {
         panic!("expected outer if");
     };
-    let HirStmt::If { cond, .. } = &then_body[0] else {
+    let DirStmt::If { cond, .. } = &then_body[0] else {
         panic!("expected inner if");
     };
     assert!(
-        matches!(cond, HirExpr::Const(1, _)),
+        matches!(cond, DirExpr::Const(1, _)),
         "inner cond should fold to true, got {cond:?}"
     );
 }
@@ -2699,10 +2699,10 @@ fn normalize_conditional_const_folds_implied_false_nested_cond() {
     use crate::midend::normalize::global_opt::apply_conditional_const_pass;
 
     // if (x > 0) { if (x < 0) y=1 else y=2 }  →  inner cond decided false
-    let mut func = cond_const_test_func(vec![HirStmt::If {
-        cond: cmp_x(HirBinaryOp::SGt, 0),
-        then_body: vec![HirStmt::If {
-            cond: cmp_x(HirBinaryOp::SLt, 0),
+    let mut func = cond_const_test_func(vec![DirStmt::If {
+        cond: cmp_x(DirBinaryOp::SGt, 0),
+        then_body: vec![DirStmt::If {
+            cond: cmp_x(DirBinaryOp::SLt, 0),
             then_body: vec![assign_y(1)],
             else_body: vec![assign_y(2)],
         }],
@@ -2710,14 +2710,14 @@ fn normalize_conditional_const_folds_implied_false_nested_cond() {
     }]);
 
     assert!(apply_conditional_const_pass(&mut func));
-    let HirStmt::If { then_body, .. } = &func.body[0] else {
+    let DirStmt::If { then_body, .. } = &func.body[0] else {
         panic!("expected outer if");
     };
-    let HirStmt::If { cond, .. } = &then_body[0] else {
+    let DirStmt::If { cond, .. } = &then_body[0] else {
         panic!("expected inner if");
     };
     assert!(
-        matches!(cond, HirExpr::Const(0, _)),
+        matches!(cond, DirExpr::Const(0, _)),
         "inner cond should fold to false, got {cond:?}"
     );
 }
@@ -2727,25 +2727,25 @@ fn normalize_conditional_const_keeps_undecidable_else_branch_cond() {
     use crate::midend::normalize::global_opt::apply_conditional_const_pass;
 
     // else of (x > 0) implies x <= 0; (x >= 0) still undecidable (x may be 0)
-    let mut func = cond_const_test_func(vec![HirStmt::If {
-        cond: cmp_x(HirBinaryOp::SGt, 0),
+    let mut func = cond_const_test_func(vec![DirStmt::If {
+        cond: cmp_x(DirBinaryOp::SGt, 0),
         then_body: vec![],
-        else_body: vec![HirStmt::If {
-            cond: cmp_x(HirBinaryOp::SGe, 0),
+        else_body: vec![DirStmt::If {
+            cond: cmp_x(DirBinaryOp::SGe, 0),
             then_body: vec![assign_y(1)],
             else_body: vec![assign_y(2)],
         }],
     }]);
 
     apply_conditional_const_pass(&mut func);
-    let HirStmt::If { else_body, .. } = &func.body[0] else {
+    let DirStmt::If { else_body, .. } = &func.body[0] else {
         panic!("expected outer if");
     };
-    let HirStmt::If { cond, .. } = &else_body[0] else {
+    let DirStmt::If { cond, .. } = &else_body[0] else {
         panic!("expected inner if");
     };
     assert!(
-        matches!(cond, HirExpr::Binary { .. }),
+        matches!(cond, DirExpr::Binary { .. }),
         "undecidable cond must stay, got {cond:?}"
     );
 }
@@ -2759,19 +2759,19 @@ fn normalize_conditional_const_write_invalidates_range() {
         bits: 32,
         signed: true,
     };
-    let mut func = cond_const_test_func(vec![HirStmt::If {
-        cond: cmp_x(HirBinaryOp::SGt, 0),
+    let mut func = cond_const_test_func(vec![DirStmt::If {
+        cond: cmp_x(DirBinaryOp::SGt, 0),
         then_body: vec![
-            HirStmt::Assign {
-                lhs: HirLValue::Var("x".to_string()),
-                rhs: HirExpr::Call {
+            DirStmt::Assign {
+                lhs: DirLValue::Var("x".to_string()),
+                rhs: DirExpr::Call {
                     target: "ext".to_string(),
                     args: vec![],
                     ty: i32_ty,
                 },
             },
-            HirStmt::If {
-                cond: cmp_x(HirBinaryOp::SGe, 0),
+            DirStmt::If {
+                cond: cmp_x(DirBinaryOp::SGe, 0),
                 then_body: vec![assign_y(1)],
                 else_body: vec![assign_y(2)],
             },
@@ -2780,14 +2780,14 @@ fn normalize_conditional_const_write_invalidates_range() {
     }]);
 
     apply_conditional_const_pass(&mut func);
-    let HirStmt::If { then_body, .. } = &func.body[0] else {
+    let DirStmt::If { then_body, .. } = &func.body[0] else {
         panic!("expected outer if");
     };
-    let HirStmt::If { cond, .. } = &then_body[1] else {
+    let DirStmt::If { cond, .. } = &then_body[1] else {
         panic!("expected inner if");
     };
     assert!(
-        matches!(cond, HirExpr::Binary { .. }),
+        matches!(cond, DirExpr::Binary { .. }),
         "cond after clobbering write must stay, got {cond:?}"
     );
 }
@@ -2797,25 +2797,25 @@ fn normalize_conditional_const_label_in_dead_arm_blocks_fold() {
     use crate::midend::normalize::global_opt::apply_conditional_const_pass;
 
     // Dead else arm holds a jump target label → fold must be skipped.
-    let mut func = cond_const_test_func(vec![HirStmt::If {
-        cond: cmp_x(HirBinaryOp::SGt, 0),
-        then_body: vec![HirStmt::If {
-            cond: cmp_x(HirBinaryOp::SGe, 0),
+    let mut func = cond_const_test_func(vec![DirStmt::If {
+        cond: cmp_x(DirBinaryOp::SGt, 0),
+        then_body: vec![DirStmt::If {
+            cond: cmp_x(DirBinaryOp::SGe, 0),
             then_body: vec![assign_y(1)],
-            else_body: vec![HirStmt::Label("join_1".to_string()), assign_y(2)],
+            else_body: vec![DirStmt::Label("join_1".to_string()), assign_y(2)],
         }],
         else_body: vec![],
     }]);
 
     apply_conditional_const_pass(&mut func);
-    let HirStmt::If { then_body, .. } = &func.body[0] else {
+    let DirStmt::If { then_body, .. } = &func.body[0] else {
         panic!("expected outer if");
     };
-    let HirStmt::If { cond, .. } = &then_body[0] else {
+    let DirStmt::If { cond, .. } = &then_body[0] else {
         panic!("expected inner if");
     };
     assert!(
-        matches!(cond, HirExpr::Binary { .. }),
+        matches!(cond, DirExpr::Binary { .. }),
         "label-bearing dead arm must block the fold, got {cond:?}"
     );
 }
@@ -2829,39 +2829,39 @@ fn normalize_conditional_const_branch_write_invalidates_eq_env_after_join() {
         bits: 32,
         signed: true,
     };
-    let mut func = cond_const_test_func(vec![HirStmt::If {
-        cond: cmp_x(HirBinaryOp::Eq, 5),
+    let mut func = cond_const_test_func(vec![DirStmt::If {
+        cond: cmp_x(DirBinaryOp::Eq, 5),
         then_body: vec![
-            HirStmt::If {
-                cond: HirExpr::Binary {
-                    op: HirBinaryOp::Ne,
-                    lhs: Box::new(HirExpr::Var("y".to_string())),
-                    rhs: Box::new(HirExpr::Const(0, i32_ty.clone())),
+            DirStmt::If {
+                cond: DirExpr::Binary {
+                    op: DirBinaryOp::Ne,
+                    lhs: Box::new(DirExpr::Var("y".to_string())),
+                    rhs: Box::new(DirExpr::Const(0, i32_ty.clone())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Assign {
-                    lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Const(1, i32_ty),
+                then_body: vec![DirStmt::Assign {
+                    lhs: DirLValue::Var("x".to_string()),
+                    rhs: DirExpr::Const(1, i32_ty),
                 }],
                 else_body: vec![],
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Var("y".to_string()),
-                rhs: HirExpr::Var("x".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("y".to_string()),
+                rhs: DirExpr::Var("x".to_string()),
             },
         ],
         else_body: vec![],
     }]);
 
     apply_conditional_const_pass(&mut func);
-    let HirStmt::If { then_body, .. } = &func.body[0] else {
+    let DirStmt::If { then_body, .. } = &func.body[0] else {
         panic!("expected outer if");
     };
-    let HirStmt::Assign { rhs, .. } = &then_body[1] else {
+    let DirStmt::Assign { rhs, .. } = &then_body[1] else {
         panic!("expected join assign");
     };
     assert!(
-        matches!(rhs, HirExpr::Var(name) if name == "x"),
+        matches!(rhs, DirExpr::Var(name) if name == "x"),
         "stale eq binding must not survive a branch write, got {rhs:?}"
     );
 }

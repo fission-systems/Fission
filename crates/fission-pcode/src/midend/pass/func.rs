@@ -2,7 +2,7 @@ use crate::midend::builder::PreviewBuilder;
 use crate::midend::structuring::irreducible::NodeSplitResult;
 use crate::midend::structuring::loop_analysis::LoopBody;
 use crate::midend::support::StackSlot;
-use crate::midend::ir::{HirStmt, NirBinding};
+use crate::midend::ir::{DirStmt, DirBinding};
 use std::collections::BTreeMap;
 
 pub(crate) struct NirFunc<'a, 'b> {
@@ -71,20 +71,20 @@ impl<'a, 'b> NirFunc<'a, 'b> {
         &mut self.builder.locals
     }
 
-    pub(crate) fn params(&self) -> &BTreeMap<usize, NirBinding> {
+    pub(crate) fn params(&self) -> &BTreeMap<usize, DirBinding> {
         &self.builder.params
     }
 
-    pub(crate) fn params_mut(&mut self) -> &mut BTreeMap<usize, NirBinding> {
+    pub(crate) fn params_mut(&mut self) -> &mut BTreeMap<usize, DirBinding> {
         self.ir_version += 1;
         &mut self.builder.params
     }
 
-    pub(crate) fn temps(&self) -> &BTreeMap<String, NirBinding> {
+    pub(crate) fn temps(&self) -> &BTreeMap<String, DirBinding> {
         &self.builder.temps
     }
 
-    pub(crate) fn temps_mut(&mut self) -> &mut BTreeMap<String, NirBinding> {
+    pub(crate) fn temps_mut(&mut self) -> &mut BTreeMap<String, DirBinding> {
         self.ir_version += 1;
         &mut self.builder.temps
     }
@@ -98,14 +98,14 @@ impl<'a, 'b> NirFunc<'a, 'b> {
         &mut self.builder.loop_bodies
     }
 
-    pub(crate) fn lowered_block_stmts(&self, block_idx: usize) -> Option<&[HirStmt]> {
+    pub(crate) fn lowered_block_stmts(&self, block_idx: usize) -> Option<&[DirStmt]> {
         self.builder
             .lowered_block_stmts_cache
             .get(&block_idx)
             .map(|v| v.as_slice())
     }
 
-    pub(crate) fn lowered_block_stmts_mut(&mut self, block_idx: usize) -> &mut Vec<HirStmt> {
+    pub(crate) fn lowered_block_stmts_mut(&mut self, block_idx: usize) -> &mut Vec<DirStmt> {
         self.ir_version += 1;
         self.builder
             .lowered_block_stmts_cache
@@ -113,7 +113,7 @@ impl<'a, 'b> NirFunc<'a, 'b> {
             .or_insert_with(Vec::new)
     }
 
-    pub(crate) fn set_lowered_block_stmts(&mut self, block_idx: usize, stmts: Vec<HirStmt>) {
+    pub(crate) fn set_lowered_block_stmts(&mut self, block_idx: usize, stmts: Vec<DirStmt>) {
         self.ir_version += 1;
         self.builder
             .lowered_block_stmts_cache
@@ -139,11 +139,11 @@ impl<'a, 'b> NirFunc<'a, 'b> {
         self.ir_version += 1;
     }
 
-    pub(crate) fn structured_body(&self) -> Option<&[HirStmt]> {
+    pub(crate) fn structured_body(&self) -> Option<&[DirStmt]> {
         self.builder.structured_body.as_deref()
     }
 
-    pub(crate) fn set_structured_body(&mut self, body: Vec<HirStmt>) {
+    pub(crate) fn set_structured_body(&mut self, body: Vec<DirStmt>) {
         self.ir_version += 1;
         self.builder.structured_body = Some(body);
     }

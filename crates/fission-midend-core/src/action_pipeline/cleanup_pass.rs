@@ -10,7 +10,7 @@ use super::budget::hir_shape;
 use super::concept::GhidraActionConcept;
 use super::gates::body_exceeds_early_cleanup_budget;
 use super::pass::{Pass, PassCtx, PassOutcome, run_pass_logged};
-use crate::ir::HirFunction;
+use crate::ir::DirFunction;
 
 /// A structural cleanup block, admission-gated the same way
 /// `run_cleanup_block` in normalize's legacy driver is: skipped (with
@@ -20,7 +20,7 @@ use crate::ir::HirFunction;
 pub struct CleanupPass {
     pub name: &'static str,
     pub concept: GhidraActionConcept,
-    pub block: fn(&mut HirFunction),
+    pub block: fn(&mut DirFunction),
 }
 
 impl Pass for CleanupPass {
@@ -47,7 +47,7 @@ impl Pass for CleanupPass {
 pub fn cleanup_pass(
     name: &'static str,
     concept: GhidraActionConcept,
-    block: fn(&mut HirFunction),
+    block: fn(&mut DirFunction),
 ) -> Box<dyn Pass> {
     Box::new(CleanupPass {
         name,
@@ -99,7 +99,7 @@ pub fn gated_followup(cond: Box<dyn Pass>, then: Vec<Box<dyn Pass>>) -> Box<dyn 
 /// data-driven admission-gate idiom (e.g. SCCP eligibility) as a single
 /// composable `Pass`.
 pub struct AdmissionGatedPass {
-    pub admits: fn(&HirFunction) -> bool,
+    pub admits: fn(&DirFunction) -> bool,
     pub on_skip: Option<fn()>,
     pub inner: Box<dyn Pass>,
 }
@@ -125,7 +125,7 @@ impl Pass for AdmissionGatedPass {
 }
 
 pub fn admission_gated(
-    admits: fn(&HirFunction) -> bool,
+    admits: fn(&DirFunction) -> bool,
     on_skip: Option<fn()>,
     inner: Box<dyn Pass>,
 ) -> Box<dyn Pass> {

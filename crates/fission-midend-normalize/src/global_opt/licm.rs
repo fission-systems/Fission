@@ -41,26 +41,26 @@ use crate::HashSet;
 
 /// Apply LICM to all loops in `func`.  Returns `true` if any statement was
 /// hoisted.
-pub fn apply_licm_pass(func: &mut HirFunction) -> bool {
+pub fn apply_licm_pass(func: &mut DirFunction) -> bool {
     hoist_in_stmts(&mut func.body)
 }
 
 /// Recursively process a statement list, applying LICM innermost-first.
 ///
 /// Returns `true` if any hoisting occurred (so the caller can re-run cleanup).
-fn hoist_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
+fn hoist_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
 
     // First, recurse into nested bodies (innermost-first / post-order).
     // We do this before extracting loop-level info from *this* level.
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 if hoist_in_stmts(body) {
                     changed = true;
                 }
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, body, update, ..
             } => {
                 if let Some(s) = init {
@@ -73,7 +73,7 @@ fn hoist_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
                     hoist_single(s);
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -85,12 +85,12 @@ fn hoist_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
                     changed = true;
                 }
             }
-            HirStmt::Block(body) => {
+            DirStmt::Block(body) => {
                 if hoist_in_stmts(body) {
                     changed = true;
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     if hoist_in_stmts(&mut case.body) {
                         changed = true;
@@ -108,7 +108,7 @@ fn hoist_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
     let mut i = 0;
     while i < stmts.len() {
         let hoisted = match &stmts[i] {
-            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {
+            DirStmt::While { .. } | DirStmt::DoWhile { .. } | DirStmt::For { .. } => {
                 extract_invariants_from_loop(&mut stmts[i])
             }
             _ => vec![],
@@ -129,15 +129,15 @@ fn hoist_in_stmts(stmts: &mut Vec<HirStmt>) -> bool {
 }
 
 /// Dummy to satisfy compiler when visiting init/update of For in inner pass.
-fn hoist_single(_stmt: &mut HirStmt) {}
+fn hoist_single(_stmt: &mut DirStmt) {}
 
 /// Extract loop-invariant assignments from the top-level body of `loop_stmt`.
 ///
 /// Returns the list of hoisted assignments (removed from the loop body).
-fn extract_invariants_from_loop(loop_stmt: &mut HirStmt) -> Vec<HirStmt> {
+fn extract_invariants_from_loop(loop_stmt: &mut DirStmt) -> Vec<DirStmt> {
     let body = match loop_stmt {
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => body,
-        HirStmt::For { body, .. } => body,
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => body,
+        DirStmt::For { body, .. } => body,
         _ => return vec![],
     };
 
@@ -169,16 +169,16 @@ fn extract_invariants_from_loop(loop_stmt: &mut HirStmt) -> Vec<HirStmt> {
 /// Collect all Var names that are **assigned** (defined) anywhere in `stmts`,
 /// including in nested blocks.  Memory writes (Deref/Index lhs) are also noted
 /// so that loads from those locations are treated as non-invariant.
-fn collect_all_defs(stmts: &[HirStmt], out: &mut HashSet<String>) {
+fn collect_all_defs(stmts: &[DirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         collect_defs_in_stmt(stmt, out);
     }
 }
 
-fn collect_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+fn collect_defs_in_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Assign { lhs, .. } => {
-            if let HirLValue::Var(name) = lhs {
+        DirStmt::Assign { lhs, .. } => {
+            if let DirLValue::Var(name) = lhs {
                 out.insert(name.clone());
             }
             // Memory writes are tracked as a sentinel key to block Load hoisting.
@@ -186,7 +186,7 @@ fn collect_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             // (We only hoist pure non-Load expressions anyway, so this is a no-op
             // but makes the invariant check explicit.)
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -194,10 +194,10 @@ fn collect_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
             collect_all_defs(then_body, out);
             collect_all_defs(else_body, out);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             collect_all_defs(body, out);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, body, update, ..
         } => {
             if let Some(s) = init {
@@ -208,22 +208,22 @@ fn collect_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
                 collect_defs_in_stmt(s, out);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 collect_all_defs(&case.body, out);
             }
             collect_all_defs(default, out);
         }
-        HirStmt::Block(body) => collect_all_defs(body, out),
+        DirStmt::Block(body) => collect_all_defs(body, out),
         _ => {}
     }
 }
 
 /// Return `true` if `stmt` is an assignment that is safe to hoist out of a
 /// loop whose definitions are `loop_defs`.
-fn is_invariant_stmt(stmt: &HirStmt, loop_defs: &HashSet<String>) -> bool {
-    let HirStmt::Assign {
-        lhs: HirLValue::Var(target),
+fn is_invariant_stmt(stmt: &DirStmt, loop_defs: &HashSet<String>) -> bool {
+    let DirStmt::Assign {
+        lhs: DirLValue::Var(target),
         rhs,
     } = stmt
     else {
@@ -239,24 +239,24 @@ fn is_invariant_stmt(stmt: &HirStmt, loop_defs: &HashSet<String>) -> bool {
 
 /// Return `true` if `expr` contains no `Load`/`Call`/`AggregateCopy` and all
 /// `Var` operands are not in `loop_defs`.
-fn is_pure_and_invariant(expr: &HirExpr, loop_defs: &HashSet<String>) -> bool {
+fn is_pure_and_invariant(expr: &DirExpr, loop_defs: &HashSet<String>) -> bool {
     match expr {
-        HirExpr::Const(_, _) => true,
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => !loop_defs.contains(name.as_str()),
-        HirExpr::Cast { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
-        HirExpr::Unary { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Const(_, _) => true,
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => !loop_defs.contains(name.as_str()),
+        DirExpr::Cast { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
+        DirExpr::Unary { expr: inner, .. } => is_pure_and_invariant(inner, loop_defs),
+        DirExpr::Binary { lhs, rhs, .. } => {
             is_pure_and_invariant(lhs, loop_defs) && is_pure_and_invariant(rhs, loop_defs)
         }
-        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
             is_pure_and_invariant(base, loop_defs)
         }
         // Loads, calls, aggregate copies are never considered pure/invariant.
-        HirExpr::Load { .. }
-        | HirExpr::Call { .. }
-        | HirExpr::AggregateCopy { .. }
-        | HirExpr::Select { .. } => false,
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Load { .. }
+        | DirExpr::Call { .. }
+        | DirExpr::AggregateCopy { .. }
+        | DirExpr::Select { .. } => false,
+        DirExpr::Index { base, index, .. } => {
             // Array index expression can be invariant if both parts are.
             // We are conservative: only hoist if both are pure & invariant.
             is_pure_and_invariant(base, loop_defs) && is_pure_and_invariant(index, loop_defs)

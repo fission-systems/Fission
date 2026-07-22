@@ -47,29 +47,29 @@ impl PartitionKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionedMemoryAccess {
     pub kind: MemoryAccessKind,
-    pub ptr: HirExpr,
-    pub base: HirExpr,
+    pub ptr: DirExpr,
+    pub base: DirExpr,
     pub base_repr: String,
     pub const_offset: i64,
     pub stride: Option<i64>,
-    pub index: Option<HirExpr>,
+    pub index: Option<DirExpr>,
     pub access_ty: NirType,
 }
 
 #[derive(Debug, Default, Clone)]
 struct AddressParts {
-    base: Option<HirExpr>,
+    base: Option<DirExpr>,
     const_offset: i64,
-    scaled_index: Option<(HirExpr, i64)>,
+    scaled_index: Option<(DirExpr, i64)>,
 }
 
-pub fn collect_partitioned_memory_accesses(stmts: &[HirStmt]) -> Vec<PartitionedMemoryAccess> {
+pub fn collect_partitioned_memory_accesses(stmts: &[DirStmt]) -> Vec<PartitionedMemoryAccess> {
     let mut accesses = Vec::new();
     collect_accesses_from_stmts(stmts, &mut accesses);
     accesses
 }
 
-pub fn partition_key_for_pointer_expr(ptr: &HirExpr, access_ty: &NirType) -> Option<PartitionKey> {
+pub fn partition_key_for_pointer_expr(ptr: &DirExpr, access_ty: &NirType) -> Option<PartitionKey> {
     let access = parse_partitioned_access(ptr, access_ty, MemoryAccessKind::Load)?;
     Some(access.partition_key())
 }
@@ -134,28 +134,28 @@ impl PartitionedMemoryAccess {
     }
 }
 
-fn collect_accesses_from_stmts(stmts: &[HirStmt], accesses: &mut Vec<PartitionedMemoryAccess>) {
+fn collect_accesses_from_stmts(stmts: &[DirStmt], accesses: &mut Vec<PartitionedMemoryAccess>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
-                if let HirLValue::Deref { ptr, ty } = lhs
+            DirStmt::Assign { lhs, rhs } => {
+                if let DirLValue::Deref { ptr, ty } = lhs
                     && let Some(access) = parse_partitioned_access(ptr, ty, MemoryAccessKind::Store)
                 {
                     accesses.push(access);
                 }
                 collect_accesses_from_expr(rhs, accesses);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 collect_accesses_from_expr(va_list, accesses);
             }
-            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
                 collect_accesses_from_expr(expr, accesses);
             }
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => collect_accesses_from_stmts(body, accesses),
-            HirStmt::Switch {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => collect_accesses_from_stmts(body, accesses),
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -166,7 +166,7 @@ fn collect_accesses_from_stmts(stmts: &[HirStmt], accesses: &mut Vec<Partitioned
                 }
                 collect_accesses_from_stmts(default, accesses);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -175,42 +175,42 @@ fn collect_accesses_from_stmts(stmts: &[HirStmt], accesses: &mut Vec<Partitioned
                 collect_accesses_from_stmts(then_body, accesses);
                 collect_accesses_from_stmts(else_body, accesses);
             }
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(None)
-            | HirStmt::Break
-            | HirStmt::Continue => {}
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(None)
+            | DirStmt::Break
+            | DirStmt::Continue => {}
         }
     }
 }
 
-fn collect_accesses_from_expr(expr: &HirExpr, accesses: &mut Vec<PartitionedMemoryAccess>) {
+fn collect_accesses_from_expr(expr: &DirExpr, accesses: &mut Vec<PartitionedMemoryAccess>) {
     match expr {
-        HirExpr::Load { ptr, ty } => {
+        DirExpr::Load { ptr, ty } => {
             if let Some(access) = parse_partitioned_access(ptr, ty, MemoryAccessKind::Load) {
                 accesses.push(access);
             }
             collect_accesses_from_expr(ptr, accesses);
         }
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => collect_accesses_from_expr(expr, accesses),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => collect_accesses_from_expr(expr, accesses),
+        DirExpr::Binary { lhs, rhs, .. } => {
             collect_accesses_from_expr(lhs, accesses);
             collect_accesses_from_expr(rhs, accesses);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 collect_accesses_from_expr(arg, accesses);
             }
         }
-        HirExpr::PtrOffset { base, .. } => collect_accesses_from_expr(base, accesses),
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::PtrOffset { base, .. } => collect_accesses_from_expr(base, accesses),
+        DirExpr::Index { base, index, .. } => {
             collect_accesses_from_expr(base, accesses);
             collect_accesses_from_expr(index, accesses);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -220,12 +220,12 @@ fn collect_accesses_from_expr(expr: &HirExpr, accesses: &mut Vec<PartitionedMemo
             collect_accesses_from_expr(then_expr, accesses);
             collect_accesses_from_expr(else_expr, accesses);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
 }
 
 fn parse_partitioned_access(
-    ptr: &HirExpr,
+    ptr: &DirExpr,
     access_ty: &NirType,
     kind: MemoryAccessKind,
 ) -> Option<PartitionedMemoryAccess> {
@@ -257,9 +257,9 @@ fn parse_partitioned_access(
     })
 }
 
-fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
+fn classify_base_object(base: &DirExpr) -> MemoryAccessClass {
     match base {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
             if name.starts_with("stack_")
                 || name.starts_with("local_")
                 || name.starts_with("home_")
@@ -275,14 +275,14 @@ fn classify_base_object(base: &HirExpr) -> MemoryAccessClass {
                 MemoryAccessClass::Unknown
             }
         }
-        HirExpr::PtrOffset { base, .. }
-        | HirExpr::Cast { expr: base, .. }
-        | HirExpr::FieldAccess { base, .. } => classify_base_object(base),
+        DirExpr::PtrOffset { base, .. }
+        | DirExpr::Cast { expr: base, .. }
+        | DirExpr::FieldAccess { base, .. } => classify_base_object(base),
         _ => MemoryAccessClass::HeapLike,
     }
 }
 
-fn classify_escape(base: &HirExpr) -> MemoryEscapeClass {
+fn classify_escape(base: &DirExpr) -> MemoryEscapeClass {
     match classify_base_object(base) {
         MemoryAccessClass::Stack | MemoryAccessClass::Aggregate | MemoryAccessClass::GlobalLike => {
             if expr_has_side_effects(base) {
@@ -295,23 +295,23 @@ fn classify_escape(base: &HirExpr) -> MemoryEscapeClass {
     }
 }
 
-fn collect_address_parts(expr: &HirExpr, parts: &mut AddressParts, sign: i64) -> Option<()> {
+fn collect_address_parts(expr: &DirExpr, parts: &mut AddressParts, sign: i64) -> Option<()> {
     match expr {
-        HirExpr::Const(value, _) => {
+        DirExpr::Const(value, _) => {
             parts.const_offset += sign * *value;
             Some(())
         }
-        HirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
-        HirExpr::PtrOffset { base, offset } => {
+        DirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
+        DirExpr::PtrOffset { base, offset } => {
             parts.const_offset += sign * *offset;
             collect_address_parts(base, parts, sign)
         }
-        HirExpr::FieldAccess { base, offset, .. } => {
+        DirExpr::FieldAccess { base, offset, .. } => {
             parts.const_offset += sign * i64::from(*offset);
             collect_address_parts(base, parts, sign)
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -319,8 +319,8 @@ fn collect_address_parts(expr: &HirExpr, parts: &mut AddressParts, sign: i64) ->
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, sign)
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
             lhs,
             rhs,
             ..
@@ -328,27 +328,27 @@ fn collect_address_parts(expr: &HirExpr, parts: &mut AddressParts, sign: i64) ->
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, -sign)
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Mul,
+        DirExpr::Binary {
+            op: DirBinaryOp::Mul,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Const(value, _) = lhs.as_ref() {
+            if let DirExpr::Const(value, _) = lhs.as_ref() {
                 return add_scaled_index_expr(parts, rhs, sign * *value);
             }
-            if let HirExpr::Const(value, _) = rhs.as_ref() {
+            if let DirExpr::Const(value, _) = rhs.as_ref() {
                 return add_scaled_index_expr(parts, lhs, sign * *value);
             }
             add_base_expr(parts, expr.clone(), sign)
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Shl,
+        DirExpr::Binary {
+            op: DirBinaryOp::Shl,
             lhs,
             rhs,
             ..
         } => {
-            let HirExpr::Const(shift, _) = rhs.as_ref() else {
+            let DirExpr::Const(shift, _) = rhs.as_ref() else {
                 return add_base_expr(parts, expr.clone(), sign);
             };
             if *shift < 0 || *shift > 30 {
@@ -360,8 +360,8 @@ fn collect_address_parts(expr: &HirExpr, parts: &mut AddressParts, sign: i64) ->
     }
 }
 
-fn add_scaled_index_expr(parts: &mut AddressParts, expr: &HirExpr, stride: i64) -> Option<()> {
-    if let HirExpr::Const(value, _) = expr {
+fn add_scaled_index_expr(parts: &mut AddressParts, expr: &DirExpr, stride: i64) -> Option<()> {
+    if let DirExpr::Const(value, _) = expr {
         parts.const_offset += stride * *value;
         return Some(());
     }
@@ -372,20 +372,20 @@ fn add_scaled_index_expr(parts: &mut AddressParts, expr: &HirExpr, stride: i64) 
     add_scaled_index(parts, expr.clone(), stride)
 }
 
-fn extract_index_bias(expr: &HirExpr) -> Option<(HirExpr, i64)> {
+fn extract_index_bias(expr: &DirExpr) -> Option<(DirExpr, i64)> {
     match expr {
-        HirExpr::Cast { expr, .. } => extract_index_bias(expr),
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        DirExpr::Cast { expr, .. } => extract_index_bias(expr),
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Const(value, _) = lhs.as_ref() {
+            if let DirExpr::Const(value, _) = lhs.as_ref() {
                 let (index, bias) = extract_index_bias(rhs)?;
                 return Some((index, bias + *value));
             }
-            if let HirExpr::Const(value, _) = rhs.as_ref() {
+            if let DirExpr::Const(value, _) = rhs.as_ref() {
                 let (index, bias) = extract_index_bias(lhs)?;
                 return Some((index, bias + *value));
             }
@@ -395,13 +395,13 @@ fn extract_index_bias(expr: &HirExpr) -> Option<(HirExpr, i64)> {
                 None
             }
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Const(value, _) = rhs.as_ref() {
+            if let DirExpr::Const(value, _) = rhs.as_ref() {
                 let (index, bias) = extract_index_bias(lhs)?;
                 return Some((index, bias - *value));
             }
@@ -416,8 +416,8 @@ fn extract_index_bias(expr: &HirExpr) -> Option<(HirExpr, i64)> {
     }
 }
 
-fn add_base_expr(parts: &mut AddressParts, expr: HirExpr, sign: i64) -> Option<()> {
-    if sign != 1 || matches!(expr, HirExpr::Const(_, _)) {
+fn add_base_expr(parts: &mut AddressParts, expr: DirExpr, sign: i64) -> Option<()> {
+    if sign != 1 || matches!(expr, DirExpr::Const(_, _)) {
         return None;
     }
     match &parts.base {
@@ -430,7 +430,7 @@ fn add_base_expr(parts: &mut AddressParts, expr: HirExpr, sign: i64) -> Option<(
     }
 }
 
-fn add_scaled_index(parts: &mut AddressParts, expr: HirExpr, stride: i64) -> Option<()> {
+fn add_scaled_index(parts: &mut AddressParts, expr: DirExpr, stride: i64) -> Option<()> {
     if stride <= 0 || expr_has_side_effects(&expr) {
         return None;
     }

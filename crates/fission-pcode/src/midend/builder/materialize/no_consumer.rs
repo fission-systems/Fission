@@ -21,17 +21,17 @@ impl<'a> PreviewBuilder<'a> {
             )
     }
 
-    fn no_consumer_flag_rhs_is_pure(expr: &HirExpr) -> bool {
+    fn no_consumer_flag_rhs_is_pure(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => true,
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(..) => true,
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::no_consumer_flag_rhs_is_pure(expr)
             }
-            HirExpr::FieldAccess { base, .. } => Self::no_consumer_flag_rhs_is_pure(base),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::FieldAccess { base, .. } => Self::no_consumer_flag_rhs_is_pure(base),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 Self::no_consumer_flag_rhs_is_pure(lhs) && Self::no_consumer_flag_rhs_is_pure(rhs)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -41,11 +41,11 @@ impl<'a> PreviewBuilder<'a> {
                     && Self::no_consumer_flag_rhs_is_pure(then_expr)
                     && Self::no_consumer_flag_rhs_is_pure(else_expr)
             }
-            HirExpr::Call { .. }
-            | HirExpr::Load { .. }
-            | HirExpr::PtrOffset { .. }
-            | HirExpr::Index { .. }
-            | HirExpr::AggregateCopy { .. } => false,
+            DirExpr::Call { .. }
+            | DirExpr::Load { .. }
+            | DirExpr::PtrOffset { .. }
+            | DirExpr::Index { .. }
+            | DirExpr::AggregateCopy { .. } => false,
         }
     }
 
@@ -54,7 +54,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> NoConsumerMaterializationProfile {
         let same_block_consumers =
             Self::collect_output_use_sites_in_block(block, op_idx, output).len();
@@ -76,7 +76,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn classify_no_consumer_materialization_decision(
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         legacy_inline_candidate: bool,
         plan: ReplacementValuePlan,
         hazard: Option<AliasUnsafeHazard>,
@@ -144,21 +144,21 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn classify_no_consumer_suppression_rhs_kind(
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> NoConsumerSuppressionRhsKind {
         match rhs {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => NoConsumerSuppressionRhsKind::Var,
-            HirExpr::Const(..) => NoConsumerSuppressionRhsKind::Const,
-            HirExpr::Cast { .. } => NoConsumerSuppressionRhsKind::Cast,
-            HirExpr::Unary { .. } => NoConsumerSuppressionRhsKind::Unary,
-            HirExpr::Binary { .. } => NoConsumerSuppressionRhsKind::Binary,
-            HirExpr::Load { .. } => NoConsumerSuppressionRhsKind::Load,
-            HirExpr::Call { .. } => NoConsumerSuppressionRhsKind::Call,
-            HirExpr::AggregateCopy { .. } => NoConsumerSuppressionRhsKind::Aggregate,
-            HirExpr::PtrOffset { .. } => NoConsumerSuppressionRhsKind::PtrOffset,
-            HirExpr::Index { .. } => NoConsumerSuppressionRhsKind::Index,
-            HirExpr::Select { .. } => NoConsumerSuppressionRhsKind::Select,
-            HirExpr::FieldAccess { .. } => NoConsumerSuppressionRhsKind::FieldAccess,
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => NoConsumerSuppressionRhsKind::Var,
+            DirExpr::Const(..) => NoConsumerSuppressionRhsKind::Const,
+            DirExpr::Cast { .. } => NoConsumerSuppressionRhsKind::Cast,
+            DirExpr::Unary { .. } => NoConsumerSuppressionRhsKind::Unary,
+            DirExpr::Binary { .. } => NoConsumerSuppressionRhsKind::Binary,
+            DirExpr::Load { .. } => NoConsumerSuppressionRhsKind::Load,
+            DirExpr::Call { .. } => NoConsumerSuppressionRhsKind::Call,
+            DirExpr::AggregateCopy { .. } => NoConsumerSuppressionRhsKind::Aggregate,
+            DirExpr::PtrOffset { .. } => NoConsumerSuppressionRhsKind::PtrOffset,
+            DirExpr::Index { .. } => NoConsumerSuppressionRhsKind::Index,
+            DirExpr::Select { .. } => NoConsumerSuppressionRhsKind::Select,
+            DirExpr::FieldAccess { .. } => NoConsumerSuppressionRhsKind::FieldAccess,
         }
     }
 
@@ -263,7 +263,7 @@ mod tests {
             &blocks[0],
             0,
             &output,
-            &HirExpr::Const(1, int(32)),
+            &DirExpr::Const(1, int(32)),
         );
 
         assert_eq!(profile.same_block_consumers, 0);
@@ -307,7 +307,7 @@ mod tests {
             &blocks[0],
             0,
             &output,
-            &HirExpr::Const(1, int(32)),
+            &DirExpr::Const(1, int(32)),
         );
 
         assert_eq!(profile.same_block_consumers, 0);
@@ -321,7 +321,7 @@ mod tests {
     fn no_consumer_materialization_decision_suppresses_dead_unique_const() {
         let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
             &varnode(0x10),
-            &HirExpr::Const(1, int(32)),
+            &DirExpr::Const(1, int(32)),
             false,
             ReplacementValuePlan::incomplete(
                 ReplacementReadClass::SameBlockData,
@@ -350,10 +350,10 @@ mod tests {
     fn no_consumer_materialization_decision_keeps_preserved_rhs() {
         let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
             &varnode(0x10),
-            &HirExpr::Binary {
-                op: HirBinaryOp::Eq,
-                lhs: Box::new(HirExpr::Var("x".to_string())),
-                rhs: Box::new(HirExpr::Const(0, int(32))),
+            &DirExpr::Binary {
+                op: DirBinaryOp::Eq,
+                lhs: Box::new(DirExpr::Var("x".to_string())),
+                rhs: Box::new(DirExpr::Const(0, int(32))),
                 ty: NirType::Bool,
             },
             false,
@@ -391,7 +391,7 @@ mod tests {
         output.space_id = REGISTER_SPACE_ID;
         let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
             &output,
-            &HirExpr::Const(1, int(32)),
+            &DirExpr::Const(1, int(32)),
             false,
             ReplacementValuePlan::incomplete(
                 ReplacementReadClass::SameBlockData,
@@ -428,10 +428,10 @@ mod tests {
         output.size = 1;
         let decision = PreviewBuilder::classify_no_consumer_materialization_decision(
             &output,
-            &HirExpr::Binary {
-                op: HirBinaryOp::Eq,
-                lhs: Box::new(HirExpr::Var("x".to_string())),
-                rhs: Box::new(HirExpr::Const(0, int(32))),
+            &DirExpr::Binary {
+                op: DirBinaryOp::Eq,
+                lhs: Box::new(DirExpr::Var("x".to_string())),
+                rhs: Box::new(DirExpr::Const(0, int(32))),
                 ty: NirType::Bool,
             },
             false,

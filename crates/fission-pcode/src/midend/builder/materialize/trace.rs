@@ -607,7 +607,7 @@ impl<'a> PreviewBuilder<'a> {
         input: &Varnode,
         family_idx: usize,
         predecessor_addrs: &[u64],
-        expr: &HirExpr,
+        expr: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -679,7 +679,7 @@ impl<'a> PreviewBuilder<'a> {
         input: &Varnode,
         family_idx: usize,
         predecessor_addrs: &[u64],
-        incoming: &[HirExpr],
+        incoming: &[DirExpr],
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -718,7 +718,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op: &PcodeOp,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         plan: ReplacementValuePlan,
         event: &str,
     ) {
@@ -748,7 +748,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op_seq: u32,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         hazard: AliasUnsafeHazard,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
@@ -805,7 +805,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op_seq: u32,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         hazard: AliasUnsafeHazard,
     ) {
         let Some(block) = self
@@ -863,7 +863,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op_seq: u32,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -932,7 +932,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1024,7 +1024,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1071,7 +1071,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1111,7 +1111,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1153,7 +1153,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1210,7 +1210,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1268,7 +1268,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1374,7 +1374,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1452,7 +1452,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1519,7 +1519,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1570,7 +1570,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1707,7 +1707,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1880,7 +1880,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> MaterializationRejectionReason {
         let Some(proof) =
             self.describe_temp_only_representative_site_proof(block, op_idx, output, rhs)
@@ -1910,7 +1910,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -1968,7 +1968,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2027,7 +2027,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2066,7 +2066,7 @@ impl<'a> PreviewBuilder<'a> {
             proof.consumer_kind,
             proof.rhs_kind,
             proof.downstream_opcode,
-            crate::render::print_expr(rhs),
+            crate::midend::print_dir_expr(rhs),
             proof.address_base_kind,
             proof.address_expr_kind,
             proof.same_block_use_count,
@@ -2087,7 +2087,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2125,7 +2125,7 @@ impl<'a> PreviewBuilder<'a> {
             block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
             proof.consumer_kind,
             proof.downstream_opcode,
-            crate::render::print_expr(rhs),
+            crate::midend::print_dir_expr(rhs),
             proof.base_reg,
             proof.offset,
             proof.same_block_use_count,
@@ -2144,7 +2144,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         proof: Option<&StackAddressStabilityProof>,
         replaced: bool,
         materialized: bool,
@@ -2197,7 +2197,7 @@ impl<'a> PreviewBuilder<'a> {
             block.ops.get(op_idx).map(|op| op.seq_num).unwrap_or_default(),
             consumer_kind,
             downstream_opcode,
-            crate::render::print_expr(rhs),
+            crate::midend::print_dir_expr(rhs),
             base_reg,
             offset,
             replaced,
@@ -2258,7 +2258,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2302,7 +2302,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2360,7 +2360,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2425,7 +2425,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         proof: &ParityChainProof,
         legacy_inline_candidate: bool,
         fallback_plan: ReplacementValuePlan,
@@ -2530,7 +2530,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2589,7 +2589,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2651,7 +2651,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -2704,7 +2704,7 @@ impl<'a> PreviewBuilder<'a> {
         op_seq: u32,
         event: &str,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         preserve_materialization: bool,
         legacy_inline_candidate: bool,
         profile: NoConsumerMaterializationProfile,
@@ -2737,7 +2737,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -3078,7 +3078,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op_seq: u32,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;
@@ -3094,7 +3094,7 @@ impl<'a> PreviewBuilder<'a> {
         block_addr: u64,
         op_seq: u32,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         reason: NoConsumerMaterializationKeepReason,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
@@ -3111,7 +3111,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         applied: bool,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
@@ -3141,7 +3141,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) {
         if !self.emit_ready_trace_enabled_for_current_fn() {
             return;

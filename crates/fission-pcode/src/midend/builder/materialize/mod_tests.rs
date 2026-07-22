@@ -431,7 +431,7 @@ fn direct_successor_return_register_merge_uses_shared_edge_binding() {
     ]);
     let options = crate::midend::builder::materialize::test_support::test_options();
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Const(5, type_from_size(8, false));
+    let rhs = DirExpr::Const(5, type_from_size(8, false));
 
     let name = builder
         .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[0], 0, &rax, &rhs)
@@ -494,7 +494,7 @@ fn direct_successor_return_register_merge_rejects_side_effect_after_def() {
     ]);
     let options = crate::midend::builder::materialize::test_support::test_options();
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Const(5, type_from_size(8, false));
+    let rhs = DirExpr::Const(5, type_from_size(8, false));
 
     assert!(
         builder
@@ -540,7 +540,7 @@ fn direct_successor_accumulator_merge_uses_shared_gpr_edge_binding() {
     ]);
     let options = crate::midend::builder::materialize::test_support::test_options();
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Const(5, type_from_size(8, false));
+    let rhs = DirExpr::Const(5, type_from_size(8, false));
 
     let name = builder
         .merge_binding_name_for_direct_successor_accumulator(&pcode.blocks[0], 0, &r12, &rhs)
@@ -591,7 +591,7 @@ fn direct_successor_accumulator_merge_rejects_partial_register_output() {
     ]);
     let options = crate::midend::builder::materialize::test_support::test_options();
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Const(5, type_from_size(4, false));
+    let rhs = DirExpr::Const(5, type_from_size(4, false));
 
     assert!(
         builder
@@ -670,10 +670,10 @@ fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
         exit_idx: Some(2),
         all_exits: vec![2],
     }];
-    let rhs = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("rax".to_string())),
-        rhs: Box::new(HirExpr::Const(1, type_from_size(4, false))),
+    let rhs = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("rax".to_string())),
+        rhs: Box::new(DirExpr::Const(1, type_from_size(4, false))),
         ty: type_from_size(4, false),
     };
 
@@ -724,7 +724,7 @@ fn conditional_loop_exit_accumulator_merge_accepts_32bit_return_register_eax() {
             .temps
             .get(&name)
             .and_then(|b| b.initializer.as_ref()),
-        Some(&HirExpr::Const(0, type_from_size(4, false)))
+        Some(&DirExpr::Const(0, type_from_size(4, false)))
     );
 }
 
@@ -788,7 +788,7 @@ fn conditional_loop_exit_accumulator_merge_uses_seeded_edge_binding() {
         exit_idx: Some(2),
         all_exits: vec![2],
     }];
-    let rhs = HirExpr::Const(7, type_from_size(8, false));
+    let rhs = DirExpr::Const(7, type_from_size(8, false));
     assert_eq!(
         builder.canonical_x86_gpr64_name_for_value(&r10),
         Some(("r10", 10))
@@ -837,7 +837,7 @@ fn conditional_loop_exit_accumulator_merge_uses_seeded_edge_binding() {
             .temps
             .get(&name)
             .and_then(|binding| binding.initializer.as_ref()),
-        Some(&HirExpr::Const(0, type_from_size(8, false)))
+        Some(&DirExpr::Const(0, type_from_size(8, false)))
     );
 }
 
@@ -893,8 +893,8 @@ fn conditional_loop_exit_accumulator_merge_uses_external_seed_binding() {
         exit_idx: Some(2),
         all_exits: vec![2],
     }];
-    let external_rhs = HirExpr::Const(10, type_from_size(8, false));
-    let latch_rhs = HirExpr::Const(7, type_from_size(8, false));
+    let external_rhs = DirExpr::Const(10, type_from_size(8, false));
+    let latch_rhs = DirExpr::Const(7, type_from_size(8, false));
 
     let external_name = builder.with_lowering_site(
         LoweringSite {
@@ -1002,14 +1002,14 @@ fn stack_home_accumulator_store_uses_seeded_live_gpr_binding() {
         .stack_home_accumulator_store_rhs(&pcode.blocks[1], 0, &store, "home_4c", &ebp)
         .expect("stack-home accumulator merge");
 
-    assert_eq!(rhs, HirExpr::Var("rbp".to_string()));
+    assert_eq!(rhs, DirExpr::Var("rbp".to_string()));
     assert!(builder.params.is_empty(), "must not promote rbp to a param");
     assert_eq!(
         builder
             .temps
             .get("rbp")
             .and_then(|binding| binding.initializer.as_ref()),
-        Some(&HirExpr::Const(0, type_from_size(8, false)))
+        Some(&DirExpr::Const(0, type_from_size(8, false)))
     );
 }
 
@@ -1123,7 +1123,7 @@ fn stack_home_accumulator_store_accepts_joined_backedge_defs() {
         },
     );
 
-    assert_eq!(rhs, HirExpr::Var("rbp".to_string()));
+    assert_eq!(rhs, DirExpr::Var("rbp".to_string()));
     assert!(builder.params.is_empty(), "must not promote rbp to a param");
 }
 
@@ -1217,10 +1217,10 @@ fn block_entry_accumulator_read_uses_joined_live_gpr_binding() {
         exit_idx: Some(6),
         all_exits: vec![6],
     }];
-    let stale_rhs = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("xVar53".to_string())),
-        rhs: Box::new(HirExpr::Const(1, int(64))),
+    let stale_rhs = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("xVar53".to_string())),
+        rhs: Box::new(DirExpr::Const(1, int(64))),
         ty: int(64),
     };
 
@@ -1240,10 +1240,10 @@ fn block_entry_accumulator_read_uses_joined_live_gpr_binding() {
 
     assert_eq!(
         rewritten,
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
-            lhs: Box::new(HirExpr::Var("rbp".to_string())),
-            rhs: Box::new(HirExpr::Const(1, int(64))),
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
+            lhs: Box::new(DirExpr::Var("rbp".to_string())),
+            rhs: Box::new(DirExpr::Const(1, int(64))),
             ty: int(64),
         }
     );
@@ -1266,10 +1266,10 @@ fn block_entry_accumulator_read_projects_full_width_explicit_merge_for_partial_r
     let options = crate::midend::builder::materialize::test_support::test_options();
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
     let binding = builder.ensure_explicit_merge_binding_for_block(0, &rsi);
-    let stale_rhs = HirExpr::Binary {
-        op: HirBinaryOp::Sub,
-        lhs: Box::new(HirExpr::Var("rbx".to_string())),
-        rhs: Box::new(HirExpr::Var("xVar49".to_string())),
+    let stale_rhs = DirExpr::Binary {
+        op: DirBinaryOp::Sub,
+        lhs: Box::new(DirExpr::Var("rbx".to_string())),
+        rhs: Box::new(DirExpr::Var("xVar49".to_string())),
         ty: int(32),
     };
 
@@ -1289,12 +1289,12 @@ fn block_entry_accumulator_read_projects_full_width_explicit_merge_for_partial_r
 
     assert_eq!(
         rewritten,
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
-            lhs: Box::new(HirExpr::Var("rbx".to_string())),
-            rhs: Box::new(HirExpr::Cast {
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
+            lhs: Box::new(DirExpr::Var("rbx".to_string())),
+            rhs: Box::new(DirExpr::Cast {
                 ty: int(32),
-                expr: Box::new(HirExpr::Var(binding.name)),
+                expr: Box::new(DirExpr::Var(binding.name)),
             }),
             ty: int(32),
         }
@@ -1352,7 +1352,7 @@ fn block_entry_partial_gpr_read_uses_pred_restore_binding() {
     );
     builder.temps.insert(
         "limit".to_string(),
-        NirBinding {
+        DirBinding {
             name: "limit".to_string(),
             ty: int(64),
             surface_type_name: None,
@@ -1360,10 +1360,10 @@ fn block_entry_partial_gpr_read_uses_pred_restore_binding() {
             initializer: None,
         },
     );
-    let stale_rhs = HirExpr::Binary {
-        op: HirBinaryOp::Sub,
-        lhs: Box::new(HirExpr::Var("rbx".to_string())),
-        rhs: Box::new(HirExpr::Var("xVar49".to_string())),
+    let stale_rhs = DirExpr::Binary {
+        op: DirBinaryOp::Sub,
+        lhs: Box::new(DirExpr::Var("rbx".to_string())),
+        rhs: Box::new(DirExpr::Var("xVar49".to_string())),
         ty: int(32),
     };
 
@@ -1383,12 +1383,12 @@ fn block_entry_partial_gpr_read_uses_pred_restore_binding() {
 
     assert_eq!(
         rewritten,
-        HirExpr::Binary {
-            op: HirBinaryOp::Sub,
-            lhs: Box::new(HirExpr::Var("rbx".to_string())),
-            rhs: Box::new(HirExpr::Cast {
+        DirExpr::Binary {
+            op: DirBinaryOp::Sub,
+            lhs: Box::new(DirExpr::Var("rbx".to_string())),
+            rhs: Box::new(DirExpr::Cast {
                 ty: int(32),
-                expr: Box::new(HirExpr::Var("limit".to_string())),
+                expr: Box::new(DirExpr::Var("limit".to_string())),
             }),
             ty: int(32),
         }
@@ -1440,10 +1440,10 @@ fn block_entry_partial_gpr_read_rejects_side_effect_after_pred_def() {
         MaterializedVarnodeKey::new(&rsi, &pcode.blocks[1].ops[0]),
         "limit".to_string(),
     );
-    let stale_rhs = HirExpr::Binary {
-        op: HirBinaryOp::Sub,
-        lhs: Box::new(HirExpr::Var("rbx".to_string())),
-        rhs: Box::new(HirExpr::Var("xVar49".to_string())),
+    let stale_rhs = DirExpr::Binary {
+        op: DirBinaryOp::Sub,
+        lhs: Box::new(DirExpr::Var("rbx".to_string())),
+        rhs: Box::new(DirExpr::Var("xVar49".to_string())),
         ty: int(32),
     };
 
@@ -1526,10 +1526,10 @@ fn block_entry_accumulator_read_accepts_loop_exit_zero_seed() {
         exit_idx: Some(3),
         all_exits: vec![3],
     }];
-    let stale_rhs = HirExpr::Binary {
-        op: HirBinaryOp::Mul,
-        lhs: Box::new(HirExpr::Var("xVar53".to_string())),
-        rhs: Box::new(HirExpr::Const(1, int(64))),
+    let stale_rhs = DirExpr::Binary {
+        op: DirBinaryOp::Mul,
+        lhs: Box::new(DirExpr::Var("xVar53".to_string())),
+        rhs: Box::new(DirExpr::Const(1, int(64))),
         ty: int(64),
     };
 
@@ -1549,10 +1549,10 @@ fn block_entry_accumulator_read_accepts_loop_exit_zero_seed() {
 
     assert_eq!(
         rewritten,
-        HirExpr::Binary {
-            op: HirBinaryOp::Mul,
-            lhs: Box::new(HirExpr::Var("rbp".to_string())),
-            rhs: Box::new(HirExpr::Const(1, int(64))),
+        DirExpr::Binary {
+            op: DirBinaryOp::Mul,
+            lhs: Box::new(DirExpr::Var("rbp".to_string())),
+            rhs: Box::new(DirExpr::Const(1, int(64))),
             ty: int(64),
         }
     );
@@ -1755,8 +1755,8 @@ fn explicit_merge_select_materializes_store_value_diamond() {
     assert!(
         matches!(
             stmts.as_slice(),
-            [HirStmt::Assign {
-                rhs: HirExpr::Select { .. },
+            [DirStmt::Assign {
+                rhs: DirExpr::Select { .. },
                 ..
             }]
         ),
@@ -1788,11 +1788,11 @@ fn missing_merge_aarch64_zero_extend_uses_low_live_register_binding_for_safe_rhs
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Cast {
+    let rhs = DirExpr::Cast {
         ty: int(64),
-        expr: Box::new(HirExpr::Cast {
+        expr: Box::new(DirExpr::Cast {
             ty: int(32),
-            expr: Box::new(HirExpr::Var("xVar7".to_string())),
+            expr: Box::new(DirExpr::Var("xVar7".to_string())),
         }),
     };
 
@@ -1848,9 +1848,9 @@ fn missing_join_store_value_uses_low_live_register_binding_for_safe_rhs() {
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Cast {
+    let rhs = DirExpr::Cast {
         ty: int(64),
-        expr: Box::new(HirExpr::Var("uVar1".to_string())),
+        expr: Box::new(DirExpr::Var("uVar1".to_string())),
     };
 
     assert_eq!(
@@ -1917,10 +1917,10 @@ fn passthrough_join_store_producer_uses_low_live_register_binding() {
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Var("w0".to_string())),
-        rhs: Box::new(HirExpr::Const(1, int(32))),
+    let rhs = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Var("w0".to_string())),
+        rhs: Box::new(DirExpr::Const(1, int(32))),
         ty: int(32),
     };
 
@@ -1982,7 +1982,7 @@ fn loop_header_missing_merge_uses_x64_live_register_binding() {
     let mut options = crate::midend::builder::materialize::test_support::test_options();
     options.calling_convention = CallingConvention::WindowsX64;
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Var("r14".to_string());
+    let rhs = DirExpr::Var("r14".to_string());
     let proof = builder
         .describe_missing_merge_binding_proof(&body, 0, &r15d, &rhs)
         .expect("missing merge proof");
@@ -2064,9 +2064,9 @@ fn loop_header_missing_merge_rejects_side_effect_rhs() {
     let pcode = pcode_function(vec![entry, header, body.clone(), exit]);
     let options = crate::midend::builder::materialize::test_support::test_options();
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Call {
+    let rhs = DirExpr::Call {
         target: "may_call".to_string(),
-        args: vec![HirExpr::Var("r14".to_string())],
+        args: vec![DirExpr::Var("r14".to_string())],
         ty: int(32),
     };
 
@@ -2110,17 +2110,17 @@ fn missing_merge_live_register_binding_rejects_call_or_aggregate_rhs() {
     options.format = "ELF64".to_string();
     options.pe_x64_only = false;
     let builder = PreviewBuilder::new(&pcode, &options, None);
-    let rhs = HirExpr::Binary {
-        op: HirBinaryOp::Add,
-        lhs: Box::new(HirExpr::Call {
+    let rhs = DirExpr::Binary {
+        op: DirBinaryOp::Add,
+        lhs: Box::new(DirExpr::Call {
             target: "__pcodeop_294".to_string(),
-            args: vec![HirExpr::Var("reg".to_string())],
+            args: vec![DirExpr::Var("reg".to_string())],
             ty: NirType::Aggregate {
                 size: 16,
                 fields: Vec::new(),
             },
         }),
-        rhs: Box::new(HirExpr::Const(4, int(32))),
+        rhs: Box::new(DirExpr::Const(4, int(32))),
         ty: int(32),
     };
 
@@ -2356,10 +2356,10 @@ fn same_instruction_callother_does_not_steal_arm_call_args_or_result() {
         .expect("lower ARM call block");
 
     let call_result = stmts.iter().find_map(|stmt| match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(result),
-            rhs: HirExpr::Call { args, .. },
-        } if matches!(args.as_slice(), [HirExpr::Const(7, _)]) => Some(result.as_str()),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(result),
+            rhs: DirExpr::Call { args, .. },
+        } if matches!(args.as_slice(), [DirExpr::Const(7, _)]) => Some(result.as_str()),
         _ => None,
     });
     let call_result =
@@ -2367,11 +2367,11 @@ fn same_instruction_callother_does_not_steal_arm_call_args_or_result() {
     assert!(
         stmts.iter().any(|stmt| matches!(
             stmt,
-            HirStmt::Assign {
-                rhs: HirExpr::Binary { lhs, rhs, .. },
+            DirStmt::Assign {
+                rhs: DirExpr::Binary { lhs, rhs, .. },
                 ..
-            } if matches!(lhs.as_ref(), HirExpr::Var(name) if name == call_result)
-                || matches!(rhs.as_ref(), HirExpr::Var(name) if name == call_result)
+            } if matches!(lhs.as_ref(), DirExpr::Var(name) if name == call_result)
+                || matches!(rhs.as_ref(), DirExpr::Var(name) if name == call_result)
         )),
         "call result was not used by the following instruction: {stmts:?}"
     );
@@ -2416,15 +2416,15 @@ fn lower_block_stmts_uses_block_index_for_duplicate_start_addresses() {
         matches!(
             stmts.as_slice(),
             [
-                HirStmt::Assign {
-                    lhs: HirLValue::Var(def),
-                    rhs: HirExpr::Const(7, _),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var(def),
+                    rhs: DirExpr::Const(7, _),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Deref { .. },
-                    rhs: HirExpr::Cast { expr, .. },
+                DirStmt::Assign {
+                    lhs: DirLValue::Deref { .. },
+                    rhs: DirExpr::Cast { expr, .. },
                 },
-            ] if matches!(expr.as_ref(), HirExpr::Var(used) if used == def)
+            ] if matches!(expr.as_ref(), DirExpr::Var(used) if used == def)
         ),
         "duplicate-address block did not retain its own definition: {stmts:?}"
     );
@@ -2690,7 +2690,7 @@ fn duplicate_start_join_preserves_register_addend_after_zero_extend() {
 fn sat_o2_cmov_block_probe_materialize() {
     use crate::midend::PreviewBuilder;
     use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-    use crate::midend::ir::{HirStmt, MlilPreviewOptions, StructuringEngineKind};
+    use crate::midend::ir::{DirStmt, MlilPreviewOptions, StructuringEngineKind};
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
     let eax = Varnode {
@@ -2878,7 +2878,7 @@ fn sat_o2_cmov_block_probe_materialize() {
     let stmts = builder.lower_block_stmts(&pcode.blocks[0]).expect("lower");
     let dump = format!("{stmts:?}");
     assert!(
-        stmts.iter().any(|s| matches!(s, HirStmt::If { .. })),
+        stmts.iter().any(|s| matches!(s, DirStmt::If { .. })),
         "need if from terminator cmov, got {dump}"
     );
     assert!(
@@ -3049,7 +3049,7 @@ fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
     use crate::midend::PreviewBuilder;
     use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
     use crate::midend::ir::{
-        HirExpr, HirLValue, HirStmt, MlilPreviewOptions, StructuringEngineKind,
+        DirExpr, DirLValue, DirStmt, MlilPreviewOptions, StructuringEngineKind,
     };
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
@@ -3287,20 +3287,20 @@ fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
         .expect("cmov block");
     let dump = format!("{stmts:?}");
     assert!(
-        stmts.iter().any(|s| matches!(s, HirStmt::If { .. })),
+        stmts.iter().any(|s| matches!(s, DirStmt::If { .. })),
         "cmov block needs if, got {dump}"
     );
     let assigns_int_min_to_eax = stmts.iter().any(|s| match s {
-        HirStmt::If { then_body, .. } => then_body.iter().any(|inner| matches!(
+        DirStmt::If { then_body, .. } => then_body.iter().any(|inner| matches!(
             inner,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
-                rhs: HirExpr::Const(v, _),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
+                rhs: DirExpr::Const(v, _),
             } if name == "eax" && (*v == i64::from(i32::MIN) as i64 || *v == 2147483648i64 || *v == -2147483648i64)
         )),
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs: HirExpr::Const(v, _),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
+            rhs: DirExpr::Const(v, _),
         } if name == "eax" && (*v == i64::from(i32::MIN) as i64 || *v == 2147483648i64 || *v == -2147483648i64) => true,
         _ => false,
     });

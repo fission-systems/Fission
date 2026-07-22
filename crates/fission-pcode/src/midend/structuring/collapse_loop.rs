@@ -16,7 +16,7 @@ pub use fission_midend_structuring::collapse_loop::{
 pub(crate) fn structure_cfg_via_collapse_loop(
     builder: &mut PreviewBuilder,
     total_nodes: usize,
-) -> Result<Vec<HirStmt>, MlilPreviewError> {
+) -> Result<Vec<DirStmt>, MlilPreviewError> {
     fission_midend_structuring::build_sese_region_body(
         builder,
         0,

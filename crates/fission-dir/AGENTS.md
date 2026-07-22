@@ -10,20 +10,41 @@ stage doesn't silently change a function's behavior while restructuring its
 control flow (the class of bug an AArch64 if/else-collapse slipped through
 undetected, found only by manual Ghidra diffing before this crate existed).
 
-**DIR is not a new IR.** It's the same `Vec<HirStmt>`/`HirExpr` grammar as
-HIR (`fission_midend_core::ir::{Dir, Hir}`, thin newtypes over the identical
-`Vec<HirStmt>`), captured immediately before vs. immediately after
-structuring runs. Same type, same variable namespace -- one interpreter,
-fed the same concrete arguments, evaluates both and diffs the results, with
-no ABI/register modeling or real machine execution needed. See `src/lib.rs`'s
-module doc for the full rationale and roadmap.
+**DIR is a genuinely independent IR**, not `HIR` reused under a different
+name. `fission-pcode`'s builder emits `DirStmt`/`DirExpr`
+(`fission_midend_core::ir`) directly from p-code -- the flattened,
+goto/label-based form -- and normalize/structuring's own internal passes
+read and incrementally rewrite that same `Dir*` grammar across many
+sub-passes. Structuring performs one real, explicit
+`DirFunction -> HirFunction` conversion
+(`fission_midend_core::ir::dir_stmts_to_hir_stmts`, called from
+`fission-pcode`'s `midend/orchestrate.rs` right after
+`run_structuring_pipeline` + `eliminate_redundant_var_assigns` finish) once
+its CFG-to-AST rewrite is done. `HirStmt`/`HirExpr` are a separately
+defined type (not a macro-generated mirror of `DirStmt`/`DirExpr`, even
+though the two start out shape-identical) -- see
+`fission_midend_core::ir::hir`'s module doc for why independence, not
+sharing, is the point: it's what makes an accidental DIR/HIR argument swap
+in this crate a compile error instead of two same-shaped types silently
+type-checking while being logically backwards, and it leaves room for DIR
+and HIR to diverge as their respective needs diverge (DIR is a pipeline-
+internal, execution-facing representation; HIR carries surface-presentation
+concerns DIR never needs).
+
+This crate consumes `DirFunction`/`HirFunction` on equal footing: both are
+real outputs `fission-pcode`'s production pipeline produces (via
+`fission_pcode::take_last_dir_snapshot`/`take_last_hir_function_snapshot`),
+not something this crate privately lowers from someone else's type. One
+interpreter, fed the same concrete arguments, evaluates a `DirStmt` tree and
+a `HirStmt` tree and diffs the results -- see `src/lib.rs`'s module doc for
+the full rationale and roadmap.
 
 ## Structure
 
 ```text
 fission-dir/
 ├── src/
-│   ├── interp.rs   # Tree-walking HirStmt/HirExpr interpreter (Phase 1: no memory/general-call model)
+│   ├── interp.rs   # define_interp! macro -> dir::interpret + hir::interpret (Phase 1: no memory/general-call model)
 │   ├── diff.rs      # DIR-vs-HIR differential harness + sample generation
 │   └── lib.rs       # Module-level roadmap doc (Phase 1 done, Phase 2 not started)
 ├── tests/
@@ -37,7 +58,7 @@ fission-dir/
 
 | Task | Location | Notes |
 |---|---|---|
-| Add an interpreter-supported construct | `interp.rs`'s `eval_expr`/`exec_stmt` | Bail loudly (`Err`) for anything unmodeled -- never guess a default value |
+| Add an interpreter-supported construct | `interp.rs`'s `define_interp!` macro body (`eval_expr`/`exec_stmt`) | One edit updates both `dir::interpret` and `hir::interpret` -- they cannot drift, by construction. Bail loudly (`Err`) for anything unmodeled -- never guess a default value |
 | Recognize a new pure intrinsic (`__foo`) | `interp.rs`'s `eval_builtin_call` | Only add names already on `fission_pcode`'s own `is_pure_intrinsic_call` list -- a fixed whitelist, not general `Call` support |
 | Change how samples are generated | `diff.rs`'s `default_samples` | Boundary-heavy concrete sampling; Phase 2 replaces this with solver-backed proof |
 | The DIR/HIR capture hook itself | `fission-pcode`'s `midend/orchestrate.rs` (`take_last_dir_snapshot`/`take_last_hir_function_snapshot`) | Not owned by this crate -- purely observational thread-local side channels, same pattern as `take_last_layered_pseudocode` |
@@ -53,9 +74,11 @@ fission-dir/
   unmodeled construct or UB), not a divergence -- see `diff_dir_hir`'s doc
   comment. Only report a `Divergence` when exactly one side fails, or both
   succeed with different results.
-- Keep `Dir`/`Hir` as distinct newtypes at every public API boundary in
-  this crate -- don't collapse them back to bare `Vec<HirStmt>`; that
-  reopens the swapped-argument footgun the newtype exists to prevent.
+- Keep `DirStmt`/`HirStmt` (and `DirFunction`/`HirFunction`) as genuinely
+  separate types at every API boundary in this crate -- don't collapse them
+  onto a shared type or a type alias; that reopens the swapped-argument
+  footgun independence exists to prevent, and forecloses DIR/HIR diverging
+  later.
 - Prefer validating a new interpreter feature against a real compiled
   fixture over a hand-built `PcodeFunction`/`HirStmt` -- hand-built
   fixtures repeatedly missed real gaps this crate's own history found only
@@ -68,7 +91,7 @@ fission-dir/
 ## Anti-Patterns
 
 - Do not silently default an unmodeled construct to `0`/`Ok` -- every
-  unsupported `HirExpr`/`HirStmt` variant must `bail!`.
+  unsupported `DirExpr`/`DirStmt`/`HirExpr`/`HirStmt` variant must `bail!`.
 - Do not add general interprocedural `Call` support to `interp.rs` -- Phase 1
   is deliberately scoped to pure/arithmetic functions; a real `Call` model
   belongs in Phase 2 alongside the emulator/solver work, not smuggled in as

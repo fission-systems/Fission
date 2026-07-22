@@ -3,7 +3,7 @@
 /// Builds a lightweight overlay of memory access nodes:
 ///
 /// - `MemDef`: a store to a memory location (lhs is `Deref` or `Index`).
-/// - `MemUse`: a load from a memory location (`HirExpr::Load`).
+/// - `MemUse`: a load from a memory location (`DirExpr::Load`).
 /// - `MemPhi`: a virtual merge node at CFG join points (after `if`/`while`).
 ///
 /// ## Alias Key
@@ -171,24 +171,24 @@ impl Builder {
         });
     }
 
-    fn scan_stmts(&mut self, stmts: &[HirStmt]) {
+    fn scan_stmts(&mut self, stmts: &[DirStmt]) {
         for stmt in stmts {
             self.scan_stmt(stmt);
         }
     }
 
-    fn scan_stmt(&mut self, stmt: &HirStmt) {
+    fn scan_stmt(&mut self, stmt: &DirStmt) {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 // Scan rhs first for uses.
                 self.scan_expr_uses(rhs);
                 // Then record the def.
                 match lhs {
-                    HirLValue::Deref { ptr, ty } => {
+                    DirLValue::Deref { ptr, ty } => {
                         let key = self.alias_key_for_ptr(ptr, nir_byte_size(ty));
                         self.add_def(key);
                     }
-                    HirLValue::Index {
+                    DirLValue::Index {
                         base,
                         index: _,
                         elem_ty,
@@ -196,14 +196,14 @@ impl Builder {
                         let key = self.alias_key_for_ptr(base, nir_byte_size(elem_ty));
                         self.add_def(key);
                     }
-                    HirLValue::Var(_) => {} // Not a memory write.
-                    HirLValue::FieldAccess { base, ty, .. } => {
+                    DirLValue::Var(_) => {} // Not a memory write.
+                    DirLValue::FieldAccess { base, ty, .. } => {
                         let key = self.alias_key_for_ptr(base, nir_byte_size(ty));
                         self.add_def(key);
                     }
                 }
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -218,14 +218,14 @@ impl Builder {
                 // Merge: emit MemPhi where defs differ.
                 self.merge_reaching(then_reaching, else_reaching);
             }
-            HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
                 self.scan_expr_uses(cond);
                 let saved = self.reaching.clone();
                 self.scan_stmts(body);
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
                 self.merge_reaching(body_reaching, saved);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -245,7 +245,7 @@ impl Builder {
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
                 self.merge_reaching(body_reaching, saved);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -268,51 +268,51 @@ impl Builder {
                     self.merge_reaching(curr, arm);
                 }
             }
-            HirStmt::Block(stmts) => self.scan_stmts(stmts),
-            HirStmt::Return(Some(e)) => self.scan_expr_uses(e),
-            HirStmt::Expr(e) => self.scan_expr_uses(e),
+            DirStmt::Block(stmts) => self.scan_stmts(stmts),
+            DirStmt::Return(Some(e)) => self.scan_expr_uses(e),
+            DirStmt::Expr(e) => self.scan_expr_uses(e),
             _ => {}
         }
     }
 
-    fn scan_expr_uses(&mut self, expr: &HirExpr) {
+    fn scan_expr_uses(&mut self, expr: &DirExpr) {
         match expr {
-            HirExpr::Load { ptr, ty } => {
+            DirExpr::Load { ptr, ty } => {
                 // Record use before scanning ptr (so nested loads get their own uses).
                 let key = self.alias_key_for_ptr(ptr, nir_byte_size(ty));
                 self.add_use(key);
                 self.scan_expr_uses(ptr);
             }
-            HirExpr::Call { args, .. } => {
+            DirExpr::Call { args, .. } => {
                 // Mark any Var whose address might be passed as potentially escaped.
                 for arg in args {
                     self.scan_expr_uses(arg);
-                    if let HirExpr::PtrOffset { base, .. } = arg {
-                        if let HirExpr::Var(name) = base.as_ref() {
+                    if let DirExpr::PtrOffset { base, .. } = arg {
+                        if let DirExpr::Var(name) = base.as_ref() {
                             self.escaped.insert(name.clone());
                         }
                     }
                 }
             }
-            HirExpr::Unary { expr: inner, .. } => self.scan_expr_uses(inner),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Unary { expr: inner, .. } => self.scan_expr_uses(inner),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 self.scan_expr_uses(lhs);
                 self.scan_expr_uses(rhs);
             }
-            HirExpr::Cast { expr: inner, .. } => self.scan_expr_uses(inner),
-            HirExpr::PtrOffset { base, .. } => self.scan_expr_uses(base),
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Cast { expr: inner, .. } => self.scan_expr_uses(inner),
+            DirExpr::PtrOffset { base, .. } => self.scan_expr_uses(base),
+            DirExpr::Index { base, index, .. } => {
                 self.scan_expr_uses(base);
                 self.scan_expr_uses(index);
             }
-            HirExpr::AggregateCopy { src, .. } => self.scan_expr_uses(src),
-            HirExpr::FieldAccess { base, .. } => self.scan_expr_uses(base),
+            DirExpr::AggregateCopy { src, .. } => self.scan_expr_uses(src),
+            DirExpr::FieldAccess { base, .. } => self.scan_expr_uses(base),
             _ => {}
         }
     }
 
     /// Compute an alias key for a pointer expression.
-    fn alias_key_for_ptr(&self, ptr: &HirExpr, size: u32) -> AliasKey {
+    fn alias_key_for_ptr(&self, ptr: &DirExpr, size: u32) -> AliasKey {
         alias_key_for_pointer_expr(ptr, size)
     }
 
@@ -378,7 +378,7 @@ pub fn nir_byte_size(ty: &NirType) -> u32 {
 /// Used by MemSSA construction and by redundant-load elimination. Precision
 /// comes from the canonical partition collector; everything else is conservatively
 /// collapsed to [`AliasKey::Unknown`].
-pub fn alias_key_for_pointer_expr(ptr: &HirExpr, size: u32) -> AliasKey {
+pub fn alias_key_for_pointer_expr(ptr: &DirExpr, size: u32) -> AliasKey {
     let access_ty = NirType::Aggregate {
         size,
         fields: vec![],
@@ -389,7 +389,7 @@ pub fn alias_key_for_pointer_expr(ptr: &HirExpr, size: u32) -> AliasKey {
 }
 
 /// Build MemSSA for a HIR function.
-pub fn build_mem_ssa(func: &HirFunction) -> MemSsa {
+pub fn build_mem_ssa(func: &DirFunction) -> MemSsa {
     let mut builder = Builder::new();
     builder.scan_stmts(&func.body);
     builder.finish()

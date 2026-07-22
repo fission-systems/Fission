@@ -2927,7 +2927,7 @@ fn preview_build_stats_records_max_structuring_scc_component_size() {
     assert_eq!(stats.max_structuring_scc_component_size, 1);
 }
 
-fn lower_x86_cond_expr(func: &PcodeFunction) -> HirExpr {
+fn lower_x86_cond_expr(func: &PcodeFunction) -> DirExpr {
     let options = preview_options_for(CallingConvention::X86_32);
     let mut builder = PreviewBuilder::new(func, &options, None);
     match builder
@@ -2978,7 +2978,7 @@ fn preview_recovers_test_reg_reg_jz_as_eq_zero() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_expr(&cond), "eax == 0");
+    assert_eq!(print_dir_expr(&cond), "eax == 0");
 }
 
 #[test]
@@ -3065,7 +3065,7 @@ fn preview_recovers_test_reg_reg_jg_as_gt_zero() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_expr(&cond), "0 < ecx");
+    assert_eq!(print_dir_expr(&cond), "0 < ecx");
 }
 
 #[test]
@@ -3107,7 +3107,7 @@ fn preview_recovers_cmp_je_as_eq() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_expr(&cond), "eax == ecx");
+    assert_eq!(print_dir_expr(&cond), "eax == ecx");
 }
 
 #[test]
@@ -3140,7 +3140,7 @@ fn preview_recovers_cmp_jb_as_unsigned_lt() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_expr(&cond), "eax < ecx");
+    assert_eq!(print_dir_expr(&cond), "eax < ecx");
 }
 
 #[test]
@@ -3200,7 +3200,7 @@ fn preview_recovers_cmp_jl_as_signed_lt() {
     };
 
     let cond = lower_x86_cond_expr(&func);
-    assert_eq!(print_expr(&cond), "eax < ecx");
+    assert_eq!(print_dir_expr(&cond), "eax < ecx");
 }
 
 #[test]
@@ -3235,5 +3235,5 @@ fn preview_leaves_non_exact_branch_shape_as_generic_value() {
     let cond = lower_x86_cond_expr(&func);
     // Non-exact Jcc shape (BoolXor of flag bits) stays generic — but the
     // register-space flag bits must still keep distinct SLA names.
-    assert_eq!(print_expr(&cond), "zf ^ sf");
+    assert_eq!(print_dir_expr(&cond), "zf ^ sf");
 }

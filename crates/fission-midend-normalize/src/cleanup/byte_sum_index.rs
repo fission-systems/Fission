@@ -9,12 +9,12 @@ use crate::prelude::*;
 use crate::HashMap;
 
 /// Apply byte-sum index truncation recovery. Returns true if any rewrite ran.
-pub fn apply_byte_sum_index_trunc(func: &mut HirFunction) -> bool {
+pub fn apply_byte_sum_index_trunc(func: &mut DirFunction) -> bool {
     let mut type_map: HashMap<String, NirType> = HashMap::default();
     for b in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(b.name.clone(), b.ty.clone());
     }
-    let mut last_def: HashMap<String, HirExpr> = HashMap::default();
+    let mut last_def: HashMap<String, DirExpr> = HashMap::default();
     let mut byte_ranged: HashMap<String, bool> = HashMap::default();
     // Names whose *last* def was a sum of two byte-ranged values (frozen at assign time).
     let mut byte_sum_names: HashMap<String, bool> = HashMap::default();
@@ -31,9 +31,9 @@ pub fn apply_byte_sum_index_trunc(func: &mut HirFunction) -> bool {
 }
 
 fn rewrite_stmts(
-    stmts: &mut [HirStmt],
+    stmts: &mut [DirStmt],
     type_map: &HashMap<String, NirType>,
-    last_def: &mut HashMap<String, HirExpr>,
+    last_def: &mut HashMap<String, DirExpr>,
     byte_ranged: &mut HashMap<String, bool>,
     byte_sum_names: &mut HashMap<String, bool>,
     changed: &mut bool,
@@ -51,25 +51,25 @@ fn rewrite_stmts(
 }
 
 fn rewrite_stmt(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     type_map: &HashMap<String, NirType>,
-    last_def: &mut HashMap<String, HirExpr>,
+    last_def: &mut HashMap<String, DirExpr>,
     byte_ranged: &mut HashMap<String, bool>,
     byte_sum_names: &mut HashMap<String, bool>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } => {
             // Pattern: w = v  where v's last def was a byte-sum.
-            if let HirExpr::Var(src) = rhs {
+            if let DirExpr::Var(src) = rhs {
                 if byte_sum_names.get(src).copied().unwrap_or(false) {
                     let source_ty = last_def
                         .get(src)
                         .and_then(|d| match d {
-                            HirExpr::Binary { ty, .. } => Some(ty.clone()),
+                            DirExpr::Binary { ty, .. } => Some(ty.clone()),
                             _ => None,
                         })
                         .unwrap_or(NirType::Int {
@@ -77,10 +77,10 @@ fn rewrite_stmt(
                             signed: false,
                         });
                     let ty = unsigned_mask_type(name, &source_ty, type_map);
-                    *rhs = HirExpr::Binary {
-                        op: HirBinaryOp::And,
-                        lhs: Box::new(HirExpr::Var(src.clone())),
-                        rhs: Box::new(HirExpr::Const(0xff, ty.clone())),
+                    *rhs = DirExpr::Binary {
+                        op: DirBinaryOp::And,
+                        lhs: Box::new(DirExpr::Var(src.clone())),
+                        rhs: Box::new(DirExpr::Const(0xff, ty.clone())),
                         ty,
                     };
                     *changed = true;
@@ -98,7 +98,7 @@ fn rewrite_stmt(
             byte_sum_names.insert(name.clone(), is_sum);
             last_def.insert(name.clone(), rhs.clone());
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             rewrite_stmts(
                 body,
                 type_map,
@@ -108,7 +108,7 @@ fn rewrite_stmt(
                 changed,
             );
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -146,7 +146,7 @@ fn rewrite_stmt(
                 then_sum.get(k).copied() == Some(*v) && else_sum.get(k).copied() == Some(*v)
             });
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init.as_mut() {
@@ -174,7 +174,7 @@ fn rewrite_stmt(
                 );
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 let mut d = last_def.clone();
                 let mut b = byte_ranged.clone();
@@ -215,13 +215,13 @@ fn int_type_width(ty: &NirType) -> Option<u32> {
 }
 
 fn is_byte_sum(
-    expr: &HirExpr,
+    expr: &DirExpr,
     byte_ranged: &HashMap<String, bool>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Add,
+        DirExpr::Binary {
+            op: DirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -245,53 +245,53 @@ fn ptr_elem_is_byte(ty: &NirType) -> bool {
 }
 
 fn expr_is_byte_ranged(
-    expr: &HirExpr,
+    expr: &DirExpr,
     byte_ranged: &HashMap<String, bool>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     match expr {
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             if byte_ranged.get(name).copied().unwrap_or(false) {
                 return true;
             }
             // Typed as uchar / byte binding.
             type_map.get(name).is_some_and(is_byte_int_ty)
         }
-        HirExpr::Load { ptr, ty, .. } => {
+        DirExpr::Load { ptr, ty, .. } => {
             if is_byte_int_ty(ty) {
                 return true;
             }
             // `*uchar_ptr` may be typed as a wider int after promotion.
-            if let HirExpr::Var(pn) = ptr.as_ref() {
+            if let DirExpr::Var(pn) = ptr.as_ref() {
                 if type_map.get(pn).is_some_and(ptr_elem_is_byte) {
                     return true;
                 }
             }
-            match fission_midend_core::expr_type(ptr) {
+            match fission_midend_core::util_dir::expr_type(ptr) {
                 NirType::Ptr(inner) => is_byte_int_ty(&inner),
                 _ => false,
             }
         }
-        HirExpr::Cast { ty, expr: inner } => {
+        DirExpr::Cast { ty, expr: inner } => {
             is_byte_int_ty(ty) || expr_is_byte_ranged(inner, byte_ranged, type_map)
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::And,
+        DirExpr::Binary {
+            op: DirBinaryOp::And,
             rhs,
             lhs,
             ..
         } => match (lhs.as_ref(), rhs.as_ref()) {
-            (HirExpr::Const(m, _), _) | (_, HirExpr::Const(m, _)) => {
+            (DirExpr::Const(m, _), _) | (_, DirExpr::Const(m, _)) => {
                 let m = *m as u64;
                 m == 0xff || m == 255
             }
             _ => false,
         },
-        HirExpr::Binary {
-            op: HirBinaryOp::Mod,
+        DirExpr::Binary {
+            op: DirBinaryOp::Mod,
             rhs,
             ..
-        } => matches!(rhs.as_ref(), HirExpr::Const(m, _) if *m == 256 || *m == 0x100),
+        } => matches!(rhs.as_ref(), DirExpr::Const(m, _) if *m == 256 || *m == 0x100),
         _ => false,
     }
 }
@@ -322,8 +322,8 @@ mod tests {
         }
     }
 
-    fn binding(name: &str, ty: NirType) -> NirBinding {
-        NirBinding {
+    fn binding(name: &str, ty: NirType) -> DirBinding {
+        DirBinding {
             name: name.into(),
             ty,
             surface_type_name: None,
@@ -334,38 +334,38 @@ mod tests {
 
     #[test]
     fn recovers_truncation_after_byte_sum_copy() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "f".into(),
             params: vec![],
             locals: vec![],
             return_type: u32_ty(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("a".into()),
-                    rhs: HirExpr::Load {
-                        ptr: Box::new(HirExpr::Var("p".into())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("a".into()),
+                    rhs: DirExpr::Load {
+                        ptr: Box::new(DirExpr::Var("p".into())),
                         ty: u8_ty(),
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("b".into()),
-                    rhs: HirExpr::Load {
-                        ptr: Box::new(HirExpr::Var("q".into())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("b".into()),
+                    rhs: DirExpr::Load {
+                        ptr: Box::new(DirExpr::Var("q".into())),
                         ty: u8_ty(),
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("s".into()),
-                    rhs: HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Var("a".into())),
-                        rhs: Box::new(HirExpr::Var("b".into())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("s".into()),
+                    rhs: DirExpr::Binary {
+                        op: DirBinaryOp::Add,
+                        lhs: Box::new(DirExpr::Var("a".into())),
+                        rhs: Box::new(DirExpr::Var("b".into())),
                         ty: u32_ty(),
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("idx".into()),
-                    rhs: HirExpr::Var("s".into()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("idx".into()),
+                    rhs: DirExpr::Var("s".into()),
                 },
             ],
             ..Default::default()
@@ -373,13 +373,13 @@ mod tests {
 
         assert!(apply_byte_sum_index_trunc(&mut func));
         match &func.body[3] {
-            HirStmt::Assign { rhs, .. } => match rhs {
-                HirExpr::Binary {
-                    op: HirBinaryOp::And,
+            DirStmt::Assign { rhs, .. } => match rhs {
+                DirExpr::Binary {
+                    op: DirBinaryOp::And,
                     rhs: mask,
                     ..
                 } => {
-                    assert!(matches!(mask.as_ref(), HirExpr::Const(0xff, _)));
+                    assert!(matches!(mask.as_ref(), DirExpr::Const(0xff, _)));
                 }
                 other => panic!("expected masked assign, got {other:?}"),
             },
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn recovered_mask_uses_unsigned_destination_width() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "signed_byte_sum".into(),
             params: vec![],
             locals: vec![
@@ -400,18 +400,18 @@ mod tests {
             ],
             return_type: u32_ty(),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("sum".into()),
-                    rhs: HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Var("a".into())),
-                        rhs: Box::new(HirExpr::Var("b".into())),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("sum".into()),
+                    rhs: DirExpr::Binary {
+                        op: DirBinaryOp::Add,
+                        lhs: Box::new(DirExpr::Var("a".into())),
+                        rhs: Box::new(DirExpr::Var("b".into())),
                         ty: i8_ty(),
                     },
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("index".into()),
-                    rhs: HirExpr::Var("sum".into()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("index".into()),
+                    rhs: DirExpr::Var("sum".into()),
                 },
             ],
             ..Default::default()
@@ -420,9 +420,9 @@ mod tests {
         assert!(apply_byte_sum_index_trunc(&mut func));
         assert!(matches!(
             &func.body[1],
-            HirStmt::Assign {
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::And,
+            DirStmt::Assign {
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::And,
                     rhs,
                     ty: NirType::Int {
                         bits: 32,
@@ -433,7 +433,7 @@ mod tests {
                 ..
             } if matches!(
                 rhs.as_ref(),
-                HirExpr::Const(
+                DirExpr::Const(
                     0xff,
                     NirType::Int {
                         bits: 32,

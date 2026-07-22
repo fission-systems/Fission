@@ -526,7 +526,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<MissingMergeBindingProof> {
         let def_block_idx = self.lowering_block_index(block);
         let first_use =
@@ -736,7 +736,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<JoinMergeMissingProof> {
         let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
         if !matches!(
@@ -847,7 +847,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<MergeBindingCandidateProof> {
         let proof = self.describe_join_merge_missing_proof(block, op_idx, output, rhs)?;
         let def_block_idx = self.lowering_block_index(block);
@@ -896,7 +896,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<MissingIncomingSemanticsProof> {
         let missing = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
         if missing.relation != MissingMergeBindingRelation::JoinMergeMissing {
@@ -1054,7 +1054,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Result<MergeBindingCandidateProof, ExplicitMergeBindingTrialReason> {
         let Some(missing_proof) =
             self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)
@@ -1107,7 +1107,7 @@ impl<'a> PreviewBuilder<'a> {
     pub(super) fn synthesize_explicit_merge_bindings_for_block(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
-    ) -> Result<Vec<HirStmt>, MlilPreviewError> {
+    ) -> Result<Vec<DirStmt>, MlilPreviewError> {
         let block_idx = self.lowering_block_index(block);
         let Some(predecessor_idxs) = self.predecessors.get(block_idx).cloned() else {
             return Ok(Vec::new());
@@ -1131,7 +1131,7 @@ impl<'a> PreviewBuilder<'a> {
             incoming_value_kinds: Vec<MergeBindingCandidateIncomingKind>,
             incoming_values: Vec<String>,
             rhs_kind: DisallowedSingleConsumerRhsKind,
-            incoming_by_pred: HashMap<u64, HirExpr>,
+            incoming_by_pred: HashMap<u64, DirExpr>,
         }
 
         let scan_started = diag.then(std::time::Instant::now);
@@ -1253,9 +1253,9 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry
                 .materialization
                 .replacement_plan_merge_binding_count += 1;
-            stmts.push(HirStmt::Assign {
-                lhs: HirLValue::Var(binding.name),
-                rhs: select_rhs.unwrap_or_else(|| HirExpr::Call {
+            stmts.push(DirStmt::Assign {
+                lhs: DirLValue::Var(binding.name),
+                rhs: select_rhs.unwrap_or_else(|| DirExpr::Call {
                     target: "__fission_merge2".to_string(),
                     args,
                     ty: type_from_size(pending.output.size, false),
@@ -1313,9 +1313,9 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         merge_block_idx: usize,
         predecessor_blocks: &[u64],
-        incoming_by_pred: &HashMap<u64, HirExpr>,
+        incoming_by_pred: &HashMap<u64, DirExpr>,
         output: &Varnode,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         if predecessor_blocks.len() != 2 {
             return None;
         }
@@ -1347,7 +1347,7 @@ impl<'a> PreviewBuilder<'a> {
                 } else {
                     continue;
                 };
-                return Some(HirExpr::Select {
+                return Some(DirExpr::Select {
                     cond: Box::new(cond),
                     then_expr: Box::new(true_expr),
                     else_expr: Box::new(else_expr),
@@ -1381,7 +1381,7 @@ impl<'a> PreviewBuilder<'a> {
                 let true_expr = incoming_by_pred.get(&true_addr)?.clone();
                 let false_expr = incoming_by_pred.get(&false_addr)?.clone();
 
-                return Some(HirExpr::Select {
+                return Some(DirExpr::Select {
                     cond: Box::new(cond),
                     then_expr: Box::new(true_expr),
                     else_expr: Box::new(false_expr),
@@ -1706,7 +1706,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<TempOnlyRepresentativeProof> {
         let missing = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
         if missing.relation == MissingMergeBindingRelation::RepresentativeOnlyMissing {
@@ -1792,7 +1792,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<UnknownMissingMergeAttributionProof> {
         let proof = self.describe_missing_merge_binding_proof(block, op_idx, output, rhs)?;
         if proof.relation != MissingMergeBindingRelation::UnknownMissingMerge {
@@ -1861,7 +1861,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<SyntheticRootMergeAttributionProof> {
         let unknown =
             self.describe_unknown_missing_merge_attribution(block, op_idx, output, rhs)?;
@@ -1942,7 +1942,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<ForwardJoinNotSelectedProof> {
         let synthetic =
             self.describe_synthetic_root_merge_attribution(block, op_idx, output, rhs)?;
@@ -2000,7 +2000,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<AmbiguousJoinPredProof> {
         let proof = self.describe_forward_join_not_selected_proof(block, op_idx, output, rhs)?;
         if proof.rejected_reason
@@ -2149,7 +2149,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> MalformedDefUseWindowDetail {
         let rhs_kind = Self::classify_no_consumer_suppression_rhs_kind(rhs);
         let terminator_idx = self.block_terminator_index(block);
@@ -2276,7 +2276,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<CrossBlockReplacementProof> {
         let (_, _, provenance) =
             self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
@@ -2734,7 +2734,7 @@ mod tests {
     #[test]
     fn cross_block_consumer_provenance_prefers_merge_phi_consumer() {
         let output = varnode(0x10);
-        let rhs = HirExpr::Const(1, int(32));
+        let rhs = DirExpr::Const(1, int(32));
         let mut blocks = vec![
             block_at(
                 0x1000,
@@ -2792,7 +2792,7 @@ mod tests {
     #[test]
     fn cross_block_consumer_provenance_marks_single_successor_data_consumer() {
         let output = varnode(0x10);
-        let rhs = HirExpr::Const(1, int(32));
+        let rhs = DirExpr::Const(1, int(32));
         let mut blocks = vec![
             block_at(
                 0x1000,

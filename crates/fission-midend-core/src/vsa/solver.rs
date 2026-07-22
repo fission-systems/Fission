@@ -15,14 +15,14 @@
 /// imprecise for programs with complex aliasing.
 use super::circle_range::CircleRange;
 use super::transfer::{RangeEnv, eval_expr, nir_bits};
-use crate::ir::{HirFunction, HirLValue, HirStmt, NirBinding};
+use crate::ir::{DirFunction, DirLValue, DirStmt, NirBinding};
 use std::collections::HashMap;
 
 const MAX_ITERATIONS: usize = 8;
 
 /// Run the VSA solver on a function and return the resulting range
 /// environment (variable name → CircleRange).
-pub fn solve(func: &HirFunction) -> RangeEnv {
+pub fn solve(func: &DirFunction) -> RangeEnv {
     let mut env: RangeEnv = HashMap::new();
 
     // Seed with parameter and local types.
@@ -47,17 +47,17 @@ pub fn solve(func: &HirFunction) -> RangeEnv {
 ///
 /// `with_widening`: if true, apply the widening operator on assignment to
 /// prevent non-termination in loops.
-fn propagate_stmts(stmts: &[HirStmt], env: &mut RangeEnv, with_widening: bool, changed: &mut bool) {
+fn propagate_stmts(stmts: &[DirStmt], env: &mut RangeEnv, with_widening: bool, changed: &mut bool) {
     for stmt in stmts {
         propagate_stmt(stmt, env, with_widening, changed);
     }
 }
 
-fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut bool) {
+fn propagate_stmt(stmt: &DirStmt, env: &mut RangeEnv, widen: bool, changed: &mut bool) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             let new_range = eval_expr(rhs, env);
-            if let HirLValue::Var(name) = lhs {
+            if let DirLValue::Var(name) = lhs {
                 let old = env
                     .get(name.as_str())
                     .copied()
@@ -74,10 +74,10 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
             }
             // Memory assignments (Deref/Index) are ignored — conservative.
         }
-        HirStmt::Block(stmts) => {
+        DirStmt::Block(stmts) => {
             propagate_stmts(stmts, env, widen, changed);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond: _,
             then_body,
             else_body,
@@ -109,10 +109,10 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
                 }
             }
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             propagate_stmts(body, env, true, changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, body, update, ..
         } => {
             if let Some(init_stmt) = init {
@@ -123,7 +123,7 @@ fn propagate_stmt(stmt: &HirStmt, env: &mut RangeEnv, widen: bool, changed: &mut
                 propagate_stmt(update_stmt, env, true, changed);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             let base_env = env.clone();
             let mut merged_env: RangeEnv = HashMap::new();
             for case in cases {

@@ -10,7 +10,7 @@ use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator};
 use crate::regions::EmitReadyDecision;
 use crate::switch::{SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch};
-use fission_midend_core::ir::{DispatcherProofUnit, HirExpr, HirStmt, HirSwitchCase, MlilPreviewError};
+use fission_midend_core::ir::{DispatcherProofUnit, DirExpr, DirStmt, DirSwitchCase, MlilPreviewError};
 use crate::HashSet;
 
 /// Admit switch-chain recovery from CFG shape alone (no p-code opcodes).
@@ -58,12 +58,12 @@ pub fn switch_recovery_cfg_admitted(host: &impl StructuringHost, start_idx: usiz
 /// Lower an emit-ready dispatcher proof into a structured switch statement.
 pub fn lower_structured_switch_terminator(
     host: &mut impl StructuringHost,
-    expr: &HirExpr,
+    expr: &DirExpr,
     targets: &[u64],
     default_target: Option<u64>,
     min_val: i64,
     proof: Option<&DispatcherProofUnit>,
-) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
     let emit_ready = EmitReadyDecision::from_dispatcher_proof(proof);
     let Some(proof) = proof else {
         return Ok(None);
@@ -116,7 +116,7 @@ pub fn lower_structured_switch_terminator(
             return Ok(None);
         };
         max_skip = max_skip.max(skip_to);
-        cases.push(HirSwitchCase {
+        cases.push(DirSwitchCase {
             values: vec![value],
             body: case_body,
         });
@@ -138,7 +138,7 @@ pub fn lower_structured_switch_terminator(
         LinearExit::Return | LinearExit::End => max_skip,
     };
     Ok(Some((
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr: expr.clone(),
             cases,
             default,
@@ -151,7 +151,7 @@ pub fn lower_structured_switch_terminator(
 pub fn build_linear_multiblock_body(
     host: &mut impl StructuringHost,
     try_switch_recovery: bool,
-) -> Result<Vec<HirStmt>, MlilPreviewError> {
+) -> Result<Vec<DirStmt>, MlilPreviewError> {
     let mut body = Vec::new();
     let targeted = host.collect_jump_targets()?;
     let mut emitted_labels = HashSet::default();
@@ -170,7 +170,7 @@ pub fn build_linear_multiblock_body(
             && let Some((switch_stmt, skip_to)) = try_lower_switch(host, idx)?
         {
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                body.push(HirStmt::Label(block_label(block_key)));
+                body.push(DirStmt::Label(block_label(block_key)));
             }
             body.push(switch_stmt);
             idx = skip_to;
@@ -179,19 +179,19 @@ pub fn build_linear_multiblock_body(
         let block_key = host.block_target_key(idx);
         let block_start = host.block_start_address(idx);
         if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-            body.push(HirStmt::Label(block_label(block_key)));
+            body.push(DirStmt::Label(block_label(block_key)));
         }
         body.extend(host.lower_block_stmts(idx)?);
         match host.lower_block_terminator(idx)? {
-            LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
+            LoweredTerminator::Return(expr) => body.push(DirStmt::Return(expr)),
             LoweredTerminator::Goto(target) => {
                 if let Some(target_idx) = host.find_block_index_by_address(target)
                     && let Some(expr) =
                         host.lower_return_join_expr_for_predecessor(idx, target_idx)?
                 {
-                    body.push(HirStmt::Return(Some(expr)));
+                    body.push(DirStmt::Return(Some(expr)));
                 } else if host.next_block_address(idx) != Some(target) {
-                    body.push(HirStmt::Goto(block_label(target)));
+                    body.push(DirStmt::Goto(block_label(target)));
                 }
             }
             LoweredTerminator::Fallthrough(Some(target)) => {
@@ -199,7 +199,7 @@ pub fn build_linear_multiblock_body(
                     && let Some(expr) =
                         host.lower_return_join_expr_for_predecessor(idx, target_idx)?
                 {
-                    body.push(HirStmt::Return(Some(expr)));
+                    body.push(DirStmt::Return(Some(expr)));
                 }
             }
             LoweredTerminator::Cond {
@@ -211,23 +211,23 @@ pub fn build_linear_multiblock_body(
                     && let Some(expr) =
                         host.lower_return_join_expr_for_predecessor(idx, true_idx)?
                 {
-                    vec![HirStmt::Return(Some(expr))]
+                    vec![DirStmt::Return(Some(expr))]
                 } else {
-                    vec![HirStmt::Goto(block_label(true_target))]
+                    vec![DirStmt::Goto(block_label(true_target))]
                 };
                 let else_body = if let Some(false_target) = false_target {
                     if let Some(false_idx) = host.find_block_index_by_address(false_target)
                         && let Some(expr) =
                             host.lower_return_join_expr_for_predecessor(idx, false_idx)?
                     {
-                        vec![HirStmt::Return(Some(expr))]
+                        vec![DirStmt::Return(Some(expr))]
                     } else {
-                        vec![HirStmt::Goto(block_label(false_target))]
+                        vec![DirStmt::Goto(block_label(false_target))]
                     }
                 } else {
                     Vec::new()
                 };
-                body.push(HirStmt::If {
+                body.push(DirStmt::If {
                     cond,
                     then_body,
                     else_body,
@@ -268,9 +268,9 @@ pub fn build_linear_multiblock_body(
                         .recovered_cases
                         .iter()
                         .filter(|(_, target)| Some(*target) != default_target)
-                        .map(|(value, target)| HirSwitchCase {
+                        .map(|(value, target)| DirSwitchCase {
                             values: vec![*value],
-                            body: vec![HirStmt::Goto(block_label(*target))],
+                            body: vec![DirStmt::Goto(block_label(*target))],
                         })
                         .collect()
                 } else {
@@ -278,18 +278,18 @@ pub fn build_linear_multiblock_body(
                         .into_iter()
                         .filter(|target| Some(*target) != default_target)
                         .enumerate()
-                        .map(|(i, t)| HirSwitchCase {
+                        .map(|(i, t)| DirSwitchCase {
                             values: vec![min_val + i as i64],
-                            body: vec![HirStmt::Goto(block_label(t))],
+                            body: vec![DirStmt::Goto(block_label(t))],
                         })
                         .collect()
                 };
-                body.push(HirStmt::Switch {
+                body.push(DirStmt::Switch {
                     expr,
                     cases,
                     default: default_target
                         .map(block_label)
-                        .map(HirStmt::Goto)
+                        .map(DirStmt::Goto)
                         .into_iter()
                         .collect(),
                 });

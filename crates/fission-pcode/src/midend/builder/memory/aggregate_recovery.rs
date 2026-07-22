@@ -6,7 +6,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         rhs: &Varnode,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         let debug = preview_debug_enabled();
         if rhs.size < 16 {
             return Ok(None);
@@ -87,7 +87,7 @@ impl<'a> PreviewBuilder<'a> {
                 ) {
                     if debug {
                         let line =
-                            format!("[T4] asm-guided xmm source -> {}", print_expr(&slot_expr));
+                            format!("[T4] asm-guided xmm source -> {}", print_dir_expr(&slot_expr));
                         eprintln!("{line}");
                         append_preview_debug_trace(&line);
                     }
@@ -165,7 +165,7 @@ impl<'a> PreviewBuilder<'a> {
                                 slot_name
                             ));
                         }
-                        return Ok(Some(HirExpr::Var(slot_name)));
+                        return Ok(Some(DirExpr::Var(slot_name)));
                     }
                     if debug {
                         eprintln!("[mlil-preview][agg] load did not resolve stack slot");
@@ -283,7 +283,7 @@ impl<'a> PreviewBuilder<'a> {
         start_block_idx: usize,
         scan_end: usize,
         reg_vn: &Varnode,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         let xmm_index = xmm_register_index(reg_vn)?;
         let mut block_idx = start_block_idx;
         let mut current_scan_end = scan_end;
@@ -308,7 +308,7 @@ impl<'a> PreviewBuilder<'a> {
                         fields: vec![],
                     },
                 )?;
-                return Some(HirExpr::Var(slot_name));
+                return Some(DirExpr::Var(slot_name));
             }
 
             let preds = self.predecessors.get(block_idx)?;

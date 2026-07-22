@@ -48,17 +48,17 @@ fn is_flag_var(name: &str) -> bool {
 // ── Phase 1: Definition scan ──────────────────────────────────────────────────
 
 /// Count how many times each flag variable is assigned in the entire body.
-fn count_flag_defs(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) {
+fn count_flag_defs(stmts: &[DirStmt], counts: &mut HashMap<String, usize>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 ..
             } if is_flag_var(name) => {
                 *counts.entry(name.clone()).or_insert(0) += 1;
             }
-            HirStmt::Block(body) => count_flag_defs(body, counts),
-            HirStmt::If {
+            DirStmt::Block(body) => count_flag_defs(body, counts),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -66,10 +66,10 @@ fn count_flag_defs(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) {
                 count_flag_defs(then_body, counts);
                 count_flag_defs(else_body, counts);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 count_flag_defs(body, counts)
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -80,7 +80,7 @@ fn count_flag_defs(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) {
                     count_flag_defs(std::slice::from_ref(update.as_ref()), counts);
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     count_flag_defs(&case.body, counts);
                 }
@@ -92,7 +92,7 @@ fn count_flag_defs(stmts: &[HirStmt], counts: &mut HashMap<String, usize>) {
 }
 
 /// Collect definitions for flags that have exactly ONE assignment in the body.
-fn collect_single_defs(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
+fn collect_single_defs(stmts: &[DirStmt]) -> HashMap<String, DirExpr> {
     // First pass: count assignments per flag.
     let mut counts: HashMap<String, usize> = HashMap::default();
     count_flag_defs(stmts, &mut counts);
@@ -109,26 +109,26 @@ fn collect_single_defs(stmts: &[HirStmt]) -> HashMap<String, HirExpr> {
     }
 
     // Second pass: collect the actual definition expressions.
-    let mut defs: HashMap<String, HirExpr> = HashMap::default();
+    let mut defs: HashMap<String, DirExpr> = HashMap::default();
     collect_defs_for(stmts, &single, &mut defs);
     defs
 }
 
 fn collect_defs_for(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     wanted: &crate::HashSet<String>,
-    defs: &mut HashMap<String, HirExpr>,
+    defs: &mut HashMap<String, DirExpr>,
 ) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } if wanted.contains(name.as_str()) => {
                 defs.entry(name.clone()).or_insert_with(|| rhs.clone());
             }
-            HirStmt::Block(body) => collect_defs_for(body, wanted, defs),
-            HirStmt::If {
+            DirStmt::Block(body) => collect_defs_for(body, wanted, defs),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -136,11 +136,11 @@ fn collect_defs_for(
                 collect_defs_for(then_body, wanted, defs);
                 collect_defs_for(else_body, wanted, defs);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 collect_defs_for(body, wanted, defs)
             }
-            HirStmt::For { body, .. } => collect_defs_for(body, wanted, defs),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::For { body, .. } => collect_defs_for(body, wanted, defs),
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_defs_for(&case.body, wanted, defs);
                 }
@@ -154,8 +154,8 @@ fn collect_defs_for(
 // ── Phase 2: Pattern extraction helpers ──────────────────────────────────────
 
 /// Extract `(a, b)` from `__sborrow(a, b)` or `__scarry(a, b)`.
-fn extract_sborrow_args(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
-    if let HirExpr::Call { target, args, .. } = expr {
+fn extract_sborrow_args(expr: &DirExpr) -> Option<(DirExpr, DirExpr)> {
+    if let DirExpr::Call { target, args, .. } = expr {
         if (target == "__sborrow" || target == "__scarry") && args.len() == 2 {
             return Some((args[0].clone(), args[1].clone()));
         }
@@ -164,9 +164,9 @@ fn extract_sborrow_args(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
 }
 
 /// Extract `(a, b)` from `a < b` (unsigned Lt).
-fn extract_lt_args(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Lt,
+fn extract_lt_args(expr: &DirExpr) -> Option<(DirExpr, DirExpr)> {
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Lt,
         lhs,
         rhs,
         ..
@@ -178,9 +178,9 @@ fn extract_lt_args(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
 }
 
 /// Extract `(a, b)` from `a == b`.
-fn extract_eq_args(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Eq,
+fn extract_eq_args(expr: &DirExpr) -> Option<(DirExpr, DirExpr)> {
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Eq,
         lhs,
         rhs,
         ..
@@ -194,35 +194,35 @@ fn extract_eq_args(expr: &HirExpr) -> Option<(HirExpr, HirExpr)> {
 // ── Phase 3: Condition pattern matching ──────────────────────────────────────
 
 /// Check whether `expr` is `Var(flag)`.
-fn is_flag_expr(expr: &HirExpr, flag: &str) -> bool {
-    matches!(expr, HirExpr::Var(n) if n == flag)
+fn is_flag_expr(expr: &DirExpr, flag: &str) -> bool {
+    matches!(expr, DirExpr::Var(n) if n == flag)
 }
 
 /// Check whether `expr` is `!Var(flag)`.
-fn is_not_flag(expr: &HirExpr, flag: &str) -> bool {
-    matches!(expr, HirExpr::Unary { op: HirUnaryOp::Not, expr: inner, .. }
+fn is_not_flag(expr: &DirExpr, flag: &str) -> bool {
+    matches!(expr, DirExpr::Unary { op: DirUnaryOp::Not, expr: inner, .. }
              if is_flag_expr(inner, flag))
 }
 
 /// Check whether `expr` is `Var(sf) == Var(of)` or `Var(of) == Var(sf)`.
-fn is_sf_eq_of(expr: &HirExpr) -> bool {
+fn is_sf_eq_of(expr: &DirExpr) -> bool {
     matches!(expr,
-        HirExpr::Binary { op: HirBinaryOp::Eq, lhs, rhs, .. }
+        DirExpr::Binary { op: DirBinaryOp::Eq, lhs, rhs, .. }
         if (is_flag_expr(lhs, "sf") && is_flag_expr(rhs, "of"))
             || (is_flag_expr(lhs, "of") && is_flag_expr(rhs, "sf")))
 }
 
 /// Check whether `expr` is `Var(sf) != Var(of)` or `Var(of) != Var(sf)`.
-fn is_sf_ne_of(expr: &HirExpr) -> bool {
+fn is_sf_ne_of(expr: &DirExpr) -> bool {
     matches!(expr,
-        HirExpr::Binary { op: HirBinaryOp::Ne, lhs, rhs, .. }
+        DirExpr::Binary { op: DirBinaryOp::Ne, lhs, rhs, .. }
         if (is_flag_expr(lhs, "sf") && is_flag_expr(rhs, "of"))
             || (is_flag_expr(lhs, "of") && is_flag_expr(rhs, "sf")))
 }
 
 /// Helper: build `Binary { op, lhs, rhs, ty: Bool }`.
-fn bool_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr) -> HirExpr {
-    HirExpr::Binary {
+fn bool_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr) -> DirExpr {
+    DirExpr::Binary {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -232,23 +232,23 @@ fn bool_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr) -> HirExpr {
 
 /// Substitute any raw flag `Var` references in `expr` with their definitions.
 /// Returns `Some(new_expr)` if any substitution occurred, `None` otherwise.
-fn substitute_single_flags(expr: &HirExpr, defs: &HashMap<String, HirExpr>) -> Option<HirExpr> {
+fn substitute_single_flags(expr: &DirExpr, defs: &HashMap<String, DirExpr>) -> Option<DirExpr> {
     match expr {
-        HirExpr::Var(name) if is_flag_var(name) => defs.get(name).cloned(),
-        HirExpr::Unary {
+        DirExpr::Var(name) if is_flag_var(name) => defs.get(name).cloned(),
+        DirExpr::Unary {
             op,
             expr: inner,
             ty,
-        } => substitute_single_flags(inner, defs).map(|new_inner| HirExpr::Unary {
+        } => substitute_single_flags(inner, defs).map(|new_inner| DirExpr::Unary {
             op: *op,
             expr: Box::new(new_inner),
             ty: ty.clone(),
         }),
-        HirExpr::Binary { op, lhs, rhs, ty } => {
+        DirExpr::Binary { op, lhs, rhs, ty } => {
             let new_lhs = substitute_single_flags(lhs, defs);
             let new_rhs = substitute_single_flags(rhs, defs);
             if new_lhs.is_some() || new_rhs.is_some() {
-                Some(HirExpr::Binary {
+                Some(DirExpr::Binary {
                     op: *op,
                     lhs: Box::new(new_lhs.unwrap_or_else(|| *lhs.clone())),
                     rhs: Box::new(new_rhs.unwrap_or_else(|| *rhs.clone())),
@@ -265,15 +265,15 @@ fn substitute_single_flags(expr: &HirExpr, defs: &HashMap<String, HirExpr>) -> O
 /// Try to recover a high-level comparison from a condition that references
 /// raw x86 flag variables. Returns `Some(recovered)` on success.
 pub(super) fn try_recover_flag_condition(
-    cond: &HirExpr,
-    defs: &HashMap<String, HirExpr>,
-) -> Option<HirExpr> {
+    cond: &DirExpr,
+    defs: &HashMap<String, DirExpr>,
+) -> Option<DirExpr> {
     // ── JL / JGE: signed SF != OF / SF == OF ──────────────────────────────
     // JL (signed less than): SF != OF → a < b (signed)
     if is_sf_ne_of(cond) {
         if let Some(of_def) = defs.get("of") {
             if let Some((a, b)) = extract_sborrow_args(of_def) {
-                return Some(bool_binary(HirBinaryOp::SLt, a, b));
+                return Some(bool_binary(DirBinaryOp::SLt, a, b));
             }
         }
     }
@@ -281,9 +281,9 @@ pub(super) fn try_recover_flag_condition(
     if is_sf_eq_of(cond) {
         if let Some(of_def) = defs.get("of") {
             if let Some((a, b)) = extract_sborrow_args(of_def) {
-                return Some(HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(bool_binary(HirBinaryOp::SLt, a, b)),
+                return Some(DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(bool_binary(DirBinaryOp::SLt, a, b)),
                     ty: NirType::Bool,
                 });
             }
@@ -293,8 +293,8 @@ pub(super) fn try_recover_flag_condition(
     // ── JLE / JG: zf + sf/of ─────────────────────────────────────────────
     // JLE (signed <=): ZF=1 OR (SF != OF) → a <= b signed
     // Try: LogicalOr(zf, sf_ne_of) or LogicalOr(sf_ne_of, zf)
-    if let HirExpr::Binary {
-        op: HirBinaryOp::LogicalOr | HirBinaryOp::Or,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::LogicalOr | DirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -306,7 +306,7 @@ pub(super) fn try_recover_flag_condition(
         {
             if let Some(of_def) = defs.get("of") {
                 if let Some((a, b)) = extract_sborrow_args(of_def) {
-                    return Some(bool_binary(HirBinaryOp::SLe, a, b));
+                    return Some(bool_binary(DirBinaryOp::SLe, a, b));
                 }
             }
         }
@@ -316,7 +316,7 @@ pub(super) fn try_recover_flag_condition(
         {
             if let Some(cf_def) = defs.get("cf") {
                 if let Some((a, b)) = extract_lt_args(cf_def) {
-                    return Some(bool_binary(HirBinaryOp::Le, a, b));
+                    return Some(bool_binary(DirBinaryOp::Le, a, b));
                 }
             }
         }
@@ -324,8 +324,8 @@ pub(super) fn try_recover_flag_condition(
 
     // JG (signed >): !ZF AND (SF == OF) → a > b signed = b < a
     // Try: LogicalAnd(!zf, sf_eq_of) or LogicalAnd(sf_eq_of, !zf)
-    if let HirExpr::Binary {
-        op: HirBinaryOp::LogicalAnd | HirBinaryOp::And,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::LogicalAnd | DirBinaryOp::And,
         lhs,
         rhs,
         ..
@@ -338,7 +338,7 @@ pub(super) fn try_recover_flag_condition(
             if let Some(of_def) = defs.get("of") {
                 if let Some((a, b)) = extract_sborrow_args(of_def) {
                     // a > b signed = b < a signed
-                    return Some(bool_binary(HirBinaryOp::SLt, b, a));
+                    return Some(bool_binary(DirBinaryOp::SLt, b, a));
                 }
             }
         }
@@ -349,7 +349,7 @@ pub(super) fn try_recover_flag_condition(
             if let Some(cf_def) = defs.get("cf") {
                 if let Some((a, b)) = extract_lt_args(cf_def) {
                     // a > b unsigned = b < a
-                    return Some(bool_binary(HirBinaryOp::Lt, b, a));
+                    return Some(bool_binary(DirBinaryOp::Lt, b, a));
                 }
             }
         }
@@ -363,7 +363,7 @@ pub(super) fn try_recover_flag_condition(
 
 // ── Phase 4: Walk statements ──────────────────────────────────────────────────
 
-fn recover_in_cond(cond: &mut HirExpr, defs: &HashMap<String, HirExpr>, changed: &mut bool) {
+fn recover_in_cond(cond: &mut DirExpr, defs: &HashMap<String, DirExpr>, changed: &mut bool) {
     if let Some(recovered) = try_recover_flag_condition(cond, defs) {
         *cond = recovered;
         *changed = true;
@@ -373,8 +373,8 @@ fn recover_in_cond(cond: &mut HirExpr, defs: &HashMap<String, HirExpr>, changed:
 }
 
 fn recover_in_stmts_box(
-    stmt: &mut Box<HirStmt>,
-    defs: &HashMap<String, HirExpr>,
+    stmt: &mut Box<DirStmt>,
+    defs: &HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     let mut tmp = vec![*stmt.clone()];
@@ -384,10 +384,10 @@ fn recover_in_stmts_box(
     }
 }
 
-fn recover_in_stmts(stmts: &mut Vec<HirStmt>, defs: &HashMap<String, HirExpr>, changed: &mut bool) {
+fn recover_in_stmts(stmts: &mut Vec<DirStmt>, defs: &HashMap<String, DirExpr>, changed: &mut bool) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -396,15 +396,15 @@ fn recover_in_stmts(stmts: &mut Vec<HirStmt>, defs: &HashMap<String, HirExpr>, c
                 recover_in_stmts(then_body, defs, changed);
                 recover_in_stmts(else_body, defs, changed);
             }
-            HirStmt::While { cond, body } => {
+            DirStmt::While { cond, body } => {
                 recover_in_cond(cond, defs, changed);
                 recover_in_stmts(body, defs, changed);
             }
-            HirStmt::DoWhile { body, cond } => {
+            DirStmt::DoWhile { body, cond } => {
                 recover_in_stmts(body, defs, changed);
                 recover_in_cond(cond, defs, changed);
             }
-            HirStmt::For {
+            DirStmt::For {
                 cond,
                 body,
                 init,
@@ -422,8 +422,8 @@ fn recover_in_stmts(stmts: &mut Vec<HirStmt>, defs: &HashMap<String, HirExpr>, c
                 }
                 recover_in_stmts(body, defs, changed);
             }
-            HirStmt::Block(body) => recover_in_stmts(body, defs, changed),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Block(body) => recover_in_stmts(body, defs, changed),
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     recover_in_stmts(&mut case.body, defs, changed);
                 }
@@ -435,23 +435,23 @@ fn recover_in_stmts(stmts: &mut Vec<HirStmt>, defs: &HashMap<String, HirExpr>, c
 }
 
 fn recover_in_stmts_with_reaching_defs(
-    stmts: &mut Vec<HirStmt>,
-    defs: &mut HashMap<String, HirExpr>,
+    stmts: &mut Vec<DirStmt>,
+    defs: &mut HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } if is_flag_var(name) => {
                 defs.insert(name.clone(), rhs.clone());
             }
-            HirStmt::Block(body) => {
+            DirStmt::Block(body) => {
                 let mut nested_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(body, &mut nested_defs, changed);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -462,17 +462,17 @@ fn recover_in_stmts_with_reaching_defs(
                 let mut else_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(else_body, &mut else_defs, changed);
             }
-            HirStmt::While { cond, body } => {
+            DirStmt::While { cond, body } => {
                 recover_in_cond(cond, defs, changed);
                 let mut body_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
             }
-            HirStmt::DoWhile { body, cond } => {
+            DirStmt::DoWhile { body, cond } => {
                 let mut body_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
                 recover_in_cond(cond, &body_defs, changed);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -491,7 +491,7 @@ fn recover_in_stmts_with_reaching_defs(
                     recover_in_stmts_box_with_reaching_defs(update, &mut body_defs, changed);
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     let mut case_defs = defs.clone();
                     recover_in_stmts_with_reaching_defs(&mut case.body, &mut case_defs, changed);
@@ -499,11 +499,11 @@ fn recover_in_stmts_with_reaching_defs(
                 let mut default_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(default, &mut default_defs, changed);
             }
-            HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => {
+            DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => {
                 defs.clear();
             }
             _ => {}
@@ -512,8 +512,8 @@ fn recover_in_stmts_with_reaching_defs(
 }
 
 fn recover_in_stmts_box_with_reaching_defs(
-    stmt: &mut Box<HirStmt>,
-    defs: &mut HashMap<String, HirExpr>,
+    stmt: &mut Box<DirStmt>,
+    defs: &mut HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     let mut tmp = vec![*stmt.clone()];
@@ -532,17 +532,17 @@ struct FlagBasicBlock {
     successors: Vec<usize>,
 }
 
-fn collect_goto_targets(stmt: &HirStmt, targets: &mut HashSet<String>) {
+fn collect_goto_targets(stmt: &DirStmt, targets: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Goto(label) => {
+        DirStmt::Goto(label) => {
             targets.insert(label.clone());
         }
-        HirStmt::Block(body) => {
+        DirStmt::Block(body) => {
             for stmt in body {
                 collect_goto_targets(stmt, targets);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -551,12 +551,12 @@ fn collect_goto_targets(stmt: &HirStmt, targets: &mut HashSet<String>) {
                 collect_goto_targets(stmt, targets);
             }
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             for stmt in body {
                 collect_goto_targets(stmt, targets);
             }
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(init) = init {
@@ -569,7 +569,7 @@ fn collect_goto_targets(stmt: &HirStmt, targets: &mut HashSet<String>) {
                 collect_goto_targets(update, targets);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for stmt in &case.body {
                     collect_goto_targets(stmt, targets);
@@ -583,17 +583,17 @@ fn collect_goto_targets(stmt: &HirStmt, targets: &mut HashSet<String>) {
     }
 }
 
-fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
+fn build_flag_cfg(stmts: &[DirStmt]) -> Vec<FlagBasicBlock> {
     if stmts.is_empty() {
         return Vec::new();
     }
 
     let mut starts = vec![0];
     for (index, stmt) in stmts.iter().enumerate() {
-        if index != 0 && matches!(stmt, HirStmt::Label(_)) {
+        if index != 0 && matches!(stmt, DirStmt::Label(_)) {
             starts.push(index);
         }
-        if index + 1 < stmts.len() && matches!(stmt, HirStmt::Goto(_) | HirStmt::Return(_)) {
+        if index + 1 < stmts.len() && matches!(stmt, DirStmt::Goto(_) | DirStmt::Return(_)) {
             starts.push(index + 1);
         }
     }
@@ -613,7 +613,7 @@ fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
     let mut label_blocks = HashMap::default();
     for (block_index, block) in blocks.iter().enumerate() {
         for stmt in &stmts[block.start..block.end] {
-            if let HirStmt::Label(label) = stmt {
+            if let DirStmt::Label(label) = stmt {
                 label_blocks.insert(label.clone(), block_index);
             }
         }
@@ -632,7 +632,7 @@ fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
             .collect();
 
         let terminal = &stmts[end - 1];
-        if !matches!(terminal, HirStmt::Goto(_) | HirStmt::Return(_))
+        if !matches!(terminal, DirStmt::Goto(_) | DirStmt::Return(_))
             && block_index + 1 < blocks.len()
         {
             successors.push(block_index + 1);
@@ -644,7 +644,7 @@ fn build_flag_cfg(stmts: &[HirStmt]) -> Vec<FlagBasicBlock> {
     blocks
 }
 
-fn flag_uses(stmt: &HirStmt) -> HashSet<String> {
+fn flag_uses(stmt: &DirStmt) -> HashSet<String> {
     LivenessTransfer::for_stmt(stmt)
         .uses_before_definition()
         .map(str::to_string)
@@ -652,10 +652,10 @@ fn flag_uses(stmt: &HirStmt) -> HashSet<String> {
         .collect()
 }
 
-fn flag_definition(stmt: &HirStmt) -> Option<(&str, &HirExpr)> {
+fn flag_definition(stmt: &DirStmt) -> Option<(&str, &DirExpr)> {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } if is_flag_var(name) => Some((name, rhs)),
         _ => None,
@@ -665,7 +665,7 @@ fn flag_definition(stmt: &HirStmt) -> Option<(&str, &HirExpr)> {
 fn transfer_flag_block(
     block: &FlagBasicBlock,
     stmt_uses: &[HashSet<String>],
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     live_out: &HashSet<String>,
 ) -> HashSet<String> {
     let mut live = live_out.clone();
@@ -683,7 +683,7 @@ fn transfer_flag_block(
 /// Nested structured statements are summarized conservatively as uses and are
 /// cleaned only when the flag has no use anywhere. This avoids inventing a
 /// second structured-CFG engine inside normalization.
-fn dead_flag_definition_sites(stmts: &[HirStmt]) -> HashSet<usize> {
+fn dead_flag_definition_sites(stmts: &[DirStmt]) -> HashSet<usize> {
     let blocks = build_flag_cfg(stmts);
     if blocks.is_empty() {
         return HashSet::default();
@@ -728,7 +728,7 @@ fn dead_flag_definition_sites(stmts: &[HirStmt]) -> HashSet<usize> {
     dead
 }
 
-fn remove_dead_sites(stmts: &mut Vec<HirStmt>, dead_sites: &HashSet<usize>, changed: &mut bool) {
+fn remove_dead_sites(stmts: &mut Vec<DirStmt>, dead_sites: &HashSet<usize>, changed: &mut bool) {
     stmts.retain(|stmt| {
         let remove = dead_sites.contains(&(std::ptr::from_ref(stmt) as usize));
         *changed |= remove;
@@ -737,14 +737,14 @@ fn remove_dead_sites(stmts: &mut Vec<HirStmt>, dead_sites: &HashSet<usize>, chan
 }
 
 fn remove_globally_unused_flags(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     uses: &HashMap<String, usize>,
     changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body) => remove_globally_unused_flags(body, uses, changed),
-            HirStmt::If {
+            DirStmt::Block(body) => remove_globally_unused_flags(body, uses, changed),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -752,11 +752,11 @@ fn remove_globally_unused_flags(
                 remove_globally_unused_flags(then_body, uses, changed);
                 remove_globally_unused_flags(else_body, uses, changed);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 remove_globally_unused_flags(body, uses, changed);
             }
-            HirStmt::For { body, .. } => remove_globally_unused_flags(body, uses, changed),
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::For { body, .. } => remove_globally_unused_flags(body, uses, changed),
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     remove_globally_unused_flags(&mut case.body, uses, changed);
                 }
@@ -776,7 +776,7 @@ fn remove_globally_unused_flags(
 
 /// Remove pure x86 flag definitions using CFG liveness for unstructured HIR
 /// plus structured liveness summaries for nested bodies.
-fn remove_dead_flag_assigns(func: &mut HirFunction) {
+fn remove_dead_flag_assigns(func: &mut DirFunction) {
     let dead_sites = dead_flag_definition_sites(&func.body);
     let mut changed = false;
     remove_dead_sites(&mut func.body, &dead_sites, &mut changed);
@@ -812,7 +812,7 @@ fn remove_dead_flag_assigns(func: &mut HirFunction) {
 /// assignments were removed. Always runs dead-flag cleanup: flag writes may
 /// be pure noise even when no condition was rewritten in this pass (e.g. the
 /// compare was already high-level while CF/OF/SF/ZF/PF stores remain).
-pub fn apply_flag_recovery_pass(func: &mut HirFunction) -> bool {
+pub fn apply_flag_recovery_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
     let mut reaching_defs = HashMap::default();
     recover_in_stmts_with_reaching_defs(&mut func.body, &mut reaching_defs, &mut changed);
@@ -832,27 +832,27 @@ pub fn apply_flag_recovery_pass(func: &mut HirFunction) -> bool {
 
 /// Late cleanup: drop unused flag assignments after other normalize waves may
 /// have left residual CF/OF/SF/ZF/PF stores.
-pub fn apply_dead_flag_cleanup_pass(func: &mut HirFunction) -> bool {
+pub fn apply_dead_flag_cleanup_pass(func: &mut DirFunction) -> bool {
     let before = flag_assign_count(&func.body);
     remove_dead_flag_assigns(func);
     flag_assign_count(&func.body) != before
 }
 
-fn flag_assign_count(stmts: &[HirStmt]) -> usize {
+fn flag_assign_count(stmts: &[DirStmt]) -> usize {
     let mut n = 0;
     count_flag_assigns(stmts, &mut n);
     n
 }
 
-fn count_flag_assigns(stmts: &[HirStmt], n: &mut usize) {
+fn count_flag_assigns(stmts: &[DirStmt], n: &mut usize) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 ..
             } if is_flag_var(name) => *n += 1,
-            HirStmt::Block(body) => count_flag_assigns(body, n),
-            HirStmt::If {
+            DirStmt::Block(body) => count_flag_assigns(body, n),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -860,10 +860,10 @@ fn count_flag_assigns(stmts: &[HirStmt], n: &mut usize) {
                 count_flag_assigns(then_body, n);
                 count_flag_assigns(else_body, n);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 count_flag_assigns(body, n)
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -874,7 +874,7 @@ fn count_flag_assigns(stmts: &[HirStmt], n: &mut usize) {
                     count_flag_assigns(std::slice::from_ref(update.as_ref()), n);
                 }
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     count_flag_assigns(&case.body, n);
                 }
@@ -902,12 +902,12 @@ mod tests {
     use super::*;
 // prelude via parent
 
-    fn var(name: &str) -> HirExpr {
-        HirExpr::Var(name.to_string())
+    fn var(name: &str) -> DirExpr {
+        DirExpr::Var(name.to_string())
     }
 
-    fn int(value: i64) -> HirExpr {
-        HirExpr::Const(
+    fn int(value: i64) -> DirExpr {
+        DirExpr::Const(
             value,
             NirType::Int {
                 bits: 32,
@@ -916,30 +916,30 @@ mod tests {
         )
     }
 
-    fn eq(lhs: HirExpr, rhs: HirExpr) -> HirExpr {
-        bool_binary(HirBinaryOp::Eq, lhs, rhs)
+    fn eq(lhs: DirExpr, rhs: DirExpr) -> DirExpr {
+        bool_binary(DirBinaryOp::Eq, lhs, rhs)
     }
 
-    fn not(expr: HirExpr) -> HirExpr {
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+    fn not(expr: DirExpr) -> DirExpr {
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr: Box::new(expr),
             ty: NirType::Bool,
         }
     }
 
-    fn assign(name: &str, rhs: HirExpr) -> HirStmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name.to_string()),
+    fn assign(name: &str, rhs: DirExpr) -> DirStmt {
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name.to_string()),
             rhs,
         }
     }
 
-    fn first_if_cond(func: &HirFunction) -> &HirExpr {
+    fn first_if_cond(func: &DirFunction) -> &DirExpr {
         func.body
             .iter()
             .find_map(|stmt| match stmt {
-                HirStmt::If { cond, .. } => Some(cond),
+                DirStmt::If { cond, .. } => Some(cond),
                 _ => None,
             })
             .expect("function contains if")
@@ -947,41 +947,41 @@ mod tests {
 
     #[test]
     fn local_reaching_flag_recovery_uses_latest_straight_line_definition() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
                 assign("zf", eq(var("stale_row"), var("stale_limit"))),
                 assign("tmp", int(0)),
                 assign("zf", eq(var("row"), var("limit"))),
-                HirStmt::If {
+                DirStmt::If {
                     cond: not(var("zf")),
                     then_body: Vec::new(),
                     else_body: Vec::new(),
                 },
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(apply_flag_recovery_pass(&mut func));
         assert_eq!(
             first_if_cond(&func),
-            &bool_binary(HirBinaryOp::Ne, var("row"), var("limit"))
+            &bool_binary(DirBinaryOp::Ne, var("row"), var("limit"))
         );
     }
 
     #[test]
     fn local_reaching_flag_recovery_does_not_cross_label_boundary() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
                 assign("zf", eq(var("stale_row"), var("stale_limit"))),
-                HirStmt::Label("join".to_string()),
-                HirStmt::If {
+                DirStmt::Label("join".to_string()),
+                DirStmt::If {
                     cond: not(var("zf")),
                     then_body: Vec::new(),
                     else_body: Vec::new(),
                 },
                 assign("zf", eq(var("later_row"), var("later_limit"))),
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         // The label still blocks expression substitution. The pass reports a
@@ -994,21 +994,21 @@ mod tests {
     #[test]
     fn dead_flag_cleanup_removes_only_overwritten_definition() {
         let live_rhs = eq(var("current_value"), var("current_limit"));
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
                 assign("cf", eq(var("stale_value"), var("stale_limit"))),
                 assign("cf", live_rhs.clone()),
-                HirStmt::Return(Some(var("cf"))),
+                DirStmt::Return(Some(var("cf"))),
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(apply_dead_flag_cleanup_pass(&mut func));
         assert_eq!(flag_assign_count(&func.body), 1);
         assert!(matches!(
             &func.body[0],
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } if name == "cf" && rhs == &live_rhs
         ));
@@ -1017,14 +1017,14 @@ mod tests {
     #[test]
     fn dead_flag_cleanup_removes_entry_definition_hidden_by_loop_definition() {
         let live_rhs = eq(var("current_value"), var("current_limit"));
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
                 assign("cf", eq(var("entry_stack"), int(16))),
-                HirStmt::While {
+                DirStmt::While {
                     cond: int(1),
                     body: vec![
                         assign("cf", live_rhs.clone()),
-                        HirStmt::If {
+                        DirStmt::If {
                             cond: var("cf"),
                             then_body: Vec::new(),
                             else_body: Vec::new(),
@@ -1032,18 +1032,18 @@ mod tests {
                     ],
                 },
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(apply_dead_flag_cleanup_pass(&mut func));
         assert_eq!(flag_assign_count(&func.body), 1);
         assert!(matches!(
             &func.body[0],
-            HirStmt::While { body, .. }
+            DirStmt::While { body, .. }
                 if matches!(
                     &body[0],
-                    HirStmt::Assign {
-                        lhs: HirLValue::Var(name),
+                    DirStmt::Assign {
+                        lhs: DirLValue::Var(name),
                         rhs,
                     } if name == "cf" && rhs == &live_rhs
                 )
@@ -1052,13 +1052,13 @@ mod tests {
 
     #[test]
     fn dead_flag_cleanup_reaches_fixed_point_across_flag_dependencies() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
                 assign("cf", eq(var("entry_stack"), int(16))),
                 assign("zf", not(var("cf"))),
                 assign("pf", var("zf")),
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(apply_dead_flag_cleanup_pass(&mut func));
@@ -1067,16 +1067,16 @@ mod tests {
 
     #[test]
     fn dead_flag_cleanup_keeps_definitions_from_both_branch_predecessors() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
-                HirStmt::If {
+                DirStmt::If {
                     cond: var("selector"),
                     then_body: vec![assign("cf", eq(var("left"), var("limit")))],
                     else_body: vec![assign("cf", eq(var("right"), var("limit")))],
                 },
-                HirStmt::Return(Some(var("cf"))),
+                DirStmt::Return(Some(var("cf"))),
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(!apply_dead_flag_cleanup_pass(&mut func));
@@ -1085,23 +1085,23 @@ mod tests {
 
     #[test]
     fn dead_flag_cleanup_keeps_definitions_at_label_cfg_join() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
-                HirStmt::If {
+                DirStmt::If {
                     cond: var("selector"),
-                    then_body: vec![HirStmt::Goto("left_path".to_string())],
-                    else_body: vec![HirStmt::Goto("right_path".to_string())],
+                    then_body: vec![DirStmt::Goto("left_path".to_string())],
+                    else_body: vec![DirStmt::Goto("right_path".to_string())],
                 },
-                HirStmt::Label("left_path".to_string()),
+                DirStmt::Label("left_path".to_string()),
                 assign("cf", eq(var("left"), var("limit"))),
-                HirStmt::Goto("join".to_string()),
-                HirStmt::Label("right_path".to_string()),
+                DirStmt::Goto("join".to_string()),
+                DirStmt::Label("right_path".to_string()),
                 assign("cf", eq(var("right"), var("limit"))),
-                HirStmt::Goto("join".to_string()),
-                HirStmt::Label("join".to_string()),
-                HirStmt::Return(Some(var("cf"))),
+                DirStmt::Goto("join".to_string()),
+                DirStmt::Label("join".to_string()),
+                DirStmt::Return(Some(var("cf"))),
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(!apply_dead_flag_cleanup_pass(&mut func));
@@ -1111,25 +1111,25 @@ mod tests {
     #[test]
     fn dead_flag_cleanup_follows_goto_edges_and_definition_kills() {
         let live_rhs = eq(var("live_value"), var("live_limit"));
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![
                 assign("cf", eq(var("stale_value"), var("stale_limit"))),
-                HirStmt::Goto("redefine_flag".to_string()),
-                HirStmt::Label("redefine_flag".to_string()),
+                DirStmt::Goto("redefine_flag".to_string()),
+                DirStmt::Label("redefine_flag".to_string()),
                 assign("cf", live_rhs.clone()),
-                HirStmt::Goto("use_flag".to_string()),
-                HirStmt::Label("use_flag".to_string()),
-                HirStmt::Return(Some(var("cf"))),
+                DirStmt::Goto("use_flag".to_string()),
+                DirStmt::Label("use_flag".to_string()),
+                DirStmt::Return(Some(var("cf"))),
             ],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(apply_dead_flag_cleanup_pass(&mut func));
         assert_eq!(flag_assign_count(&func.body), 1);
         assert!(func.body.iter().any(|stmt| matches!(
             stmt,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } if name == "cf" && rhs == &live_rhs
         )));
@@ -1137,16 +1137,16 @@ mod tests {
 
     #[test]
     fn dead_flag_cleanup_retains_effectful_dead_definition() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             body: vec![assign(
                 "cf",
-                HirExpr::Call {
+                DirExpr::Call {
                     target: "observe_machine_state".to_string(),
                     args: Vec::new(),
                     ty: NirType::Bool,
                 },
             )],
-            ..HirFunction::default()
+            ..DirFunction::default()
         };
 
         assert!(!apply_dead_flag_cleanup_pass(&mut func));

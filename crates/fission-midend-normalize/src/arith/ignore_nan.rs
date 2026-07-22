@@ -4,7 +4,7 @@ use crate::HashSet;
 /// Simplifies floating-point comparison expressions by ignoring redundant NaN checks (RuleIgnoreNan).
 /// - `!__isnan(x) && (x < y)` -> `x < y`
 /// - `__isnan(x) || (x != y)` -> `x != y`
-pub fn apply_ignore_nan_pass(func: &mut HirFunction) -> bool {
+pub fn apply_ignore_nan_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
     for stmt in &mut func.body {
         changed |= visit_stmt(stmt);
@@ -12,17 +12,17 @@ pub fn apply_ignore_nan_pass(func: &mut HirFunction) -> bool {
     changed
 }
 
-fn get_var_name(expr: &HirExpr) -> Option<&str> {
+fn get_var_name(expr: &DirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) => Some(name),
-        HirExpr::Cast { expr: inner, .. } => get_var_name(inner),
+        DirExpr::Var(name) => Some(name),
+        DirExpr::Cast { expr: inner, .. } => get_var_name(inner),
         _ => None,
     }
 }
 
-fn get_isnan_var(expr: &HirExpr) -> Option<&str> {
+fn get_isnan_var(expr: &DirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Call { target, args, .. } if target == "__isnan" => {
+        DirExpr::Call { target, args, .. } if target == "__isnan" => {
             if args.len() == 1 {
                 get_var_name(&args[0])
             } else {
@@ -33,10 +33,10 @@ fn get_isnan_var(expr: &HirExpr) -> Option<&str> {
     }
 }
 
-fn get_negated_isnan_var(expr: &HirExpr) -> Option<&str> {
+fn get_negated_isnan_var(expr: &DirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr: inner,
             ..
         } => get_isnan_var(inner),
@@ -44,27 +44,27 @@ fn get_negated_isnan_var(expr: &HirExpr) -> Option<&str> {
     }
 }
 
-fn contains_comparison_involving(expr: &HirExpr, var_name: &str) -> bool {
+fn contains_comparison_involving(expr: &DirExpr, var_name: &str) -> bool {
     match expr {
-        HirExpr::Binary { op, lhs, rhs, .. } => {
+        DirExpr::Binary { op, lhs, rhs, .. } => {
             if matches!(
                 op,
-                HirBinaryOp::Eq
-                    | HirBinaryOp::Ne
-                    | HirBinaryOp::Lt
-                    | HirBinaryOp::Le
-                    | HirBinaryOp::Gt
-                    | HirBinaryOp::Ge
-                    | HirBinaryOp::SLt
-                    | HirBinaryOp::SLe
-                    | HirBinaryOp::SGt
-                    | HirBinaryOp::SGe
+                DirBinaryOp::Eq
+                    | DirBinaryOp::Ne
+                    | DirBinaryOp::Lt
+                    | DirBinaryOp::Le
+                    | DirBinaryOp::Gt
+                    | DirBinaryOp::Ge
+                    | DirBinaryOp::SLt
+                    | DirBinaryOp::SLe
+                    | DirBinaryOp::SGt
+                    | DirBinaryOp::SGe
             ) {
                 if get_var_name(lhs) == Some(var_name) || get_var_name(rhs) == Some(var_name) {
                     return true;
                 }
             }
-            if matches!(op, HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr) {
+            if matches!(op, DirBinaryOp::LogicalAnd | DirBinaryOp::LogicalOr) {
                 return contains_comparison_involving(lhs, var_name)
                     || contains_comparison_involving(rhs, var_name);
             }
@@ -74,9 +74,9 @@ fn contains_comparison_involving(expr: &HirExpr, var_name: &str) -> bool {
     false
 }
 
-fn collect_and_operands(expr: &HirExpr, operands: &mut Vec<HirExpr>) {
-    if let HirExpr::Binary {
-        op: HirBinaryOp::LogicalAnd,
+fn collect_and_operands(expr: &DirExpr, operands: &mut Vec<DirExpr>) {
+    if let DirExpr::Binary {
+        op: DirBinaryOp::LogicalAnd,
         lhs,
         rhs,
         ..
@@ -89,9 +89,9 @@ fn collect_and_operands(expr: &HirExpr, operands: &mut Vec<HirExpr>) {
     }
 }
 
-fn collect_or_operands(expr: &HirExpr, operands: &mut Vec<HirExpr>) {
-    if let HirExpr::Binary {
-        op: HirBinaryOp::LogicalOr,
+fn collect_or_operands(expr: &DirExpr, operands: &mut Vec<DirExpr>) {
+    if let DirExpr::Binary {
+        op: DirBinaryOp::LogicalOr,
         lhs,
         rhs,
         ..
@@ -104,14 +104,14 @@ fn collect_or_operands(expr: &HirExpr, operands: &mut Vec<HirExpr>) {
     }
 }
 
-fn rebuild_and_tree(mut operands: Vec<HirExpr>) -> HirExpr {
+fn rebuild_and_tree(mut operands: Vec<DirExpr>) -> DirExpr {
     if operands.is_empty() {
-        return HirExpr::Const(1, NirType::Bool);
+        return DirExpr::Const(1, NirType::Bool);
     }
     let mut expr = operands.remove(0);
     for op in operands {
-        expr = HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
+        expr = DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
             lhs: Box::new(expr),
             rhs: Box::new(op),
             ty: NirType::Bool,
@@ -120,14 +120,14 @@ fn rebuild_and_tree(mut operands: Vec<HirExpr>) -> HirExpr {
     expr
 }
 
-fn rebuild_or_tree(mut operands: Vec<HirExpr>) -> HirExpr {
+fn rebuild_or_tree(mut operands: Vec<DirExpr>) -> DirExpr {
     if operands.is_empty() {
-        return HirExpr::Const(0, NirType::Bool);
+        return DirExpr::Const(0, NirType::Bool);
     }
     let mut expr = operands.remove(0);
     for op in operands {
-        expr = HirExpr::Binary {
-            op: HirBinaryOp::LogicalOr,
+        expr = DirExpr::Binary {
+            op: DirBinaryOp::LogicalOr,
             lhs: Box::new(expr),
             rhs: Box::new(op),
             ty: NirType::Bool,
@@ -136,28 +136,28 @@ fn rebuild_or_tree(mut operands: Vec<HirExpr>) -> HirExpr {
     expr
 }
 
-fn visit_expr(expr: &mut HirExpr) -> bool {
+fn visit_expr(expr: &mut DirExpr) -> bool {
     let mut changed = false;
 
     // Recurse first
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. } => {
             changed |= visit_expr(inner);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= visit_expr(lhs);
             changed |= visit_expr(rhs);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= visit_expr(arg);
             }
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -167,7 +167,7 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
             changed |= visit_expr(then_expr);
             changed |= visit_expr(else_expr);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= visit_expr(base);
             changed |= visit_expr(index);
         }
@@ -175,8 +175,8 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
     }
 
     // Now try optimizing the current expression
-    if let HirExpr::Binary { op, .. } = expr {
-        if *op == HirBinaryOp::LogicalAnd {
+    if let DirExpr::Binary { op, .. } = expr {
+        if *op == DirBinaryOp::LogicalAnd {
             let mut operands = Vec::new();
             collect_and_operands(expr, &mut operands);
 
@@ -203,7 +203,7 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
                 *expr = rebuild_and_tree(new_operands);
                 return true;
             }
-        } else if *op == HirBinaryOp::LogicalOr {
+        } else if *op == DirBinaryOp::LogicalOr {
             let mut operands = Vec::new();
             collect_or_operands(expr, &mut operands);
 
@@ -236,37 +236,37 @@ fn visit_expr(expr: &mut HirExpr) -> bool {
     changed
 }
 
-fn visit_stmt(stmt: &mut HirStmt) -> bool {
+fn visit_stmt(stmt: &mut DirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             changed |= visit_expr(rhs);
             match lhs {
-                HirLValue::Deref { ptr, .. } => {
+                DirLValue::Deref { ptr, .. } => {
                     changed |= visit_expr(ptr);
                 }
-                HirLValue::Index { base, index, .. } => {
+                DirLValue::Index { base, index, .. } => {
                     changed |= visit_expr(base);
                     changed |= visit_expr(index);
                 }
                 _ => {}
             }
         }
-        HirStmt::Expr(expr) => {
+        DirStmt::Expr(expr) => {
             changed |= visit_expr(expr);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             changed |= visit_expr(va_list);
         }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => {
             for s in body {
                 changed |= visit_stmt(s);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -279,7 +279,7 @@ fn visit_stmt(stmt: &mut HirStmt) -> bool {
                 changed |= visit_stmt(s);
             }
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -294,7 +294,7 @@ fn visit_stmt(stmt: &mut HirStmt) -> bool {
                 changed |= visit_stmt(s);
             }
         }
-        HirStmt::Return(Some(expr)) => {
+        DirStmt::Return(Some(expr)) => {
             changed |= visit_expr(expr);
         }
         _ => {}

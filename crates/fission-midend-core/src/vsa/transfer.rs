@@ -1,32 +1,32 @@
 /// Transfer functions for Value Set Analysis over HIR expressions.
 ///
-/// Each `HirExpr` operation is mapped to an abstract transformer over
+/// Each `DirExpr` operation is mapped to an abstract transformer over
 /// `CircleRange` values.  The functions are monotone and conservative:
 /// when an exact result cannot be computed they return `top`.
 use super::circle_range::CircleRange;
-use crate::ir::{HirBinaryOp, HirExpr, HirUnaryOp, NirType};
+use crate::ir::{DirBinaryOp, DirExpr, DirUnaryOp, NirType};
 use std::collections::HashMap;
 
 /// Map from variable name → abstract range at the current program point.
 pub(crate) type RangeEnv = HashMap<String, CircleRange>;
 
-/// Evaluate the abstract range of a `HirExpr` given the current environment.
-pub fn eval_expr(expr: &HirExpr, env: &RangeEnv) -> CircleRange {
+/// Evaluate the abstract range of a `DirExpr` given the current environment.
+pub fn eval_expr(expr: &DirExpr, env: &RangeEnv) -> CircleRange {
     match expr {
-        HirExpr::Const(value, ty) => {
+        DirExpr::Const(value, ty) => {
             let bits = nir_bits(ty).unwrap_or(64);
             CircleRange::singleton(*value as u64, bits)
         }
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => env
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => env
             .get(name.as_str())
             .copied()
             .unwrap_or_else(|| CircleRange::top(64)),
-        HirExpr::Cast { expr: inner, ty } => {
+        DirExpr::Cast { expr: inner, ty } => {
             let bits = nir_bits(ty).unwrap_or(64);
             let src = eval_expr(inner, env);
             src.cast_unsigned(bits)
         }
-        HirExpr::Unary {
+        DirExpr::Unary {
             op,
             expr: inner,
             ty,
@@ -35,7 +35,7 @@ pub fn eval_expr(expr: &HirExpr, env: &RangeEnv) -> CircleRange {
             let src = eval_expr(inner, env);
             eval_unary(*op, src, bits)
         }
-        HirExpr::Binary { op, lhs, rhs, ty } => {
+        DirExpr::Binary { op, lhs, rhs, ty } => {
             let bits = nir_bits(ty).unwrap_or(64);
             let a = eval_expr(lhs, env);
             let b = eval_expr(rhs, env);
@@ -47,8 +47,8 @@ pub fn eval_expr(expr: &HirExpr, env: &RangeEnv) -> CircleRange {
     }
 }
 
-fn eval_unary(op: HirUnaryOp, src: CircleRange, bits: u32) -> CircleRange {
-    use HirUnaryOp::*;
+fn eval_unary(op: DirUnaryOp, src: CircleRange, bits: u32) -> CircleRange {
+    use DirUnaryOp::*;
     match op {
         // Boolean negation: !0 = 1, !non_zero = 0.
         Not => {
@@ -87,8 +87,8 @@ fn eval_unary(op: HirUnaryOp, src: CircleRange, bits: u32) -> CircleRange {
     }
 }
 
-fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> CircleRange {
-    use HirBinaryOp::*;
+fn eval_binary(op: DirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> CircleRange {
+    use DirBinaryOp::*;
     let a = a.cast_unsigned(bits);
     let b = b.cast_unsigned(bits);
     match op {
@@ -218,8 +218,8 @@ fn eval_binary(op: HirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> Ci
     }
 }
 
-fn eval_cmp(op: HirBinaryOp, a: u64, b: u64, bits: u32) -> u64 {
-    use HirBinaryOp::*;
+fn eval_cmp(op: DirBinaryOp, a: u64, b: u64, bits: u32) -> u64 {
+    use DirBinaryOp::*;
     let result = match op {
         Eq => a == b,
         Ne => a != b,

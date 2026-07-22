@@ -1,6 +1,6 @@
 //! Centralized admission gates for normalize action groups.
 
-use crate::ir::HirFunction;
+use crate::ir::DirFunction;
 use super::budget::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT,
     LARGE_FUNCTION_LOCAL_THRESHOLD, LARGE_FUNCTION_STMT_THRESHOLD, count_hir_stmts,
@@ -26,12 +26,12 @@ pub fn gate_not_large_function() -> Gate {
     })
 }
 
-pub fn body_exceeds_early_cleanup_budget(body: &[crate::ir::HirStmt]) -> bool {
+pub fn body_exceeds_early_cleanup_budget(body: &[crate::ir::DirStmt]) -> bool {
     count_hir_stmts(body) > EARLY_CLEANUP_BLOCK_STMT_LIMIT
         || super::budget::count_hir_blocks(body) > EARLY_CLEANUP_BLOCK_BLOCK_LIMIT
 }
 
-pub fn cleanup_round_limit_for(func: &HirFunction) -> usize {
+pub fn cleanup_round_limit_for(func: &DirFunction) -> usize {
     if count_hir_stmts(&func.body) > CLEANUP_LARGE_BODY_STMT_THRESHOLD {
         CLEANUP_LARGE_BODY_ROUND_LIMIT
     } else {

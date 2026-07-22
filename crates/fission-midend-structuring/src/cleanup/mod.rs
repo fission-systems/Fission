@@ -1,5 +1,5 @@
-use fission_midend_core::ir::{HirExpr, HirLValue, HirStmt, HirSwitchCase, NirType};
-use fission_midend_core::util::label_cleanup as core_labels;
+use fission_midend_core::ir::{DirExpr, DirLValue, DirStmt, DirSwitchCase, NirType};
+use fission_midend_core::util_dir::label_cleanup as core_labels;
 use crate::HashMap;
 use crate::HashSet;
 
@@ -12,12 +12,12 @@ pub use goto::eliminate_redundant_gotos;
 /// [`cleanup_redundant_labels_protecting`]. Pass `host.lsda_landing_pad_labels()`
 /// (empty for the overwhelming majority of functions, which have no C++
 /// exception handling at all).
-pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<HirStmt>) -> Vec<HirStmt> {
+pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<DirStmt>) -> Vec<DirStmt> {
     body = eliminate_redundant_gotos(body);
     body = dedupe_structured_region_entry_labels(body);
     body = cleanup_redundant_labels_protecting(body, protected);
     let referenced = collect_referenced_labels(&body);
-    while matches!(body.first(), Some(HirStmt::Label(label)) if !referenced.contains(label) && !protected.contains(label))
+    while matches!(body.first(), Some(DirStmt::Label(label)) if !referenced.contains(label) && !protected.contains(label))
     {
         body.remove(0);
     }
@@ -27,15 +27,15 @@ pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<HirSt
 /// Like [`cleanup_redundant_labels`], but additionally protects every label
 /// in `protected` from removal even when nothing in `body` textually
 /// references it via `Goto` -- for labels reachable only via an edge with
-/// no `HirStmt` representation at all (see
+/// no `DirStmt` representation at all (see
 /// `StructuringHost::lsda_landing_pad_labels`). Ordinary label cleanup
 /// (`referenced.contains`) is exactly right for real dead labels; it just
 /// has no way to know a C++ exception landing pad's label is a live entry
 /// point when nothing in the text ever does `Goto` to it.
 pub fn cleanup_redundant_labels_protecting(
-    body: Vec<HirStmt>,
+    body: Vec<DirStmt>,
     protected: &HashSet<String>,
-) -> Vec<HirStmt> {
+) -> Vec<DirStmt> {
     if protected.is_empty() {
         return cleanup_redundant_labels(body, None);
     }
@@ -47,14 +47,14 @@ pub fn cleanup_redundant_labels_protecting(
 /// Remove duplicate block labels emitted both outside and inside a structured region
 /// (e.g. `Label(L); while (1) { Label(L); ... }`). Keeps the inner declaration so
 /// loop back-edges and continue lowering remain anchored on the region body.
-pub fn dedupe_structured_region_entry_labels(mut body: Vec<HirStmt>) -> Vec<HirStmt> {
+pub fn dedupe_structured_region_entry_labels(mut body: Vec<DirStmt>) -> Vec<DirStmt> {
     dedupe_structured_region_entry_labels_in_place(&mut body);
     body
 }
 
-fn first_meaningful_label(stmts: &[HirStmt]) -> Option<&str> {
+fn first_meaningful_label(stmts: &[DirStmt]) -> Option<&str> {
     stmts.iter().find_map(|stmt| {
-        if let HirStmt::Label(label) = stmt {
+        if let DirStmt::Label(label) = stmt {
             Some(label.as_str())
         } else {
             None
@@ -62,15 +62,15 @@ fn first_meaningful_label(stmts: &[HirStmt]) -> Option<&str> {
     })
 }
 
-fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<HirStmt>) {
+fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<DirStmt>) {
     let mut i = 0;
     while i < stmts.len() {
-        if let HirStmt::Label(outer) = stmts[i].clone() {
+        if let DirStmt::Label(outer) = stmts[i].clone() {
             if i + 1 < stmts.len() {
                 let inner_matches = match &mut stmts[i + 1] {
-                    HirStmt::While { body, .. }
-                    | HirStmt::DoWhile { body, .. }
-                    | HirStmt::For { body, .. } => {
+                    DirStmt::While { body, .. }
+                    | DirStmt::DoWhile { body, .. }
+                    | DirStmt::For { body, .. } => {
                         dedupe_structured_region_entry_labels_in_place(body);
                         first_meaningful_label(body) == Some(outer.as_str())
                     }
@@ -87,10 +87,10 @@ fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<HirStmt>) {
     }
 }
 
-fn dedupe_structured_region_entry_labels_stmt(stmt: &mut HirStmt) {
+fn dedupe_structured_region_entry_labels_stmt(stmt: &mut DirStmt) {
     match stmt {
-        HirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(body),
-        HirStmt::If {
+        DirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(body),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -98,17 +98,17 @@ fn dedupe_structured_region_entry_labels_stmt(stmt: &mut HirStmt) {
             dedupe_structured_region_entry_labels_in_place(then_body);
             dedupe_structured_region_entry_labels_in_place(else_body);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } | DirStmt::For { body, .. } => {
             dedupe_structured_region_entry_labels_in_place(body);
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 if case.body.len() >= 2 {
-                    if let HirStmt::Label(outer) = case.body[0].clone() {
+                    if let DirStmt::Label(outer) = case.body[0].clone() {
                         let inner_matches = match &mut case.body[1] {
-                            HirStmt::While { body, .. }
-                            | HirStmt::DoWhile { body, .. }
-                            | HirStmt::For { body, .. } => {
+                            DirStmt::While { body, .. }
+                            | DirStmt::DoWhile { body, .. }
+                            | DirStmt::For { body, .. } => {
                                 dedupe_structured_region_entry_labels_in_place(body);
                                 first_meaningful_label(body) == Some(outer.as_str())
                             }
@@ -128,9 +128,9 @@ fn dedupe_structured_region_entry_labels_stmt(stmt: &mut HirStmt) {
 }
 
 /// True when `child_body` is a single loop whose body already begins with `label`.
-pub fn child_body_has_entry_label(child_body: &[HirStmt], label: &str) -> bool {
+pub fn child_body_has_entry_label(child_body: &[DirStmt], label: &str) -> bool {
     child_body.iter().any(|stmt| match stmt {
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } | DirStmt::For { body, .. } => {
             first_meaningful_label(body) == Some(label)
         }
         _ => false,
@@ -141,12 +141,12 @@ pub fn child_body_has_entry_label(child_body: &[HirStmt], label: &str) -> bool {
 /// `Label(label)` is absent from the body.  Such "orphan" gotos indicate
 /// a structuring failure where a back-edge or cross-edge target was referenced
 /// but the emitter never placed the matching label statement.
-pub fn has_orphan_goto_labels(body: &[HirStmt]) -> bool {
+pub fn has_orphan_goto_labels(body: &[DirStmt]) -> bool {
     !orphan_goto_labels(body).is_empty()
 }
 
 /// Label names referenced by `Goto` but absent from any `Label` declaration in `body`.
-pub fn orphan_goto_labels(body: &[HirStmt]) -> Vec<String> {
+pub fn orphan_goto_labels(body: &[DirStmt]) -> Vec<String> {
     let goto_targets = collect_referenced_labels(body);
     if goto_targets.is_empty() {
         return Vec::new();
@@ -162,7 +162,7 @@ pub fn orphan_goto_labels(body: &[HirStmt]) -> Vec<String> {
 
 /// Collects the set of label names that are *declared* (i.e. `Label(name)`)
 /// anywhere in the body, recursing into nested statement blocks.
-fn collect_declared_labels(body: &[HirStmt]) -> HashSet<String> {
+fn collect_declared_labels(body: &[DirStmt]) -> HashSet<String> {
     let mut declared = HashSet::default();
     for stmt in body {
         collect_stmt_declared_labels(stmt, &mut declared);
@@ -170,20 +170,20 @@ fn collect_declared_labels(body: &[HirStmt]) -> HashSet<String> {
     declared
 }
 
-fn collect_stmt_declared_labels(stmt: &HirStmt, declared: &mut HashSet<String>) {
+fn collect_stmt_declared_labels(stmt: &DirStmt, declared: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Label(label) => {
+        DirStmt::Label(label) => {
             declared.insert(label.clone());
         }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => {
             for s in body {
                 collect_stmt_declared_labels(s, declared);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for s in &case.body {
                     collect_stmt_declared_labels(s, declared);
@@ -193,7 +193,7 @@ fn collect_stmt_declared_labels(stmt: &HirStmt, declared: &mut HashSet<String>) 
                 collect_stmt_declared_labels(s, declared);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -205,13 +205,13 @@ fn collect_stmt_declared_labels(stmt: &HirStmt, declared: &mut HashSet<String>) 
                 collect_stmt_declared_labels(s, declared);
             }
         }
-        HirStmt::Assign { .. }
-        | HirStmt::VaStart { .. }
-        | HirStmt::Expr(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Return(_)
-        | HirStmt::Break
-        | HirStmt::Continue => {}
+        DirStmt::Assign { .. }
+        | DirStmt::VaStart { .. }
+        | DirStmt::Expr(_)
+        | DirStmt::Goto(_)
+        | DirStmt::Return(_)
+        | DirStmt::Break
+        | DirStmt::Continue => {}
     }
 }
 
@@ -220,16 +220,16 @@ fn collect_stmt_declared_labels(stmt: &HirStmt, declared: &mut HashSet<String>) 
 // ---------------------------------------------------------------------------
 
 pub fn cleanup_redundant_labels(
-    body: Vec<HirStmt>,
+    body: Vec<DirStmt>,
     global_refs: Option<&std::collections::HashSet<String>>,
-) -> Vec<HirStmt> {
+) -> Vec<DirStmt> {
     core_labels::cleanup_redundant_labels(body, global_refs)
 }
 
 pub fn normalize_guarded_tail_layout(
-    body: Vec<HirStmt>,
+    body: Vec<DirStmt>,
     protected: &HashSet<String>,
-) -> (Vec<HirStmt>, usize) {
+) -> (Vec<DirStmt>, usize) {
     let cleaned = cleanup_redundant_labels_protecting(body, protected);
     let (canonicalized, rewritten_aliases) = canonicalize_top_level_forward_label_aliases(cleaned);
     let cleaned = cleanup_redundant_labels_protecting(canonicalized, protected);
@@ -237,8 +237,8 @@ pub fn normalize_guarded_tail_layout(
 }
 
 pub fn canonicalize_top_level_forward_label_aliases(
-    body: Vec<HirStmt>,
-) -> (Vec<HirStmt>, usize) {
+    body: Vec<DirStmt>,
+) -> (Vec<DirStmt>, usize) {
     let (aliases, alias_ranges) = top_level_forward_label_aliases_with_ranges(&body);
     if aliases.is_empty() {
         return (body, 0);
@@ -268,23 +268,23 @@ pub fn canonicalize_top_level_forward_label_aliases(
 }
 
 fn top_level_forward_label_aliases_with_ranges(
-    body: &[HirStmt],
+    body: &[DirStmt],
 ) -> (HashMap<String, String>, Vec<(usize, usize)>) {
     let mut aliases = HashMap::default();
     let mut ranges = Vec::new();
     let mut idx = 0usize;
     while idx < body.len() {
-        let HirStmt::Label(alias_label) = &body[idx] else {
+        let DirStmt::Label(alias_label) = &body[idx] else {
             idx += 1;
             continue;
         };
         let next_label_idx =
-            (idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
+            (idx + 1..body.len()).find(|pos| matches!(body[*pos], DirStmt::Label(_)));
         let Some(next_label_idx) = next_label_idx else {
             idx += 1;
             continue;
         };
-        let HirStmt::Label(next_label) = &body[next_label_idx] else {
+        let DirStmt::Label(next_label) = &body[next_label_idx] else {
             unreachable!();
         };
         if is_top_level_forward_alias_segment(&body[idx + 1..next_label_idx], next_label) {
@@ -296,14 +296,14 @@ fn top_level_forward_label_aliases_with_ranges(
     (aliases, ranges)
 }
 
-fn is_top_level_forward_alias_segment(segment: &[HirStmt], next_label: &str) -> bool {
+fn is_top_level_forward_alias_segment(segment: &[DirStmt], next_label: &str) -> bool {
     let mut saw_forward_goto = false;
     for stmt in segment {
         if is_ignorable_discovery_stmt(stmt) {
             continue;
         }
         match stmt {
-            HirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+            DirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
                 saw_forward_goto = true;
             }
             _ => return false,
@@ -312,24 +312,24 @@ fn is_top_level_forward_alias_segment(segment: &[HirStmt], next_label: &str) -> 
     saw_forward_goto
 }
 
-fn adjacent_label_aliases(body: &[HirStmt]) -> HashMap<String, String> {
+fn adjacent_label_aliases(body: &[DirStmt]) -> HashMap<String, String> {
     let mut aliases = HashMap::default();
     let mut idx = 0usize;
     while idx < body.len() {
-        let HirStmt::Label(_) = &body[idx] else {
+        let DirStmt::Label(_) = &body[idx] else {
             idx += 1;
             continue;
         };
         let start = idx;
-        while idx + 1 < body.len() && matches!(body[idx + 1], HirStmt::Label(_)) {
+        while idx + 1 < body.len() && matches!(body[idx + 1], DirStmt::Label(_)) {
             idx += 1;
         }
         if idx > start {
-            let HirStmt::Label(canonical) = &body[idx] else {
+            let DirStmt::Label(canonical) = &body[idx] else {
                 unreachable!();
             };
             for alias_idx in start..idx {
-                let HirStmt::Label(alias) = &body[alias_idx] else {
+                let DirStmt::Label(alias) = &body[alias_idx] else {
                     unreachable!();
                 };
                 aliases.insert(alias.clone(), canonical.clone());
@@ -352,53 +352,53 @@ fn canonicalize_label(label: &str, aliases: &HashMap<String, String>) -> String 
     current
 }
 
-fn rewrite_stmt_labels(body: Vec<HirStmt>, aliases: &HashMap<String, String>) -> Vec<HirStmt> {
+fn rewrite_stmt_labels(body: Vec<DirStmt>, aliases: &HashMap<String, String>) -> Vec<DirStmt> {
     body.into_iter()
         .map(|stmt| rewrite_stmt_label(stmt, aliases))
         .collect()
 }
 
-fn rewrite_stmt_label(stmt: HirStmt, aliases: &HashMap<String, String>) -> HirStmt {
+fn rewrite_stmt_label(stmt: DirStmt, aliases: &HashMap<String, String>) -> DirStmt {
     match stmt {
-        HirStmt::Block(body) => HirStmt::Block(rewrite_stmt_labels(body, aliases)),
-        HirStmt::Switch {
+        DirStmt::Block(body) => DirStmt::Block(rewrite_stmt_labels(body, aliases)),
+        DirStmt::Switch {
             expr,
             cases,
             default,
-        } => HirStmt::Switch {
+        } => DirStmt::Switch {
             expr,
             cases: cases
                 .into_iter()
-                .map(|case| HirSwitchCase {
+                .map(|case| DirSwitchCase {
                     values: case.values,
                     body: rewrite_stmt_labels(case.body, aliases),
                 })
                 .collect(),
             default: rewrite_stmt_labels(default, aliases),
         },
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
-        } => HirStmt::If {
+        } => DirStmt::If {
             cond,
             then_body: rewrite_stmt_labels(then_body, aliases),
             else_body: rewrite_stmt_labels(else_body, aliases),
         },
-        HirStmt::While { cond, body } => HirStmt::While {
+        DirStmt::While { cond, body } => DirStmt::While {
             cond,
             body: rewrite_stmt_labels(body, aliases),
         },
-        HirStmt::DoWhile { body, cond } => HirStmt::DoWhile {
+        DirStmt::DoWhile { body, cond } => DirStmt::DoWhile {
             body: rewrite_stmt_labels(body, aliases),
             cond,
         },
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
             body,
-        } => HirStmt::For {
+        } => DirStmt::For {
             init: init.map(|s| {
                 Box::new(
                     rewrite_stmt_labels(vec![*s], aliases)
@@ -418,13 +418,13 @@ fn rewrite_stmt_label(stmt: HirStmt, aliases: &HashMap<String, String>) -> HirSt
             }),
             body: rewrite_stmt_labels(body, aliases),
         },
-        HirStmt::Label(label) => HirStmt::Label(canonicalize_label(&label, aliases)),
-        HirStmt::Goto(label) => HirStmt::Goto(canonicalize_label(&label, aliases)),
+        DirStmt::Label(label) => DirStmt::Label(canonicalize_label(&label, aliases)),
+        DirStmt::Goto(label) => DirStmt::Goto(canonicalize_label(&label, aliases)),
         other => other,
     }
 }
 
-fn collect_referenced_labels(body: &[HirStmt]) -> HashSet<String> {
+fn collect_referenced_labels(body: &[DirStmt]) -> HashSet<String> {
     let mut referenced = HashSet::default();
     for stmt in body {
         collect_stmt_referenced_labels(stmt, &mut referenced);
@@ -432,7 +432,7 @@ fn collect_referenced_labels(body: &[HirStmt]) -> HashSet<String> {
     referenced
 }
 
-pub fn collect_referenced_label_counts(body: &[HirStmt]) -> HashMap<String, usize> {
+pub fn collect_referenced_label_counts(body: &[DirStmt]) -> HashMap<String, usize> {
     let mut counts = HashMap::default();
     for stmt in body {
         collect_stmt_referenced_label_counts(stmt, &mut counts);
@@ -440,17 +440,17 @@ pub fn collect_referenced_label_counts(body: &[HirStmt]) -> HashMap<String, usiz
     counts
 }
 
-fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<String>) {
+fn collect_stmt_referenced_labels(stmt: &DirStmt, referenced: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for stmt in &case.body {
                     collect_stmt_referenced_labels(stmt, referenced);
@@ -460,7 +460,7 @@ fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<Strin
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -472,30 +472,30 @@ fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<Strin
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
-        HirStmt::Goto(label) => {
+        DirStmt::Goto(label) => {
             referenced.insert(label.clone());
         }
-        HirStmt::Assign { .. }
-        | HirStmt::VaStart { .. }
-        | HirStmt::Expr(_)
-        | HirStmt::Label(_)
-        | HirStmt::Return(_)
-        | HirStmt::Break
-        | HirStmt::Continue => {}
+        DirStmt::Assign { .. }
+        | DirStmt::VaStart { .. }
+        | DirStmt::Expr(_)
+        | DirStmt::Label(_)
+        | DirStmt::Return(_)
+        | DirStmt::Break
+        | DirStmt::Continue => {}
     }
 }
 
-fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<String, usize>) {
+fn collect_stmt_referenced_label_counts(stmt: &DirStmt, counts: &mut HashMap<String, usize>) {
     match stmt {
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for stmt in &case.body {
                     collect_stmt_referenced_label_counts(stmt, counts);
@@ -505,7 +505,7 @@ fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<Str
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -517,35 +517,35 @@ fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<Str
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
-        HirStmt::Goto(label) => {
+        DirStmt::Goto(label) => {
             *counts.entry(label.clone()).or_insert(0) += 1;
         }
-        HirStmt::Assign { .. }
-        | HirStmt::VaStart { .. }
-        | HirStmt::Expr(_)
-        | HirStmt::Label(_)
-        | HirStmt::Return(_)
-        | HirStmt::Break
-        | HirStmt::Continue => {}
+        DirStmt::Assign { .. }
+        | DirStmt::VaStart { .. }
+        | DirStmt::Expr(_)
+        | DirStmt::Label(_)
+        | DirStmt::Return(_)
+        | DirStmt::Break
+        | DirStmt::Continue => {}
     }
 }
 
-pub fn single_goto_target(body: &[HirStmt]) -> Option<&str> {
+pub fn single_goto_target(body: &[DirStmt]) -> Option<&str> {
     match body {
-        [HirStmt::Goto(label)] => Some(label.as_str()),
+        [DirStmt::Goto(label)] => Some(label.as_str()),
         _ => None,
     }
 }
 
-pub fn has_top_level_label(body: &[HirStmt]) -> bool {
-    body.iter().any(|stmt| matches!(stmt, HirStmt::Label(_)))
+pub fn has_top_level_label(body: &[DirStmt]) -> bool {
+    body.iter().any(|stmt| matches!(stmt, DirStmt::Label(_)))
 }
 
-pub fn is_ignorable_discovery_stmt(stmt: &HirStmt) -> bool {
-    matches!(stmt, HirStmt::Label(_)) || matches!(stmt, HirStmt::Block(body) if body.is_empty())
+pub fn is_ignorable_discovery_stmt(stmt: &DirStmt) -> bool {
+    matches!(stmt, DirStmt::Label(_)) || matches!(stmt, DirStmt::Block(body) if body.is_empty())
 }
 
-pub fn trim_ignorable_stmt_bounds(body: &[HirStmt]) -> Option<(usize, usize)> {
+pub fn trim_ignorable_stmt_bounds(body: &[DirStmt]) -> Option<(usize, usize)> {
     let start = body
         .iter()
         .position(|stmt| !is_ignorable_discovery_stmt(stmt))?;
@@ -556,7 +556,7 @@ pub fn trim_ignorable_stmt_bounds(body: &[HirStmt]) -> Option<(usize, usize)> {
     Some((start, end + 1))
 }
 
-pub fn has_non_ignorable_payload(body: &[HirStmt]) -> bool {
+pub fn has_non_ignorable_payload(body: &[DirStmt]) -> bool {
     trim_ignorable_stmt_bounds(body).is_some()
 }
 
@@ -570,14 +570,14 @@ mod tests {
     #[test]
     fn goto_elim_removes_empty_jump_before_label() {
         let stmts = vec![
-            HirStmt::Goto("exit".to_string()),
-            HirStmt::Label("exit".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Goto("exit".to_string()),
+            DirStmt::Label("exit".to_string()),
+            DirStmt::Return(None),
         ];
         let result = eliminate_redundant_gotos(stmts);
         assert_eq!(
             result,
-            vec![HirStmt::Label("exit".to_string()), HirStmt::Return(None)]
+            vec![DirStmt::Label("exit".to_string()), DirStmt::Return(None)]
         );
     }
 
@@ -585,16 +585,16 @@ mod tests {
     fn goto_elim_removes_single_ref_label_and_goto_pair() {
         // Goto(L) immediately before Label(L) with a single reference → both removed.
         let stmts = vec![
-            HirStmt::Goto("lbl".to_string()),
-            HirStmt::Label("lbl".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Goto("lbl".to_string()),
+            DirStmt::Label("lbl".to_string()),
+            DirStmt::Return(None),
         ];
         let result = eliminate_redundant_gotos(stmts);
         // After empty-jump removal, Label(lbl) + Return remains.
         // Then single-ref inline removes both Goto and Label (they are adjacent).
         // The result should have no Goto and no Label.
         assert!(
-            !result.iter().any(|s| matches!(s, HirStmt::Goto(_))),
+            !result.iter().any(|s| matches!(s, DirStmt::Goto(_))),
             "goto should be eliminated: {result:?}"
         );
     }
@@ -604,13 +604,13 @@ mod tests {
         // `if (cond) { Goto(L) }; Label(L); Return` →
         // `if (!cond) { Return }` (conditional inversion).
         let stmts = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("tail".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("tail".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("tail".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Label("tail".to_string()),
+            DirStmt::Return(None),
         ];
         let result = eliminate_redundant_gotos(stmts);
         // After inversion the Label should be gone and we should have a single If.
@@ -619,7 +619,7 @@ mod tests {
             1,
             "expected single If after inversion: {result:?}"
         );
-        let HirStmt::If {
+        let DirStmt::If {
             else_body,
             then_body,
             ..
@@ -628,35 +628,35 @@ mod tests {
             panic!("expected If: {result:?}");
         };
         assert!(else_body.is_empty(), "else should be empty: {result:?}");
-        assert_eq!(then_body, &vec![HirStmt::Return(None)]);
+        assert_eq!(then_body, &vec![DirStmt::Return(None)]);
     }
 
     #[test]
     fn normalize_guarded_tail_layout_collapses_adjacent_labels_before_alias_rewrite() {
         let body = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("block_alias_a".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("block_alias_a".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("block_alias_a".to_string()),
-            HirStmt::Label("block_alias_b".to_string()),
-            HirStmt::Goto("block_tail".to_string()),
-            HirStmt::Label("block_tail".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("block_alias_a".to_string()),
+            DirStmt::Label("block_alias_b".to_string()),
+            DirStmt::Goto("block_tail".to_string()),
+            DirStmt::Label("block_tail".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         let (normalized, _) = normalize_guarded_tail_layout(body, &HashSet::default());
         assert_eq!(
             normalized,
             vec![
-                HirStmt::If {
-                    cond: HirExpr::Var("cond".to_string()),
-                    then_body: vec![HirStmt::Goto("block_tail".to_string())],
+                DirStmt::If {
+                    cond: DirExpr::Var("cond".to_string()),
+                    then_body: vec![DirStmt::Goto("block_tail".to_string())],
                     else_body: Vec::new(),
                 },
-                HirStmt::Label("block_tail".to_string()),
-                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+                DirStmt::Label("block_tail".to_string()),
+                DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
             ]
         );
     }
@@ -664,15 +664,15 @@ mod tests {
     #[test]
     fn canonicalize_top_level_forward_aliases_rewrites_and_prunes_alias_segment() {
         let body = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("block_alias".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("block_alias".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Label("block_alias".to_string()),
-            HirStmt::Goto("block_tail".to_string()),
-            HirStmt::Label("block_tail".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("block_alias".to_string()),
+            DirStmt::Goto("block_tail".to_string()),
+            DirStmt::Label("block_tail".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body);
@@ -680,13 +680,13 @@ mod tests {
         assert_eq!(
             normalized,
             vec![
-                HirStmt::If {
-                    cond: HirExpr::Var("cond".to_string()),
-                    then_body: vec![HirStmt::Goto("block_tail".to_string())],
+                DirStmt::If {
+                    cond: DirExpr::Var("cond".to_string()),
+                    then_body: vec![DirStmt::Goto("block_tail".to_string())],
                     else_body: Vec::new(),
                 },
-                HirStmt::Label("block_tail".to_string()),
-                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+                DirStmt::Label("block_tail".to_string()),
+                DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
             ]
         );
     }
@@ -694,11 +694,11 @@ mod tests {
     #[test]
     fn canonicalize_top_level_forward_aliases_preserves_nontrivial_alias_payload() {
         let body = vec![
-            HirStmt::Label("block_alias".to_string()),
-            HirStmt::Expr(HirExpr::Var("work".to_string())),
-            HirStmt::Goto("block_tail".to_string()),
-            HirStmt::Label("block_tail".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Label("block_alias".to_string()),
+            DirStmt::Expr(DirExpr::Var("work".to_string())),
+            DirStmt::Goto("block_tail".to_string()),
+            DirStmt::Label("block_tail".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body.clone());
@@ -708,9 +708,9 @@ mod tests {
 
     #[test]
     fn orphan_goto_labels_detects_missing_declarations() {
-        let body = vec![HirStmt::While {
-            cond: HirExpr::Const(1, NirType::Bool),
-            body: vec![HirStmt::Goto("block_140001890".to_string())],
+        let body = vec![DirStmt::While {
+            cond: DirExpr::Const(1, NirType::Bool),
+            body: vec![DirStmt::Goto("block_140001890".to_string())],
         }];
         assert_eq!(
             orphan_goto_labels(&body),
@@ -722,8 +722,8 @@ mod tests {
     #[test]
     fn orphan_goto_labels_empty_when_all_targets_declared() {
         let body = vec![
-            HirStmt::Label("block_140001890".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Label("block_140001890".to_string()),
+            DirStmt::Return(None),
         ];
         assert!(orphan_goto_labels(&body).is_empty());
         assert!(!has_orphan_goto_labels(&body));
@@ -732,17 +732,17 @@ mod tests {
     #[test]
     fn finalize_structured_body_inlines_single_predecessor_dead_forward_segment() {
         let body = vec![
-            HirStmt::Goto("block_join".to_string()),
-            HirStmt::Expr(HirExpr::Var("dead_unreachable".to_string())),
-            HirStmt::Goto("block_join".to_string()),
-            HirStmt::Label("block_join".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Goto("block_join".to_string()),
+            DirStmt::Expr(DirExpr::Var("dead_unreachable".to_string())),
+            DirStmt::Goto("block_join".to_string()),
+            DirStmt::Label("block_join".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
 
         let finalized = finalize_structured_body(&HashSet::default(), body);
         assert_eq!(
             finalized,
-            vec![HirStmt::Return(Some(HirExpr::Var("ret".to_string())))]
+            vec![DirStmt::Return(Some(DirExpr::Var("ret".to_string())))]
         );
     }
 
@@ -755,12 +755,12 @@ mod tests {
     #[test]
     fn finalize_structured_body_protects_unreferenced_landing_pad_label() {
         let body = vec![
-            HirStmt::Goto("block_join".to_string()),
-            HirStmt::Label("block_landing_pad".to_string()),
-            HirStmt::Expr(HirExpr::Var("catch_handler_call".to_string())),
-            HirStmt::Goto("block_join".to_string()),
-            HirStmt::Label("block_join".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            DirStmt::Goto("block_join".to_string()),
+            DirStmt::Label("block_landing_pad".to_string()),
+            DirStmt::Expr(DirExpr::Var("catch_handler_call".to_string())),
+            DirStmt::Goto("block_join".to_string()),
+            DirStmt::Label("block_join".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
         ];
         let protected: HashSet<String> = ["block_landing_pad".to_string()].into_iter().collect();
 
@@ -772,11 +772,11 @@ mod tests {
         assert_eq!(
             finalized,
             vec![
-                HirStmt::Goto("block_join".to_string()),
-                HirStmt::Label("block_landing_pad".to_string()),
-                HirStmt::Expr(HirExpr::Var("catch_handler_call".to_string())),
-                HirStmt::Label("block_join".to_string()),
-                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+                DirStmt::Goto("block_join".to_string()),
+                DirStmt::Label("block_landing_pad".to_string()),
+                DirStmt::Expr(DirExpr::Var("catch_handler_call".to_string())),
+                DirStmt::Label("block_join".to_string()),
+                DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
             ]
         );
     }
@@ -788,9 +788,9 @@ mod tests {
         // unrelated statement first exercises the actual `referenced`/
         // `protected` check this test is pinning.
         let body = vec![
-            HirStmt::Expr(HirExpr::Var("leading".to_string())),
-            HirStmt::Label("block_unreferenced".to_string()),
-            HirStmt::Return(None),
+            DirStmt::Expr(DirExpr::Var("leading".to_string())),
+            DirStmt::Label("block_unreferenced".to_string()),
+            DirStmt::Return(None),
         ];
         let protected: HashSet<String> = ["block_unreferenced".to_string()].into_iter().collect();
 
@@ -801,8 +801,8 @@ mod tests {
         assert_eq!(
             unprotected,
             vec![
-                HirStmt::Expr(HirExpr::Var("leading".to_string())),
-                HirStmt::Return(None),
+                DirStmt::Expr(DirExpr::Var("leading".to_string())),
+                DirStmt::Return(None),
             ]
         );
 
@@ -810,9 +810,9 @@ mod tests {
         assert_eq!(
             protected_result,
             vec![
-                HirStmt::Expr(HirExpr::Var("leading".to_string())),
-                HirStmt::Label("block_unreferenced".to_string()),
-                HirStmt::Return(None),
+                DirStmt::Expr(DirExpr::Var("leading".to_string())),
+                DirStmt::Label("block_unreferenced".to_string()),
+                DirStmt::Return(None),
             ]
         );
     }
@@ -820,14 +820,14 @@ mod tests {
     #[test]
     fn dedupe_structured_region_entry_labels_removes_outer_loop_header_duplicate() {
         let body = vec![
-            HirStmt::Label("block_140001890".to_string()),
-            HirStmt::While {
-                cond: HirExpr::Const(1, NirType::Bool),
+            DirStmt::Label("block_140001890".to_string()),
+            DirStmt::While {
+                cond: DirExpr::Const(1, NirType::Bool),
                 body: vec![
-                    HirStmt::Label("block_140001890".to_string()),
-                    HirStmt::Assign {
-                        lhs: HirLValue::Var("x".to_string()),
-                        rhs: HirExpr::Const(
+                    DirStmt::Label("block_140001890".to_string()),
+                    DirStmt::Assign {
+                        lhs: DirLValue::Var("x".to_string()),
+                        rhs: DirExpr::Const(
                             0,
                             NirType::Int {
                                 bits: 32,
@@ -841,11 +841,11 @@ mod tests {
 
         let deduped = dedupe_structured_region_entry_labels(body);
         assert_eq!(deduped.len(), 1);
-        let HirStmt::While { body, .. } = &deduped[0] else {
+        let DirStmt::While { body, .. } = &deduped[0] else {
             panic!("expected while");
         };
         assert_eq!(body.len(), 2);
-        assert!(matches!(body[0], HirStmt::Label(ref l) if l == "block_140001890"));
+        assert!(matches!(body[0], DirStmt::Label(ref l) if l == "block_140001890"));
     }
 
     #[test]
@@ -853,33 +853,33 @@ mod tests {
         // Pattern: if (n <= 0) { goto end }; loop_body; return sum; end: return 0
         // Expected: if (n <= 0) { return 0 }; loop_body; return sum
         let stmts = vec![
-            HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Goto("block_end".to_string())],
+            DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Goto("block_end".to_string())],
                 else_body: Vec::new(),
             },
-            HirStmt::Assign {
-                lhs: HirLValue::Var("sum".to_string()),
-                rhs: HirExpr::Var("work".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("sum".to_string()),
+                rhs: DirExpr::Var("work".to_string()),
             },
-            HirStmt::Return(Some(HirExpr::Var("sum".to_string()))),
-            HirStmt::Label("block_end".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("zero".to_string()))),
+            DirStmt::Return(Some(DirExpr::Var("sum".to_string()))),
+            DirStmt::Label("block_end".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("zero".to_string()))),
         ];
         let result = eliminate_redundant_gotos(stmts);
         assert_eq!(
             result,
             vec![
-                HirStmt::If {
-                    cond: HirExpr::Var("cond".to_string()),
-                    then_body: vec![HirStmt::Return(Some(HirExpr::Var("zero".to_string())))],
+                DirStmt::If {
+                    cond: DirExpr::Var("cond".to_string()),
+                    then_body: vec![DirStmt::Return(Some(DirExpr::Var("zero".to_string())))],
                     else_body: Vec::new(),
                 },
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("sum".to_string()),
-                    rhs: HirExpr::Var("work".to_string()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("sum".to_string()),
+                    rhs: DirExpr::Var("work".to_string()),
                 },
-                HirStmt::Return(Some(HirExpr::Var("sum".to_string()))),
+                DirStmt::Return(Some(DirExpr::Var("sum".to_string()))),
             ]
         );
     }

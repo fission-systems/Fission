@@ -18,8 +18,33 @@
 // Keep this bridge explicit so render does not depend on normalize/structuring.
 pub(crate) use crate::midend::{
     HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, MlilPreviewOptions,
-    NirBinding, NirBindingOrigin, NirType, SWITCH_FALLTHROUGH_SENTINEL, expr_type,
+    NirBinding, NirBindingOrigin, NirType, SWITCH_FALLTHROUGH_SENTINEL,
 };
+
+/// HIR-side counterpart to `crate::midend::support::expr_util::expr_type`
+/// (which is DIR-typed, used by builder) -- `render` consumes the final
+/// structured `HirFunction`, never `DirExpr`, so it needs its own
+/// `&HirExpr`-typed twin rather than depending on builder's Dir-side copy.
+pub(crate) fn expr_type(expr: &HirExpr) -> NirType {
+    match expr {
+        HirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
+        HirExpr::Var(_) => NirType::Unknown,
+        HirExpr::Const(_, ty)
+        | HirExpr::Unary { ty, .. }
+        | HirExpr::Binary { ty, .. }
+        | HirExpr::Select { ty, .. }
+        | HirExpr::Call { ty, .. }
+        | HirExpr::Load { ty, .. }
+        | HirExpr::FieldAccess { ty, .. }
+        | HirExpr::Index { elem_ty: ty, .. } => ty.clone(),
+        HirExpr::Cast { ty, .. } => ty.clone(),
+        HirExpr::PtrOffset { .. } => NirType::Ptr(Box::new(NirType::Unknown)),
+        HirExpr::AggregateCopy { size, .. } => NirType::Aggregate {
+            size: *size,
+            fields: vec![],
+        },
+    }
+}
 
 mod globals;
 mod layer;

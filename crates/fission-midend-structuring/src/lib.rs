@@ -117,7 +117,7 @@ pub use switch::{
     SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch,
 };
 
-pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats, SWITCH_FALLTHROUGH_SENTINEL};
+pub use fission_midend_core::{DirFunction, DirStmt, NirBuildStats, SWITCH_FALLTHROUGH_SENTINEL};
 pub use regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,

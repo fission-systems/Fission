@@ -10,7 +10,7 @@
 ///
 /// ```text
 /// circle_range.rs  — CircleRange domain (wrapping intervals mod 2^n)
-/// transfer.rs      — HirExpr → CircleRange transfer functions
+/// transfer.rs      — DirExpr → CircleRange transfer functions
 /// solver.rs        — Worklist fixed-point solver with widening
 /// jump_resolver.rs — Switch refinement using VSA results
 /// ```

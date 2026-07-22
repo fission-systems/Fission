@@ -1,5 +1,5 @@
 use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-use crate::midend::ir::{HirBinaryOp, HirExpr, MlilPreviewOptions, NirType, StructuringEngineKind};
+use crate::midend::ir::{DirBinaryOp, DirExpr, MlilPreviewOptions, NirType, StructuringEngineKind};
 use crate::midend::{PreviewBuilder, render_mlil_preview};
 use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
@@ -13,8 +13,8 @@ fn preview_options_with_cspec(mut options: MlilPreviewOptions) -> MlilPreviewOpt
     options
 }
 
-fn test_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr, ty: NirType) -> HirExpr {
-    HirExpr::Binary {
+fn test_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr, ty: NirType) -> DirExpr {
+    DirExpr::Binary {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -79,20 +79,20 @@ fn merge_inferred_branchind_targets_preserves_case_map_with_successors() {
 
 #[test]
 fn selector_upper_bound_keeps_false_arm_hi_equality_case() {
-    let selector = HirExpr::Var("sel".to_string());
-    let three = HirExpr::Const(3, NirType::Unknown);
-    let zero = HirExpr::Const(0, NirType::Unknown);
+    let selector = DirExpr::Var("sel".to_string());
+    let three = DirExpr::Const(3, NirType::Unknown);
+    let zero = DirExpr::Const(0, NirType::Unknown);
     let cond = test_binary(
-        HirBinaryOp::LogicalAnd,
+        DirBinaryOp::LogicalAnd,
         test_binary(
-            HirBinaryOp::Le,
+            DirBinaryOp::Le,
             three.clone(),
             selector.clone(),
             NirType::Bool,
         ),
         test_binary(
-            HirBinaryOp::Ne,
-            test_binary(HirBinaryOp::Sub, selector.clone(), three, NirType::Unknown),
+            DirBinaryOp::Ne,
+            test_binary(DirBinaryOp::Sub, selector.clone(), three, NirType::Unknown),
             zero,
             NirType::Bool,
         ),
@@ -242,9 +242,9 @@ fn x64_cbranch_condition_recovers_cmp_jnz_from_fresh_zero_flag() {
     assert_eq!(
         cond,
         test_binary(
-            HirBinaryOp::Ne,
-            HirExpr::Var("rsi".to_string()),
-            HirExpr::Var("param_1".to_string()),
+            DirBinaryOp::Ne,
+            DirExpr::Var("rsi".to_string()),
+            DirExpr::Var("param_1".to_string()),
             NirType::Bool
         )
     );
@@ -862,7 +862,7 @@ fn x86_32_epilogue_join_live_eax_when_pred_values_differ() {
 #[test]
 fn x64_eax_int_min_arm_shares_rax_return_surface() {
     use crate::midend::cspec::test_maps::apply_preview_cspec;
-    use crate::midend::ir::HirStmt;
+    use crate::midend::ir::DirStmt;
     use crate::midend::PreviewBuilder;
 
     let eax4 = Varnode {
@@ -1009,7 +1009,7 @@ fn x64_eax_int_min_arm_shares_rax_return_surface() {
     let dump = format!("{stmts:?}");
     eprintln!("x64_eax_intmin_materialize:\n{dump}");
     assert!(
-        stmts.iter().any(|s| matches!(s, HirStmt::If { .. })),
+        stmts.iter().any(|s| matches!(s, DirStmt::If { .. })),
         "cmov body must be guarded by if, got {dump}"
     );
     let has_int_min =

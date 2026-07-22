@@ -16,27 +16,27 @@ pub(crate) fn is_comparison(opcode: PcodeOpcode) -> bool {
     )
 }
 
-pub(crate) fn map_binary_op(opcode: PcodeOpcode) -> Result<HirBinaryOp, MlilPreviewError> {
+pub(crate) fn map_binary_op(opcode: PcodeOpcode) -> Result<DirBinaryOp, MlilPreviewError> {
     match opcode {
-        PcodeOpcode::IntAdd | PcodeOpcode::FloatAdd => Ok(HirBinaryOp::Add),
-        PcodeOpcode::IntSub | PcodeOpcode::FloatSub => Ok(HirBinaryOp::Sub),
-        PcodeOpcode::IntMult | PcodeOpcode::FloatMult => Ok(HirBinaryOp::Mul),
-        PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv | PcodeOpcode::FloatDiv => Ok(HirBinaryOp::Div),
-        PcodeOpcode::IntRem | PcodeOpcode::IntSRem => Ok(HirBinaryOp::Mod),
-        PcodeOpcode::IntAnd => Ok(HirBinaryOp::And),
-        PcodeOpcode::BoolAnd => Ok(HirBinaryOp::LogicalAnd),
-        PcodeOpcode::IntOr => Ok(HirBinaryOp::Or),
-        PcodeOpcode::BoolOr => Ok(HirBinaryOp::LogicalOr),
-        PcodeOpcode::IntXor | PcodeOpcode::BoolXor => Ok(HirBinaryOp::Xor),
-        PcodeOpcode::IntLeft => Ok(HirBinaryOp::Shl),
-        PcodeOpcode::IntRight => Ok(HirBinaryOp::Shr),
-        PcodeOpcode::IntSRight => Ok(HirBinaryOp::Sar),
-        PcodeOpcode::IntEqual | PcodeOpcode::FloatEqual => Ok(HirBinaryOp::Eq),
-        PcodeOpcode::IntNotEqual | PcodeOpcode::FloatNotEqual => Ok(HirBinaryOp::Ne),
-        PcodeOpcode::IntLess | PcodeOpcode::FloatLess => Ok(HirBinaryOp::Lt),
-        PcodeOpcode::IntLessEqual | PcodeOpcode::FloatLessEqual => Ok(HirBinaryOp::Le),
-        PcodeOpcode::IntSLess => Ok(HirBinaryOp::SLt),
-        PcodeOpcode::IntSLessEqual => Ok(HirBinaryOp::SLe),
+        PcodeOpcode::IntAdd | PcodeOpcode::FloatAdd => Ok(DirBinaryOp::Add),
+        PcodeOpcode::IntSub | PcodeOpcode::FloatSub => Ok(DirBinaryOp::Sub),
+        PcodeOpcode::IntMult | PcodeOpcode::FloatMult => Ok(DirBinaryOp::Mul),
+        PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv | PcodeOpcode::FloatDiv => Ok(DirBinaryOp::Div),
+        PcodeOpcode::IntRem | PcodeOpcode::IntSRem => Ok(DirBinaryOp::Mod),
+        PcodeOpcode::IntAnd => Ok(DirBinaryOp::And),
+        PcodeOpcode::BoolAnd => Ok(DirBinaryOp::LogicalAnd),
+        PcodeOpcode::IntOr => Ok(DirBinaryOp::Or),
+        PcodeOpcode::BoolOr => Ok(DirBinaryOp::LogicalOr),
+        PcodeOpcode::IntXor | PcodeOpcode::BoolXor => Ok(DirBinaryOp::Xor),
+        PcodeOpcode::IntLeft => Ok(DirBinaryOp::Shl),
+        PcodeOpcode::IntRight => Ok(DirBinaryOp::Shr),
+        PcodeOpcode::IntSRight => Ok(DirBinaryOp::Sar),
+        PcodeOpcode::IntEqual | PcodeOpcode::FloatEqual => Ok(DirBinaryOp::Eq),
+        PcodeOpcode::IntNotEqual | PcodeOpcode::FloatNotEqual => Ok(DirBinaryOp::Ne),
+        PcodeOpcode::IntLess | PcodeOpcode::FloatLess => Ok(DirBinaryOp::Lt),
+        PcodeOpcode::IntLessEqual | PcodeOpcode::FloatLessEqual => Ok(DirBinaryOp::Le),
+        PcodeOpcode::IntSLess => Ok(DirBinaryOp::SLt),
+        PcodeOpcode::IntSLessEqual => Ok(DirBinaryOp::SLe),
         _ => Err(MlilPreviewError::UnsupportedPattern("binary op")),
     }
 }

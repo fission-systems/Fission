@@ -19,8 +19,8 @@ fn bool_ty() -> NirType {
     NirType::Bool
 }
 
-fn bind(name: &str, ty: NirType) -> NirBinding {
-    NirBinding {
+fn bind(name: &str, ty: NirType) -> DirBinding {
+    DirBinding {
         name: name.into(),
         ty,
         surface_type_name: None,
@@ -29,8 +29,8 @@ fn bind(name: &str, ty: NirType) -> NirBinding {
     }
 }
 
-fn param(name: &str, idx: usize) -> NirBinding {
-    NirBinding {
+fn param(name: &str, idx: usize) -> DirBinding {
+    DirBinding {
         name: name.into(),
         ty: i32t(),
         surface_type_name: None,
@@ -39,22 +39,22 @@ fn param(name: &str, idx: usize) -> NirBinding {
     }
 }
 
-fn assign(lhs: &str, rhs: HirExpr) -> HirStmt {
-    HirStmt::Assign {
-        lhs: HirLValue::Var(lhs.into()),
+fn assign(lhs: &str, rhs: DirExpr) -> DirStmt {
+    DirStmt::Assign {
+        lhs: DirLValue::Var(lhs.into()),
         rhs,
     }
 }
 
-fn var(name: &str) -> HirExpr {
-    HirExpr::Var(name.into())
+fn var(name: &str) -> DirExpr {
+    DirExpr::Var(name.into())
 }
 
 /// Reconstruct the pre-normalize clamp cmov HIR (simplified SLe/SLt form) and
 /// ensure normalize keeps both guarded overrides on the accumulator.
 #[test]
 fn normalize_preserves_cmov_clamp_select_chain() {
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "clamp".to_string(),
         return_type: i32t(),
         params: vec![param("param_1", 0), param("param_2", 1), param("param_3", 2)],
@@ -67,9 +67,9 @@ fn normalize_preserves_cmov_clamp_select_chain() {
             assign("edx", var("param_1")),
             assign("uVar2", var("param_3")),
             assign("ecx", var("param_2")),
-            HirStmt::If {
-                cond: HirExpr::Binary {
-                    op: HirBinaryOp::SLe,
+            DirStmt::If {
+                cond: DirExpr::Binary {
+                    op: DirBinaryOp::SLe,
                     lhs: Box::new(var("edx")),
                     rhs: Box::new(var("uVar2")),
                     ty: bool_ty(),
@@ -77,9 +77,9 @@ fn normalize_preserves_cmov_clamp_select_chain() {
                 then_body: vec![assign("uVar2", var("edx"))],
                 else_body: vec![],
             },
-            HirStmt::If {
-                cond: HirExpr::Binary {
-                    op: HirBinaryOp::SLt,
+            DirStmt::If {
+                cond: DirExpr::Binary {
+                    op: DirBinaryOp::SLt,
                     lhs: Box::new(var("edx")),
                     rhs: Box::new(var("ecx")),
                     ty: bool_ty(),
@@ -87,13 +87,13 @@ fn normalize_preserves_cmov_clamp_select_chain() {
                 then_body: vec![assign("uVar2", var("ecx"))],
                 else_body: vec![],
             },
-            HirStmt::Return(Some(var("uVar2"))),
+            DirStmt::Return(Some(var("uVar2"))),
         ],
-        ..HirFunction::default()
+        ..DirFunction::default()
     };
 
     normalize_hir_function(&mut func);
-    let code = print_hir_function(&func);
+    let code = print_dir_function(&func);
     eprintln!("normalized simplified clamp:\n{code}");
     assert!(
         code.contains("if") || code.contains("?"),
@@ -113,7 +113,7 @@ fn normalize_preserves_cmov_clamp_select_chain() {
 /// Full flag-temp shape matching builder output for m32 O2 clamp cmov.
 #[test]
 fn normalize_preserves_flag_temp_cmov_clamp_chain() {
-    let mut func = HirFunction {
+    let mut func = DirFunction {
         name: "clamp".to_string(),
         return_type: i32t(),
         params: vec![param("param_1", 0), param("param_2", 1), param("param_3", 2)],
@@ -142,7 +142,7 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             assign("uVar5", var("edx")),
             assign(
                 "of",
-                HirExpr::Call {
+                DirExpr::Call {
                     target: "__sborrow".into(),
                     args: vec![var("uVar5"), var("uVar2")],
                     ty: bool_ty(),
@@ -150,8 +150,8 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             ),
             assign(
                 "iVar6",
-                HirExpr::Binary {
-                    op: HirBinaryOp::Sub,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Sub,
                     lhs: Box::new(var("uVar5")),
                     rhs: Box::new(var("uVar2")),
                     ty: i32t(),
@@ -159,26 +159,26 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             ),
             assign(
                 "sf",
-                HirExpr::Binary {
-                    op: HirBinaryOp::SLt,
+                DirExpr::Binary {
+                    op: DirBinaryOp::SLt,
                     lhs: Box::new(var("iVar6")),
-                    rhs: Box::new(HirExpr::Const(0, u32t())),
+                    rhs: Box::new(DirExpr::Const(0, u32t())),
                     ty: bool_ty(),
                 },
             ),
             assign(
                 "zf",
-                HirExpr::Binary {
-                    op: HirBinaryOp::Eq,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Eq,
                     lhs: Box::new(var("iVar6")),
-                    rhs: Box::new(HirExpr::Const(0, u32t())),
+                    rhs: Box::new(DirExpr::Const(0, u32t())),
                     ty: bool_ty(),
                 },
             ),
             assign(
                 "xVar10",
-                HirExpr::Binary {
-                    op: HirBinaryOp::Ne,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Ne,
                     lhs: Box::new(var("of")),
                     rhs: Box::new(var("sf")),
                     ty: bool_ty(),
@@ -186,8 +186,8 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             ),
             assign(
                 "xVar11",
-                HirExpr::Binary {
-                    op: HirBinaryOp::LogicalOr,
+                DirExpr::Binary {
+                    op: DirBinaryOp::LogicalOr,
                     lhs: Box::new(var("zf")),
                     rhs: Box::new(var("xVar10")),
                     ty: u32t(),
@@ -195,15 +195,15 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             ),
             assign(
                 "xVar12",
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+                DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: Box::new(var("xVar11")),
                     ty: u32t(),
                 },
             ),
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: Box::new(var("xVar12")),
                     ty: bool_ty(),
                 },
@@ -214,7 +214,7 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             assign("uVar13", var("edx")),
             assign(
                 "of",
-                HirExpr::Call {
+                DirExpr::Call {
                     target: "__sborrow".into(),
                     args: vec![var("uVar13"), var("ecx")],
                     ty: bool_ty(),
@@ -222,8 +222,8 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             ),
             assign(
                 "iVar14",
-                HirExpr::Binary {
-                    op: HirBinaryOp::Sub,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Sub,
                     lhs: Box::new(var("uVar13")),
                     rhs: Box::new(var("ecx")),
                     ty: i32t(),
@@ -231,17 +231,17 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             ),
             assign(
                 "sf",
-                HirExpr::Binary {
-                    op: HirBinaryOp::SLt,
+                DirExpr::Binary {
+                    op: DirBinaryOp::SLt,
                     lhs: Box::new(var("iVar14")),
-                    rhs: Box::new(HirExpr::Const(0, u32t())),
+                    rhs: Box::new(DirExpr::Const(0, u32t())),
                     ty: bool_ty(),
                 },
             ),
             assign(
                 "xVar18",
-                HirExpr::Binary {
-                    op: HirBinaryOp::Ne,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Ne,
                     lhs: Box::new(var("of")),
                     rhs: Box::new(var("sf")),
                     ty: bool_ty(),
@@ -249,28 +249,28 @@ fn normalize_preserves_flag_temp_cmov_clamp_chain() {
             ),
             assign(
                 "xVar19",
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+                DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: Box::new(var("xVar18")),
                     ty: u32t(),
                 },
             ),
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: Box::new(var("xVar19")),
                     ty: bool_ty(),
                 },
                 then_body: vec![assign("uVar2", var("ecx"))],
                 else_body: vec![],
             },
-            HirStmt::Return(Some(var("uVar2"))),
+            DirStmt::Return(Some(var("uVar2"))),
         ],
-        ..HirFunction::default()
+        ..DirFunction::default()
     };
 
     normalize_hir_function(&mut func);
-    let code = print_hir_function(&func);
+    let code = print_dir_function(&func);
     eprintln!("normalized flag-temp clamp:\n{code}");
 
     // edx = param_1 must dominate its uses (no use-before-def).

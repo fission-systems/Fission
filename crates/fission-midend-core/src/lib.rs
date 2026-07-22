@@ -16,6 +16,7 @@ pub mod action_pipeline;
 pub mod ir;
 pub mod labels;
 pub mod util;
+pub mod util_dir;
 pub mod vsa;
 pub mod wave_stats;
 

@@ -1,6 +1,6 @@
 //! Guarded-tail shared types.
 
-use fission_midend_core::ir::{HirExpr, HirStmt};
+use fission_midend_core::ir::{DirExpr, DirStmt};
 use crate::regions::{RegionKind, RegionLegality, RegionRejectionReason};
 use crate::HashMap;
 
@@ -42,7 +42,7 @@ pub enum AliasOwnershipLegalityReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NestedBeforeAliasWitness {
     pub stmt_idx: usize,
-    pub cond: Option<HirExpr>,
+    pub cond: Option<DirExpr>,
     pub class: NestedBeforeOwnershipClass,
 }
 
@@ -81,7 +81,7 @@ pub struct RegionShapeWitness {
     pub target_label: String,
     pub label_idx: usize,
     pub keep_middle_when_cond_true: bool,
-    pub middle: Vec<HirStmt>,
+    pub middle: Vec<DirStmt>,
     pub external_redirects: Vec<(String, String)>,
     pub terminal_join_present: bool,
     pub follow_witness: bool,
@@ -136,7 +136,7 @@ pub struct GuardedTailReplacementRead {
 pub struct GuardedTailExportedBinding {
     pub def_stmt_idx: usize,
     pub binding_name: String,
-    pub replacement_source: HirExpr,
+    pub replacement_source: DirExpr,
     pub read_sites: Vec<GuardedTailReplacementRead>,
 }
 
@@ -144,8 +144,8 @@ pub struct GuardedTailExportedBinding {
 pub struct GuardedTailSyntheticMerge {
     pub binding_name: String,
     pub replacement_target: String,
-    pub then_value: HirExpr,
-    pub else_value: HirExpr,
+    pub then_value: DirExpr,
+    pub else_value: DirExpr,
     pub read_sites: Vec<GuardedTailReplacementRead>,
 }
 
@@ -168,7 +168,7 @@ pub struct GuardedTailVerification {
     pub region_legality: RegionLegality,
     pub replacement_complete: bool,
     pub removable_ops_legal: bool,
-    pub rewritten_middle: Vec<HirStmt>,
+    pub rewritten_middle: Vec<DirStmt>,
     pub exported_bindings: Vec<GuardedTailExportedBinding>,
     pub rejection_reason: Option<GuardedTailExecutionRejection>,
 }
@@ -177,12 +177,12 @@ pub struct GuardedTailVerification {
 pub struct GuardedTailExecutionPlan {
     pub synthetic_merges: Vec<GuardedTailSyntheticMerge>,
     pub redirects: Vec<(String, String)>,
-    pub rewritten_middle: Vec<HirStmt>,
+    pub rewritten_middle: Vec<DirStmt>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GuardedTailReplacementCache {
-    pub else_sources: HashMap<String, HirExpr>,
+    pub else_sources: HashMap<String, DirExpr>,
 }
 
 impl From<GuardedTailWitnessRejection> for RegionRejectionReason {
@@ -218,7 +218,7 @@ pub enum PromotionShapeRejection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConditionAssumption {
-    pub expr: HirExpr,
+    pub expr: DirExpr,
     pub value: bool,
 }
 
@@ -311,19 +311,19 @@ pub struct NestedEntryBoundaryContext {
 pub struct NestedBoundaryRefTrace {
     pub stmt_idx: usize,
     pub kind: ExternalEntryRefKind,
-    pub cond: Option<HirExpr>,
+    pub cond: Option<DirExpr>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NestedBoundaryPairTrace {
     pub ref_count: usize,
     pub same_guard_family: bool,
     pub relation_reason: Option<&'static str>,
-    pub conds: Vec<HirExpr>,
+    pub conds: Vec<DirExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuardedTailRewriteResult {
-    pub stmts: Vec<HirStmt>,
+    pub stmts: Vec<DirStmt>,
     pub unresolved_join_refs: usize,
     pub exits_to_join: bool,
 }

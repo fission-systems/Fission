@@ -1,6 +1,6 @@
 //! Pass trait and execution context for the action pipeline.
 
-use crate::ir::{DecompFacts, HirFunction, NirBuildStats};
+use crate::ir::{DecompFacts, DirFunction, NirBuildStats};
 use super::budget::hir_shape;
 use super::concept::{GhidraActionConcept, record_ghidra_action_stage};
 use std::time::Instant;
@@ -19,11 +19,11 @@ pub fn norm_trace_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("FISSION_NORM_TRACE").is_some())
 }
 
-pub fn norm_trace_hash(func: &HirFunction) -> u64 {
+pub fn norm_trace_hash(func: &DirFunction) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     // Deliberately excludes callee_observed_max_arity/callee_summaries and
-    // other bookkeeping fields -- hashing the *whole* HirFunction produced
+    // other bookkeeping fields -- hashing the *whole* DirFunction produced
     // a different hash on every run even when the final rendered output
     // was byte-identical, so something outside body/locals/params/
     // return_type has non-deterministic Debug output (a real bug on its
@@ -54,7 +54,7 @@ impl PassOutcome {
 }
 
 pub struct PassCtx<'a> {
-    pub func: &'a mut HirFunction,
+    pub func: &'a mut DirFunction,
     pub perf: bool,
     pub diag: bool,
     pub stats: Option<&'a mut NirBuildStats>,
@@ -75,11 +75,11 @@ pub trait Pass {
     fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome;
 }
 
-/// Wraps an existing `fn(&mut HirFunction) -> bool` pass.
+/// Wraps an existing `fn(&mut DirFunction) -> bool` pass.
 pub struct FnPass {
     pub name: &'static str,
     pub concept: GhidraActionConcept,
-    pub f: fn(&mut HirFunction) -> bool,
+    pub f: fn(&mut DirFunction) -> bool,
 }
 
 impl Pass for FnPass {
@@ -99,7 +99,7 @@ impl Pass for FnPass {
 pub fn fn_pass(
     name: &'static str,
     concept: GhidraActionConcept,
-    f: fn(&mut HirFunction) -> bool,
+    f: fn(&mut DirFunction) -> bool,
 ) -> Box<dyn Pass> {
     Box::new(FnPass { name, concept, f })
 }

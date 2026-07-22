@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use fission_midend_core::expr_type;
+use fission_midend_core::util_dir::expr_type;
 use crate::HashMap;
 
 /// Bit-level consumed-mask backward propagation pass.
@@ -34,9 +34,9 @@ use crate::HashMap;
 ///
 /// Variables with multiple definitions are treated conservatively (fully consumed).
 /// Loop-carried variables are also treated conservatively.
-pub fn apply_bit_consume_dead_code_pass(func: &mut HirFunction) -> bool {
+pub fn apply_bit_consume_dead_code_pass(func: &mut DirFunction) -> bool {
     // --- Phase 1: collect definitions and multi-def variables ---
-    let mut def_map: HashMap<String, HirExpr> = HashMap::default();
+    let mut def_map: HashMap<String, DirExpr> = HashMap::default();
     let mut multi_def: crate::HashSet<String> = crate::HashSet::default();
     collect_definitions(&func.body, &mut def_map, &mut multi_def);
 
@@ -93,8 +93,8 @@ pub fn apply_bit_consume_dead_code_pass(func: &mut HirFunction) -> bool {
 // ── Phase 1: definition collection ───────────────────────────────────────────
 
 fn collect_definitions(
-    stmts: &[HirStmt],
-    def_map: &mut HashMap<String, HirExpr>,
+    stmts: &[DirStmt],
+    def_map: &mut HashMap<String, DirExpr>,
     multi_def: &mut crate::HashSet<String>,
 ) {
     for stmt in stmts {
@@ -103,13 +103,13 @@ fn collect_definitions(
 }
 
 fn collect_def_stmt(
-    stmt: &HirStmt,
-    def_map: &mut HashMap<String, HirExpr>,
+    stmt: &DirStmt,
+    def_map: &mut HashMap<String, DirExpr>,
     multi_def: &mut crate::HashSet<String>,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } => {
             if def_map.contains_key(name.as_str()) {
@@ -118,10 +118,10 @@ fn collect_def_stmt(
                 def_map.insert(name.clone(), rhs.clone());
             }
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             collect_definitions(body, def_map, multi_def);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -132,7 +132,7 @@ fn collect_def_stmt(
             }
             collect_definitions(body, def_map, multi_def);
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -140,7 +140,7 @@ fn collect_def_stmt(
             collect_definitions(then_body, def_map, multi_def);
             collect_definitions(else_body, def_map, multi_def);
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 collect_definitions(&case.body, def_map, multi_def);
             }
@@ -153,9 +153,9 @@ fn collect_def_stmt(
 // ── Phase 2: seed consumed masks from use sites ───────────────────────────────
 
 fn collect_consumed_seeds(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     consumed: &mut HashMap<String, u64>,
-    def_map: &HashMap<String, HirExpr>,
+    def_map: &HashMap<String, DirExpr>,
     multi_def: &crate::HashSet<String>,
 ) {
     for stmt in stmts {
@@ -164,34 +164,34 @@ fn collect_consumed_seeds(
 }
 
 fn seed_stmt(
-    stmt: &HirStmt,
+    stmt: &DirStmt,
     consumed: &mut HashMap<String, u64>,
-    def_map: &HashMap<String, HirExpr>,
+    def_map: &HashMap<String, DirExpr>,
     multi_def: &crate::HashSet<String>,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } => {
             // The RHS seeds the consumed mask for variables it reads.
             // This is the forward-seed pass: we look at how `rhs` reads variables.
             seed_expr_uses(rhs, consumed, true /*can_narrow*/);
         }
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             // Memory write: all operands fully consumed.
             seed_lvalue_fully(lhs, consumed);
             seed_expr_fully(rhs, consumed);
         }
-        HirStmt::Expr(expr) => seed_expr_fully(expr, consumed),
-        HirStmt::Return(Some(expr)) => seed_expr_fully(expr, consumed),
-        HirStmt::Return(None) => {}
-        HirStmt::Break | HirStmt::Continue | HirStmt::Label(_) | HirStmt::Goto(_) => {}
-        HirStmt::VaStart { va_list, .. } => seed_expr_fully(va_list, consumed),
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Expr(expr) => seed_expr_fully(expr, consumed),
+        DirStmt::Return(Some(expr)) => seed_expr_fully(expr, consumed),
+        DirStmt::Return(None) => {}
+        DirStmt::Break | DirStmt::Continue | DirStmt::Label(_) | DirStmt::Goto(_) => {}
+        DirStmt::VaStart { va_list, .. } => seed_expr_fully(va_list, consumed),
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             collect_consumed_seeds(body, consumed, def_map, multi_def);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -208,7 +208,7 @@ fn seed_stmt(
             }
             collect_consumed_seeds(body, consumed, def_map, multi_def);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -217,7 +217,7 @@ fn seed_stmt(
             collect_consumed_seeds(then_body, consumed, def_map, multi_def);
             collect_consumed_seeds(else_body, consumed, def_map, multi_def);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -233,21 +233,21 @@ fn seed_stmt(
 
 /// Seed variables in `expr` as their bits in context determine.
 /// `can_narrow = true` means we track the operator-level narrowing (AND/cast).
-fn seed_expr_uses(expr: &HirExpr, consumed: &mut HashMap<String, u64>, can_narrow: bool) {
+fn seed_expr_uses(expr: &DirExpr, consumed: &mut HashMap<String, u64>, can_narrow: bool) {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::And,
+        DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if can_narrow => {
             // `_ = lhs & const_mask`: only those bits of lhs are initially consumed.
-            if let HirExpr::Const(mask, _) = rhs.as_ref() {
+            if let DirExpr::Const(mask, _) = rhs.as_ref() {
                 seed_expr_with_mask(lhs, *mask as u64, consumed);
                 // mask itself is a constant, no variable
                 return;
             }
-            if let HirExpr::Const(mask, _) = lhs.as_ref() {
+            if let DirExpr::Const(mask, _) = lhs.as_ref() {
                 seed_expr_with_mask(rhs, *mask as u64, consumed);
                 return;
             }
@@ -255,13 +255,13 @@ fn seed_expr_uses(expr: &HirExpr, consumed: &mut HashMap<String, u64>, can_narro
             seed_expr_fully(lhs, consumed);
             seed_expr_fully(rhs, consumed);
         }
-        HirExpr::Cast { ty, expr: inner } if can_narrow => {
+        DirExpr::Cast { ty, expr: inner } if can_narrow => {
             // Narrow cast: only narrow bits of inner are consumed initially.
             let narrow_mask = type_bitmask(ty);
             seed_expr_with_mask(inner, narrow_mask, consumed);
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Shr,
+        DirExpr::Binary {
+            op: DirBinaryOp::Shr,
             lhs,
             rhs: shift,
             ..
@@ -275,9 +275,9 @@ fn seed_expr_uses(expr: &HirExpr, consumed: &mut HashMap<String, u64>, can_narro
     }
 }
 
-fn seed_expr_with_mask(expr: &HirExpr, mask: u64, consumed: &mut HashMap<String, u64>) {
+fn seed_expr_with_mask(expr: &DirExpr, mask: u64, consumed: &mut HashMap<String, u64>) {
     match expr {
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             let entry = consumed.entry(name.clone()).or_insert(0);
             *entry |= mask;
         }
@@ -286,32 +286,32 @@ fn seed_expr_with_mask(expr: &HirExpr, mask: u64, consumed: &mut HashMap<String,
     }
 }
 
-fn seed_expr_fully(expr: &HirExpr, consumed: &mut HashMap<String, u64>) {
+fn seed_expr_fully(expr: &DirExpr, consumed: &mut HashMap<String, u64>) {
     match expr {
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             *consumed.entry(name.clone()).or_insert(0) = u64::MAX;
         }
-        HirExpr::Const(_, _) => {}
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => seed_expr_fully(inner, consumed),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Const(_, _) => {}
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => seed_expr_fully(inner, consumed),
+        DirExpr::Binary { lhs, rhs, .. } => {
             seed_expr_fully(lhs, consumed);
             seed_expr_fully(rhs, consumed);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for a in args {
                 seed_expr_fully(a, consumed);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             seed_expr_fully(base, consumed);
             seed_expr_fully(index, consumed);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -321,19 +321,19 @@ fn seed_expr_fully(expr: &HirExpr, consumed: &mut HashMap<String, u64>) {
             seed_expr_fully(then_expr, consumed);
             seed_expr_fully(else_expr, consumed);
         }
-        HirExpr::AddressOfGlobal(_) => {}
+        DirExpr::AddressOfGlobal(_) => {}
     }
 }
 
-fn seed_lvalue_fully(lhs: &HirLValue, consumed: &mut HashMap<String, u64>) {
+fn seed_lvalue_fully(lhs: &DirLValue, consumed: &mut HashMap<String, u64>) {
     match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => seed_expr_fully(ptr, consumed),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => seed_expr_fully(ptr, consumed),
+        DirLValue::Index { base, index, .. } => {
             seed_expr_fully(base, consumed);
             seed_expr_fully(index, consumed);
         }
-        HirLValue::FieldAccess { base, .. } => seed_expr_fully(base, consumed),
+        DirLValue::FieldAccess { base, .. } => seed_expr_fully(base, consumed),
     }
 }
 
@@ -341,30 +341,30 @@ fn seed_lvalue_fully(lhs: &HirLValue, consumed: &mut HashMap<String, u64>) {
 
 /// Given a definition `x = expr` and `out_consume` = consumed mask of `x`,
 /// compute additional consumed contributions for variables appearing in `expr`.
-fn backward_propagate(expr: &HirExpr, out_consume: u64) -> Vec<(String, u64)> {
+fn backward_propagate(expr: &DirExpr, out_consume: u64) -> Vec<(String, u64)> {
     let mut result = Vec::new();
     backward_propagate_inner(expr, out_consume, &mut result);
     result
 }
 
-fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(String, u64)>) {
+fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(String, u64)>) {
     match expr {
         // x = y        → consumed[y] |= consumed[x]
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             result.push((name.clone(), out_consume));
         }
 
         // x = y & C    → consumed[y] |= consumed[x] & C
-        HirExpr::Binary {
-            op: HirBinaryOp::And,
+        DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Const(mask, _) = rhs.as_ref() {
+            if let DirExpr::Const(mask, _) = rhs.as_ref() {
                 backward_propagate_inner(lhs, out_consume & (*mask as u64), result);
                 // mask is a constant, no variable contribution
-            } else if let HirExpr::Const(mask, _) = lhs.as_ref() {
+            } else if let DirExpr::Const(mask, _) = lhs.as_ref() {
                 backward_propagate_inner(rhs, out_consume & (*mask as u64), result);
             } else {
                 // Non-const AND: conservative
@@ -375,17 +375,17 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
 
         // x = y | z   → consumed[y] |= consumed[x], consumed[z] |= consumed[x]
         // Special: x = y | C → consumed[y] |= consumed[x] & ~C (those bits not covered by C)
-        HirExpr::Binary {
-            op: HirBinaryOp::Or,
+        DirExpr::Binary {
+            op: DirBinaryOp::Or,
             lhs,
             rhs,
             ..
         } => {
-            if let HirExpr::Const(c, _) = rhs.as_ref() {
+            if let DirExpr::Const(c, _) = rhs.as_ref() {
                 // Bits covered by constant: variable contributes if constant didn't already cover
                 let var_mask = out_consume & !(*c as u64);
                 backward_propagate_inner(lhs, var_mask, result);
-            } else if let HirExpr::Const(c, _) = lhs.as_ref() {
+            } else if let DirExpr::Const(c, _) = lhs.as_ref() {
                 let var_mask = out_consume & !(*c as u64);
                 backward_propagate_inner(rhs, var_mask, result);
             } else {
@@ -395,8 +395,8 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y ^ z   → consumed[y] |= consumed[x], consumed[z] |= consumed[x]
-        HirExpr::Binary {
-            op: HirBinaryOp::Xor,
+        DirExpr::Binary {
+            op: DirBinaryOp::Xor,
             lhs,
             rhs,
             ..
@@ -406,13 +406,13 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y << n (const) → consumed[y] |= consumed[x] >> n
-        HirExpr::Binary {
-            op: HirBinaryOp::Shl,
+        DirExpr::Binary {
+            op: DirBinaryOp::Shl,
             lhs,
             rhs: shift,
             ..
         } => {
-            if let HirExpr::Const(n, _) = shift.as_ref() {
+            if let DirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 let src_mask = out_consume >> n;
                 if src_mask != 0 {
@@ -427,13 +427,13 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y >> n (const, logical) → consumed[y] |= consumed[x] << n
-        HirExpr::Binary {
-            op: HirBinaryOp::Shr,
+        DirExpr::Binary {
+            op: DirBinaryOp::Shr,
             lhs,
             rhs: shift,
             ..
         } => {
-            if let HirExpr::Const(n, _) = shift.as_ref() {
+            if let DirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 let src_mask = out_consume << n;
                 backward_propagate_inner(lhs, src_mask, result);
@@ -445,13 +445,13 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y >>s n (const, arithmetic) → same as logical for consumed-mask purposes
-        HirExpr::Binary {
-            op: HirBinaryOp::Sar,
+        DirExpr::Binary {
+            op: DirBinaryOp::Sar,
             lhs,
             rhs: shift,
             ..
         } => {
-            if let HirExpr::Const(n, _) = shift.as_ref() {
+            if let DirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 // Arithmetic shift: sign-bit may replicate; treat upper bits as consumed too
                 let src_mask = (out_consume << n)
@@ -469,23 +469,23 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = (NarrowType)y → consumed[y] |= consumed[x] & narrow_mask
-        HirExpr::Cast { ty, expr: inner } => {
+        DirExpr::Cast { ty, expr: inner } => {
             let narrow_mask = type_bitmask(ty);
             let src_mask = out_consume & narrow_mask;
             backward_propagate_inner(inner, src_mask, result);
         }
 
         // x = -y  or  x = ~y → consumed[y] |= consumed[x]
-        HirExpr::Unary { expr: inner, .. } => {
+        DirExpr::Unary { expr: inner, .. } => {
             backward_propagate_inner(inner, out_consume, result);
         }
-        HirExpr::FieldAccess { base, .. } => {
+        DirExpr::FieldAccess { base, .. } => {
             backward_propagate_inner(base, out_consume, result);
         }
 
         // x = y + z  → conservative (carry propagation makes it hard to be precise)
-        HirExpr::Binary {
-            op: HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::Mul,
+        DirExpr::Binary {
+            op: DirBinaryOp::Add | DirBinaryOp::Sub | DirBinaryOp::Mul,
             lhs,
             rhs,
             ..
@@ -495,28 +495,28 @@ fn backward_propagate_inner(expr: &HirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // Comparisons, div, mod: treat all inputs as fully consumed
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             let full = if out_consume == 0 { 0 } else { u64::MAX };
             backward_propagate_inner(lhs, full, result);
             backward_propagate_inner(rhs, full, result);
         }
 
         // Loads, calls, constants: no variable propagation needed (no sub-variables)
-        HirExpr::Const(_, _)
-        | HirExpr::Load { .. }
-        | HirExpr::Call { .. }
-        | HirExpr::AddressOfGlobal(_)
-        | HirExpr::PtrOffset { .. }
-        | HirExpr::AggregateCopy { .. }
-        | HirExpr::Index { .. }
-        | HirExpr::Select { .. } => {}
+        DirExpr::Const(_, _)
+        | DirExpr::Load { .. }
+        | DirExpr::Call { .. }
+        | DirExpr::AddressOfGlobal(_)
+        | DirExpr::PtrOffset { .. }
+        | DirExpr::AggregateCopy { .. }
+        | DirExpr::Index { .. }
+        | DirExpr::Select { .. } => {}
     }
 }
 
 // ── Phase 4: simplification ───────────────────────────────────────────────────
 
 fn simplify_stmts(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     consumed: &HashMap<String, u64>,
     multi_def: &crate::HashSet<String>,
     type_map: &HashMap<String, NirType>,
@@ -528,15 +528,15 @@ fn simplify_stmts(
 }
 
 fn simplify_stmt(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     consumed: &HashMap<String, u64>,
     multi_def: &crate::HashSet<String>,
     type_map: &HashMap<String, NirType>,
     any_changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } => {
             // Only simplify single-defined, non-multi-def variables.
@@ -547,18 +547,18 @@ fn simplify_stmt(
             let out_consume = consumed.get(name.as_str()).copied().unwrap_or(0);
             simplify_assign_rhs(rhs, out_consume, consumed, type_map, any_changed);
         }
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             simplify_lvalue(lhs, consumed, any_changed);
             simplify_expr(rhs, consumed, any_changed);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             simplify_expr(expr, consumed, any_changed);
         }
-        HirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             simplify_stmts(body, consumed, multi_def, type_map, any_changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -575,7 +575,7 @@ fn simplify_stmt(
             }
             simplify_stmts(body, consumed, multi_def, type_map, any_changed);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -584,7 +584,7 @@ fn simplify_stmt(
             simplify_stmts(then_body, consumed, multi_def, type_map, any_changed);
             simplify_stmts(else_body, consumed, multi_def, type_map, any_changed);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -601,7 +601,7 @@ fn simplify_stmt(
 
 /// Simplify the RHS of `name = rhs` given the consumed mask of `name`.
 fn simplify_assign_rhs(
-    rhs: &mut HirExpr,
+    rhs: &mut DirExpr,
     out_consume: u64,
     consumed: &HashMap<String, u64>,
     type_map: &HashMap<String, NirType>,
@@ -609,14 +609,14 @@ fn simplify_assign_rhs(
 ) {
     // Rule 1: `x = y | C` where no consumed bit overlaps with C → `x = y`
     // This removes dead OR-with-constant branches.
-    if let HirExpr::Binary {
-        op: HirBinaryOp::Or,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::Or,
         lhs,
         rhs: rhs_inner,
         ty,
     } = rhs
     {
-        if let HirExpr::Const(c, _) = rhs_inner.as_ref() {
+        if let DirExpr::Const(c, _) = rhs_inner.as_ref() {
             let dead_bits = *c as u64 & !out_consume;
             if dead_bits == *c as u64 && *c != 0 {
                 // All bits of C are never consumed → strip the OR
@@ -628,7 +628,7 @@ fn simplify_assign_rhs(
                 return;
             }
         }
-        if let HirExpr::Const(c, _) = lhs.as_ref() {
+        if let DirExpr::Const(c, _) = lhs.as_ref() {
             let dead_bits = *c as u64 & !out_consume;
             if dead_bits == *c as u64 && *c != 0 {
                 let inner = *rhs_inner.clone();
@@ -646,7 +646,7 @@ fn simplify_assign_rhs(
 
     // Rule 3: a widening cast is redundant when consumers only need bits that
     // already exist in the source. A narrowing cast always changes the value.
-    if let HirExpr::Cast { ty, expr: inner } = rhs {
+    if let DirExpr::Cast { ty, expr: inner } = rhs {
         let source_ty = expr_type_with_bindings(inner, type_map);
         let can_remove = type_width(ty)
             .zip(type_width(&source_ty))
@@ -666,30 +666,30 @@ fn simplify_assign_rhs(
     simplify_expr(rhs, consumed, any_changed);
 }
 
-fn simplify_expr(expr: &mut HirExpr, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
+fn simplify_expr(expr: &mut DirExpr, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
     match expr {
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             simplify_expr(lhs, consumed, any_changed);
             simplify_expr(rhs, consumed, any_changed);
         }
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             simplify_expr(inner, consumed, any_changed);
         }
-        HirExpr::Load { ptr, .. } | HirExpr::PtrOffset { base: ptr, .. } => {
+        DirExpr::Load { ptr, .. } | DirExpr::PtrOffset { base: ptr, .. } => {
             simplify_expr(ptr, consumed, any_changed);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 simplify_expr(a, consumed, any_changed);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             simplify_expr(base, consumed, any_changed);
             simplify_expr(index, consumed, any_changed);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -699,20 +699,20 @@ fn simplify_expr(expr: &mut HirExpr, consumed: &HashMap<String, u64>, any_change
             simplify_expr(then_expr, consumed, any_changed);
             simplify_expr(else_expr, consumed, any_changed);
         }
-        HirExpr::AggregateCopy { src, .. } => simplify_expr(src, consumed, any_changed),
+        DirExpr::AggregateCopy { src, .. } => simplify_expr(src, consumed, any_changed),
         _ => {}
     }
 }
 
-fn simplify_lvalue(lhs: &mut HirLValue, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
+fn simplify_lvalue(lhs: &mut DirLValue, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
     match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => simplify_expr(ptr, consumed, any_changed),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => simplify_expr(ptr, consumed, any_changed),
+        DirLValue::Index { base, index, .. } => {
             simplify_expr(base, consumed, any_changed);
             simplify_expr(index, consumed, any_changed);
         }
-        HirLValue::FieldAccess { base, .. } => simplify_expr(base, consumed, any_changed),
+        DirLValue::FieldAccess { base, .. } => simplify_expr(base, consumed, any_changed),
     }
 }
 
@@ -744,9 +744,9 @@ fn type_width(ty: &NirType) -> Option<u32> {
     }
 }
 
-fn expr_type_with_bindings(expr: &HirExpr, type_map: &HashMap<String, NirType>) -> NirType {
+fn expr_type_with_bindings(expr: &DirExpr, type_map: &HashMap<String, NirType>) -> NirType {
     match expr {
-        HirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
+        DirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
         _ => expr_type(expr),
     }
 }
@@ -765,17 +765,17 @@ mod tests {
 
     #[test]
     fn preserves_narrowing_cast_from_wide_binding() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "narrow_lane".into(),
             locals: vec![
-                NirBinding {
+                DirBinding {
                     name: "wide".into(),
                     ty: uint(32),
                     surface_type_name: None,
                     origin: Some(NirBindingOrigin::Temp),
                     initializer: None,
                 },
-                NirBinding {
+                DirBinding {
                     name: "narrowed".into(),
                     ty: uint(32),
                     surface_type_name: None,
@@ -785,14 +785,14 @@ mod tests {
             ],
             return_type: uint(32),
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("narrowed".into()),
-                    rhs: HirExpr::Cast {
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("narrowed".into()),
+                    rhs: DirExpr::Cast {
                         ty: uint(8),
-                        expr: Box::new(HirExpr::Var("wide".into())),
+                        expr: Box::new(DirExpr::Var("wide".into())),
                     },
                 },
-                HirStmt::Return(Some(HirExpr::Var("narrowed".into()))),
+                DirStmt::Return(Some(DirExpr::Var("narrowed".into()))),
             ],
             ..Default::default()
         };
@@ -800,8 +800,8 @@ mod tests {
         assert!(!apply_bit_consume_dead_code_pass(&mut func));
         assert!(matches!(
             &func.body[0],
-            HirStmt::Assign {
-                rhs: HirExpr::Cast {
+            DirStmt::Assign {
+                rhs: DirExpr::Cast {
                     ty: NirType::Int { bits: 8, .. },
                     ..
                 },

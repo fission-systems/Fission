@@ -543,7 +543,7 @@ fn join_register_read_uses_edge_zero_as_carried_initializer() {
     );
     builder.temps.insert(
         "carried".to_string(),
-        NirBinding {
+        DirBinding {
             name: "carried".to_string(),
             ty: type_from_size(8, false),
             surface_type_name: None,
@@ -563,9 +563,9 @@ fn join_register_read_uses_edge_zero_as_carried_initializer() {
 
     assert_eq!(
         lowered,
-        HirExpr::Cast {
+        DirExpr::Cast {
             ty: type_from_size(4, false),
-            expr: Box::new(HirExpr::Var("carried".to_string())),
+            expr: Box::new(DirExpr::Var("carried".to_string())),
         }
     );
     assert_eq!(
@@ -573,7 +573,7 @@ fn join_register_read_uses_edge_zero_as_carried_initializer() {
             .temps
             .get("carried")
             .and_then(|binding| binding.initializer.as_ref()),
-        Some(&HirExpr::Const(0, type_from_size(4, false)))
+        Some(&DirExpr::Const(0, type_from_size(4, false)))
     );
 }
 
@@ -645,7 +645,7 @@ fn loop_exit_register_read_uses_predecessor_path_zero_seed() {
     );
     builder.temps.insert(
         "loop_acc".to_string(),
-        NirBinding {
+        DirBinding {
             name: "loop_acc".to_string(),
             ty: type_from_size(8, false),
             surface_type_name: None,
@@ -663,13 +663,13 @@ fn loop_exit_register_read_uses_predecessor_path_zero_seed() {
         .lower_varnode(&r10, &mut visiting)
         .expect("loop-exit register read lowers");
 
-    assert_eq!(lowered, HirExpr::Var("loop_acc".to_string()));
+    assert_eq!(lowered, DirExpr::Var("loop_acc".to_string()));
     assert_eq!(
         builder
             .temps
             .get("loop_acc")
             .and_then(|binding| binding.initializer.as_ref()),
-        Some(&HirExpr::Const(0, type_from_size(8, false)))
+        Some(&DirExpr::Const(0, type_from_size(8, false)))
     );
     assert!(
         builder.params.is_empty(),
@@ -1061,7 +1061,7 @@ fn join_register_update_read_stays_live_register_instead_of_abi_param() {
         .lower_varnode(&w0, &mut visiting)
         .expect("join register update read lowers");
 
-    assert_eq!(lowered, HirExpr::Var("w0".to_string()));
+    assert_eq!(lowered, DirExpr::Var("w0".to_string()));
 }
 
 /// x64 `call r8` after loading args into rcx/rdx: CallInd through a register

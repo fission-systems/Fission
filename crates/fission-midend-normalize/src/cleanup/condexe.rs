@@ -6,7 +6,7 @@ use crate::HashSet;
 /// Simplifies a series of conditionally executed statements (Ghidra's ActionConditionalExe equivalent).
 /// Merges sequential sibling Ifs with identical conditions, and uses path-sensitive propagation
 /// to fold nested redundant If statement hierarchies.
-pub fn apply_condexe_folding_pass(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn apply_condexe_folding_pass(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
 
     // Run fixed-point iteration of sequential and path-sensitive folding passes
@@ -30,19 +30,19 @@ pub fn apply_condexe_folding_pass(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
+fn fold_sequential_siblings(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0;
 
     while idx + 1 < stmts.len() {
         let is_foldable = {
             if let (
-                Some(HirStmt::If {
+                Some(DirStmt::If {
                     cond: cond1,
                     then_body: then1,
                     else_body: else1,
                 }),
-                Some(HirStmt::If {
+                Some(DirStmt::If {
                     cond: cond2,
                     then_body: then2,
                     else_body: else2,
@@ -66,18 +66,18 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
         };
 
         if is_foldable {
-            if let HirStmt::If {
+            if let DirStmt::If {
                 then_body: mut then1,
                 cond: cond1,
                 ..
             } = stmts.remove(idx)
             {
-                if let HirStmt::If {
+                if let DirStmt::If {
                     then_body: then2, ..
                 } = stmts.remove(idx)
                 {
                     then1.extend(then2);
-                    let merged_if = HirStmt::If {
+                    let merged_if = DirStmt::If {
                         cond: cond1,
                         then_body: then1,
                         else_body: Vec::new(),
@@ -95,13 +95,13 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
     // Also recurse into all nested block/If structures
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 changed |= fold_sequential_siblings(body);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -109,7 +109,7 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
                 changed |= fold_sequential_siblings(then_body);
                 changed |= fold_sequential_siblings(else_body);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= fold_sequential_siblings(&mut case.body);
                 }
@@ -123,9 +123,9 @@ fn fold_sequential_siblings(stmts: &mut Vec<HirStmt>) -> bool {
 }
 
 fn fold_conditions(
-    stmts: &mut Vec<HirStmt>,
-    true_conds: &mut Vec<HirExpr>,
-    false_conds: &mut Vec<HirExpr>,
+    stmts: &mut Vec<DirStmt>,
+    true_conds: &mut Vec<DirExpr>,
+    false_conds: &mut Vec<DirExpr>,
 ) -> bool {
     let mut changed = false;
     let mut idx = 0;
@@ -133,7 +133,7 @@ fn fold_conditions(
     while idx < stmts.len() {
         let mut is_if = false;
         let mut cond_opt = None;
-        if let HirStmt::If { cond, .. } = &stmts[idx] {
+        if let DirStmt::If { cond, .. } = &stmts[idx] {
             is_if = true;
             cond_opt = Some(cond.clone());
         }
@@ -143,7 +143,7 @@ fn fold_conditions(
 
             // Case 1: Redundant If statement where condition is proven True
             if true_conds.contains(&cond) {
-                if let HirStmt::If { then_body, .. } = stmts.remove(idx) {
+                if let DirStmt::If { then_body, .. } = stmts.remove(idx) {
                     for (i, s) in then_body.into_iter().enumerate() {
                         stmts.insert(idx + i, s);
                     }
@@ -153,7 +153,7 @@ fn fold_conditions(
             }
             // Case 2: Redundant If statement where condition is proven False
             else if false_conds.contains(&cond) {
-                if let HirStmt::If { else_body, .. } = stmts.remove(idx) {
+                if let DirStmt::If { else_body, .. } = stmts.remove(idx) {
                     for (i, s) in else_body.into_iter().enumerate() {
                         stmts.insert(idx + i, s);
                     }
@@ -163,7 +163,7 @@ fn fold_conditions(
             }
             // Case 3: Condition not proven, recurse with path context
             else {
-                if let HirStmt::If {
+                if let DirStmt::If {
                     cond,
                     then_body,
                     else_body,
@@ -185,10 +185,10 @@ fn fold_conditions(
         } else {
             // For other control-flow statements, recursively fold with safety invalidations
             match &mut stmts[idx] {
-                HirStmt::Block(body) => {
+                DirStmt::Block(body) => {
                     changed |= fold_conditions(body, true_conds, false_conds);
                 }
-                HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                     let mut assigned_in_body = HashSet::default();
                     for s in body.iter() {
                         get_assigned_vars_in_stmt(s, &mut assigned_in_body);
@@ -200,7 +200,7 @@ fn fold_conditions(
                     }
                     changed |= fold_conditions(body, &mut nested_true, &mut nested_false);
                 }
-                HirStmt::For {
+                DirStmt::For {
                     init, update, body, ..
                 } => {
                     let mut assigned = HashSet::default();
@@ -220,7 +220,7 @@ fn fold_conditions(
                     }
                     changed |= fold_conditions(body, &mut nested_true, &mut nested_false);
                 }
-                HirStmt::Switch { cases, default, .. } => {
+                DirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         let mut nested_true = true_conds.clone();
                         let mut nested_false = false_conds.clone();
@@ -248,22 +248,22 @@ fn fold_conditions(
     changed
 }
 
-fn get_variables_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
+fn get_variables_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
     match expr {
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             vars.insert(name.clone());
         }
-        HirExpr::Cast { expr, .. } => {
+        DirExpr::Cast { expr, .. } => {
             get_variables_in_expr(expr, vars);
         }
-        HirExpr::Unary { expr, .. } => {
+        DirExpr::Unary { expr, .. } => {
             get_variables_in_expr(expr, vars);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             get_variables_in_expr(lhs, vars);
             get_variables_in_expr(rhs, vars);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -273,44 +273,44 @@ fn get_variables_in_expr(expr: &HirExpr, vars: &mut HashSet<String>) {
             get_variables_in_expr(then_expr, vars);
             get_variables_in_expr(else_expr, vars);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 get_variables_in_expr(arg, vars);
             }
         }
-        HirExpr::Load { ptr, .. } => {
+        DirExpr::Load { ptr, .. } => {
             get_variables_in_expr(ptr, vars);
         }
-        HirExpr::PtrOffset { base, .. } => {
+        DirExpr::PtrOffset { base, .. } => {
             get_variables_in_expr(base, vars);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             get_variables_in_expr(base, vars);
             get_variables_in_expr(index, vars);
         }
-        HirExpr::AggregateCopy { src, .. } => {
+        DirExpr::AggregateCopy { src, .. } => {
             get_variables_in_expr(src, vars);
         }
         _ => {}
     }
 }
 
-fn get_assigned_vars_in_stmt(stmt: &HirStmt, vars: &mut HashSet<String>) {
+fn get_assigned_vars_in_stmt(stmt: &DirStmt, vars: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Assign { lhs, .. } => {
-            if let HirLValue::Var(name) = lhs {
+        DirStmt::Assign { lhs, .. } => {
+            if let DirLValue::Var(name) = lhs {
                 vars.insert(name.clone());
             }
         }
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => {
             for s in body {
                 get_assigned_vars_in_stmt(s, vars);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -322,7 +322,7 @@ fn get_assigned_vars_in_stmt(stmt: &HirStmt, vars: &mut HashSet<String>) {
                 get_assigned_vars_in_stmt(s, vars);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for s in &case.body {
                     get_assigned_vars_in_stmt(s, vars);
@@ -338,8 +338,8 @@ fn get_assigned_vars_in_stmt(stmt: &HirStmt, vars: &mut HashSet<String>) {
 
 fn invalidate_variable(
     var_name: &str,
-    true_conds: &mut Vec<HirExpr>,
-    false_conds: &mut Vec<HirExpr>,
+    true_conds: &mut Vec<DirExpr>,
+    false_conds: &mut Vec<DirExpr>,
 ) {
     true_conds.retain(|cond| {
         let mut vars = HashSet::default();
@@ -383,7 +383,7 @@ fn invalidate_variable(
 /// or inline the ternary.
 ///
 /// Returns `true` if any transformation was applied.
-pub fn apply_iblock_phi_elimination(stmts: &mut Vec<HirStmt>) -> bool {
+pub fn apply_iblock_phi_elimination(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
 
     for _ in 0..8 {
@@ -403,22 +403,22 @@ pub fn apply_iblock_phi_elimination(stmts: &mut Vec<HirStmt>) -> bool {
 /// ```
 /// where `lhs` is a simple variable (no memory write), and replaces subsequent
 /// uses of `lhs` with `(cond ? val_t : val_f)`, then removes the dead if-else.
-fn iblock_phi_pass(stmts: &mut Vec<HirStmt>) -> bool {
+fn iblock_phi_pass(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0;
 
     while idx < stmts.len() {
         // Recurse into nested blocks first
         match &mut stmts[idx] {
-            HirStmt::Block(body) => {
+            DirStmt::Block(body) => {
                 changed |= iblock_phi_pass(body);
             }
-            HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. }
-            | HirStmt::For { body, .. } => {
+            DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
                 changed |= iblock_phi_pass(body);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     changed |= iblock_phi_pass(&mut case.body);
                 }
@@ -434,7 +434,7 @@ fn iblock_phi_pass(stmts: &mut Vec<HirStmt>) -> bool {
             let lhs_used_below = stmts[idx + 1..].iter().any(|s| stmt_uses_var(s, &lhs_var));
 
             if lhs_used_below {
-                let select_expr = HirExpr::Select {
+                let select_expr = DirExpr::Select {
                     cond: Box::new(cond),
                     then_expr: Box::new(val_true),
                     else_expr: Box::new(val_false),
@@ -465,8 +465,8 @@ fn iblock_phi_pass(stmts: &mut Vec<HirStmt>) -> bool {
 /// - Both `then_body` and `else_body` have exactly one statement.
 /// - Both are assignments to the same simple variable `lhs_var`.
 /// - The assigned values are pure expressions (no side effects).
-fn extract_diamond_phi(stmt: &HirStmt) -> Option<(HirExpr, String, HirExpr, HirExpr)> {
-    let HirStmt::If {
+fn extract_diamond_phi(stmt: &DirStmt) -> Option<(DirExpr, String, DirExpr, DirExpr)> {
+    let DirStmt::If {
         cond,
         then_body,
         else_body,
@@ -498,23 +498,23 @@ fn extract_diamond_phi(stmt: &HirStmt) -> Option<(HirExpr, String, HirExpr, HirE
 
 /// Extracts `(var_name, rhs_expr)` from a simple `var = expr` assignment.
 /// Returns `None` if the LHS is not a simple variable or if the stmt is not an assign.
-fn extract_simple_assign(stmt: &HirStmt) -> Option<(String, &HirExpr)> {
-    let HirStmt::Assign { lhs, rhs } = stmt else {
+fn extract_simple_assign(stmt: &DirStmt) -> Option<(String, &DirExpr)> {
+    let DirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
-    let HirLValue::Var(name) = lhs else {
+    let DirLValue::Var(name) = lhs else {
         return None;
     };
     Some((name.clone(), rhs))
 }
 
 /// Returns `true` if any expression in `stmt` reads from `var_name`.
-fn stmt_uses_var(stmt: &HirStmt, var_name: &str) -> bool {
+fn stmt_uses_var(stmt: &DirStmt, var_name: &str) -> bool {
     match stmt {
-        HirStmt::Assign { rhs, .. } => expr_uses_var(rhs, var_name),
-        HirStmt::Return(Some(expr)) => expr_uses_var(expr, var_name),
-        HirStmt::Return(None) => false,
-        HirStmt::If {
+        DirStmt::Assign { rhs, .. } => expr_uses_var(rhs, var_name),
+        DirStmt::Return(Some(expr)) => expr_uses_var(expr, var_name),
+        DirStmt::Return(None) => false,
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -523,10 +523,10 @@ fn stmt_uses_var(stmt: &HirStmt, var_name: &str) -> bool {
                 || then_body.iter().any(|s| stmt_uses_var(s, var_name))
                 || else_body.iter().any(|s| stmt_uses_var(s, var_name))
         }
-        HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+        DirStmt::While { cond, body } | DirStmt::DoWhile { cond, body } => {
             expr_uses_var(cond, var_name) || body.iter().any(|s| stmt_uses_var(s, var_name))
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -539,9 +539,9 @@ fn stmt_uses_var(stmt: &HirStmt, var_name: &str) -> bool {
                     .map_or(false, |s| stmt_uses_var(s, var_name))
                 || body.iter().any(|s| stmt_uses_var(s, var_name))
         }
-        HirStmt::Block(body) => body.iter().any(|s| stmt_uses_var(s, var_name)),
-        HirStmt::Expr(expr) => expr_uses_var(expr, var_name),
-        HirStmt::Switch {
+        DirStmt::Block(body) => body.iter().any(|s| stmt_uses_var(s, var_name)),
+        DirStmt::Expr(expr) => expr_uses_var(expr, var_name),
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -556,15 +556,15 @@ fn stmt_uses_var(stmt: &HirStmt, var_name: &str) -> bool {
     }
 }
 
-fn expr_uses_var(expr: &HirExpr, var_name: &str) -> bool {
+fn expr_uses_var(expr: &DirExpr, var_name: &str) -> bool {
     match expr {
-        HirExpr::Var(name) => name == var_name,
-        HirExpr::Cast { expr, .. } => expr_uses_var(expr, var_name),
-        HirExpr::Unary { expr, .. } => expr_uses_var(expr, var_name),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Var(name) => name == var_name,
+        DirExpr::Cast { expr, .. } => expr_uses_var(expr, var_name),
+        DirExpr::Unary { expr, .. } => expr_uses_var(expr, var_name),
+        DirExpr::Binary { lhs, rhs, .. } => {
             expr_uses_var(lhs, var_name) || expr_uses_var(rhs, var_name)
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -574,27 +574,27 @@ fn expr_uses_var(expr: &HirExpr, var_name: &str) -> bool {
                 || expr_uses_var(then_expr, var_name)
                 || expr_uses_var(else_expr, var_name)
         }
-        HirExpr::Call { args, .. } => args.iter().any(|a| expr_uses_var(a, var_name)),
-        HirExpr::Load { ptr, .. } => expr_uses_var(ptr, var_name),
-        HirExpr::PtrOffset { base, .. } => expr_uses_var(base, var_name),
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Call { args, .. } => args.iter().any(|a| expr_uses_var(a, var_name)),
+        DirExpr::Load { ptr, .. } => expr_uses_var(ptr, var_name),
+        DirExpr::PtrOffset { base, .. } => expr_uses_var(base, var_name),
+        DirExpr::Index { base, index, .. } => {
             expr_uses_var(base, var_name) || expr_uses_var(index, var_name)
         }
-        HirExpr::AggregateCopy { src, .. } => expr_uses_var(src, var_name),
+        DirExpr::AggregateCopy { src, .. } => expr_uses_var(src, var_name),
         _ => false,
     }
 }
 
 /// Replaces all reads of `var_name` in `stmt` with `replacement`.
-fn replace_var_in_stmt(stmt: &mut HirStmt, var_name: &str, replacement: &HirExpr) {
+fn replace_var_in_stmt(stmt: &mut DirStmt, var_name: &str, replacement: &DirExpr) {
     match stmt {
-        HirStmt::Assign { rhs, .. } => {
+        DirStmt::Assign { rhs, .. } => {
             replace_var_in_expr(rhs, var_name, replacement);
         }
-        HirStmt::Return(Some(expr)) => {
+        DirStmt::Return(Some(expr)) => {
             replace_var_in_expr(expr, var_name, replacement);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -607,13 +607,13 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, var_name: &str, replacement: &HirExpr
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
-        HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+        DirStmt::While { cond, body } | DirStmt::DoWhile { cond, body } => {
             replace_var_in_expr(cond, var_name, replacement);
             for s in body.iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -632,15 +632,15 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, var_name: &str, replacement: &HirExpr
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
-        HirStmt::Block(body) => {
+        DirStmt::Block(body) => {
             for s in body.iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
-        HirStmt::Expr(expr) => {
+        DirStmt::Expr(expr) => {
             replace_var_in_expr(expr, var_name, replacement);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -659,22 +659,22 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, var_name: &str, replacement: &HirExpr
     }
 }
 
-fn replace_var_in_expr(expr: &mut HirExpr, var_name: &str, replacement: &HirExpr) {
+fn replace_var_in_expr(expr: &mut DirExpr, var_name: &str, replacement: &DirExpr) {
     match expr {
-        HirExpr::Var(name) if name == var_name => {
+        DirExpr::Var(name) if name == var_name => {
             *expr = replacement.clone();
         }
-        HirExpr::Cast { expr: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. } => {
             replace_var_in_expr(inner, var_name, replacement);
         }
-        HirExpr::Unary { expr: inner, .. } => {
+        DirExpr::Unary { expr: inner, .. } => {
             replace_var_in_expr(inner, var_name, replacement);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             replace_var_in_expr(lhs, var_name, replacement);
             replace_var_in_expr(rhs, var_name, replacement);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -684,22 +684,22 @@ fn replace_var_in_expr(expr: &mut HirExpr, var_name: &str, replacement: &HirExpr
             replace_var_in_expr(then_expr, var_name, replacement);
             replace_var_in_expr(else_expr, var_name, replacement);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 replace_var_in_expr(a, var_name, replacement);
             }
         }
-        HirExpr::Load { ptr, .. } => {
+        DirExpr::Load { ptr, .. } => {
             replace_var_in_expr(ptr, var_name, replacement);
         }
-        HirExpr::PtrOffset { base, .. } => {
+        DirExpr::PtrOffset { base, .. } => {
             replace_var_in_expr(base, var_name, replacement);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             replace_var_in_expr(base, var_name, replacement);
             replace_var_in_expr(index, var_name, replacement);
         }
-        HirExpr::AggregateCopy { src, .. } => {
+        DirExpr::AggregateCopy { src, .. } => {
             replace_var_in_expr(src, var_name, replacement);
         }
         _ => {}

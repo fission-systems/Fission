@@ -11,40 +11,40 @@ fn reg(offset: u64, size: u32) -> Varnode {
     }
 }
 
-fn lhs_var(stmt: &HirStmt) -> Option<&str> {
+fn lhs_var(stmt: &DirStmt) -> Option<&str> {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             ..
         } => Some(name.as_str()),
         _ => None,
     }
 }
 
-fn expr_var(expr: &HirExpr) -> Option<&str> {
+fn expr_var(expr: &DirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => Some(name.as_str()),
-        HirExpr::Cast { expr, .. } => expr_var(expr),
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => Some(name.as_str()),
+        DirExpr::Cast { expr, .. } => expr_var(expr),
         _ => None,
     }
 }
 
-fn expr_contains_shr(expr: &HirExpr) -> bool {
+fn expr_contains_shr(expr: &DirExpr) -> bool {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::Shr,
+        DirExpr::Binary {
+            op: DirBinaryOp::Shr,
             ..
         } => true,
-        HirExpr::Binary { lhs, rhs, .. } => expr_contains_shr(lhs) || expr_contains_shr(rhs),
-        HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => expr_contains_shr(expr),
-        HirExpr::Call { args, .. } => args.iter().any(expr_contains_shr),
-        HirExpr::Load { ptr, .. } => expr_contains_shr(ptr),
-        HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => expr_contains_shr(lhs) || expr_contains_shr(rhs),
+        DirExpr::Unary { expr, .. } | DirExpr::Cast { expr, .. } => expr_contains_shr(expr),
+        DirExpr::Call { args, .. } => args.iter().any(expr_contains_shr),
+        DirExpr::Load { ptr, .. } => expr_contains_shr(ptr),
+        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
             expr_contains_shr(base)
         }
-        HirExpr::Index { base, index, .. } => expr_contains_shr(base) || expr_contains_shr(index),
-        HirExpr::AggregateCopy { src, .. } => expr_contains_shr(src),
-        HirExpr::Select {
+        DirExpr::Index { base, index, .. } => expr_contains_shr(base) || expr_contains_shr(index),
+        DirExpr::AggregateCopy { src, .. } => expr_contains_shr(src),
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -52,7 +52,7 @@ fn expr_contains_shr(expr: &HirExpr) -> bool {
         } => {
             expr_contains_shr(cond) || expr_contains_shr(then_expr) || expr_contains_shr(else_expr)
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
     }
 }
 
@@ -790,9 +790,9 @@ fn loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp() {
     let shr_stmt = loop_body.iter().find(|s| {
         matches!(
             s,
-            HirStmt::Assign {
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+            DirStmt::Assign {
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Shr | DirBinaryOp::Sar,
                     ..
                 },
                 ..
@@ -803,14 +803,14 @@ fn loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp() {
         shr_stmt.is_some(),
         "expected IntRight assignment in loop body: {loop_body:?}"
     );
-    if let Some(HirStmt::Assign {
-        lhs: HirLValue::Var(ind),
-        rhs: HirExpr::Binary { lhs: a, .. },
+    if let Some(DirStmt::Assign {
+        lhs: DirLValue::Var(ind),
+        rhs: DirExpr::Binary { lhs: a, .. },
         ..
     }) = shr_stmt
     {
         assert!(
-            matches!(a.as_ref(), HirExpr::Var(name) if name == ind),
+            matches!(a.as_ref(), DirExpr::Var(name) if name == ind),
             "shift must be self-update on the induction binding, got {shr_stmt:?}"
         );
         // Prefer formal/stable names over pure anonymous temps when possible.
@@ -818,9 +818,9 @@ fn loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp() {
             !ind.starts_with("uVar") || loop_body.iter().any(|s| {
                 matches!(
                     s,
-                    HirStmt::Assign {
-                        lhs: HirLValue::Var(name),
-                        rhs: HirExpr::Var(src),
+                    DirStmt::Assign {
+                        lhs: DirLValue::Var(name),
+                        rhs: DirExpr::Var(src),
                         ..
                     } if name == "ecx" && src == ind
                 )
@@ -1092,9 +1092,9 @@ fn m32_popcount_loop_carries_add_and_shr() {
     let add_stmt = loop_body.iter().find(|s| {
         matches!(
             s,
-            HirStmt::Assign {
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Add,
+            DirStmt::Assign {
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Add,
                     ..
                 },
                 ..
@@ -1105,15 +1105,15 @@ fn m32_popcount_loop_carries_add_and_shr() {
         add_stmt.is_some(),
         "expected loop-carried add assignment, got {loop_body:?}"
     );
-    if let Some(HirStmt::Assign {
-        lhs: HirLValue::Var(acc),
-        rhs: HirExpr::Binary { lhs: a, rhs: b, .. },
+    if let Some(DirStmt::Assign {
+        lhs: DirLValue::Var(acc),
+        rhs: DirExpr::Binary { lhs: a, rhs: b, .. },
         ..
     }) = add_stmt
     {
         assert!(
-            matches!(a.as_ref(), HirExpr::Var(name) if name == acc)
-                && matches!(b.as_ref(), HirExpr::Var(_)),
+            matches!(a.as_ref(), DirExpr::Var(name) if name == acc)
+                && matches!(b.as_ref(), DirExpr::Var(_)),
             "add should be self-update acc = acc + bit (not Const(0)+ecx), got {add_stmt:?}"
         );
     }
@@ -1122,9 +1122,9 @@ fn m32_popcount_loop_carries_add_and_shr() {
     let shr_stmt = loop_body.iter().find(|s| {
         matches!(
             s,
-            HirStmt::Assign {
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+            DirStmt::Assign {
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Shr | DirBinaryOp::Sar,
                     ..
                 },
                 ..
@@ -1135,14 +1135,14 @@ fn m32_popcount_loop_carries_add_and_shr() {
         shr_stmt.is_some(),
         "expected loop-carried shift assignment, got {loop_body:?}"
     );
-    if let Some(HirStmt::Assign {
-        lhs: HirLValue::Var(ind),
-        rhs: HirExpr::Binary { lhs: a, .. },
+    if let Some(DirStmt::Assign {
+        lhs: DirLValue::Var(ind),
+        rhs: DirExpr::Binary { lhs: a, .. },
         ..
     }) = shr_stmt
     {
         assert!(
-            matches!(a.as_ref(), HirExpr::Var(name) if name == ind),
+            matches!(a.as_ref(), DirExpr::Var(name) if name == ind),
             "shift should be self-update ind = ind >> 1, got {shr_stmt:?}"
         );
     }
@@ -1237,14 +1237,14 @@ fn loop_pointer_scan_load_and_add_share_cursor_binding() {
 
     // Find load: edx += *cursor  or  tmp = *cursor
     let load_ptr_name = loop_body.iter().find_map(|stmt| match stmt {
-        HirStmt::Assign {
-            rhs: HirExpr::Load { ptr, .. },
+        DirStmt::Assign {
+            rhs: DirExpr::Load { ptr, .. },
             ..
         } => expr_var(ptr).map(|s| s.to_string()),
-        HirStmt::Assign {
+        DirStmt::Assign {
             rhs:
-                HirExpr::Binary {
-                    op: HirBinaryOp::Add,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Add,
                     lhs,
                     rhs,
                     ..
@@ -1253,7 +1253,7 @@ fn loop_pointer_scan_load_and_add_share_cursor_binding() {
         } => {
             // sum = sum + *ptr form
             match (lhs.as_ref(), rhs.as_ref()) {
-                (HirExpr::Load { ptr, .. }, _) | (_, HirExpr::Load { ptr, .. }) => {
+                (DirExpr::Load { ptr, .. }, _) | (_, DirExpr::Load { ptr, .. }) => {
                     expr_var(ptr).map(|s| s.to_string())
                 }
                 _ => None,
@@ -1271,17 +1271,17 @@ fn loop_pointer_scan_load_and_add_share_cursor_binding() {
     let update = loop_body.iter().find(|stmt| {
         matches!(
             stmt,
-            HirStmt::Assign {
-                lhs: HirLValue::Var(_),
-                rhs: HirExpr::Binary {
-                    op: HirBinaryOp::Add,
+            DirStmt::Assign {
+                lhs: DirLValue::Var(_),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Add,
                     lhs: a,
                     rhs: b,
                     ..
                 },
                 ..
-            } if matches!(b.as_ref(), HirExpr::Const(4, _))
-                || matches!(a.as_ref(), HirExpr::Const(4, _))
+            } if matches!(b.as_ref(), DirExpr::Const(4, _))
+                || matches!(a.as_ref(), DirExpr::Const(4, _))
         )
     });
     assert!(
@@ -1303,9 +1303,9 @@ fn loop_pointer_scan_load_and_add_share_cursor_binding() {
         load_ptr == cursor_init
             || loop_body.iter().any(|s| matches!(
                 s,
-                HirStmt::Assign {
-                    lhs: HirLValue::Var(name),
-                    rhs: HirExpr::Var(src),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var(name),
+                    rhs: DirExpr::Var(src),
                     ..
                 } if name.as_str() == load_ptr.as_str() && src.as_str() == cursor_init
             )),

@@ -619,7 +619,7 @@ impl<'a> PreviewBuilder<'a> {
             || self.register_key_cross_space_zero_extends(&candidate_key, &requested_key)
     }
 
-    fn project_alias_def_expr(&self, requested: &Varnode, op: &PcodeOp, expr: HirExpr) -> HirExpr {
+    fn project_alias_def_expr(&self, requested: &Varnode, op: &PcodeOp, expr: DirExpr) -> DirExpr {
         let Some(output) = op.output.as_ref() else {
             return expr;
         };
@@ -627,7 +627,7 @@ impl<'a> PreviewBuilder<'a> {
             return expr;
         }
         if self.register_key_zero_extends(&VarnodeKey::from(output), &VarnodeKey::from(requested)) {
-            return HirExpr::Cast {
+            return DirExpr::Cast {
                 ty: type_from_size(requested.size, false),
                 expr: Box::new(expr),
             };
@@ -639,13 +639,13 @@ impl<'a> PreviewBuilder<'a> {
             &VarnodeKey::from(output),
             &VarnodeKey::from(requested),
         ) {
-            return HirExpr::Cast {
+            return DirExpr::Cast {
                 ty: type_from_size(requested.size, false),
                 expr: Box::new(expr),
             };
         }
         if self.aarch64_gpr_low_view_alias(output, requested) {
-            return HirExpr::Cast {
+            return DirExpr::Cast {
                 ty: type_from_size(requested.size, false),
                 expr: Box::new(expr),
             };
@@ -657,10 +657,10 @@ impl<'a> PreviewBuilder<'a> {
         let shifted = if byte_offset == 0 {
             expr
         } else {
-            HirExpr::Binary {
-                op: HirBinaryOp::Shr,
+            DirExpr::Binary {
+                op: DirBinaryOp::Shr,
                 lhs: Box::new(expr),
-                rhs: Box::new(HirExpr::Const(
+                rhs: Box::new(DirExpr::Const(
                     (byte_offset * 8) as i64,
                     NirType::Int {
                         bits: 64,
@@ -670,7 +670,7 @@ impl<'a> PreviewBuilder<'a> {
                 ty: type_from_size(output.size, false),
             }
         };
-        HirExpr::Cast {
+        DirExpr::Cast {
             ty: type_from_size(requested.size, false),
             expr: Box::new(shifted),
         }
@@ -735,7 +735,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn loop_exit_materialized_register_binding(&mut self, vn: &Varnode) -> Option<HirExpr> {
+    fn loop_exit_materialized_register_binding(&mut self, vn: &Varnode) -> Option<DirExpr> {
         if vn.is_constant || !is_register_space_id(vn.space_id) || vn.size < 4 {
             return None;
         }
@@ -756,7 +756,7 @@ impl<'a> PreviewBuilder<'a> {
                         if let Some(name) =
                             self.find_loop_carried_variable_for_register(vn, loop_body)
                         {
-                            return Some(HirExpr::Var(name));
+                            return Some(DirExpr::Var(name));
                         }
                     }
                 }
@@ -811,7 +811,7 @@ impl<'a> PreviewBuilder<'a> {
                         materialized_expr = Some(self.project_alias_def_expr(
                             vn,
                             pred_op,
-                            HirExpr::Var(name.clone()),
+                            DirExpr::Var(name.clone()),
                         ));
                         materialized_name = Some(name);
                     }
@@ -829,7 +829,7 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(binding) = self.temps.get_mut(&name)
             && binding.initializer.is_none()
         {
-            binding.initializer = Some(HirExpr::Const(0, type_from_size(vn.size, false)));
+            binding.initializer = Some(DirExpr::Const(0, type_from_size(vn.size, false)));
         }
         materialized_expr
     }
@@ -1071,9 +1071,9 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend) fn lower_call(
         &mut self,
         op: &PcodeOp,
-        recovered_args: Option<Vec<HirExpr>>,
+        recovered_args: Option<Vec<DirExpr>>,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let created_trace = if self.active_trace_id.is_none() {
             let trace_id = self.next_trace_id();
             self.active_trace_id = Some(trace_id);
@@ -1092,9 +1092,9 @@ impl<'a> PreviewBuilder<'a> {
     fn lower_call_inner(
         &mut self,
         op: &PcodeOp,
-        recovered_args: Option<Vec<HirExpr>>,
+        recovered_args: Option<Vec<DirExpr>>,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         if matches!(op.opcode, PcodeOpcode::CallOther) {
             return self.lower_callother(op, recovered_args, visiting);
         }
@@ -1105,7 +1105,7 @@ impl<'a> PreviewBuilder<'a> {
                 name
             } else {
                 match self.lower_varnode(target, visiting) {
-                    Ok(HirExpr::Const(val, _)) => {
+                    Ok(DirExpr::Const(val, _)) => {
                         let addr = val as u64;
                         if let Some(name) = self.resolve_call_target_by_address(addr) {
                             if matches!(op.opcode, PcodeOpcode::CallInd) {
@@ -1121,7 +1121,7 @@ impl<'a> PreviewBuilder<'a> {
                             format!("sub_{addr:x}")
                         }
                     }
-                    Ok(HirExpr::Var(name)) if matches!(op.opcode, PcodeOpcode::CallInd) => {
+                    Ok(DirExpr::Var(name)) if matches!(op.opcode, PcodeOpcode::CallInd) => {
                         if let Some(addr) = self.resolve_copy_only_constant_chain(target) {
                             if let Some(name) = self.resolve_call_target_by_address(addr) {
                                 self.telemetry
@@ -1153,7 +1153,7 @@ impl<'a> PreviewBuilder<'a> {
                             "__fission_callind_opaque".to_string()
                         }
                     }
-                    Ok(HirExpr::Var(name)) => self
+                    Ok(DirExpr::Var(name)) => self
                         .resolve_address_like_call_target_name(&name)
                         .unwrap_or(name),
                     Ok(other) if matches!(op.opcode, PcodeOpcode::CallInd) => {
@@ -1173,7 +1173,7 @@ impl<'a> PreviewBuilder<'a> {
                             self.resolve_indirect_scalar_call_target_name(target)
                         {
                             name
-                        } else if matches!(other, HirExpr::Load { .. }) {
+                        } else if matches!(other, DirExpr::Load { .. }) {
                             if let Some(name) = self.resolve_iat_load_call_target(target) {
                                 name
                             } else if let Some(name) =
@@ -1193,7 +1193,7 @@ impl<'a> PreviewBuilder<'a> {
                             "__fission_callind_opaque".to_string()
                         }
                     }
-                    Ok(other) => print_expr(&other),
+                    Ok(other) => print_dir_expr(&other),
                     Err(MlilPreviewError::UnsupportedPattern("opcode"))
                         if matches!(op.opcode, PcodeOpcode::CallInd) =>
                     {
@@ -1280,7 +1280,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
-        Ok(HirExpr::Call {
+        Ok(DirExpr::Call {
             target,
             args,
             ty: op
@@ -1293,13 +1293,13 @@ impl<'a> PreviewBuilder<'a> {
 
     /// True when a recovered call argument expression is the same surface as
     /// the CallInd target (function pointer used as both target and "arg").
-    fn call_arg_is_callind_target_carrier(arg: &HirExpr, target: &HirExpr) -> bool {
+    fn call_arg_is_callind_target_carrier(arg: &DirExpr, target: &DirExpr) -> bool {
         match (arg, target) {
-            (HirExpr::Var(a), HirExpr::Var(b)) => a == b,
-            (HirExpr::Cast { expr: a_inner, .. }, _) => {
+            (DirExpr::Var(a), DirExpr::Var(b)) => a == b,
+            (DirExpr::Cast { expr: a_inner, .. }, _) => {
                 Self::call_arg_is_callind_target_carrier(a_inner, target)
             }
-            (_, HirExpr::Cast { expr: t_inner, .. }) => {
+            (_, DirExpr::Cast { expr: t_inner, .. }) => {
                 Self::call_arg_is_callind_target_carrier(arg, t_inner)
             }
             _ => false,
@@ -1309,9 +1309,9 @@ impl<'a> PreviewBuilder<'a> {
     fn lower_callother(
         &mut self,
         op: &PcodeOp,
-        recovered_args: Option<Vec<HirExpr>>,
+        recovered_args: Option<Vec<DirExpr>>,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let target = op
             .inputs
             .first()
@@ -1333,7 +1333,7 @@ impl<'a> PreviewBuilder<'a> {
                 .map(|input| self.lower_varnode(input, visiting))
                 .collect::<Result<Vec<_>, _>>()?
         };
-        Ok(HirExpr::Call {
+        Ok(DirExpr::Call {
             target,
             args,
             ty: op
@@ -1442,13 +1442,13 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
         target: &str,
         ty: NirType,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let args = op
             .inputs
             .iter()
             .map(|input| self.lower_varnode(input, visiting))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(HirExpr::Call {
+        Ok(DirExpr::Call {
             target: target.to_string(),
             args,
             ty,
@@ -1821,7 +1821,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let created_trace = if self.active_trace_id.is_none() {
             let trace_id = self.next_trace_id();
             self.active_trace_id = Some(trace_id);
@@ -1841,12 +1841,12 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         if vn.is_constant {
             if let Some(name) = self.options.global_names.get(&(vn.constant_val as u64)) {
-                return Ok(HirExpr::AddressOfGlobal(name.clone()));
+                return Ok(DirExpr::AddressOfGlobal(name.clone()));
             }
-            return Ok(HirExpr::Const(
+            return Ok(DirExpr::Const(
                 vn.constant_val,
                 type_from_size(vn.size, false),
             ));
@@ -1877,7 +1877,7 @@ impl<'a> PreviewBuilder<'a> {
                     .explicit_merge_bindings
                     .get(&(site.block_idx, key.clone()))
                 {
-                    return Ok(HirExpr::Var(name.clone()));
+                    return Ok(DirExpr::Var(name.clone()));
                 }
                 if let Some(((_, candidate_key), name)) =
                     self.explicit_merge_bindings
@@ -1891,11 +1891,11 @@ impl<'a> PreviewBuilder<'a> {
                                         .register_key_cross_space_zero_extends(candidate_key, &key))
                         })
                 {
-                    let expr = HirExpr::Var(name.clone());
+                    let expr = DirExpr::Var(name.clone());
                     if candidate_key.size == key.size {
                         return Ok(expr);
                     }
-                    return Ok(HirExpr::Cast {
+                    return Ok(DirExpr::Cast {
                         ty: type_from_size(vn.size, false),
                         expr: Box::new(expr),
                     });
@@ -1904,14 +1904,14 @@ impl<'a> PreviewBuilder<'a> {
         }
         let def_site = self.lookup_def_site(vn);
         if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
-            return Ok(HirExpr::Var(name));
+            return Ok(DirExpr::Var(name));
         }
         // Loop body: LOAD/use of a loop-carried register must share the binding
         // that the loop's self-update (e.g. INT_ADD stride) will use — not a
         // frozen preheader snapshot vs a distinct bare hardware name.
         if let Some(name) = self.loop_body_carried_register_read_name(vn) {
             let name = self.ensure_live_register_binding(&name, vn.size);
-            return Ok(HirExpr::Var(name));
+            return Ok(DirExpr::Var(name));
         }
         if let Some(expr) = self.loop_exit_materialized_register_binding(vn) {
             return Ok(expr);
@@ -1935,29 +1935,29 @@ impl<'a> PreviewBuilder<'a> {
                     .get(&name)
                     .is_some_and(|binding| binding.initializer.is_some())
             {
-                return Ok(HirExpr::Var(name));
+                return Ok(DirExpr::Var(name));
             }
             if is_register_space_id(vn.space_id)
                 && self.current_store_value_read_at_join(vn)
                 && let Some(name) = self.live_register_name_for_join_register_read(vn)
             {
                 self.ensure_live_register_binding(&name, vn.size);
-                return Ok(HirExpr::Var(name));
+                return Ok(DirExpr::Var(name));
             }
             if is_register_space_id(vn.space_id)
                 && self.current_join_register_update_reads_live_register(vn)
                 && let Some(name) = self.live_register_name_for_join_register_read(vn)
             {
                 self.ensure_live_register_binding(&name, vn.size);
-                return Ok(HirExpr::Var(name));
+                return Ok(DirExpr::Var(name));
             }
             if let Some(param) = self.register_param(vn) {
-                return Ok(HirExpr::Var(param));
+                return Ok(DirExpr::Var(param));
             }
             if is_unique_space_id(vn.space_id)
                 && let Some(name) = crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
             {
-                return Ok(HirExpr::Var(name.to_string()));
+                return Ok(DirExpr::Var(name.to_string()));
             }
             if !self.options.is_64bit
                 && is_register_space_id(vn.space_id)
@@ -1968,7 +1968,7 @@ impl<'a> PreviewBuilder<'a> {
                 && let Some(name) = self.sla_hw_name(vn.offset, vn.size)
             {
                 let name = self.ensure_live_register_binding(&name, vn.size);
-                return Ok(HirExpr::Var(name));
+                return Ok(DirExpr::Var(name));
             }
             if is_register_space_id(vn.space_id) {
                 let namer = self.register_namer();
@@ -1997,14 +1997,14 @@ impl<'a> PreviewBuilder<'a> {
                         })
                 };
                 let name = self.ensure_live_register_binding(&name, vn.size);
-                return Ok(HirExpr::Var(name));
+                return Ok(DirExpr::Var(name));
             }
         }
         let stack_reg_name = self.stack_pointer_register_name(vn);
         if let Some(name) = stack_reg_name
             && matches!(name.as_str(), "rsp" | "esp" | "sp")
         {
-            return Ok(HirExpr::Var(name));
+            return Ok(DirExpr::Var(name));
         }
         if let Some((_, op)) = def_site {
             if op.output.is_none()
@@ -2016,11 +2016,11 @@ impl<'a> PreviewBuilder<'a> {
                 && let Some((site, _)) = def_site
                 && let Some(name) = self.call_result_bindings.get(&site)
             {
-                return Ok(HirExpr::Var(name.clone()));
+                return Ok(DirExpr::Var(name.clone()));
             }
             let materialized_key = MaterializedVarnodeKey::new(vn, op);
             if let Some(name) = self.materialized_vns.get(&materialized_key) {
-                return Ok(HirExpr::Var(name.clone()));
+                return Ok(DirExpr::Var(name.clone()));
             }
             // Look-through passthrough: when the best def op is a widening passthrough
             // (ZExt/SExt/Copy/Cast) that reads exactly `vn` (same space/offset/size), the
@@ -2050,7 +2050,7 @@ impl<'a> PreviewBuilder<'a> {
                                     let narrow_key =
                                         MaterializedVarnodeKey::new(prior_output, prior_op);
                                     if let Some(name) = self.materialized_vns.get(&narrow_key) {
-                                        return Ok(HirExpr::Var(name.clone()));
+                                        return Ok(DirExpr::Var(name.clone()));
                                     }
                                     break;
                                 }
@@ -2064,7 +2064,7 @@ impl<'a> PreviewBuilder<'a> {
             {
                 let output_materialized_key = MaterializedVarnodeKey::new(output, op);
                 if let Some(name) = self.materialized_vns.get(&output_materialized_key) {
-                    return Ok(self.project_alias_def_expr(vn, op, HirExpr::Var(name.clone())));
+                    return Ok(self.project_alias_def_expr(vn, op, DirExpr::Var(name.clone())));
                 }
             }
         }
@@ -2105,7 +2105,7 @@ impl<'a> PreviewBuilder<'a> {
                 let name = format!("tmp_{:x}", vn.offset);
                 self.ensure_live_register_binding(&name, vn.size)
             };
-            return Ok(HirExpr::Var(cycle_name));
+            return Ok(DirExpr::Var(cycle_name));
         }
 
         let result = match def_site {
@@ -2128,7 +2128,7 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     classified
                 }),
-            None if self.options.global_names.contains_key(&vn.offset) => Ok(HirExpr::Var(
+            None if self.options.global_names.contains_key(&vn.offset) => Ok(DirExpr::Var(
                 self.options
                     .global_names
                     .get(&vn.offset)
@@ -2138,15 +2138,15 @@ impl<'a> PreviewBuilder<'a> {
             None if is_unique_space_id(vn.space_id) => {
                 let name = format!("tmp_{:x}", vn.offset);
                 let name = self.ensure_live_register_binding(&name, vn.size);
-                Ok(HirExpr::Var(name))
+                Ok(DirExpr::Var(name))
             }
             None if self.options.is_mapped_global(vn.offset) => {
-                Ok(HirExpr::Var(format!("DAT_{:x}", vn.offset)))
+                Ok(DirExpr::Var(format!("DAT_{:x}", vn.offset)))
             }
             None => {
                 let name = format!("var_{:x}", vn.offset);
                 let name = self.ensure_live_register_binding(&name, vn.size);
-                Ok(HirExpr::Var(name))
+                Ok(DirExpr::Var(name))
             }
         };
         visiting.remove(&key);
@@ -2225,7 +2225,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         if !is_register_space_id(vn.space_id) {
             return Ok(None);
         }
@@ -2300,7 +2300,7 @@ impl<'a> PreviewBuilder<'a> {
             },
             |this| this.lower_varnode(&cond_vn, visiting),
         )?;
-        Ok(Some(HirExpr::Select {
+        Ok(Some(DirExpr::Select {
             cond: Box::new(cond),
             then_expr: Box::new(true_expr),
             else_expr: Box::new(false_expr),
@@ -2331,7 +2331,7 @@ impl<'a> PreviewBuilder<'a> {
         pred_idx: usize,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         let Some(pred_block) = self.pcode.blocks.get(pred_idx).cloned() else {
             return Ok(None);
         };
@@ -2346,7 +2346,7 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(name) =
                 self.live_call_result_binding_in_block_for_return_register(vn, pred_idx, term_idx)
         {
-            return Ok(Some(HirExpr::Var(name)));
+            return Ok(Some(DirExpr::Var(name)));
         }
         let Some(def_idx) = self.last_alias_def_in_block(&pred_block, term_idx, vn) else {
             return Ok(None);
@@ -2366,7 +2366,7 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(name) =
                 self.live_call_result_binding_in_block_for_return_register(vn, pred_idx, term_idx)
         {
-            return Ok(Some(HirExpr::Var(name)));
+            return Ok(Some(DirExpr::Var(name)));
         }
         let op = pred_block.ops[def_idx].clone();
         let expr = self.with_lowering_site(
@@ -2383,7 +2383,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         if vn.is_constant || !is_register_space_id(vn.space_id) || vn.size <= 1 {
             return Ok(None);
         }
@@ -2520,7 +2520,7 @@ impl<'a> PreviewBuilder<'a> {
         requested_end: u64,
         zeroed_ranges: &[(u64, u64)],
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         let op = &block.ops[partial_idx];
         let Some(output) = op.output.as_ref() else {
             return Ok(None);
@@ -2539,7 +2539,7 @@ impl<'a> PreviewBuilder<'a> {
             },
             |this| this.lower_def_op(op, visiting),
         )?;
-        Ok(Some(HirExpr::Cast {
+        Ok(Some(DirExpr::Cast {
             ty: type_from_size(vn.size, false),
             expr: Box::new(expr),
         }))
@@ -2692,7 +2692,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let created_trace = if self.active_trace_id.is_none() {
             let trace_id = self.next_trace_id();
             self.active_trace_id = Some(trace_id);
@@ -2712,7 +2712,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         match op.opcode {
             PcodeOpcode::Copy => self.lower_varnode(&op.inputs[0], visiting),
             PcodeOpcode::IntZExt => {
@@ -2741,18 +2741,18 @@ impl<'a> PreviewBuilder<'a> {
                     let out_ty = type_from_size(output.size, false);
                     let bits = (input.size as u32).saturating_mul(8);
                     let mask = (1i64 << bits) - 1;
-                    let truncated = HirExpr::Cast {
+                    let truncated = DirExpr::Cast {
                         ty: narrow_ty,
                         expr: Box::new(expr),
                     };
-                    return Ok(HirExpr::Binary {
-                        op: HirBinaryOp::And,
+                    return Ok(DirExpr::Binary {
+                        op: DirBinaryOp::And,
                         lhs: Box::new(truncated),
-                        rhs: Box::new(HirExpr::Const(mask, out_ty.clone())),
+                        rhs: Box::new(DirExpr::Const(mask, out_ty.clone())),
                         ty: out_ty,
                     });
                 }
-                Ok(HirExpr::Cast {
+                Ok(DirExpr::Cast {
                     ty: type_from_size(output.size, false),
                     expr: Box::new(expr),
                 })
@@ -2763,7 +2763,7 @@ impl<'a> PreviewBuilder<'a> {
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprAddressMaterialization)?;
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
-                Ok(HirExpr::Cast {
+                Ok(DirExpr::Cast {
                     ty: type_from_size(output.size, matches!(op.opcode, PcodeOpcode::IntSExt)),
                     expr: Box::new(expr),
                 })
@@ -2781,29 +2781,29 @@ impl<'a> PreviewBuilder<'a> {
                     &op.inputs[1],
                     type_from_size(out.size, false),
                 ) {
-                    Ok(HirExpr::Var(slot_name))
+                    Ok(DirExpr::Var(slot_name))
                 } else if let Some(peb_expr) = self.try_peb_field_var(&op.inputs[1]) {
                     Ok(peb_expr)
                 } else if let Some(teb_expr) = self.try_teb_field_var(&op.inputs[1]) {
                     Ok(teb_expr)
                 } else if let Some(global) = self.resolve_relocated_load_pointer(op, 16) {
                     Ok(if global.byte_offset == 0 {
-                        HirExpr::AddressOfGlobal(global.name)
+                        DirExpr::AddressOfGlobal(global.name)
                     } else {
-                        HirExpr::PtrOffset {
-                            base: Box::new(HirExpr::AddressOfGlobal(global.name)),
+                        DirExpr::PtrOffset {
+                            base: Box::new(DirExpr::AddressOfGlobal(global.name)),
                             offset: global.byte_offset,
                         }
                     })
                 } else if let Some(addr) = self.resolve_global_address(&op.inputs[1], 16)
                     && let Some(value) = self.read_readonly_scalar_from_binary(addr, out.size)
                 {
-                    Ok(HirExpr::Const(
+                    Ok(DirExpr::Const(
                         value as i64,
                         type_from_size(out.size, false),
                     ))
                 } else {
-                    Ok(HirExpr::Load {
+                    Ok(DirExpr::Load {
                         ptr: Box::new(self.lower_varnode(&op.inputs[1], visiting)?),
                         ty: type_from_size(out.size, false),
                     })
@@ -2846,7 +2846,7 @@ impl<'a> PreviewBuilder<'a> {
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
-                Ok(HirExpr::Cast {
+                Ok(DirExpr::Cast {
                     ty: float_type_from_size(output.size),
                     expr: Box::new(expr),
                 })
@@ -2862,7 +2862,7 @@ impl<'a> PreviewBuilder<'a> {
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
-                Ok(HirExpr::Cast {
+                Ok(DirExpr::Cast {
                     ty: type_from_size(output.size, true),
                     expr: Box::new(expr),
                 })
@@ -2873,8 +2873,8 @@ impl<'a> PreviewBuilder<'a> {
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
-                Ok(HirExpr::Unary {
-                    op: HirUnaryOp::Neg,
+                Ok(DirExpr::Unary {
+                    op: DirUnaryOp::Neg,
                     expr: Box::new(expr),
                     ty: float_type_from_size(output.size),
                 })
@@ -2917,12 +2917,12 @@ impl<'a> PreviewBuilder<'a> {
                     .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
                 let ty = type_from_size(output.size, false);
                 let op = match op.opcode {
-                    PcodeOpcode::IntNegate => HirUnaryOp::BitNot,
-                    PcodeOpcode::BoolNegate => HirUnaryOp::Not,
-                    PcodeOpcode::Int2Comp => HirUnaryOp::Neg,
+                    PcodeOpcode::IntNegate => DirUnaryOp::BitNot,
+                    PcodeOpcode::BoolNegate => DirUnaryOp::Not,
+                    PcodeOpcode::Int2Comp => DirUnaryOp::Neg,
                     _ => return Err(MlilPreviewError::UnsupportedExprVarnodeLowering),
                 };
-                Ok(HirExpr::Unary {
+                Ok(DirExpr::Unary {
                     op,
                     expr: Box::new(expr),
                     ty,
@@ -3000,8 +3000,8 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
-        let mut lowered: Vec<Option<HirExpr>> = Vec::with_capacity(op.inputs.len());
+    ) -> Result<DirExpr, MlilPreviewError> {
+        let mut lowered: Vec<Option<DirExpr>> = Vec::with_capacity(op.inputs.len());
         for input in &op.inputs {
             match self.lower_varnode(input, visiting) {
                 Ok(expr) => lowered.push(Some(expr)),
@@ -3010,7 +3010,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         // Collect only the successfully-lowered expressions.
-        let resolved: Vec<&HirExpr> = lowered.iter().filter_map(Option::as_ref).collect();
+        let resolved: Vec<&DirExpr> = lowered.iter().filter_map(Option::as_ref).collect();
 
         if resolved.is_empty() {
             // All inputs failed — nothing to coalesce.
@@ -3036,7 +3036,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let base = self.lower_varnode(&op.inputs[0], visiting)?;
         let offset = if op.inputs.len() > 1 && op.inputs[1].is_constant {
             op.inputs[1].constant_val
@@ -3046,7 +3046,7 @@ impl<'a> PreviewBuilder<'a> {
         if op.opcode == PcodeOpcode::PtrAdd && op.inputs.len() > 2 && op.inputs[2].is_constant {
             let index = self.lower_varnode(&op.inputs[1], visiting)?;
             let elem_ty = type_from_size(op.inputs[2].constant_val as u32, false);
-            return Ok(HirExpr::Index {
+            return Ok(DirExpr::Index {
                 base: Box::new(base),
                 index: Box::new(index),
                 elem_ty,
@@ -3062,18 +3062,18 @@ impl<'a> PreviewBuilder<'a> {
                 .as_ref()
                 .ok_or(MlilPreviewError::UnsupportedExprPtrArithmetic)?;
             let arith_op = if op.opcode == PcodeOpcode::PtrAdd {
-                HirBinaryOp::Add
+                DirBinaryOp::Add
             } else {
-                HirBinaryOp::Sub
+                DirBinaryOp::Sub
             };
-            return Ok(HirExpr::Binary {
+            return Ok(DirExpr::Binary {
                 op: arith_op,
                 lhs: Box::new(base),
                 rhs: Box::new(rhs),
                 ty: type_from_size(output.size, false),
             });
         }
-        Ok(HirExpr::PtrOffset {
+        Ok(DirExpr::PtrOffset {
             base: Box::new(base),
             offset,
         })
@@ -3083,7 +3083,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
             return Err(MlilPreviewError::UnsupportedExprVarnodeLowering);
         }
@@ -3094,7 +3094,7 @@ impl<'a> PreviewBuilder<'a> {
                 .output
                 .as_ref()
                 .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
-            return Ok(HirExpr::Const(0, type_from_size(output.size, false)));
+            return Ok(DirExpr::Const(0, type_from_size(output.size, false)));
         }
         // x86 CDQ + IDIV: dividend is Piece(sign_fill(L), L). Use signed L alone.
         if matches!(op.opcode, PcodeOpcode::IntSRem | PcodeOpcode::IntSDiv)
@@ -3113,15 +3113,15 @@ impl<'a> PreviewBuilder<'a> {
                 .saturating_mul(8)
                 .max(output.size.saturating_mul(8));
             let ty = NirType::Int { bits, signed: true };
-            let lhs = HirExpr::Cast {
+            let lhs = DirExpr::Cast {
                 ty: ty.clone(),
                 expr: Box::new(lhs),
             };
-            let rhs = HirExpr::Cast {
+            let rhs = DirExpr::Cast {
                 ty: ty.clone(),
                 expr: Box::new(rhs),
             };
-            return Ok(HirExpr::Binary {
+            return Ok(DirExpr::Binary {
                 op: map_binary_op(op.opcode)?,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
@@ -3147,7 +3147,7 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             pcode_output_type_from_size(op.opcode, output.size)
         };
-        Ok(HirExpr::Binary {
+        Ok(DirExpr::Binary {
             op: map_binary_op(op.opcode)?,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),

@@ -258,17 +258,17 @@ fn piece_recombines_matching_subpieces_back_to_source_value() {
 #[test]
 fn redundant_adjacent_labels_are_folded_to_canonical_target() {
     let body = vec![
-        HirStmt::Label("block_1000".to_string()),
-        HirStmt::Label("block_1004".to_string()),
-        HirStmt::Goto("block_1000".to_string()),
+        DirStmt::Label("block_1000".to_string()),
+        DirStmt::Label("block_1004".to_string()),
+        DirStmt::Goto("block_1000".to_string()),
     ];
 
     let cleaned = cleanup_redundant_labels(body, None);
     assert_eq!(
         cleaned,
         vec![
-            HirStmt::Label("block_1004".to_string()),
-            HirStmt::Goto("block_1004".to_string()),
+            DirStmt::Label("block_1004".to_string()),
+            DirStmt::Goto("block_1004".to_string()),
         ]
     );
 }
@@ -276,38 +276,38 @@ fn redundant_adjacent_labels_are_folded_to_canonical_target() {
 #[test]
 fn normalize_removes_constant_false_and_empty_if_residue() {
     let mut body = vec![
-        HirStmt::If {
-            cond: HirExpr::Unary {
-                op: HirUnaryOp::Not,
-                expr: Box::new(HirExpr::Var("reg".to_string())),
+        DirStmt::If {
+            cond: DirExpr::Unary {
+                op: DirUnaryOp::Not,
+                expr: Box::new(DirExpr::Var("reg".to_string())),
                 ty: NirType::Bool,
             },
             then_body: Vec::new(),
             else_body: Vec::new(),
         },
-        HirStmt::If {
-            cond: HirExpr::Const(0, NirType::Bool),
-            then_body: vec![HirStmt::Goto("block_aa0".to_string())],
+        DirStmt::If {
+            cond: DirExpr::Const(0, NirType::Bool),
+            then_body: vec![DirStmt::Goto("block_aa0".to_string())],
             else_body: Vec::new(),
         },
-        HirStmt::Label("block_keep".to_string()),
+        DirStmt::Label("block_keep".to_string()),
     ];
 
     normalize_function_body(&mut body);
 
-    assert_eq!(body, vec![HirStmt::Label("block_keep".to_string())]);
+    assert_eq!(body, vec![DirStmt::Label("block_keep".to_string())]);
 }
 
 #[test]
 fn normalize_removes_if_goto_immediate_next_label() {
     let mut body = vec![
-        HirStmt::If {
-            cond: HirExpr::Var("reg".to_string()),
-            then_body: vec![HirStmt::Goto("block_join".to_string())],
+        DirStmt::If {
+            cond: DirExpr::Var("reg".to_string()),
+            then_body: vec![DirStmt::Goto("block_join".to_string())],
             else_body: Vec::new(),
         },
-        HirStmt::Label("block_join".to_string()),
-        HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+        DirStmt::Label("block_join".to_string()),
+        DirStmt::Return(Some(DirExpr::Var("reg".to_string()))),
     ];
 
     normalize_function_body(&mut body);
@@ -315,8 +315,8 @@ fn normalize_removes_if_goto_immediate_next_label() {
     assert_eq!(
         body,
         vec![
-            HirStmt::Label("block_join".to_string()),
-            HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+            DirStmt::Label("block_join".to_string()),
+            DirStmt::Return(Some(DirExpr::Var("reg".to_string()))),
         ]
     );
 }
@@ -324,21 +324,21 @@ fn normalize_removes_if_goto_immediate_next_label() {
 #[test]
 fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch() {
     let mut body = vec![
-        HirStmt::If {
-            cond: HirExpr::Var("reg".to_string()),
-            then_body: vec![HirStmt::Goto("block_exit".to_string())],
-            else_body: vec![HirStmt::Goto("block_fallthrough".to_string())],
+        DirStmt::If {
+            cond: DirExpr::Var("reg".to_string()),
+            then_body: vec![DirStmt::Goto("block_exit".to_string())],
+            else_body: vec![DirStmt::Goto("block_fallthrough".to_string())],
         },
-        HirStmt::Label("block_fallthrough".to_string()),
-        HirStmt::Return(Some(HirExpr::Const(
+        DirStmt::Label("block_fallthrough".to_string()),
+        DirStmt::Return(Some(DirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
                 signed: false,
             },
         ))),
-        HirStmt::Label("block_exit".to_string()),
-        HirStmt::Return(Some(HirExpr::Const(
+        DirStmt::Label("block_exit".to_string()),
+        DirStmt::Return(Some(DirExpr::Const(
             1,
             NirType::Int {
                 bits: 32,
@@ -352,13 +352,13 @@ fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch()
     assert_eq!(
         body,
         vec![
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("reg".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("reg".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                then_body: vec![DirStmt::Return(Some(DirExpr::Const(
                     0,
                     NirType::Int {
                         bits: 32,
@@ -367,7 +367,7 @@ fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch()
                 )))],
                 else_body: Vec::new(),
             },
-            HirStmt::Return(Some(HirExpr::Const(
+            DirStmt::Return(Some(DirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 32,
@@ -381,9 +381,9 @@ fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch()
 #[test]
 fn normalize_removes_unreferenced_leading_entry_label() {
     let mut body = vec![
-        HirStmt::Label("block_entry".to_string()),
-        HirStmt::Expr(HirExpr::Var("reg".to_string())),
-        HirStmt::Return(Some(HirExpr::Const(
+        DirStmt::Label("block_entry".to_string()),
+        DirStmt::Expr(DirExpr::Var("reg".to_string())),
+        DirStmt::Return(Some(DirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -397,8 +397,8 @@ fn normalize_removes_unreferenced_leading_entry_label() {
     assert_eq!(
         body,
         vec![
-            HirStmt::Expr(HirExpr::Var("reg".to_string())),
-            HirStmt::Return(Some(HirExpr::Const(
+            DirStmt::Expr(DirExpr::Var("reg".to_string())),
+            DirStmt::Return(Some(DirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
@@ -412,14 +412,14 @@ fn normalize_removes_unreferenced_leading_entry_label() {
 #[test]
 fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
     let mut body = vec![
-        HirStmt::If {
-            cond: HirExpr::Var("reg".to_string()),
-            then_body: vec![HirStmt::Goto("block_join".to_string())],
+        DirStmt::If {
+            cond: DirExpr::Var("reg".to_string()),
+            then_body: vec![DirStmt::Goto("block_join".to_string())],
             else_body: Vec::new(),
         },
-        HirStmt::Assign {
-            lhs: HirLValue::Var("tmp_1".to_string()),
-            rhs: HirExpr::Const(
+        DirStmt::Assign {
+            lhs: DirLValue::Var("tmp_1".to_string()),
+            rhs: DirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 32,
@@ -427,9 +427,9 @@ fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
                 },
             ),
         },
-        HirStmt::Expr(HirExpr::Var("tmp_1".to_string())),
-        HirStmt::Label("block_join".to_string()),
-        HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+        DirStmt::Expr(DirExpr::Var("tmp_1".to_string())),
+        DirStmt::Label("block_join".to_string()),
+        DirStmt::Return(Some(DirExpr::Var("reg".to_string()))),
     ];
 
     normalize_function_body(&mut body);
@@ -437,16 +437,16 @@ fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
     assert_eq!(
         body,
         vec![
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("reg".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("reg".to_string())),
                     ty: NirType::Bool,
                 },
                 then_body: vec![
-                    HirStmt::Assign {
-                        lhs: HirLValue::Var("tmp_1".to_string()),
-                        rhs: HirExpr::Const(
+                    DirStmt::Assign {
+                        lhs: DirLValue::Var("tmp_1".to_string()),
+                        rhs: DirExpr::Const(
                             1,
                             NirType::Int {
                                 bits: 32,
@@ -454,11 +454,11 @@ fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
                             },
                         ),
                     },
-                    HirStmt::Expr(HirExpr::Var("tmp_1".to_string())),
+                    DirStmt::Expr(DirExpr::Var("tmp_1".to_string())),
                 ],
                 else_body: Vec::new(),
             },
-            HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+            DirStmt::Return(Some(DirExpr::Var("reg".to_string()))),
         ]
     );
 }
@@ -466,19 +466,19 @@ fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
 #[test]
 fn normalize_fuses_boundary_segment_with_nested_if() {
     let mut body = vec![
-        HirStmt::If {
-            cond: HirExpr::Var("reg".to_string()),
-            then_body: vec![HirStmt::Goto("block_join".to_string())],
+        DirStmt::If {
+            cond: DirExpr::Var("reg".to_string()),
+            then_body: vec![DirStmt::Goto("block_join".to_string())],
             else_body: Vec::new(),
         },
-        HirStmt::Expr(HirExpr::Var("pre".to_string())),
-        HirStmt::If {
-            cond: HirExpr::Var("flag".to_string()),
-            then_body: vec![HirStmt::Expr(HirExpr::Var("body".to_string()))],
+        DirStmt::Expr(DirExpr::Var("pre".to_string())),
+        DirStmt::If {
+            cond: DirExpr::Var("flag".to_string()),
+            then_body: vec![DirStmt::Expr(DirExpr::Var("body".to_string()))],
             else_body: Vec::new(),
         },
-        HirStmt::Label("block_join".to_string()),
-        HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+        DirStmt::Label("block_join".to_string()),
+        DirStmt::Return(Some(DirExpr::Var("reg".to_string()))),
     ];
 
     normalize_function_body(&mut body);
@@ -486,23 +486,23 @@ fn normalize_fuses_boundary_segment_with_nested_if() {
     assert_eq!(
         body,
         vec![
-            HirStmt::If {
-                cond: HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Var("reg".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Var("reg".to_string())),
                     ty: NirType::Bool,
                 },
                 then_body: vec![
-                    HirStmt::Expr(HirExpr::Var("pre".to_string())),
-                    HirStmt::If {
-                        cond: HirExpr::Var("flag".to_string()),
-                        then_body: vec![HirStmt::Expr(HirExpr::Var("body".to_string()))],
+                    DirStmt::Expr(DirExpr::Var("pre".to_string())),
+                    DirStmt::If {
+                        cond: DirExpr::Var("flag".to_string()),
+                        then_body: vec![DirStmt::Expr(DirExpr::Var("body".to_string()))],
                         else_body: Vec::new(),
                     },
                 ],
                 else_body: Vec::new(),
             },
-            HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+            DirStmt::Return(Some(DirExpr::Var("reg".to_string()))),
         ]
     );
 }
@@ -510,20 +510,20 @@ fn normalize_fuses_boundary_segment_with_nested_if() {
 #[test]
 fn normalize_promotes_guarded_jump_target_tail() {
     let mut body = vec![
-        HirStmt::If {
-            cond: HirExpr::Var("cond_a".to_string()),
-            then_body: vec![HirStmt::Goto("block_body".to_string())],
+        DirStmt::If {
+            cond: DirExpr::Var("cond_a".to_string()),
+            then_body: vec![DirStmt::Goto("block_body".to_string())],
             else_body: Vec::new(),
         },
-        HirStmt::If {
-            cond: HirExpr::Var("cond_b".to_string()),
-            then_body: vec![HirStmt::Goto("block_join".to_string())],
+        DirStmt::If {
+            cond: DirExpr::Var("cond_b".to_string()),
+            then_body: vec![DirStmt::Goto("block_join".to_string())],
             else_body: Vec::new(),
         },
-        HirStmt::Label("block_body".to_string()),
-        HirStmt::Expr(HirExpr::Var("body".to_string())),
-        HirStmt::Label("block_join".to_string()),
-        HirStmt::Return(Some(HirExpr::Const(
+        DirStmt::Label("block_body".to_string()),
+        DirStmt::Expr(DirExpr::Var("body".to_string())),
+        DirStmt::Label("block_join".to_string()),
+        DirStmt::Return(Some(DirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -537,21 +537,21 @@ fn normalize_promotes_guarded_jump_target_tail() {
     assert_eq!(
         body,
         vec![
-            HirStmt::If {
-                cond: HirExpr::Binary {
-                    op: HirBinaryOp::LogicalOr,
-                    lhs: Box::new(HirExpr::Var("cond_a".to_string())),
-                    rhs: Box::new(HirExpr::Unary {
-                        op: HirUnaryOp::Not,
-                        expr: Box::new(HirExpr::Var("cond_b".to_string())),
+            DirStmt::If {
+                cond: DirExpr::Binary {
+                    op: DirBinaryOp::LogicalOr,
+                    lhs: Box::new(DirExpr::Var("cond_a".to_string())),
+                    rhs: Box::new(DirExpr::Unary {
+                        op: DirUnaryOp::Not,
+                        expr: Box::new(DirExpr::Var("cond_b".to_string())),
                         ty: NirType::Bool,
                     }),
                     ty: NirType::Bool,
                 },
-                then_body: vec![HirStmt::Expr(HirExpr::Var("body".to_string()))],
+                then_body: vec![DirStmt::Expr(DirExpr::Var("body".to_string()))],
                 else_body: Vec::new(),
             },
-            HirStmt::Return(Some(HirExpr::Const(
+            DirStmt::Return(Some(DirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,

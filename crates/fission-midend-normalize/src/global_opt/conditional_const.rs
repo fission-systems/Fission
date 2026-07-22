@@ -9,7 +9,7 @@ use crate::{HashMap, HashSet};
 /// variable that is fully decided by dominating conditions folds to a constant;
 /// the cleanup family (`simplify_empty_and_constant_ifs`) then removes the dead
 /// arm. This is what erases re-tests left behind by duplicated join tails.
-pub fn apply_conditional_const_pass(func: &mut HirFunction) -> bool {
+pub fn apply_conditional_const_pass(func: &mut DirFunction) -> bool {
     let mut binding_types = HashMap::default();
     for local in &func.locals {
         binding_types.insert(local.name.clone(), local.ty.clone());
@@ -57,18 +57,18 @@ enum CmpKind {
     Ne,
 }
 
-fn cmp_kind(op: HirBinaryOp) -> Option<CmpKind> {
+fn cmp_kind(op: DirBinaryOp) -> Option<CmpKind> {
     Some(match op {
-        HirBinaryOp::SLt => CmpKind::SLt,
-        HirBinaryOp::SLe => CmpKind::SLe,
-        HirBinaryOp::SGt => CmpKind::SGt,
-        HirBinaryOp::SGe => CmpKind::SGe,
-        HirBinaryOp::Lt => CmpKind::ULt,
-        HirBinaryOp::Le => CmpKind::ULe,
-        HirBinaryOp::Gt => CmpKind::UGt,
-        HirBinaryOp::Ge => CmpKind::UGe,
-        HirBinaryOp::Eq => CmpKind::Eq,
-        HirBinaryOp::Ne => CmpKind::Ne,
+        DirBinaryOp::SLt => CmpKind::SLt,
+        DirBinaryOp::SLe => CmpKind::SLe,
+        DirBinaryOp::SGt => CmpKind::SGt,
+        DirBinaryOp::SGe => CmpKind::SGe,
+        DirBinaryOp::Lt => CmpKind::ULt,
+        DirBinaryOp::Le => CmpKind::ULe,
+        DirBinaryOp::Gt => CmpKind::UGt,
+        DirBinaryOp::Ge => CmpKind::UGe,
+        DirBinaryOp::Eq => CmpKind::Eq,
+        DirBinaryOp::Ne => CmpKind::Ne,
         _ => return None,
     })
 }
@@ -157,16 +157,16 @@ fn unsigned_domain(bits: u32) -> Interval {
 }
 
 /// Decompose `var CMP const` (either operand order) into a var-on-left form.
-fn split_var_const_cmp(cond: &HirExpr) -> Option<(&str, CmpKind, i64, u32)> {
-    let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
+fn split_var_const_cmp(cond: &DirExpr) -> Option<(&str, CmpKind, i64, u32)> {
+    let DirExpr::Binary { op, lhs, rhs, .. } = cond else {
         return None;
     };
     let kind = cmp_kind(*op)?;
     match (lhs.as_ref(), rhs.as_ref()) {
-        (HirExpr::Var(name), HirExpr::Const(val, cty)) => {
+        (DirExpr::Var(name), DirExpr::Const(val, cty)) => {
             Some((name.as_str(), kind, *val, int_bits(cty)?))
         }
-        (HirExpr::Const(val, cty), HirExpr::Var(name)) => {
+        (DirExpr::Const(val, cty), DirExpr::Var(name)) => {
             Some((name.as_str(), flip_cmp(kind), *val, int_bits(cty)?))
         }
         _ => None,
@@ -229,10 +229,10 @@ fn apply_range_constraint(ranges: &mut RangeEnv, name: &str, kind: CmpKind, val:
 
 /// Collect relational constraints implied by `cond` holding (`is_then_branch`)
 /// or failing (else). Follows the same polarity rules as `extract_constraints`.
-fn extract_range_constraints(cond: &HirExpr, is_then_branch: bool, ranges: &mut RangeEnv) {
+fn extract_range_constraints(cond: &DirExpr, is_then_branch: bool, ranges: &mut RangeEnv) {
     match cond {
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
             lhs,
             rhs,
             ..
@@ -242,8 +242,8 @@ fn extract_range_constraints(cond: &HirExpr, is_then_branch: bool, ranges: &mut 
                 extract_range_constraints(rhs, true, ranges);
             }
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalOr,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalOr,
             lhs,
             rhs,
             ..
@@ -253,8 +253,8 @@ fn extract_range_constraints(cond: &HirExpr, is_then_branch: bool, ranges: &mut 
                 extract_range_constraints(rhs, false, ranges);
             }
         }
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } => {
@@ -271,7 +271,7 @@ fn extract_range_constraints(cond: &HirExpr, is_then_branch: bool, ranges: &mut 
 
 /// Decide `var CMP const` from inherited intervals: Some(true/false) only when
 /// every value in the interval agrees. Width must match the constraint slot.
-fn decide_cmp(ranges: &RangeEnv, cond: &HirExpr) -> Option<bool> {
+fn decide_cmp(ranges: &RangeEnv, cond: &DirExpr) -> Option<bool> {
     let (name, kind, val, bits) = split_var_const_cmp(cond)?;
     let entry = ranges.get(name)?;
 
@@ -364,13 +364,13 @@ fn decide_interval_ne(iv: Interval, c: i128) -> Option<bool> {
 
 /// Labels are jump targets; a decided-dead arm containing one cannot be
 /// discarded safely, so the fold is skipped in that case.
-fn stmts_contain_label(stmts: &[HirStmt]) -> bool {
+fn stmts_contain_label(stmts: &[DirStmt]) -> bool {
     stmts.iter().any(|stmt| match stmt {
-        HirStmt::Label(_) => true,
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => stmts_contain_label(body),
-        HirStmt::For {
+        DirStmt::Label(_) => true,
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. } => stmts_contain_label(body),
+        DirStmt::For {
             init, update, body, ..
         } => {
             init.as_deref()
@@ -380,12 +380,12 @@ fn stmts_contain_label(stmts: &[HirStmt]) -> bool {
                     .is_some_and(|s| stmts_contain_label(std::slice::from_ref(s)))
                 || stmts_contain_label(body)
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
         } => stmts_contain_label(then_body) || stmts_contain_label(else_body),
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             cases.iter().any(|c| stmts_contain_label(&c.body)) || stmts_contain_label(default)
         }
         _ => false,
@@ -393,8 +393,8 @@ fn stmts_contain_label(stmts: &[HirStmt]) -> bool {
 }
 
 fn visit_stmts(
-    stmts: &mut [HirStmt],
-    env: &mut HashMap<String, HirExpr>,
+    stmts: &mut [DirStmt],
+    env: &mut HashMap<String, DirExpr>,
     ranges: &mut RangeEnv,
     binding_types: &HashMap<String, NirType>,
 ) -> bool {
@@ -406,31 +406,31 @@ fn visit_stmts(
 }
 
 fn visit_stmt(
-    stmt: &mut HirStmt,
-    env: &mut HashMap<String, HirExpr>,
+    stmt: &mut DirStmt,
+    env: &mut HashMap<String, DirExpr>,
     ranges: &mut RangeEnv,
     binding_types: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             // 1. Substitute in RHS
             changed |= substitute_expr(rhs, env);
             // 2. Substitute in LHS (indices / dereferences)
             changed |= substitute_lvalue(lhs, env);
             // 3. Invalidate written variable in env
-            if let HirLValue::Var(name) = lhs {
+            if let DirLValue::Var(name) = lhs {
                 env.remove(name);
                 ranges.remove(name);
             }
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             changed |= substitute_expr(expr, env);
         }
-        HirStmt::Block(body) => {
+        DirStmt::Block(body) => {
             changed |= visit_stmts(body, env, ranges, binding_types);
         }
-        HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+        DirStmt::While { cond, body } | DirStmt::DoWhile { cond, body } => {
             changed |= substitute_expr(cond, env);
 
             let mut loop_env = env.clone();
@@ -448,7 +448,7 @@ fn visit_stmt(
                 ranges.remove(v);
             }
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -484,7 +484,7 @@ fn visit_stmt(
                 ranges.remove(v);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -504,13 +504,13 @@ fn visit_stmt(
             // Fold a condition fully decided by dominating constraints; the
             // constant-if cleanup drops the dead arm afterwards.
             if let Some(decided) = decide_cmp(ranges, cond) {
-                let discarded: &[HirStmt] = if decided { else_body } else { then_body };
+                let discarded: &[DirStmt] = if decided { else_body } else { then_body };
                 if !stmts_contain_label(discarded) {
                     let cond_ty = match cond {
-                        HirExpr::Binary { ty, .. } => ty.clone(),
+                        DirExpr::Binary { ty, .. } => ty.clone(),
                         _ => NirType::Bool,
                     };
-                    *cond = HirExpr::Const(i64::from(decided), cond_ty);
+                    *cond = DirExpr::Const(i64::from(decided), cond_ty);
                     changed = true;
                 }
             }
@@ -528,7 +528,7 @@ fn visit_stmt(
                 ranges.remove(v);
             }
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -537,11 +537,11 @@ fn visit_stmt(
             for case in &mut *cases {
                 let mut case_env = env.clone();
                 let mut case_ranges = ranges.clone();
-                if let HirExpr::Var(x) = expr {
+                if let DirExpr::Var(x) = expr {
                     if case.values.len() == 1 {
                         let val = case.values[0];
                         if let Some(ty) = binding_types.get(x) {
-                            case_env.insert(x.clone(), HirExpr::Const(val, ty.clone()));
+                            case_env.insert(x.clone(), DirExpr::Const(val, ty.clone()));
                             if let Some(bits) = int_bits(ty) {
                                 apply_range_constraint(
                                     &mut case_ranges,
@@ -567,7 +567,7 @@ fn visit_stmt(
                 ranges.remove(v);
             }
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             changed |= substitute_expr(va_list, env);
         }
         _ => {}
@@ -575,33 +575,33 @@ fn visit_stmt(
     changed
 }
 
-fn substitute_expr(expr: &mut HirExpr, env: &HashMap<String, HirExpr>) -> bool {
+fn substitute_expr(expr: &mut DirExpr, env: &HashMap<String, DirExpr>) -> bool {
     let mut changed = false;
     match expr {
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             if let Some(cst) = env.get(name) {
                 *expr = cst.clone();
                 changed = true;
             }
         }
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             changed |= substitute_expr(inner, env);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= substitute_expr(lhs, env);
             changed |= substitute_expr(rhs, env);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= substitute_expr(arg, env);
             }
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -611,73 +611,73 @@ fn substitute_expr(expr: &mut HirExpr, env: &HashMap<String, HirExpr>) -> bool {
             changed |= substitute_expr(then_expr, env);
             changed |= substitute_expr(else_expr, env);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= substitute_expr(base, env);
             changed |= substitute_expr(index, env);
         }
-        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
     changed
 }
 
-fn substitute_lvalue(lval: &mut HirLValue, env: &HashMap<String, HirExpr>) -> bool {
+fn substitute_lvalue(lval: &mut DirLValue, env: &HashMap<String, DirExpr>) -> bool {
     let mut changed = false;
     match lval {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => {
             changed |= substitute_expr(ptr, env);
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             changed |= substitute_expr(base, env);
             changed |= substitute_expr(index, env);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             changed |= substitute_expr(base, env);
         }
     }
     changed
 }
 
-fn extract_constraints(cond: &HirExpr, is_then_branch: bool, env: &mut HashMap<String, HirExpr>) {
+fn extract_constraints(cond: &DirExpr, is_then_branch: bool, env: &mut HashMap<String, DirExpr>) {
     match cond {
-        HirExpr::Binary {
-            op: HirBinaryOp::Eq,
+        DirExpr::Binary {
+            op: DirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } => {
             if is_then_branch {
                 match (lhs.as_ref(), rhs.as_ref()) {
-                    (HirExpr::Var(name), HirExpr::Const(val, ty)) => {
-                        env.insert(name.clone(), HirExpr::Const(*val, ty.clone()));
+                    (DirExpr::Var(name), DirExpr::Const(val, ty)) => {
+                        env.insert(name.clone(), DirExpr::Const(*val, ty.clone()));
                     }
-                    (HirExpr::Const(val, ty), HirExpr::Var(name)) => {
-                        env.insert(name.clone(), HirExpr::Const(*val, ty.clone()));
+                    (DirExpr::Const(val, ty), DirExpr::Var(name)) => {
+                        env.insert(name.clone(), DirExpr::Const(*val, ty.clone()));
                     }
                     _ => {}
                 }
             }
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::Ne,
+        DirExpr::Binary {
+            op: DirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } => {
             if !is_then_branch {
                 match (lhs.as_ref(), rhs.as_ref()) {
-                    (HirExpr::Var(name), HirExpr::Const(val, ty)) => {
-                        env.insert(name.clone(), HirExpr::Const(*val, ty.clone()));
+                    (DirExpr::Var(name), DirExpr::Const(val, ty)) => {
+                        env.insert(name.clone(), DirExpr::Const(*val, ty.clone()));
                     }
-                    (HirExpr::Const(val, ty), HirExpr::Var(name)) => {
-                        env.insert(name.clone(), HirExpr::Const(*val, ty.clone()));
+                    (DirExpr::Const(val, ty), DirExpr::Var(name)) => {
+                        env.insert(name.clone(), DirExpr::Const(*val, ty.clone()));
                     }
                     _ => {}
                 }
             }
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
             lhs,
             rhs,
             ..
@@ -687,8 +687,8 @@ fn extract_constraints(cond: &HirExpr, is_then_branch: bool, env: &mut HashMap<S
                 extract_constraints(rhs, is_then_branch, env);
             }
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalOr,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalOr,
             lhs,
             rhs,
             ..
@@ -698,8 +698,8 @@ fn extract_constraints(cond: &HirExpr, is_then_branch: bool, env: &mut HashMap<S
                 extract_constraints(rhs, is_then_branch, env);
             }
         }
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } => {
@@ -709,20 +709,20 @@ fn extract_constraints(cond: &HirExpr, is_then_branch: bool, env: &mut HashMap<S
     }
 }
 
-fn collect_written_vars(stmts: &[HirStmt], written: &mut HashSet<String>) {
+fn collect_written_vars(stmts: &[DirStmt], written: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 collect_written_vars_lvalue(lhs, written);
                 collect_written_vars_expr(rhs, written);
             }
-            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
                 collect_written_vars_expr(expr, written);
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 collect_written_vars(body, written);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -739,7 +739,7 @@ fn collect_written_vars(stmts: &[HirStmt], written: &mut HashSet<String>) {
                 }
                 collect_written_vars(body, written);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -748,7 +748,7 @@ fn collect_written_vars(stmts: &[HirStmt], written: &mut HashSet<String>) {
                 collect_written_vars(then_body, written);
                 collect_written_vars(else_body, written);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -759,7 +759,7 @@ fn collect_written_vars(stmts: &[HirStmt], written: &mut HashSet<String>) {
                 }
                 collect_written_vars(default, written);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 collect_written_vars_expr(va_list, written);
             }
             _ => {}
@@ -767,44 +767,44 @@ fn collect_written_vars(stmts: &[HirStmt], written: &mut HashSet<String>) {
     }
 }
 
-fn collect_written_vars_lvalue(lval: &HirLValue, written: &mut HashSet<String>) {
+fn collect_written_vars_lvalue(lval: &DirLValue, written: &mut HashSet<String>) {
     match lval {
-        HirLValue::Var(name) => {
+        DirLValue::Var(name) => {
             written.insert(name.clone());
         }
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Deref { ptr, .. } => {
             collect_written_vars_expr(ptr, written);
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             collect_written_vars_expr(base, written);
             collect_written_vars_expr(index, written);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             collect_written_vars_expr(base, written);
         }
     }
 }
 
-fn collect_written_vars_expr(expr: &HirExpr, written: &mut HashSet<String>) {
+fn collect_written_vars_expr(expr: &DirExpr, written: &mut HashSet<String>) {
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             collect_written_vars_expr(inner, written);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             collect_written_vars_expr(lhs, written);
             collect_written_vars_expr(rhs, written);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 collect_written_vars_expr(arg, written);
             }
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -814,7 +814,7 @@ fn collect_written_vars_expr(expr: &HirExpr, written: &mut HashSet<String>) {
             collect_written_vars_expr(then_expr, written);
             collect_written_vars_expr(else_expr, written);
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             collect_written_vars_expr(base, written);
             collect_written_vars_expr(index, written);
         }

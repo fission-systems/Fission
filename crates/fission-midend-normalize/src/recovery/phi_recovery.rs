@@ -38,7 +38,7 @@ use crate::{HashMap, HashSet};
 /// `x` with `y` and removing the assignment.
 ///
 /// Returns `true` if any substitution was made.
-pub fn copy_propagation_pass(func: &mut HirFunction) -> bool {
+pub fn copy_propagation_pass(func: &mut DirFunction) -> bool {
     let mut changed = false;
     let loop_preservation_vars = collect_loop_preservation_vars(&func.body);
 
@@ -136,11 +136,11 @@ mod tests {
 
     #[test]
     fn copy_propagation_skips_preserved_temp_alias() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test_copy_prop_preserved".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
-            locals: vec![NirBinding {
+            locals: vec![DirBinding {
                 name: "uVar0".to_string(),
                 ty: int(32),
                 surface_type_name: None,
@@ -150,26 +150,26 @@ mod tests {
             return_type: int(32),
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("uVar0".to_string()),
-                    rhs: HirExpr::Var("eax".to_string()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("uVar0".to_string()),
+                    rhs: DirExpr::Var("eax".to_string()),
                 },
-                HirStmt::If {
-                    cond: HirExpr::Binary {
-                        op: HirBinaryOp::Eq,
-                        lhs: Box::new(HirExpr::Var("uVar0".to_string())),
-                        rhs: Box::new(HirExpr::Const(0, int(32))),
+                DirStmt::If {
+                    cond: DirExpr::Binary {
+                        op: DirBinaryOp::Eq,
+                        lhs: Box::new(DirExpr::Var("uVar0".to_string())),
+                        rhs: Box::new(DirExpr::Const(0, int(32))),
                         ty: NirType::Bool,
                     },
-                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(1, int(32))))],
-                    else_body: vec![HirStmt::Return(Some(HirExpr::Const(0, int(32))))],
+                    then_body: vec![DirStmt::Return(Some(DirExpr::Const(1, int(32))))],
+                    else_body: vec![DirStmt::Return(Some(DirExpr::Const(0, int(32))))],
                 },
             ],
             ..Default::default()
         };
 
         assert!(!copy_propagation_pass(&mut func));
-        let HirStmt::If { cond, .. } = &func.body[1] else {
+        let DirStmt::If { cond, .. } = &func.body[1] else {
             panic!("expected preserved temp consumer to stay in the if condition");
         };
         assert!(format_expr_key(cond).contains("uVar0"));
@@ -177,19 +177,19 @@ mod tests {
 
     #[test]
     fn copy_propagation_skips_single_use_alias_of_preserved_source() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test_copy_prop_preserved_source".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![
-                NirBinding {
+                DirBinding {
                     name: "uVar0".to_string(),
                     ty: int(32),
                     surface_type_name: None,
                     origin: Some(preserved_binding_origin()),
                     initializer: None,
                 },
-                NirBinding {
+                DirBinding {
                     name: "uVar1".to_string(),
                     ty: int(32),
                     surface_type_name: None,
@@ -200,11 +200,11 @@ mod tests {
             return_type: int(32),
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("uVar1".to_string()),
-                    rhs: HirExpr::Var("uVar0".to_string()),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("uVar1".to_string()),
+                    rhs: DirExpr::Var("uVar0".to_string()),
                 },
-                HirStmt::Return(Some(HirExpr::Var("uVar1".to_string()))),
+                DirStmt::Return(Some(DirExpr::Var("uVar1".to_string()))),
             ],
             ..Default::default()
         };
@@ -213,17 +213,17 @@ mod tests {
         assert_eq!(func.body.len(), 2);
         assert!(matches!(
             &func.body[1],
-            HirStmt::Return(Some(HirExpr::Var(name))) if name == "uVar1"
+            DirStmt::Return(Some(DirExpr::Var(name))) if name == "uVar1"
         ));
     }
 
     #[test]
     fn constant_propagation_eliminates_unused_local_constant() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test_const_prop".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
-            locals: vec![NirBinding {
+            locals: vec![DirBinding {
                 name: "local_c".to_string(),
                 ty: int(32),
                 surface_type_name: None,
@@ -233,11 +233,11 @@ mod tests {
             return_type: int(32),
             surface_return_type_name: None,
             body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Var("local_c".to_string()),
-                    rhs: HirExpr::Const(0, int(32)),
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("local_c".to_string()),
+                    rhs: DirExpr::Const(0, int(32)),
                 },
-                HirStmt::Return(Some(HirExpr::Var("local_c".to_string()))),
+                DirStmt::Return(Some(DirExpr::Var("local_c".to_string()))),
             ],
             ..Default::default()
         };
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(func.body.len(), 1);
         assert!(matches!(
             &func.body[0],
-            HirStmt::Return(Some(HirExpr::Const(0, _)))
+            DirStmt::Return(Some(DirExpr::Const(0, _)))
         ));
         assert!(func.locals.is_empty());
     }
@@ -255,7 +255,7 @@ mod tests {
 /// Count definition sites (assignments to LHS Var(name)) for each name in
 /// `temp_names` across the entire body.
 fn count_definitions_in_stmts<'a>(
-    stmts: &'a [HirStmt],
+    stmts: &'a [DirStmt],
     temp_names: &HashSet<&str>,
 ) -> HashMap<&'a str, usize> {
     let mut counts: HashMap<&'a str, usize> = HashMap::default();
@@ -266,25 +266,25 @@ fn count_definitions_in_stmts<'a>(
 }
 
 fn count_defs_stmt<'a>(
-    stmt: &'a HirStmt,
+    stmt: &'a DirStmt,
     temps: &HashSet<&str>,
     counts: &mut HashMap<&'a str, usize>,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             ..
         } => {
             // Count definitions for ALL variables (not just temps) so we can
             // validate the source variable y.
             *counts.entry(name.as_str()).or_default() += 1;
         }
-        HirStmt::Block(stmts) => {
+        DirStmt::Block(stmts) => {
             for s in stmts {
                 count_defs_stmt(s, temps, counts);
             }
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -296,12 +296,12 @@ fn count_defs_stmt<'a>(
                 count_defs_stmt(s, temps, counts);
             }
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             for s in body {
                 count_defs_stmt(s, temps, counts);
             }
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -314,7 +314,7 @@ fn count_defs_stmt<'a>(
                 count_defs_stmt(s, temps, counts);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for s in &case.body {
                     count_defs_stmt(s, temps, counts);
@@ -331,7 +331,7 @@ fn count_defs_stmt<'a>(
 /// Collect copy assignments `x = Var(y)` where x is a pure temp with exactly
 /// one definition.
 fn collect_copies<'a>(
-    stmts: &'a [HirStmt],
+    stmts: &'a [DirStmt],
     temp_names: &HashSet<&str>,
     def_count: &HashMap<&'a str, usize>,
     copy_map: &mut HashMap<String, String>,
@@ -342,23 +342,23 @@ fn collect_copies<'a>(
 }
 
 fn collect_copies_stmt<'a>(
-    stmt: &'a HirStmt,
+    stmt: &'a DirStmt,
     temp_names: &HashSet<&str>,
     def_count: &HashMap<&'a str, usize>,
     copy_map: &mut HashMap<String, String>,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs: HirExpr::Var(src),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
+            rhs: DirExpr::Var(src),
         } if temp_names.contains(name.as_str())
             && def_count.get(name.as_str()).copied().unwrap_or(0) == 1
             && name != src =>
         {
             copy_map.insert(name.clone(), src.clone());
         }
-        HirStmt::Block(stmts) => collect_copies(stmts, temp_names, def_count, copy_map),
-        HirStmt::If {
+        DirStmt::Block(stmts) => collect_copies(stmts, temp_names, def_count, copy_map),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -366,10 +366,10 @@ fn collect_copies_stmt<'a>(
             collect_copies(then_body, temp_names, def_count, copy_map);
             collect_copies(else_body, temp_names, def_count, copy_map);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             collect_copies(body, temp_names, def_count, copy_map);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -380,7 +380,7 @@ fn collect_copies_stmt<'a>(
             }
             collect_copies(body, temp_names, def_count, copy_map);
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 collect_copies(&case.body, temp_names, def_count, copy_map);
             }
@@ -390,15 +390,15 @@ fn collect_copies_stmt<'a>(
     }
 }
 
-fn collect_predicate_vars_in_stmts<'a>(stmts: &'a [HirStmt], out: &mut HashSet<&'a str>) {
+fn collect_predicate_vars_in_stmts<'a>(stmts: &'a [DirStmt], out: &mut HashSet<&'a str>) {
     for stmt in stmts {
         collect_predicate_vars_in_stmt(stmt, out);
     }
 }
 
-fn collect_predicate_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
+fn collect_predicate_vars_in_stmt<'a>(stmt: &'a DirStmt, out: &mut HashSet<&'a str>) {
     match stmt {
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -407,15 +407,15 @@ fn collect_predicate_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a s
             collect_predicate_vars_in_stmts(then_body, out);
             collect_predicate_vars_in_stmts(else_body, out);
         }
-        HirStmt::While { cond, body } => {
+        DirStmt::While { cond, body } => {
             collect_vars_in_expr(cond, out);
             collect_predicate_vars_in_stmts(body, out);
         }
-        HirStmt::DoWhile { body, cond } => {
+        DirStmt::DoWhile { body, cond } => {
             collect_predicate_vars_in_stmts(body, out);
             collect_vars_in_expr(cond, out);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -432,7 +432,7 @@ fn collect_predicate_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a s
             }
             collect_predicate_vars_in_stmts(body, out);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -443,44 +443,44 @@ fn collect_predicate_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a s
             }
             collect_predicate_vars_in_stmts(default, out);
         }
-        HirStmt::Block(stmts) => collect_predicate_vars_in_stmts(stmts, out),
-        HirStmt::Assign { .. }
-        | HirStmt::VaStart { .. }
-        | HirStmt::Expr(_)
-        | HirStmt::Return(_)
-        | HirStmt::Break
-        | HirStmt::Continue
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_) => {}
+        DirStmt::Block(stmts) => collect_predicate_vars_in_stmts(stmts, out),
+        DirStmt::Assign { .. }
+        | DirStmt::VaStart { .. }
+        | DirStmt::Expr(_)
+        | DirStmt::Return(_)
+        | DirStmt::Break
+        | DirStmt::Continue
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_) => {}
     }
 }
 
-fn collect_vars_in_expr<'a>(expr: &'a HirExpr, out: &mut HashSet<&'a str>) {
+fn collect_vars_in_expr<'a>(expr: &'a DirExpr, out: &mut HashSet<&'a str>) {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
             out.insert(name.as_str());
         }
-        HirExpr::Const(_, _) => {}
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => collect_vars_in_expr(expr, out),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Const(_, _) => {}
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => collect_vars_in_expr(expr, out),
+        DirExpr::Binary { lhs, rhs, .. } => {
             collect_vars_in_expr(lhs, out);
             collect_vars_in_expr(rhs, out);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 collect_vars_in_expr(arg, out);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             collect_vars_in_expr(base, out);
             collect_vars_in_expr(index, out);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -495,7 +495,7 @@ fn collect_vars_in_expr<'a>(expr: &'a HirExpr, out: &mut HashSet<&'a str>) {
 
 /// Remove copy assignments `x = y` from the body where x is in copy_map.
 fn remove_copy_assigns(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     copy_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
@@ -503,9 +503,9 @@ fn remove_copy_assigns(
         remove_copy_assigns_nested(stmt, copy_map, changed);
     }
     stmts.retain(|stmt| {
-        if let HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs: HirExpr::Var(_),
+        if let DirStmt::Assign {
+            lhs: DirLValue::Var(name),
+            rhs: DirExpr::Var(_),
         } = stmt
         {
             if copy_map.contains_key(name.as_str()) {
@@ -518,13 +518,13 @@ fn remove_copy_assigns(
 }
 
 fn remove_copy_assigns_nested(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     copy_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Block(stmts) => remove_copy_assigns(stmts, copy_map, changed),
-        HirStmt::If {
+        DirStmt::Block(stmts) => remove_copy_assigns(stmts, copy_map, changed),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -532,10 +532,10 @@ fn remove_copy_assigns_nested(
             remove_copy_assigns(then_body, copy_map, changed);
             remove_copy_assigns(else_body, copy_map, changed);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             remove_copy_assigns(body, copy_map, changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -546,7 +546,7 @@ fn remove_copy_assigns_nested(
             }
             remove_copy_assigns(body, copy_map, changed);
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 remove_copy_assigns(&mut case.body, copy_map, changed);
             }
@@ -559,7 +559,7 @@ fn remove_copy_assigns_nested(
 /// Substitute every rvalue occurrence of `x` (keys of copy_map) with its
 /// source `y` (values of copy_map) throughout all expressions.
 fn substitute_copies_in_stmts(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     copy_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
@@ -569,28 +569,28 @@ fn substitute_copies_in_stmts(
 }
 
 fn substitute_copies_in_stmt(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     copy_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             substitute_copies_lvalue(lhs, copy_map, changed);
             substitute_copies_expr(rhs, copy_map, changed);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             substitute_copies_expr(va_list, copy_map, changed);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             substitute_copies_expr(expr, copy_map, changed);
         }
-        HirStmt::Return(None)
-        | HirStmt::Break
-        | HirStmt::Continue
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_) => {}
-        HirStmt::Block(stmts) => substitute_copies_in_stmts(stmts, copy_map, changed),
-        HirStmt::If {
+        DirStmt::Return(None)
+        | DirStmt::Break
+        | DirStmt::Continue
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_) => {}
+        DirStmt::Block(stmts) => substitute_copies_in_stmts(stmts, copy_map, changed),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -599,15 +599,15 @@ fn substitute_copies_in_stmt(
             substitute_copies_in_stmts(then_body, copy_map, changed);
             substitute_copies_in_stmts(else_body, copy_map, changed);
         }
-        HirStmt::While { cond, body } => {
+        DirStmt::While { cond, body } => {
             substitute_copies_expr(cond, copy_map, changed);
             substitute_copies_in_stmts(body, copy_map, changed);
         }
-        HirStmt::DoWhile { body, cond } => {
+        DirStmt::DoWhile { body, cond } => {
             substitute_copies_in_stmts(body, copy_map, changed);
             substitute_copies_expr(cond, copy_map, changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -624,7 +624,7 @@ fn substitute_copies_in_stmt(
             }
             substitute_copies_in_stmts(body, copy_map, changed);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -639,58 +639,58 @@ fn substitute_copies_in_stmt(
 }
 
 fn substitute_copies_lvalue(
-    lhs: &mut HirLValue,
+    lhs: &mut DirLValue,
     copy_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
     match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => substitute_copies_expr(ptr, copy_map, changed),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => substitute_copies_expr(ptr, copy_map, changed),
+        DirLValue::Index { base, index, .. } => {
             substitute_copies_expr(base, copy_map, changed);
             substitute_copies_expr(index, copy_map, changed);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             substitute_copies_expr(base, copy_map, changed);
         }
     }
 }
 
 fn substitute_copies_expr(
-    expr: &mut HirExpr,
+    expr: &mut DirExpr,
     copy_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
             if let Some(src) = copy_map.get(name.as_str()) {
                 *name = src.clone();
                 *changed = true;
             }
         }
-        HirExpr::Const(_, _) => {}
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Const(_, _) => {}
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             substitute_copies_expr(inner, copy_map, changed);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             substitute_copies_expr(lhs, copy_map, changed);
             substitute_copies_expr(rhs, copy_map, changed);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 substitute_copies_expr(a, copy_map, changed);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             substitute_copies_expr(base, copy_map, changed);
             substitute_copies_expr(index, copy_map, changed);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -721,7 +721,7 @@ fn substitute_copies_expr(
 /// the then-branch or the else-branch.
 ///
 /// Returns `true` if any renaming was made.
-pub fn join_coalescing_pass(func: &mut HirFunction) -> bool {
+pub fn join_coalescing_pass(func: &mut DirFunction) -> bool {
     let temp_names: HashSet<String> = func
         .locals
         .iter()
@@ -756,14 +756,14 @@ pub fn join_coalescing_pass(func: &mut HirFunction) -> bool {
 /// Walk the statement list looking for If statements that have matching
 /// last-assignments in both branches.
 fn collect_join_renames(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     temp_names: &HashSet<String>,
     map: &DefUseMap,
     rename_map: &mut HashMap<String, String>,
 ) {
     for (idx, stmt) in stmts.iter().enumerate() {
         match stmt {
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -806,7 +806,7 @@ fn collect_join_renames(
                 collect_join_renames(then_body, temp_names, map, rename_map);
                 collect_join_renames(else_body, temp_names, map, rename_map);
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -814,13 +814,13 @@ fn collect_join_renames(
                 collect_join_renames(then_body, temp_names, map, rename_map);
                 collect_join_renames(else_body, temp_names, map, rename_map);
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 collect_join_renames(body, temp_names, map, rename_map);
             }
-            HirStmt::For { init: _, body, .. } => {
+            DirStmt::For { init: _, body, .. } => {
                 collect_join_renames(body, temp_names, map, rename_map);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_join_renames(&case.body, temp_names, map, rename_map);
                 }
@@ -833,11 +833,11 @@ fn collect_join_renames(
 
 /// Return (name, type_repr) pairs for the LAST assignment to each pure temp
 /// within a flat statement list.
-fn last_assigns(stmts: &[HirStmt], temp_names: &HashSet<String>) -> Vec<(String, String)> {
+fn last_assigns(stmts: &[DirStmt], temp_names: &HashSet<String>) -> Vec<(String, String)> {
     let mut seen: HashMap<String, String> = HashMap::default();
     for stmt in stmts {
-        if let HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        if let DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } = stmt
         {
@@ -851,29 +851,29 @@ fn last_assigns(stmts: &[HirStmt], temp_names: &HashSet<String>) -> Vec<(String,
 
 /// Quick structural type fingerprint for an expression (used to gate
 /// coalescing by compatible assignment shapes).
-fn type_repr(expr: &HirExpr) -> String {
+fn type_repr(expr: &DirExpr) -> String {
     match expr {
-        HirExpr::Const(_, ty) | HirExpr::Cast { ty, .. } => format!("{ty:?}"),
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => "var".to_string(),
-        HirExpr::Binary { ty, .. } | HirExpr::Unary { ty, .. } => format!("{ty:?}"),
-        HirExpr::Load { ty, .. } => format!("load_{ty:?}"),
+        DirExpr::Const(_, ty) | DirExpr::Cast { ty, .. } => format!("{ty:?}"),
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => "var".to_string(),
+        DirExpr::Binary { ty, .. } | DirExpr::Unary { ty, .. } => format!("{ty:?}"),
+        DirExpr::Load { ty, .. } => format!("load_{ty:?}"),
         _ => "other".to_string(),
     }
 }
 
 /// Count uses of `name` in stmts[start_idx..].
-fn count_uses_after(stmts: &[HirStmt], start_idx: usize, name: &str) -> usize {
+fn count_uses_after(stmts: &[DirStmt], start_idx: usize, name: &str) -> usize {
     stmts[start_idx.min(stmts.len())..]
         .iter()
         .map(|s| count_uses_in_stmt_flat(s, name))
         .sum()
 }
 
-fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
+fn count_uses_in_stmt_flat(stmt: &DirStmt, name: &str) -> usize {
     match stmt {
-        HirStmt::Assign { lhs: _, rhs } => count_var_in_expr(rhs, name),
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => count_var_in_expr(expr, name),
-        HirStmt::If {
+        DirStmt::Assign { lhs: _, rhs } => count_var_in_expr(rhs, name),
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => count_var_in_expr(expr, name),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -888,14 +888,14 @@ fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
                     .map(|s| count_uses_in_stmt_flat(s, name))
                     .sum::<usize>()
         }
-        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
             count_var_in_expr(cond, name)
                 + body
                     .iter()
                     .map(|s| count_uses_in_stmt_flat(s, name))
                     .sum::<usize>()
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -912,7 +912,7 @@ fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
                     .map(|s| count_uses_in_stmt_flat(s, name))
                     .sum::<usize>()
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -932,24 +932,24 @@ fn count_uses_in_stmt_flat(stmt: &HirStmt, name: &str) -> usize {
     }
 }
 
-fn count_var_in_expr(expr: &HirExpr, name: &str) -> usize {
+fn count_var_in_expr(expr: &DirExpr, name: &str) -> usize {
     match expr {
-        HirExpr::Var(n) | HirExpr::AddressOfGlobal(n) => usize::from(n.as_str() == name),
-        HirExpr::Const(_, _) => 0,
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => count_var_in_expr(expr, name),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Var(n) | DirExpr::AddressOfGlobal(n) => usize::from(n.as_str() == name),
+        DirExpr::Const(_, _) => 0,
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => count_var_in_expr(expr, name),
+        DirExpr::Binary { lhs, rhs, .. } => {
             count_var_in_expr(lhs, name) + count_var_in_expr(rhs, name)
         }
-        HirExpr::Call { args, .. } => args.iter().map(|a| count_var_in_expr(a, name)).sum(),
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Call { args, .. } => args.iter().map(|a| count_var_in_expr(a, name)).sum(),
+        DirExpr::Index { base, index, .. } => {
             count_var_in_expr(base, name) + count_var_in_expr(index, name)
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -966,7 +966,7 @@ fn count_var_in_expr(expr: &HirExpr, name: &str) -> usize {
 /// `then_var`. Also rename rvalue uses of `else_var` to `then_var` everywhere
 /// outside the else-branch (and inside other branches).
 fn apply_join_renames(
-    stmts: &mut Vec<HirStmt>,
+    stmts: &mut Vec<DirStmt>,
     rename_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
@@ -976,13 +976,13 @@ fn apply_join_renames(
 }
 
 fn apply_join_renames_stmt(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     rename_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
             rhs,
         } => {
             if let Some(canonical) = rename_map.get(name.as_str()) {
@@ -991,24 +991,24 @@ fn apply_join_renames_stmt(
             }
             apply_join_renames_expr(rhs, rename_map, changed);
         }
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             apply_join_renames_expr(rhs, rename_map, changed);
             // Also rename inside index/deref lvalues.
             apply_join_renames_lvalue(lhs, rename_map, changed);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             apply_join_renames_expr(va_list, rename_map, changed);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             apply_join_renames_expr(expr, rename_map, changed);
         }
-        HirStmt::Return(None)
-        | HirStmt::Break
-        | HirStmt::Continue
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_) => {}
-        HirStmt::Block(stmts) => apply_join_renames(stmts, rename_map, changed),
-        HirStmt::If {
+        DirStmt::Return(None)
+        | DirStmt::Break
+        | DirStmt::Continue
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_) => {}
+        DirStmt::Block(stmts) => apply_join_renames(stmts, rename_map, changed),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1017,15 +1017,15 @@ fn apply_join_renames_stmt(
             apply_join_renames(then_body, rename_map, changed);
             apply_join_renames(else_body, rename_map, changed);
         }
-        HirStmt::While { cond, body } => {
+        DirStmt::While { cond, body } => {
             apply_join_renames_expr(cond, rename_map, changed);
             apply_join_renames(body, rename_map, changed);
         }
-        HirStmt::DoWhile { body, cond } => {
+        DirStmt::DoWhile { body, cond } => {
             apply_join_renames(body, rename_map, changed);
             apply_join_renames_expr(cond, rename_map, changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -1042,7 +1042,7 @@ fn apply_join_renames_stmt(
             }
             apply_join_renames(body, rename_map, changed);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -1057,58 +1057,58 @@ fn apply_join_renames_stmt(
 }
 
 fn apply_join_renames_lvalue(
-    lhs: &mut HirLValue,
+    lhs: &mut DirLValue,
     rename_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
     match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => apply_join_renames_expr(ptr, rename_map, changed),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => apply_join_renames_expr(ptr, rename_map, changed),
+        DirLValue::Index { base, index, .. } => {
             apply_join_renames_expr(base, rename_map, changed);
             apply_join_renames_expr(index, rename_map, changed);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             apply_join_renames_expr(base, rename_map, changed);
         }
     }
 }
 
 fn apply_join_renames_expr(
-    expr: &mut HirExpr,
+    expr: &mut DirExpr,
     rename_map: &HashMap<String, String>,
     changed: &mut bool,
 ) {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
             if let Some(canonical) = rename_map.get(name.as_str()) {
                 *name = canonical.clone();
                 *changed = true;
             }
         }
-        HirExpr::Const(_, _) => {}
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Const(_, _) => {}
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             apply_join_renames_expr(inner, rename_map, changed);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             apply_join_renames_expr(lhs, rename_map, changed);
             apply_join_renames_expr(rhs, rename_map, changed);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 apply_join_renames_expr(a, rename_map, changed);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             apply_join_renames_expr(base, rename_map, changed);
             apply_join_renames_expr(index, rename_map, changed);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1124,10 +1124,10 @@ fn apply_join_renames_expr(
 // ── Constant Propagation Helpers ──────────────────────────────────────────────
 
 fn collect_constants<'a>(
-    stmts: &'a [HirStmt],
+    stmts: &'a [DirStmt],
     eligible_vars: &HashSet<&str>,
     def_count: &HashMap<&'a str, usize>,
-    const_map: &mut HashMap<String, HirExpr>,
+    const_map: &mut HashMap<String, DirExpr>,
 ) {
     for stmt in stmts {
         collect_constants_stmt(stmt, eligible_vars, def_count, const_map);
@@ -1135,22 +1135,22 @@ fn collect_constants<'a>(
 }
 
 fn collect_constants_stmt<'a>(
-    stmt: &'a HirStmt,
+    stmt: &'a DirStmt,
     eligible_vars: &HashSet<&str>,
     def_count: &HashMap<&'a str, usize>,
-    const_map: &mut HashMap<String, HirExpr>,
+    const_map: &mut HashMap<String, DirExpr>,
 ) {
     match stmt {
-        HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs: const_expr @ HirExpr::Const(_, _),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(name),
+            rhs: const_expr @ DirExpr::Const(_, _),
         } if eligible_vars.contains(name.as_str())
             && def_count.get(name.as_str()).copied().unwrap_or(0) == 1 =>
         {
             const_map.insert(name.clone(), const_expr.clone());
         }
-        HirStmt::Block(stmts) => collect_constants(stmts, eligible_vars, def_count, const_map),
-        HirStmt::If {
+        DirStmt::Block(stmts) => collect_constants(stmts, eligible_vars, def_count, const_map),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -1158,10 +1158,10 @@ fn collect_constants_stmt<'a>(
             collect_constants(then_body, eligible_vars, def_count, const_map);
             collect_constants(else_body, eligible_vars, def_count, const_map);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             collect_constants(body, eligible_vars, def_count, const_map);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -1172,7 +1172,7 @@ fn collect_constants_stmt<'a>(
             }
             collect_constants(body, eligible_vars, def_count, const_map);
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 collect_constants(&case.body, eligible_vars, def_count, const_map);
             }
@@ -1183,17 +1183,17 @@ fn collect_constants_stmt<'a>(
 }
 
 fn remove_constant_assigns(
-    stmts: &mut Vec<HirStmt>,
-    const_map: &HashMap<String, HirExpr>,
+    stmts: &mut Vec<DirStmt>,
+    const_map: &HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
         remove_constant_assigns_nested(stmt, const_map, changed);
     }
     stmts.retain(|stmt| {
-        if let HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs: HirExpr::Const(_, _),
+        if let DirStmt::Assign {
+            lhs: DirLValue::Var(name),
+            rhs: DirExpr::Const(_, _),
         } = stmt
         {
             if const_map.contains_key(name.as_str()) {
@@ -1206,13 +1206,13 @@ fn remove_constant_assigns(
 }
 
 fn remove_constant_assigns_nested(
-    stmt: &mut HirStmt,
-    const_map: &HashMap<String, HirExpr>,
+    stmt: &mut DirStmt,
+    const_map: &HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Block(stmts) => remove_constant_assigns(stmts, const_map, changed),
-        HirStmt::If {
+        DirStmt::Block(stmts) => remove_constant_assigns(stmts, const_map, changed),
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -1220,10 +1220,10 @@ fn remove_constant_assigns_nested(
             remove_constant_assigns(then_body, const_map, changed);
             remove_constant_assigns(else_body, const_map, changed);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             remove_constant_assigns(body, const_map, changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -1234,7 +1234,7 @@ fn remove_constant_assigns_nested(
             }
             remove_constant_assigns(body, const_map, changed);
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 remove_constant_assigns(&mut case.body, const_map, changed);
             }
@@ -1245,8 +1245,8 @@ fn remove_constant_assigns_nested(
 }
 
 fn substitute_constants_in_stmts(
-    stmts: &mut Vec<HirStmt>,
-    const_map: &HashMap<String, HirExpr>,
+    stmts: &mut Vec<DirStmt>,
+    const_map: &HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
@@ -1255,26 +1255,26 @@ fn substitute_constants_in_stmts(
 }
 
 fn substitute_constants_in_stmt(
-    stmt: &mut HirStmt,
-    const_map: &HashMap<String, HirExpr>,
+    stmt: &mut DirStmt,
+    const_map: &HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             substitute_constants_lvalue(lhs, const_map, changed);
             substitute_constants_expr(rhs, const_map, changed);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             substitute_constants_expr(va_list, const_map, changed);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             substitute_constants_expr(expr, const_map, changed);
         }
         _ => {}
     }
     match stmt {
-        HirStmt::Block(stmts) => substitute_constants_in_stmts(stmts, const_map, changed),
-        HirStmt::If {
+        DirStmt::Block(stmts) => substitute_constants_in_stmts(stmts, const_map, changed),
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1283,15 +1283,15 @@ fn substitute_constants_in_stmt(
             substitute_constants_in_stmts(then_body, const_map, changed);
             substitute_constants_in_stmts(else_body, const_map, changed);
         }
-        HirStmt::While { cond, body } => {
+        DirStmt::While { cond, body } => {
             substitute_constants_expr(cond, const_map, changed);
             substitute_constants_in_stmts(body, const_map, changed);
         }
-        HirStmt::DoWhile { body, cond } => {
+        DirStmt::DoWhile { body, cond } => {
             substitute_constants_in_stmts(body, const_map, changed);
             substitute_constants_expr(cond, const_map, changed);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -1308,7 +1308,7 @@ fn substitute_constants_in_stmt(
             }
             substitute_constants_in_stmts(body, const_map, changed);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -1324,29 +1324,29 @@ fn substitute_constants_in_stmt(
 }
 
 fn substitute_constants_lvalue(
-    lhs: &mut HirLValue,
-    const_map: &HashMap<String, HirExpr>,
+    lhs: &mut DirLValue,
+    const_map: &HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
     match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => substitute_constants_expr(ptr, const_map, changed),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => substitute_constants_expr(ptr, const_map, changed),
+        DirLValue::Index { base, index, .. } => {
             substitute_constants_expr(base, const_map, changed);
             substitute_constants_expr(index, const_map, changed);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             substitute_constants_expr(base, const_map, changed);
         }
     }
 }
 
 fn substitute_constants_expr(
-    expr: &mut HirExpr,
-    const_map: &HashMap<String, HirExpr>,
+    expr: &mut DirExpr,
+    const_map: &HashMap<String, DirExpr>,
     changed: &mut bool,
 ) {
-    if let HirExpr::Var(name) = expr {
+    if let DirExpr::Var(name) = expr {
         if let Some(c) = const_map.get(name.as_str()) {
             *expr = c.clone();
             *changed = true;
@@ -1354,28 +1354,28 @@ fn substitute_constants_expr(
         }
     }
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             substitute_constants_expr(inner, const_map, changed);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             substitute_constants_expr(lhs, const_map, changed);
             substitute_constants_expr(rhs, const_map, changed);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 substitute_constants_expr(a, const_map, changed);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             substitute_constants_expr(base, const_map, changed);
             substitute_constants_expr(index, const_map, changed);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1391,7 +1391,7 @@ fn substitute_constants_expr(
 
 // ── Loop-carried/Preheader Preservation Helpers ──────────────────────────────
 
-fn collect_loop_preservation_vars(stmts: &[HirStmt]) -> HashSet<String> {
+fn collect_loop_preservation_vars(stmts: &[DirStmt]) -> HashSet<String> {
     let mut defined_outside: HashSet<String> = HashSet::default();
     let mut used_inside: HashSet<String> = HashSet::default();
     collect_defs_outside_loops(stmts, &mut defined_outside);
@@ -1402,16 +1402,16 @@ fn collect_loop_preservation_vars(stmts: &[HirStmt]) -> HashSet<String> {
         .collect()
 }
 
-fn collect_defs_outside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
+fn collect_defs_outside_loops(stmts: &[DirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign { lhs, .. } => {
-                if let HirLValue::Var(name) = lhs {
+            DirStmt::Assign { lhs, .. } => {
+                if let DirLValue::Var(name) = lhs {
                     out.insert(name.clone());
                 }
             }
-            HirStmt::Block(body) => collect_defs_outside_loops(body, out),
-            HirStmt::If {
+            DirStmt::Block(body) => collect_defs_outside_loops(body, out),
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1419,7 +1419,7 @@ fn collect_defs_outside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
                 collect_defs_outside_loops(then_body, out);
                 collect_defs_outside_loops(else_body, out);
             }
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_defs_outside_loops(&case.body, out);
                 }
@@ -1430,22 +1430,22 @@ fn collect_defs_outside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
     }
 }
 
-fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
+fn collect_uses_inside_loops(stmts: &[DirStmt], out: &mut HashSet<String>) {
     // Collect via a local &str set, then promote to String at the boundary so
     // we can reuse the shared helpers (collect_vars_in_expr, etc.) without
     // changing their signatures.
-    fn inner<'a>(stmts: &'a [HirStmt], inner_out: &mut HashSet<&'a str>) {
+    fn inner<'a>(stmts: &'a [DirStmt], inner_out: &mut HashSet<&'a str>) {
         for stmt in stmts {
             match stmt {
-                HirStmt::While { cond, body } => {
+                DirStmt::While { cond, body } => {
                     collect_vars_in_expr(cond, inner_out);
                     collect_all_vars_in_stmts(body, inner_out);
                 }
-                HirStmt::DoWhile { body, cond } => {
+                DirStmt::DoWhile { body, cond } => {
                     collect_all_vars_in_stmts(body, inner_out);
                     collect_vars_in_expr(cond, inner_out);
                 }
-                HirStmt::For {
+                DirStmt::For {
                     init,
                     cond,
                     update,
@@ -1462,8 +1462,8 @@ fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
                     }
                     collect_all_vars_in_stmts(body, inner_out);
                 }
-                HirStmt::Block(body) => inner(body, inner_out),
-                HirStmt::If {
+                DirStmt::Block(body) => inner(body, inner_out),
+                DirStmt::If {
                     then_body,
                     else_body,
                     ..
@@ -1471,7 +1471,7 @@ fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
                     inner(then_body, inner_out);
                     inner(else_body, inner_out);
                 }
-                HirStmt::Switch { cases, default, .. } => {
+                DirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         inner(&case.body, inner_out);
                     }
@@ -1486,27 +1486,27 @@ fn collect_uses_inside_loops(stmts: &[HirStmt], out: &mut HashSet<String>) {
     out.extend(local.into_iter().map(str::to_owned));
 }
 
-fn collect_all_vars_in_stmts<'a>(stmts: &'a [HirStmt], out: &mut HashSet<&'a str>) {
+fn collect_all_vars_in_stmts<'a>(stmts: &'a [DirStmt], out: &mut HashSet<&'a str>) {
     for stmt in stmts {
         collect_all_vars_in_stmt(stmt, out);
     }
 }
 
-fn collect_all_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
+fn collect_all_vars_in_stmt<'a>(stmt: &'a DirStmt, out: &mut HashSet<&'a str>) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             collect_vars_in_lvalue(lhs, out);
             collect_vars_in_expr(rhs, out);
         }
-        HirStmt::Expr(expr)
-        | HirStmt::Return(Some(expr))
-        | HirStmt::VaStart { va_list: expr, .. } => {
+        DirStmt::Expr(expr)
+        | DirStmt::Return(Some(expr))
+        | DirStmt::VaStart { va_list: expr, .. } => {
             collect_vars_in_expr(expr, out);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             collect_all_vars_in_stmts(body, out)
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             cond,
@@ -1515,7 +1515,7 @@ fn collect_all_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
             collect_all_vars_in_stmts(then_body, out);
             collect_all_vars_in_stmts(else_body, out);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -1532,7 +1532,7 @@ fn collect_all_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
             }
             collect_all_vars_in_stmts(body, out);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             cases,
             default,
             expr,
@@ -1547,16 +1547,16 @@ fn collect_all_vars_in_stmt<'a>(stmt: &'a HirStmt, out: &mut HashSet<&'a str>) {
     }
 }
 
-fn collect_vars_in_lvalue<'a>(lhs: &'a HirLValue, out: &mut HashSet<&'a str>) {
+fn collect_vars_in_lvalue<'a>(lhs: &'a DirLValue, out: &mut HashSet<&'a str>) {
     match lhs {
-        HirLValue::Var(name) => {
+        DirLValue::Var(name) => {
             out.insert(name.as_str());
         }
-        HirLValue::Deref { ptr, .. } => collect_vars_in_expr(ptr, out),
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Deref { ptr, .. } => collect_vars_in_expr(ptr, out),
+        DirLValue::Index { base, index, .. } => {
             collect_vars_in_expr(base, out);
             collect_vars_in_expr(index, out);
         }
-        HirLValue::FieldAccess { base, .. } => collect_vars_in_expr(base, out),
+        DirLValue::FieldAccess { base, .. } => collect_vars_in_expr(base, out),
     }
 }

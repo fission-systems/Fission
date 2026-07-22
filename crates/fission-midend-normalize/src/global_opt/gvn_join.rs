@@ -11,11 +11,11 @@ use super::super::analysis::preservation::preserved_binding_origin;
 use super::super::cleanup::expr_has_side_effects;
 use fission_midend_core::wave_stats;
 use crate::prelude::*;
-use fission_midend_core::expr_type;
+use fission_midend_core::util_dir::expr_type;
 
 /// Hoist duplicate pure RHS on the first statement of both `if` arms when LHS
 /// names differ.  Returns `true` if changed.
-pub fn apply_gvn_join_hoist_pass(func: &mut HirFunction) -> bool {
+pub fn apply_gvn_join_hoist_pass(func: &mut DirFunction) -> bool {
     let mut ctr = func.locals.len() as u32;
     hoist_stmts(
         &mut func.body,
@@ -26,9 +26,9 @@ pub fn apply_gvn_join_hoist_pass(func: &mut HirFunction) -> bool {
 }
 
 fn hoist_stmts(
-    stmts: &mut Vec<HirStmt>,
-    locals: &mut Vec<NirBinding>,
-    params: &[NirBinding],
+    stmts: &mut Vec<DirStmt>,
+    locals: &mut Vec<DirBinding>,
+    params: &[DirBinding],
     ctr: &mut u32,
 ) -> bool {
     let mut changed = false;
@@ -37,7 +37,7 @@ fn hoist_stmts(
     }
     let mut i = 0;
     while i < stmts.len() {
-        if let HirStmt::If {
+        if let DirStmt::If {
             then_body,
             else_body,
             ..
@@ -46,7 +46,7 @@ fn hoist_stmts(
             if let Some((rhs, x, y)) = try_join_pair(then_body.as_slice(), else_body.as_slice()) {
                 let tmp = alloc_temp_name(locals, params, ctr);
                 let ty = expr_type(&rhs);
-                locals.push(NirBinding {
+                locals.push(DirBinding {
                     name: tmp.clone(),
                     ty,
                     surface_type_name: None,
@@ -54,17 +54,17 @@ fn hoist_stmts(
                     initializer: None,
                 });
                 wave_stats::add_gvn_join_preserved(1);
-                let hoist = HirStmt::Assign {
-                    lhs: HirLValue::Var(tmp.clone()),
+                let hoist = DirStmt::Assign {
+                    lhs: DirLValue::Var(tmp.clone()),
                     rhs,
                 };
-                then_body[0] = HirStmt::Assign {
-                    lhs: HirLValue::Var(x),
-                    rhs: HirExpr::Var(tmp.clone()),
+                then_body[0] = DirStmt::Assign {
+                    lhs: DirLValue::Var(x),
+                    rhs: DirExpr::Var(tmp.clone()),
                 };
-                else_body[0] = HirStmt::Assign {
-                    lhs: HirLValue::Var(y),
-                    rhs: HirExpr::Var(tmp),
+                else_body[0] = DirStmt::Assign {
+                    lhs: DirLValue::Var(y),
+                    rhs: DirExpr::Var(tmp),
                 };
                 stmts.insert(i, hoist);
                 changed = true;
@@ -91,30 +91,30 @@ mod tests {
 
     #[test]
     fn gvn_join_hoist_marks_temp_preserved() {
-        let mut func = HirFunction {
+        let mut func = DirFunction {
             name: "test_gvn_join_preserved".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: int(32),
             surface_return_type_name: None,
-            body: vec![HirStmt::If {
-                cond: HirExpr::Var("cond".to_string()),
-                then_body: vec![HirStmt::Assign {
-                    lhs: HirLValue::Var("x".to_string()),
-                    rhs: HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Var("a".to_string())),
-                        rhs: Box::new(HirExpr::Var("b".to_string())),
+            body: vec![DirStmt::If {
+                cond: DirExpr::Var("cond".to_string()),
+                then_body: vec![DirStmt::Assign {
+                    lhs: DirLValue::Var("x".to_string()),
+                    rhs: DirExpr::Binary {
+                        op: DirBinaryOp::Add,
+                        lhs: Box::new(DirExpr::Var("a".to_string())),
+                        rhs: Box::new(DirExpr::Var("b".to_string())),
                         ty: int(32),
                     },
                 }],
-                else_body: vec![HirStmt::Assign {
-                    lhs: HirLValue::Var("y".to_string()),
-                    rhs: HirExpr::Binary {
-                        op: HirBinaryOp::Add,
-                        lhs: Box::new(HirExpr::Var("a".to_string())),
-                        rhs: Box::new(HirExpr::Var("b".to_string())),
+                else_body: vec![DirStmt::Assign {
+                    lhs: DirLValue::Var("y".to_string()),
+                    rhs: DirExpr::Binary {
+                        op: DirBinaryOp::Add,
+                        lhs: Box::new(DirExpr::Var("a".to_string())),
+                        rhs: Box::new(DirExpr::Var("b".to_string())),
                         ty: int(32),
                     },
                 }],
@@ -130,14 +130,14 @@ mod tests {
 }
 
 fn hoist_stmt_deep(
-    stmt: &mut HirStmt,
-    locals: &mut Vec<NirBinding>,
-    params: &[NirBinding],
+    stmt: &mut DirStmt,
+    locals: &mut Vec<DirBinding>,
+    params: &[DirBinding],
     ctr: &mut u32,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             ..
@@ -145,10 +145,10 @@ fn hoist_stmt_deep(
             changed |= hoist_stmts(then_body, locals, params, ctr);
             changed |= hoist_stmts(else_body, locals, params, ctr);
         }
-        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             changed |= hoist_stmts(body, locals, params, ctr);
         }
-        HirStmt::For {
+        DirStmt::For {
             init, body, update, ..
         } => {
             if let Some(i) = init {
@@ -159,13 +159,13 @@ fn hoist_stmt_deep(
                 changed |= hoist_stmt_deep(u, locals, params, ctr);
             }
         }
-        HirStmt::Switch { cases, default, .. } => {
+        DirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 changed |= hoist_stmts(&mut case.body, locals, params, ctr);
             }
             changed |= hoist_stmts(default, locals, params, ctr);
         }
-        HirStmt::Block(body) => {
+        DirStmt::Block(body) => {
             changed |= hoist_stmts(body, locals, params, ctr);
         }
         _ => {}
@@ -174,19 +174,19 @@ fn hoist_stmt_deep(
 }
 
 fn try_join_pair(
-    then_body: &[HirStmt],
-    else_body: &[HirStmt],
-) -> Option<(HirExpr, String, String)> {
+    then_body: &[DirStmt],
+    else_body: &[DirStmt],
+) -> Option<(DirExpr, String, String)> {
     if then_body.is_empty() || else_body.is_empty() {
         return None;
     }
     let (
-        HirStmt::Assign {
-            lhs: HirLValue::Var(a),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(a),
             rhs: ra,
         },
-        HirStmt::Assign {
-            lhs: HirLValue::Var(b),
+        DirStmt::Assign {
+            lhs: DirLValue::Var(b),
             rhs: rb,
         },
     ) = (&then_body[0], &else_body[0])
@@ -207,7 +207,7 @@ fn try_join_pair(
     Some((ra.clone(), a.clone(), b.clone()))
 }
 
-fn alloc_temp_name(locals: &[NirBinding], params: &[NirBinding], ctr: &mut u32) -> String {
+fn alloc_temp_name(locals: &[DirBinding], params: &[DirBinding], ctr: &mut u32) -> String {
     loop {
         let name = format!("__gvn_join_{}", ctr);
         *ctr = ctr.wrapping_add(1);

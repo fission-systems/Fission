@@ -37,7 +37,7 @@ use tracing::trace_span;
 // hint by binding *name* only catches the narrow case where the raw hw name survived
 // (call-result registers). Carrying the real `(offset, size)` alongside lets the
 // DWARF-register-local rename in `type_hints.rs` match by identity instead, without
-// adding a field to `NirBinding` (constructed at ~300 call sites across the workspace --
+// adding a field to `DirBinding` (constructed at ~300 call sites across the workspace --
 // far riskier to touch than this thread-local, mirroring the existing
 // `LAST_LAYERED_PSEUDOCODE` pattern in `orchestrate.rs`). Explicit `take` + pass-as-parameter
 // into `apply_preview_type_hints` (rather than reading the thread-local inside
@@ -59,6 +59,9 @@ pub(super) fn take_register_origins() -> HashMap<String, (u64, u32)> {
     REGISTER_ORIGINS.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
 }
 
+/// Runs after structuring finishes (see `orchestrate.rs`'s call order) --
+/// operates on the real, final `HirFunction`, not `DirFunction`, despite
+/// living under `builder/` (historical location, not a Dir/Hir statement).
 pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
@@ -183,7 +186,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.temps.insert(
             name.clone(),
-            NirBinding {
+            DirBinding {
                 name: name.clone(),
                 ty,
                 surface_type_name: None,
@@ -250,7 +253,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         name: &str,
         address: u64,
-    ) -> Result<HirFunction, MlilPreviewError> {
+    ) -> Result<DirFunction, MlilPreviewError> {
         self.current_function_name = Some(name.to_string());
         let _build = trace_span!(
             "preview_build_hir",
@@ -281,21 +284,21 @@ impl<'a> PreviewBuilder<'a> {
             let block = &self.pcode.blocks[0];
             body.extend(self.lower_block_stmts(block)?);
             match self.lower_block_terminator(0)? {
-                LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
+                LoweredTerminator::Return(expr) => body.push(DirStmt::Return(expr)),
                 LoweredTerminator::Fallthrough(None) => {}
                 LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
-                    body.push(HirStmt::Goto(block_label(target)))
+                    body.push(DirStmt::Goto(block_label(target)))
                 }
                 LoweredTerminator::Cond {
                     cond,
                     true_target,
                     false_target,
-                } => body.push(HirStmt::If {
+                } => body.push(DirStmt::If {
                     cond,
-                    then_body: vec![HirStmt::Goto(block_label(true_target))],
+                    then_body: vec![DirStmt::Goto(block_label(true_target))],
                     else_body: false_target
                         .map(block_label)
-                        .map(HirStmt::Goto)
+                        .map(DirStmt::Goto)
                         .into_iter()
                         .collect(),
                 }),
@@ -330,7 +333,7 @@ impl<'a> PreviewBuilder<'a> {
                         let evidence = UnsupportedControlEvidence {
                             opcode: "Switch".to_string(),
                             source_block: Some(block.start_address),
-                            target_expr: Some(print_expr(&expr)),
+                            target_expr: Some(print_dir_expr(&expr)),
                             successor_targets: targets.clone(),
                             failure_family: UnsupportedControlFamily::NonStructuralDispatcher,
                             surface: IndirectControlSurface::DispatcherLike,
@@ -349,17 +352,17 @@ impl<'a> PreviewBuilder<'a> {
                         }
                         let cases = case_values
                             .into_iter()
-                            .map(|(value, target)| crate::midend::ir::HirSwitchCase {
+                            .map(|(value, target)| crate::midend::ir::DirSwitchCase {
                                 values: vec![value],
-                                body: vec![HirStmt::Goto(block_label(target))],
+                                body: vec![DirStmt::Goto(block_label(target))],
                             })
                             .collect();
-                        body.push(HirStmt::Switch {
+                        body.push(DirStmt::Switch {
                             expr,
                             cases,
                             default: default_target
                                 .map(block_label)
-                                .map(HirStmt::Goto)
+                                .map(DirStmt::Goto)
                                 .into_iter()
                                 .collect(),
                         });
@@ -395,8 +398,8 @@ impl<'a> PreviewBuilder<'a> {
             .iter()
             .rev()
             .find_map(|stmt| match stmt {
-                HirStmt::Return(Some(expr)) => Some(expr_type(expr)),
-                HirStmt::Return(None) => Some(NirType::Unknown),
+                DirStmt::Return(Some(expr)) => Some(expr_type(expr)),
+                DirStmt::Return(None) => Some(NirType::Unknown),
                 _ => None,
             })
             .unwrap_or(NirType::Unknown);
@@ -422,13 +425,13 @@ impl<'a> PreviewBuilder<'a> {
             .map(seed_callee_summaries_from_type_context)
             .unwrap_or_default();
 
-        Ok(HirFunction {
+        Ok(DirFunction {
             name: name.to_string(),
             params: self.params.values().cloned().collect(),
             locals: self
                 .locals
                 .iter()
-                .map(|(offset, slot)| NirBinding {
+                .map(|(offset, slot)| DirBinding {
                     name: slot.name.clone(),
                     ty: slot.ty.clone(),
                     surface_type_name: None,
@@ -457,22 +460,22 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn return_surface_shape(stmts: &[HirStmt]) -> (bool, bool) {
+    fn return_surface_shape(stmts: &[DirStmt]) -> (bool, bool) {
         let mut has_bare_return = false;
         let mut has_value_return = false;
         for stmt in stmts {
             match stmt {
-                HirStmt::Return(None) => has_bare_return = true,
-                HirStmt::Return(Some(_)) => has_value_return = true,
-                HirStmt::Block(body)
-                | HirStmt::While { body, .. }
-                | HirStmt::DoWhile { body, .. }
-                | HirStmt::For { body, .. } => {
+                DirStmt::Return(None) => has_bare_return = true,
+                DirStmt::Return(Some(_)) => has_value_return = true,
+                DirStmt::Block(body)
+                | DirStmt::While { body, .. }
+                | DirStmt::DoWhile { body, .. }
+                | DirStmt::For { body, .. } => {
                     let (bare, value) = Self::return_surface_shape(body);
                     has_bare_return |= bare;
                     has_value_return |= value;
                 }
-                HirStmt::If {
+                DirStmt::If {
                     then_body,
                     else_body,
                     ..
@@ -482,7 +485,7 @@ impl<'a> PreviewBuilder<'a> {
                     has_bare_return |= then_bare || else_bare;
                     has_value_return |= then_value || else_value;
                 }
-                HirStmt::Switch { cases, default, .. } => {
+                DirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         let (bare, value) = Self::return_surface_shape(&case.body);
                         has_bare_return |= bare;
@@ -492,13 +495,13 @@ impl<'a> PreviewBuilder<'a> {
                     has_bare_return |= bare;
                     has_value_return |= value;
                 }
-                HirStmt::Assign { .. }
-                | HirStmt::Expr(_)
-                | HirStmt::VaStart { .. }
-                | HirStmt::Label(_)
-                | HirStmt::Goto(_)
-                | HirStmt::Break
-                | HirStmt::Continue => {}
+                DirStmt::Assign { .. }
+                | DirStmt::Expr(_)
+                | DirStmt::VaStart { .. }
+                | DirStmt::Label(_)
+                | DirStmt::Goto(_)
+                | DirStmt::Break
+                | DirStmt::Continue => {}
             }
         }
         (has_bare_return, has_value_return)
@@ -508,7 +511,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         opcode: PcodeOpcode,
         source_block: Option<u64>,
-        target_expr: Option<&HirExpr>,
+        target_expr: Option<&DirExpr>,
         successor_targets: Vec<u64>,
         failure_family: UnsupportedControlFamily,
         surface: IndirectControlSurface,
@@ -535,7 +538,7 @@ impl<'a> PreviewBuilder<'a> {
         UnsupportedControlEvidence {
             opcode: format!("{opcode:?}"),
             source_block,
-            target_expr: target_expr.map(print_expr),
+            target_expr: target_expr.map(print_dir_expr),
             successor_targets,
             failure_family,
             surface,
@@ -546,12 +549,12 @@ impl<'a> PreviewBuilder<'a> {
     pub(crate) fn emit_unsupported_control_surface(
         &mut self,
         evidence: UnsupportedControlEvidence,
-        target_expr: Option<HirExpr>,
-    ) -> HirStmt {
+        target_expr: Option<DirExpr>,
+    ) -> DirStmt {
         if matches!(
             evidence.surface,
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
-        ) && let Some(HirExpr::Call { .. }) = target_expr.as_ref()
+        ) && let Some(DirExpr::Call { .. }) = target_expr.as_ref()
         {
             // Every site that reaches here (`recover_known_external_tail_call_expr`,
             // `recover_tail_call_expr_from_target_expr`,
@@ -567,16 +570,16 @@ impl<'a> PreviewBuilder<'a> {
             // every direct-address tail call -- `jmp known_func` rendered as
             // a bare `known_func();` statement with fallthrough implied,
             // instead of `return known_func();`).
-            return HirStmt::Return(target_expr);
+            return DirStmt::Return(target_expr);
         }
 
         if matches!(
             evidence.surface,
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
-        ) && let Some(HirExpr::Var(target_name)) = target_expr.as_ref()
+        ) && let Some(DirExpr::Var(target_name)) = target_expr.as_ref()
             && let Some(resolved_target) = self.resolve_address_like_call_target_name(target_name)
         {
-            return HirStmt::Expr(HirExpr::Call {
+            return DirStmt::Expr(DirExpr::Call {
                 target: resolved_target,
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -596,13 +599,13 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry
                 .indirect_control
                 .indirect_surface_preserved_count += 1;
-            return HirStmt::Expr(HirExpr::Call {
+            return DirStmt::Expr(DirExpr::Call {
                 target: pseudo_target.to_string(),
                 args: target_expr.into_iter().collect(),
                 ty: NirType::Unknown,
             });
         }
-        HirStmt::Expr(HirExpr::Call {
+        DirStmt::Expr(DirExpr::Call {
             target: "__fission_indirect_cf_unsupported".to_string(),
             args: Vec::new(),
             ty: NirType::Unknown,
@@ -647,7 +650,7 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         output: &Varnode,
         preserve_materialization: bool,
-    ) -> NirBinding {
+    ) -> DirBinding {
         let key = MaterializedVarnodeKey::new(output, op);
         if let Some(name) = self.materialized_vns.get(&key)
             && let Some(binding) = self.temps.get_mut(name)
@@ -711,7 +714,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             updated
         } else {
-            NirBinding {
+            DirBinding {
                 name: name.clone(),
                 ty,
                 surface_type_name: None,
@@ -735,7 +738,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block_idx: usize,
         output: &Varnode,
-    ) -> NirBinding {
+    ) -> DirBinding {
         let key = (block_idx, VarnodeKey::from(output));
         if let Some(name) = self.explicit_merge_bindings.get(&key)
             && let Some(binding) = self.temps.get(name)
@@ -786,7 +789,7 @@ impl<'a> PreviewBuilder<'a> {
         if !output.is_constant && is_register_space_id(output.space_id) {
             record_register_origin(&name, output.offset, output.size);
         }
-        let binding = NirBinding {
+        let binding = DirBinding {
             name: name.clone(),
             ty,
             surface_type_name: None,
@@ -807,7 +810,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.temps
             .entry(name.to_string())
-            .or_insert_with(|| NirBinding {
+            .or_insert_with(|| DirBinding {
                 name: name.to_string(),
                 ty: type_from_size(size, false),
                 surface_type_name: None,

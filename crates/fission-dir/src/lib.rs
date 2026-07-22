@@ -1,18 +1,25 @@
 //! DIR/HIR differential verification.
 //!
-//! **DIR** (dynamically-verified IR) is not a new IR type: it is the exact
-//! `Vec<HirStmt>` that
-//! `fission_pcode`'s structuring stage receives as input (flattened,
-//! goto/label-based), captured via [`fission_pcode::take_last_dir_snapshot`]
-//! immediately before structuring's CFG-to-AST rewrite runs. **HIR** is the
-//! same function's final structured output (if/while/for), which the normal
-//! decompile call already returns. Because both are the same type over the
-//! same variable namespace, [`interp::interpret`] can evaluate either one,
-//! and [`diff::diff_dir_hir`] runs both against the same concrete arguments
-//! and reports any divergence as a real, reproducible structuring bug --
-//! exactly the class of bug (structuring silently changing a function's
-//! behavior while restructuring its control flow) this session found by
-//! hand once already (an AArch64 if/else collapsed into a linear block).
+//! **DIR** (dynamically-verified IR) is a genuinely independent IR, not HIR
+//! reused under a different name: `fission_pcode`'s builder emits
+//! `DirStmt`/`DirExpr` (`fission_midend_core::ir`) directly, the flattened,
+//! goto/label-based form normalize/structuring's own internal passes read
+//! and rewrite, exposed via
+//! [`fission_pcode::take_last_dir_snapshot`]. **HIR** is the separately
+//! defined `HirStmt`/`HirExpr` grammar structuring's real
+//! `DirFunction -> HirFunction` conversion produces once its CFG-to-AST
+//! rewrite is done (`fission_midend_core::ir::dir_stmts_to_hir_stmts`),
+//! exposed via [`fission_pcode::take_last_hir_function_snapshot`] -- the
+//! same function's final structured output (if/while/for), which the
+//! normal decompile call already returns. Both are real, independent
+//! outputs of the production pipeline, consumed here on equal footing:
+//! [`interp::interpret_dir`]/[`interp::interpret_hir`] evaluate their
+//! respective grammar, and [`diff::diff_dir_hir`] runs both against the
+//! same concrete arguments and reports any divergence as a real,
+//! reproducible structuring bug -- exactly the class of bug (structuring
+//! silently changing a function's behavior while restructuring its control
+//! flow) this session found by hand once already (an AArch64 if/else
+//! collapsed into a linear block).
 //!
 //! # Roadmap
 //!

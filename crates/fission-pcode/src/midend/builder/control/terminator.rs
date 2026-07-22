@@ -24,28 +24,28 @@ fn merge_inferred_branchind_targets(
     }
 }
 
-fn arm32_callable_target_expr(expr: &HirExpr) -> HirExpr {
+fn arm32_callable_target_expr(expr: &DirExpr) -> DirExpr {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::And,
+        DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if matches!(
             &**rhs,
-            HirExpr::Const(0xffff_fffe, _) | HirExpr::Const(-2, _)
+            DirExpr::Const(0xffff_fffe, _) | DirExpr::Const(-2, _)
         ) =>
         {
             (**lhs).clone()
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::And,
+        DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if matches!(
             &**lhs,
-            HirExpr::Const(0xffff_fffe, _) | HirExpr::Const(-2, _)
+            DirExpr::Const(0xffff_fffe, _) | DirExpr::Const(-2, _)
         ) =>
         {
             (**rhs).clone()
@@ -64,9 +64,9 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-        target_expr: &HirExpr,
-    ) -> Option<HirExpr> {
-        let resolved_target = if let HirExpr::Var(target_name) = target_expr {
+        target_expr: &DirExpr,
+    ) -> Option<DirExpr> {
+        let resolved_target = if let DirExpr::Var(target_name) = target_expr {
             self.resolve_address_like_call_target_name(target_name)
         } else {
             None
@@ -75,7 +75,7 @@ impl<'a> PreviewBuilder<'a> {
             (self.options.calling_convention == CallingConvention::Arm32).then(|| {
                 format!(
                     "((code *){})",
-                    print_expr(&arm32_callable_target_expr(target_expr))
+                    print_dir_expr(&arm32_callable_target_expr(target_expr))
                 )
             })
         })?;
@@ -84,7 +84,7 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             Vec::new()
         };
-        Some(HirExpr::Call {
+        Some(DirExpr::Call {
             target,
             args,
             ty: NirType::Unknown,
@@ -96,11 +96,11 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-        target_expr: &HirExpr,
-    ) -> HirExpr {
+        target_expr: &DirExpr,
+    ) -> DirExpr {
         // Prefer opaque CallInd-style rendering for register/param fps so the
         // printer emits a cast callable. Known symbols keep direct names.
-        let resolved_symbol = if let HirExpr::Var(target_name) = target_expr {
+        let resolved_symbol = if let DirExpr::Var(target_name) = target_expr {
             self.resolve_address_like_call_target_name(target_name)
         } else {
             None
@@ -110,7 +110,7 @@ impl<'a> PreviewBuilder<'a> {
         // (x64 O2 apply_binop: 3 blocks, args live in the tail-call arm).
         let mut args = self.recover_tail_call_args(block_idx, block, term_idx);
         if let Some(target) = resolved_symbol {
-            return HirExpr::Call {
+            return DirExpr::Call {
                 target,
                 args,
                 ty: NirType::Unknown,
@@ -118,7 +118,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         // Unresolved fp: opaque form — printer casts to callable.
         args.insert(0, target_expr.clone());
-        HirExpr::Call {
+        DirExpr::Call {
             target: "__fission_callind_opaque".to_string(),
             args,
             ty: NirType::Unknown,
@@ -131,8 +131,8 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
         switch_var: &Varnode,
-        switch_expr: &HirExpr,
-    ) -> Option<HirExpr> {
+        switch_expr: &DirExpr,
+    ) -> Option<DirExpr> {
         if let Some(target_expr) =
             self.recover_branchind_callable_target(block.index as usize, term_idx, switch_var)
         {
@@ -151,7 +151,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         term_idx: usize,
         switch_var: &Varnode,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         // x86/x64: `jmp rax` / `jmp r8` tail-calls through a register-held
         // function pointer (gcc -O2 apply_binop). ARM keeps the existing mask
         // and source recovery; x86 uses the same copy-chain → param/reg path.
@@ -209,7 +209,7 @@ impl<'a> PreviewBuilder<'a> {
         before_op_idx: usize,
         source: &Varnode,
         depth: usize,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         if depth > 8 {
             return None;
         }
@@ -232,7 +232,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(expr);
             }
         }
-        self.register_param(source).map(HirExpr::Var)
+        self.register_param(source).map(DirExpr::Var)
     }
 
     fn recover_known_external_tail_call_expr(
@@ -241,7 +241,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
         target_vn: &Varnode,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         let target_addr = branch_target_address(target_vn)?;
         if self.address_to_index.contains_key(&target_addr) {
             return None;
@@ -255,7 +255,7 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             Vec::new()
         };
-        Some(HirExpr::Call {
+        Some(DirExpr::Call {
             target: resolved_target,
             args,
             ty: NirType::Unknown,
@@ -267,7 +267,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Vec<HirExpr> {
+    ) -> Vec<DirExpr> {
         if let Ok(Some(args)) = self.recover_tail_call_args_from_block(block, term_idx)
             && !args.is_empty()
         {
@@ -402,7 +402,7 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
-    fn compose_arm32_return_pair(&self, r0: HirExpr, r1: HirExpr) -> HirExpr {
+    fn compose_arm32_return_pair(&self, r0: DirExpr, r1: DirExpr) -> DirExpr {
         let (low, high) = if self.options.is_big_endian {
             (r1, r0)
         } else {
@@ -412,19 +412,19 @@ impl<'a> PreviewBuilder<'a> {
             bits: 64,
             signed: false,
         };
-        let shifted_high = HirExpr::Binary {
-            op: HirBinaryOp::Shl,
-            lhs: Box::new(HirExpr::Cast {
+        let shifted_high = DirExpr::Binary {
+            op: DirBinaryOp::Shl,
+            lhs: Box::new(DirExpr::Cast {
                 ty: u64_ty.clone(),
                 expr: Box::new(high),
             }),
-            rhs: Box::new(HirExpr::Const(32, u64_ty.clone())),
+            rhs: Box::new(DirExpr::Const(32, u64_ty.clone())),
             ty: u64_ty.clone(),
         };
-        HirExpr::Binary {
-            op: HirBinaryOp::Or,
+        DirExpr::Binary {
+            op: DirBinaryOp::Or,
             lhs: Box::new(shifted_high),
-            rhs: Box::new(HirExpr::Cast {
+            rhs: Box::new(DirExpr::Cast {
                 ty: u64_ty.clone(),
                 expr: Box::new(low),
             }),
@@ -432,25 +432,25 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn arm32_return_pair_part_is_address_like(&self, expr: &HirExpr) -> bool {
+    fn arm32_return_pair_part_is_address_like(&self, expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::AddressOfGlobal(_) | HirExpr::PtrOffset { .. } | HirExpr::Index { .. } => true,
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::AddressOfGlobal(_) | DirExpr::PtrOffset { .. } | DirExpr::Index { .. } => true,
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 self.arm32_return_pair_part_is_address_like(expr)
             }
-            HirExpr::FieldAccess { base, ty, .. } => {
+            DirExpr::FieldAccess { base, ty, .. } => {
                 matches!(ty, NirType::Ptr(_)) || self.arm32_return_pair_part_is_address_like(base)
             }
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Binary { lhs, rhs, .. } => {
                 self.arm32_return_pair_part_is_address_like(lhs)
                     || self.arm32_return_pair_part_is_address_like(rhs)
             }
-            HirExpr::Load { ptr, ty } => {
+            DirExpr::Load { ptr, ty } => {
                 matches!(ty, NirType::Ptr(_)) || self.arm32_return_pair_part_is_address_like(ptr)
             }
-            HirExpr::Call { ty, .. } => matches!(ty, NirType::Ptr(_)),
-            HirExpr::AggregateCopy { src, .. } => self.arm32_return_pair_part_is_address_like(src),
-            HirExpr::Select {
+            DirExpr::Call { ty, .. } => matches!(ty, NirType::Ptr(_)),
+            DirExpr::AggregateCopy { src, .. } => self.arm32_return_pair_part_is_address_like(src),
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -460,7 +460,7 @@ impl<'a> PreviewBuilder<'a> {
                     || self.arm32_return_pair_part_is_address_like(then_expr)
                     || self.arm32_return_pair_part_is_address_like(else_expr)
             }
-            HirExpr::Var(name) => {
+            DirExpr::Var(name) => {
                 self.options
                     .global_names
                     .values()
@@ -471,7 +471,7 @@ impl<'a> PreviewBuilder<'a> {
                         .values()
                         .any(|global| global == name)
             }
-            HirExpr::Const(_, _) => false,
+            DirExpr::Const(_, _) => false,
         }
     }
 
@@ -480,7 +480,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         let Some(((_low_op_idx, low_vn), (_high_op_idx, high_vn))) =
             self.arm32_return_pair_def_after_barrier(block, term_idx)
         else {
@@ -538,7 +538,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         if let Some(expr) =
             self.lower_arm32_return_pair_expr_from_block(block_idx, block, term_idx)?
         {
@@ -800,7 +800,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         pred_idx: usize,
         return_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         if self.options.is_64bit
             && let Some(source_vn) = self.return_join_source_register(return_idx)
         {
@@ -948,11 +948,11 @@ impl<'a> PreviewBuilder<'a> {
     fn predecessor_primary_return_expr(
         &mut self,
         return_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         let Some(preds) = self.predecessors.get(return_idx) else {
             return Ok(None);
         };
-        let mut recovered: Vec<HirExpr> = Vec::new();
+        let mut recovered: Vec<DirExpr> = Vec::new();
         for pred_idx in preds.clone() {
             if pred_idx == return_idx {
                 continue;
@@ -990,7 +990,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         self.lower_return_terminator_impl(idx, block, term_idx)
     }
 
@@ -999,7 +999,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         if self.uses_primary_return_registers()
             && let Some(expr) =
                 self.lower_arm32_return_pair_expr_from_block(idx, block, term_idx)?
@@ -1123,7 +1123,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         let Some(ret_vn) = self
             .register_namer()
             .primary_return_registers()
@@ -1206,19 +1206,19 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         ret_vn: &Varnode,
         ret_op_idx: usize,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         // Prefer the name chosen when the guarded Copy was materialized.
         if let Some(op) = block.ops.get(ret_op_idx)
             && let Some(output) = op.output.as_ref()
         {
             let key = MaterializedVarnodeKey::new(output, op);
             if let Some(name) = self.materialized_vns.get(&key) {
-                return Some(HirExpr::Var(name.clone()));
+                return Some(DirExpr::Var(name.clone()));
             }
         }
         // Fall back to the hardware return-register name.
         if let Some(name) = self.sla_hw_name(ret_vn.offset, ret_vn.size) {
-            return Some(HirExpr::Var(name));
+            return Some(DirExpr::Var(name));
         }
         None
     }
@@ -1366,7 +1366,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(in crate::midend) fn try_lower_intra_instruction_conditional_return(
         &mut self,
-    ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<DirStmt>>, MlilPreviewError> {
         if !self.options.is_64bit || self.pcode.blocks.len() != 3 {
             return Ok(None);
         }
@@ -1454,18 +1454,18 @@ impl<'a> PreviewBuilder<'a> {
         )?;
 
         Ok(Some(vec![
-            HirStmt::If {
+            DirStmt::If {
                 cond,
-                then_body: vec![HirStmt::Return(Some(default_expr))],
+                then_body: vec![DirStmt::Return(Some(default_expr))],
                 else_body: Vec::new(),
             },
-            HirStmt::Return(Some(alt_expr)),
+            DirStmt::Return(Some(alt_expr)),
         ]))
     }
 
     pub(in crate::midend) fn try_lower_conditional_tailcall_after_return(
         &mut self,
-    ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<DirStmt>>, MlilPreviewError> {
         if !self.options.is_64bit || self.pcode.blocks.len() > 4 {
             return Ok(None);
         }
@@ -1523,29 +1523,29 @@ impl<'a> PreviewBuilder<'a> {
                 tail_body.push(self.emit_unsupported_control_surface(evidence, target_expr));
             }
             LoweredTerminator::Goto(target) if self.address_to_index.get(&target).is_none() => {
-                tail_body.push(HirStmt::Goto(block_label(target)));
+                tail_body.push(DirStmt::Goto(block_label(target)));
             }
             LoweredTerminator::Fallthrough(None) | LoweredTerminator::Return(None) => {}
             _ => return Ok(None),
         }
-        tail_body.push(HirStmt::Return(None));
+        tail_body.push(DirStmt::Return(None));
 
         let return_cond = if return_on_true {
             cond
         } else {
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
+            DirExpr::Unary {
+                op: DirUnaryOp::Not,
                 expr: Box::new(cond),
                 ty: NirType::Bool,
             }
         };
         Ok(Some(vec![
-            HirStmt::If {
+            DirStmt::If {
                 cond: return_cond,
-                then_body: vec![HirStmt::Return(None)],
+                then_body: vec![DirStmt::Return(None)],
                 else_body: Vec::new(),
             },
-            HirStmt::Block(tail_body),
+            DirStmt::Block(tail_body),
         ]))
     }
 
@@ -1582,7 +1582,7 @@ impl<'a> PreviewBuilder<'a> {
                                 let evidence = UnsupportedControlEvidence {
                                     opcode: format!("{:?}", op.opcode),
                                     source_block: Some(block.start_address),
-                                    target_expr: Some(print_expr(&tail_call_expr)),
+                                    target_expr: Some(print_dir_expr(&tail_call_expr)),
                                     successor_targets: Vec::new(),
                                     failure_family: UnsupportedControlFamily::ExternalTarget,
                                     surface: IndirectControlSurface::BranchInd,
@@ -1645,7 +1645,7 @@ impl<'a> PreviewBuilder<'a> {
                                             target_expr: tail_call_expr
                                                 .as_ref()
                                                 .or(target_expr.as_ref())
-                                                .map(print_expr),
+                                                .map(print_dir_expr),
                                             successor_targets: succ_addrs,
                                             failure_family:
                                                 UnsupportedControlFamily::ExternalTarget,
@@ -1784,7 +1784,7 @@ impl<'a> PreviewBuilder<'a> {
                                     "[DIAG] branchind_switch_expr block=0x{:x} seq=0x{:x} expr={}",
                                     block.start_address,
                                     op.seq_num,
-                                    print_expr(&switch_expr)
+                                    print_dir_expr(&switch_expr)
                                 );
                             }
                             let mut targets = Vec::new();
@@ -1874,7 +1874,7 @@ impl<'a> PreviewBuilder<'a> {
                                     .predecessors
                                     .get(idx)
                                     .is_some_and(|preds| !preds.is_empty())
-                                && matches!(switch_expr, HirExpr::Var(_))
+                                && matches!(switch_expr, DirExpr::Var(_))
                             {
                                 this.record_unsupported_inventory_event(
                                     "terminator_branchind_arm32_targets_missing",
@@ -1886,7 +1886,7 @@ impl<'a> PreviewBuilder<'a> {
                                     true,
                                     "arm32_branchind_targets_missing_value_fallback",
                                 );
-                                return Ok(LoweredTerminator::Return(Some(HirExpr::Const(
+                                return Ok(LoweredTerminator::Return(Some(DirExpr::Const(
                                     0,
                                     NirType::Int {
                                         bits: 32,
@@ -2138,8 +2138,8 @@ impl<'a> PreviewBuilder<'a> {
                                     valid: proof_complete,
                                 });
                                 let proof = Some(DispatcherProofUnit {
-                                    selector_expr: print_expr(&expr),
-                                    rendered_selector_expr: Some(print_expr(&expr)),
+                                    selector_expr: print_dir_expr(&expr),
+                                    rendered_selector_expr: Some(print_dir_expr(&expr)),
                                     candidate_targets: targets.clone(),
                                     recovered_cases,
                                     selector_cardinality,
@@ -2168,7 +2168,7 @@ impl<'a> PreviewBuilder<'a> {
                                     let evidence = UnsupportedControlEvidence {
                                         opcode: format!("{:?}", op.opcode),
                                         source_block: Some(block.start_address),
-                                        target_expr: Some(print_expr(&expr)),
+                                        target_expr: Some(print_dir_expr(&expr)),
                                         successor_targets: targets,
                                         failure_family:
                                             UnsupportedControlFamily::NonStructuralDispatcher,
@@ -2204,7 +2204,7 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend::builder) fn lower_cbranch_condition_for_block(
         &mut self,
         idx: usize,
-    ) -> Option<(u64, HirExpr)> {
+    ) -> Option<(u64, DirExpr)> {
         if let Some(cached) = self.terminator_cache.get(&idx) {
             if let LoweredTerminator::Cond {
                 cond, true_target, ..
@@ -2246,7 +2246,7 @@ impl<'a> PreviewBuilder<'a> {
     fn try_recover_branch_condition(
         &mut self,
         vn: &Varnode,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         if self.options.is_64bit
             && !matches!(
                 self.options.calling_convention,
@@ -2293,7 +2293,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         match self.lower_varnode(vn, visiting) {
             Ok(expr) => Ok(expr),
             Err(err) => {
@@ -2324,27 +2324,27 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn branch_cond_too_complex(expr: &HirExpr) -> bool {
+    fn branch_cond_too_complex(expr: &DirExpr) -> bool {
         Self::expr_contains_call(expr) || Self::expr_node_count(expr) > 24
     }
 
-    fn expr_contains_call(expr: &HirExpr) -> bool {
+    fn expr_contains_call(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Call { .. } => true,
-            HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => false,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. }
-            | HirExpr::FieldAccess { base: expr, .. } => Self::expr_contains_call(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Call { .. } => true,
+            DirExpr::Const(_, _) | DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => false,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::PtrOffset { base: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. }
+            | DirExpr::FieldAccess { base: expr, .. } => Self::expr_contains_call(expr),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 Self::expr_contains_call(lhs) || Self::expr_contains_call(rhs)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 Self::expr_contains_call(base) || Self::expr_contains_call(index)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -2357,23 +2357,23 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn expr_node_count(expr: &HirExpr) -> usize {
+    fn expr_node_count(expr: &DirExpr) -> usize {
         match expr {
-            HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => 1,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. }
-            | HirExpr::FieldAccess { base: expr, .. } => 1 + Self::expr_node_count(expr),
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Const(_, _) | DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => 1,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::PtrOffset { base: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. }
+            | DirExpr::FieldAccess { base: expr, .. } => 1 + Self::expr_node_count(expr),
+            DirExpr::Binary { lhs, rhs, .. } => {
                 1 + Self::expr_node_count(lhs) + Self::expr_node_count(rhs)
             }
-            HirExpr::Call { args, .. } => 1 + args.iter().map(Self::expr_node_count).sum::<usize>(),
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Call { args, .. } => 1 + args.iter().map(Self::expr_node_count).sum::<usize>(),
+            DirExpr::Index { base, index, .. } => {
                 1 + Self::expr_node_count(base) + Self::expr_node_count(index)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -2396,7 +2396,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         if is_register_varnode(vn)
             && let Some((site, op)) = self.lookup_def_site(vn)
             && matches!(
@@ -2415,7 +2415,7 @@ impl<'a> PreviewBuilder<'a> {
     fn lower_x86_branch_predicate(
         &mut self,
         predicate: X86BranchPredicate,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let mut visiting = HashSet::default();
         // Tested values (EqZero/NeZero/…) freeze Copy sources; compare operands
         // still use ordinary lowering so both sides stay live-SSA consistent.
@@ -2428,99 +2428,99 @@ impl<'a> PreviewBuilder<'a> {
         Ok(match predicate {
             X86BranchPredicate::EqZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(HirBinaryOp::Eq, value.clone(), zero_like(&value))
+                bool_binary(DirBinaryOp::Eq, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::NeZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(HirBinaryOp::Ne, value.clone(), zero_like(&value))
+                bool_binary(DirBinaryOp::Ne, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLtZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLt, value.clone(), zero_like(&value))
+                bool_binary(DirBinaryOp::SLt, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLeZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLe, value.clone(), zero_like(&value))
+                bool_binary(DirBinaryOp::SLe, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SGtZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLt, zero_like(&value), value)
+                bool_binary(DirBinaryOp::SLt, zero_like(&value), value)
             }
             X86BranchPredicate::SGeZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLe, zero_like(&value), value)
+                bool_binary(DirBinaryOp::SLe, zero_like(&value), value)
             }
             X86BranchPredicate::MaskEqZero { value, mask } => {
                 let value = lower_tested(self, &value, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
-                let masked = HirExpr::Binary {
-                    op: HirBinaryOp::And,
+                let masked = DirExpr::Binary {
+                    op: DirBinaryOp::And,
                     lhs: Box::new(value.clone()),
                     rhs: Box::new(mask),
                     ty: expr_type(&value),
                 };
-                bool_binary(HirBinaryOp::Eq, masked.clone(), zero_like(&masked))
+                bool_binary(DirBinaryOp::Eq, masked.clone(), zero_like(&masked))
             }
             X86BranchPredicate::MaskNeZero { value, mask } => {
                 let value = lower_tested(self, &value, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
-                let masked = HirExpr::Binary {
-                    op: HirBinaryOp::And,
+                let masked = DirExpr::Binary {
+                    op: DirBinaryOp::And,
                     lhs: Box::new(value.clone()),
                     rhs: Box::new(mask),
                     ty: expr_type(&value),
                 };
-                bool_binary(HirBinaryOp::Ne, masked.clone(), zero_like(&masked))
+                bool_binary(DirBinaryOp::Ne, masked.clone(), zero_like(&masked))
             }
             X86BranchPredicate::Eq(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::Eq, lhs, rhs)
+                bool_binary(DirBinaryOp::Eq, lhs, rhs)
             }
             X86BranchPredicate::Ne(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::Ne, lhs, rhs)
+                bool_binary(DirBinaryOp::Ne, lhs, rhs)
             }
             X86BranchPredicate::ULt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::Lt, lhs, rhs)
+                bool_binary(DirBinaryOp::Lt, lhs, rhs)
             }
             X86BranchPredicate::ULe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::Le, lhs, rhs)
+                bool_binary(DirBinaryOp::Le, lhs, rhs)
             }
             X86BranchPredicate::UGt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::Lt, rhs, lhs)
+                bool_binary(DirBinaryOp::Lt, rhs, lhs)
             }
             X86BranchPredicate::UGe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::Le, rhs, lhs)
+                bool_binary(DirBinaryOp::Le, rhs, lhs)
             }
             X86BranchPredicate::SLt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLt, lhs, rhs)
+                bool_binary(DirBinaryOp::SLt, lhs, rhs)
             }
             X86BranchPredicate::SLe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLe, lhs, rhs)
+                bool_binary(DirBinaryOp::SLe, lhs, rhs)
             }
             X86BranchPredicate::SGt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLt, rhs, lhs)
+                bool_binary(DirBinaryOp::SLt, rhs, lhs)
             }
             X86BranchPredicate::SGe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(HirBinaryOp::SLe, rhs, lhs)
+                bool_binary(DirBinaryOp::SLe, rhs, lhs)
             }
         })
     }
@@ -2697,7 +2697,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         switch_var: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let exact_expr = self.lower_wrapped_varnode(switch_var, visiting).ok();
         let alias_expr = self.lower_branchind_same_block_alias_expr(idx, switch_var, visiting);
         let predecessor_expr =
@@ -2729,7 +2729,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         switch_var: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         let pcode_idx = self.pcode_block_idx(idx);
         let block = &self.pcode.blocks[pcode_idx];
         let term_idx = self.block_terminator_index(block)?;
@@ -2781,9 +2781,9 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
         selector_alias: &Varnode,
-        fallback: HirExpr,
+        fallback: DirExpr,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> HirExpr {
+    ) -> DirExpr {
         self.lower_branchind_same_block_alias_expr(idx, selector_alias, visiting)
             .or_else(|| self.recover_selector_expr_from_predecessors(idx, selector_alias, visiting))
             .unwrap_or(fallback)
@@ -2794,7 +2794,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         switch_var: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         let predecessors = self.predecessors.get(idx)?.clone();
         if preview_builder_diag_enabled() {
             let pred_blocks = predecessors
@@ -2841,7 +2841,7 @@ impl<'a> PreviewBuilder<'a> {
                             self.block_start_address(idx),
                             block.start_address,
                             op.seq_num,
-                            print_expr(&expr)
+                            print_dir_expr(&expr)
                         );
                     }
                     return Some(expr);
@@ -2866,7 +2866,7 @@ impl<'a> PreviewBuilder<'a> {
                                 self.block_start_address(idx),
                                 block.start_address,
                                 term_op.seq_num,
-                                print_expr(&expr)
+                                print_dir_expr(&expr)
                             );
                         }
                         return Some(expr);
@@ -2878,7 +2878,7 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn normalize_rendered_selector_expr(&self, expr: HirExpr, min_val: i64) -> (HirExpr, i64) {
+    fn normalize_rendered_selector_expr(&self, expr: DirExpr, min_val: i64) -> (DirExpr, i64) {
         let Some((base_expr, offset)) = super::switch_table::split_selector_base_offset(&expr)
         else {
             return (expr, min_val);
@@ -2891,7 +2891,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn selector_normalization_for_branchind(
         &self,
-        expr: &HirExpr,
+        expr: &DirExpr,
         min_val: i64,
         entry_size: u64,
         recovered_cases: Option<&[(i64, u64)]>,
@@ -2914,20 +2914,20 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn selector_expr_width(expr: &HirExpr) -> Option<u32> {
+    fn selector_expr_width(expr: &DirExpr) -> Option<u32> {
         match expr {
-            HirExpr::Const(_, ty)
-            | HirExpr::Load { ty, .. }
-            | HirExpr::Cast { ty, .. }
-            | HirExpr::Unary { ty, .. }
-            | HirExpr::Binary { ty, .. }
-            | HirExpr::FieldAccess { ty, .. } => Self::nir_type_width(ty),
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => None,
-            HirExpr::Call { ty, .. } => Self::nir_type_width(ty),
-            HirExpr::PtrOffset { .. } => None,
-            HirExpr::AggregateCopy { size, .. } => Some(*size * 8),
-            HirExpr::Index { elem_ty, .. } => Self::nir_type_width(elem_ty),
-            HirExpr::Select { ty, .. } => Self::nir_type_width(ty),
+            DirExpr::Const(_, ty)
+            | DirExpr::Load { ty, .. }
+            | DirExpr::Cast { ty, .. }
+            | DirExpr::Unary { ty, .. }
+            | DirExpr::Binary { ty, .. }
+            | DirExpr::FieldAccess { ty, .. } => Self::nir_type_width(ty),
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => None,
+            DirExpr::Call { ty, .. } => Self::nir_type_width(ty),
+            DirExpr::PtrOffset { .. } => None,
+            DirExpr::AggregateCopy { size, .. } => Some(*size * 8),
+            DirExpr::Index { elem_ty, .. } => Self::nir_type_width(elem_ty),
+            DirExpr::Select { ty, .. } => Self::nir_type_width(ty),
         }
     }
 
@@ -2942,26 +2942,26 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn selector_expr_is_side_effect_free(expr: &HirExpr) -> bool {
+    fn selector_expr_is_side_effect_free(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Const(_, _) | HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => true,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::PtrOffset { base: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. }
-            | HirExpr::FieldAccess { base: expr, .. } => {
+            DirExpr::Const(_, _) | DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => true,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::PtrOffset { base: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. }
+            | DirExpr::FieldAccess { base: expr, .. } => {
                 Self::selector_expr_is_side_effect_free(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Binary { lhs, rhs, .. } => {
                 Self::selector_expr_is_side_effect_free(lhs)
                     && Self::selector_expr_is_side_effect_free(rhs)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 Self::selector_expr_is_side_effect_free(base)
                     && Self::selector_expr_is_side_effect_free(index)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -2971,14 +2971,14 @@ impl<'a> PreviewBuilder<'a> {
                     && Self::selector_expr_is_side_effect_free(then_expr)
                     && Self::selector_expr_is_side_effect_free(else_expr)
             }
-            HirExpr::Call { .. } => false,
+            DirExpr::Call { .. } => false,
         }
     }
 
     fn infer_branchind_targets_from_jump_table_expr(
         &mut self,
         idx: usize,
-        switch_expr: &HirExpr,
+        switch_expr: &DirExpr,
         selector_alias: Option<&Varnode>,
     ) -> Option<InferredJumpTableTargets> {
         const MAX_JUMP_TABLE_CASES: u64 = 256;
@@ -2990,8 +2990,8 @@ impl<'a> PreviewBuilder<'a> {
             eprintln!(
                 "[DIAG] branchind_switch_selector block=0x{:x} expr={} discrim={} min={} table=0x{:x} target_base={:?} relative={} entry_size={}",
                 self.block_start_address(idx),
-                print_expr(switch_expr),
-                print_expr(&selector.discriminant),
+                print_dir_expr(switch_expr),
+                print_dir_expr(&selector.discriminant),
                 selector.min_val,
                 selector.table_base,
                 selector.target_base.map(|addr| format!("0x{addr:x}")),
@@ -3027,7 +3027,7 @@ impl<'a> PreviewBuilder<'a> {
             eprintln!(
                 "[DIAG] branchind_switch_bound block=0x{:x} normalized_selector={} max_selector={} min={}",
                 self.block_start_address(idx),
-                print_expr(&normalized_selector),
+                print_dir_expr(&normalized_selector),
                 max_selector,
                 selector.min_val
             );
@@ -3291,7 +3291,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         selector_alias: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Option<HirExpr> {
+    ) -> Option<DirExpr> {
         let cache_key = (idx, selector_alias.space_id, selector_alias.offset);
         if let Some(cached) = self.selector_representatives.get(&cache_key) {
             return Some(cached.clone());
@@ -3334,7 +3334,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         let peeled = self.peel_passthrough_varnode(vn);
         if let Some((_, op)) = self.lookup_def_site(&peeled) {
             match op.opcode {
@@ -3353,20 +3353,20 @@ impl<'a> PreviewBuilder<'a> {
         self.lower_wrapped_varnode(&peeled, visiting)
     }
 
-    fn extract_modulo_bound(expr: &HirExpr) -> Option<u64> {
+    fn extract_modulo_bound(expr: &DirExpr) -> Option<u64> {
         let mut current = expr;
         loop {
             match current {
-                HirExpr::Cast { expr, .. } => {
+                DirExpr::Cast { expr, .. } => {
                     current = expr;
                 }
-                HirExpr::Binary {
-                    op: HirBinaryOp::Mod,
+                DirExpr::Binary {
+                    op: DirBinaryOp::Mod,
                     rhs,
                     ..
                 } => {
                     let stripped_rhs = strip_casts(rhs);
-                    if let HirExpr::Const(divisor, _) = stripped_rhs {
+                    if let DirExpr::Const(divisor, _) = stripped_rhs {
                         if divisor > 0 {
                             return Some((divisor - 1) as u64);
                         }
@@ -3381,7 +3381,7 @@ impl<'a> PreviewBuilder<'a> {
     fn infer_branchind_selector_upper_bound(
         &mut self,
         idx: usize,
-        selector: &HirExpr,
+        selector: &DirExpr,
         selector_alias: Option<&Varnode>,
         min_val: i64,
     ) -> Option<u64> {
@@ -3390,10 +3390,10 @@ impl<'a> PreviewBuilder<'a> {
         let predecessors = self.predecessors.get(idx)?.clone();
 
         let mut selector_names = HashSet::default();
-        if let HirExpr::Var(name) = &normalized {
+        if let DirExpr::Var(name) = &normalized {
             selector_names.insert(name.clone());
         }
-        if let HirExpr::Var(name) = strip_casts(selector) {
+        if let DirExpr::Var(name) = strip_casts(selector) {
             selector_names.insert(name.clone());
         }
 
@@ -3447,9 +3447,9 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
-        let is_match = |expr: &HirExpr| {
+        let is_match = |expr: &DirExpr| {
             let stripped = strip_casts(expr);
-            if let HirExpr::Var(name) = &stripped {
+            if let DirExpr::Var(name) = &stripped {
                 if selector_names.contains(name) {
                     return true;
                 }
@@ -4073,8 +4073,8 @@ enum X86BranchPredicate {
     SGe(Varnode, Varnode),
 }
 
-fn bool_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr) -> HirExpr {
-    HirExpr::Binary {
+fn bool_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr) -> DirExpr {
+    DirExpr::Binary {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -4082,8 +4082,8 @@ fn bool_binary(op: HirBinaryOp, lhs: HirExpr, rhs: HirExpr) -> HirExpr {
     }
 }
 
-fn zero_like(expr: &HirExpr) -> HirExpr {
-    HirExpr::Const(0, expr_type(expr))
+fn zero_like(expr: &DirExpr) -> DirExpr {
+    DirExpr::Const(0, expr_type(expr))
 }
 
 fn same_cmp_pair(lhs: &(Varnode, Varnode), rhs: &(Varnode, Varnode)) -> bool {
@@ -4184,13 +4184,13 @@ fn containing_section_start(sections: &[(u64, u64)], address: u64) -> Option<u64
 }
 
 fn extract_selector_upper_bound_from_cond(
-    cond: &HirExpr,
-    selector_match: &impl Fn(&HirExpr) -> bool,
+    cond: &DirExpr,
+    selector_match: &impl Fn(&DirExpr) -> bool,
     current_on_true: bool,
 ) -> Option<u64> {
     let cond = strip_casts(cond);
-    if let HirExpr::Unary {
-        op: HirUnaryOp::Not,
+    if let DirExpr::Unary {
+        op: DirUnaryOp::Not,
         expr,
         ..
     } = cond
@@ -4198,22 +4198,22 @@ fn extract_selector_upper_bound_from_cond(
         return extract_selector_upper_bound_from_cond(&expr, selector_match, !current_on_true);
     }
 
-    let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
+    let DirExpr::Binary { op, lhs, rhs, .. } = cond else {
         return None;
     };
 
     let lhs = strip_casts(&lhs);
     let rhs = strip_casts(&rhs);
-    let const_u64 = |expr: &HirExpr| match strip_casts(expr) {
-        HirExpr::Const(value, _) if value >= 0 => Some(value as u64),
+    let const_u64 = |expr: &DirExpr| match strip_casts(expr) {
+        DirExpr::Const(value, _) if value >= 0 => Some(value as u64),
         _ => None,
     };
-    let selector_sub_const_eq_zero = |expr: &HirExpr, zero_side: &HirExpr| {
+    let selector_sub_const_eq_zero = |expr: &DirExpr, zero_side: &DirExpr| {
         if const_u64(zero_side) != Some(0) {
             return None;
         }
-        let HirExpr::Binary {
-            op: HirBinaryOp::Sub,
+        let DirExpr::Binary {
+            op: DirBinaryOp::Sub,
             lhs,
             rhs,
             ..
@@ -4225,7 +4225,7 @@ fn extract_selector_upper_bound_from_cond(
     };
 
     match op {
-        HirBinaryOp::LogicalAnd | HirBinaryOp::And => {
+        DirBinaryOp::LogicalAnd | DirBinaryOp::And => {
             let lhs_bound =
                 extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
             let rhs_bound =
@@ -4244,7 +4244,7 @@ fn extract_selector_upper_bound_from_cond(
                 }
             };
         }
-        HirBinaryOp::LogicalOr | HirBinaryOp::Or => {
+        DirBinaryOp::LogicalOr | DirBinaryOp::Or => {
             let lhs_bound =
                 extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
             let rhs_bound =
@@ -4267,34 +4267,34 @@ fn extract_selector_upper_bound_from_cond(
     }
 
     match (op, selector_match(&lhs), selector_match(&rhs)) {
-        (HirBinaryOp::Eq, true, false) if current_on_true => const_u64(&rhs),
-        (HirBinaryOp::Eq, false, true) if current_on_true => const_u64(&lhs),
-        (HirBinaryOp::Ne, true, false) if !current_on_true => const_u64(&rhs),
-        (HirBinaryOp::Ne, false, true) if !current_on_true => const_u64(&lhs),
-        (HirBinaryOp::Eq, false, false) if current_on_true => {
+        (DirBinaryOp::Eq, true, false) if current_on_true => const_u64(&rhs),
+        (DirBinaryOp::Eq, false, true) if current_on_true => const_u64(&lhs),
+        (DirBinaryOp::Ne, true, false) if !current_on_true => const_u64(&rhs),
+        (DirBinaryOp::Ne, false, true) if !current_on_true => const_u64(&lhs),
+        (DirBinaryOp::Eq, false, false) if current_on_true => {
             selector_sub_const_eq_zero(&lhs, &rhs)
                 .or_else(|| selector_sub_const_eq_zero(&rhs, &lhs))
         }
-        (HirBinaryOp::Ne, false, false) if !current_on_true => {
+        (DirBinaryOp::Ne, false, false) if !current_on_true => {
             selector_sub_const_eq_zero(&lhs, &rhs)
                 .or_else(|| selector_sub_const_eq_zero(&rhs, &lhs))
         }
-        (HirBinaryOp::Le | HirBinaryOp::SLe, true, false) if current_on_true => const_u64(&rhs),
-        (HirBinaryOp::Lt | HirBinaryOp::SLt, true, false) if current_on_true => {
+        (DirBinaryOp::Le | DirBinaryOp::SLe, true, false) if current_on_true => const_u64(&rhs),
+        (DirBinaryOp::Lt | DirBinaryOp::SLt, true, false) if current_on_true => {
             const_u64(&rhs)?.checked_sub(1)
         }
-        (HirBinaryOp::Le | HirBinaryOp::SLe, false, true) if !current_on_true => {
+        (DirBinaryOp::Le | DirBinaryOp::SLe, false, true) if !current_on_true => {
             const_u64(&lhs)?.checked_sub(1)
         }
-        (HirBinaryOp::Lt | HirBinaryOp::SLt, false, true) if !current_on_true => const_u64(&lhs),
-        (HirBinaryOp::Gt | HirBinaryOp::SGt, true, false) if !current_on_true => const_u64(&rhs),
-        (HirBinaryOp::Ge | HirBinaryOp::SGe, true, false) if !current_on_true => {
+        (DirBinaryOp::Lt | DirBinaryOp::SLt, false, true) if !current_on_true => const_u64(&lhs),
+        (DirBinaryOp::Gt | DirBinaryOp::SGt, true, false) if !current_on_true => const_u64(&rhs),
+        (DirBinaryOp::Ge | DirBinaryOp::SGe, true, false) if !current_on_true => {
             const_u64(&rhs)?.checked_sub(1)
         }
-        (HirBinaryOp::Gt | HirBinaryOp::SGt, false, true) if current_on_true => {
+        (DirBinaryOp::Gt | DirBinaryOp::SGt, false, true) if current_on_true => {
             const_u64(&lhs)?.checked_sub(1)
         }
-        (HirBinaryOp::Ge | HirBinaryOp::SGe, false, true) if current_on_true => const_u64(&lhs),
+        (DirBinaryOp::Ge | DirBinaryOp::SGe, false, true) if current_on_true => const_u64(&lhs),
         _ => None,
     }
 }

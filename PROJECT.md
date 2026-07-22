@@ -3760,3 +3760,101 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     clean, `golden_corpus_check.py check` clean (160/160, determinism
     holds) confirming the `take_last_hir_function_snapshot` hook is equally
     zero-behavior-change.
+- **DIR promoted to a genuinely independent IR (not `HirStmt` reused under
+  a different name) -- a real, workspace-wide type split, 2026-07-22.**
+  User's explicit correction after the newtype-over-`Vec<HirStmt>` design
+  above: DIR must be its own type, produced by `fission-pcode`'s actual
+  production pipeline (builder emits it natively; structuring performs a
+  real `DirFunction -> HirFunction` conversion), not something `fission-dir`
+  privately lowers from someone else's type. Chosen deliberately over the
+  smaller alternative (an independent type defined only inside
+  `fission-dir`, converted from a captured `HirStmt` snapshot) once sizing
+  showed the real fix was tractable via a scripted, compiler-verified
+  rename rather than hand-rewriting builder's internals.
+  - **Scope, measured before starting**: a grep for `HirStmt`/`HirExpr`
+    returned 16,513 occurrences across 176 files (70 in
+    `fission-midend-normalize`, 60 in `fission-pcode`, 27 in
+    `fission-midend-structuring`, 15 in `fission-midend-core`, 4 in
+    `fission-dir`) — because builder, all of normalize, and all of
+    structuring (both the `fission-midend-structuring` facade crate and
+    `fission-pcode`'s own `midend/structuring/`) read and incrementally
+    rewrite one shared tree across dozens of passes. Only `render`/printer
+    and anything consuming a finished decompile is genuinely HIR.
+  - **Mechanism**: `DirStmt`/`DirExpr`/`DirLValue`/`DirBinaryOp`/
+    `DirUnaryOp`/`DirSwitchCase`/`DirFunction`/`DirBinding` defined as
+    genuinely separate enums/structs in
+    `crates/fission-midend-core/src/ir/{hir,procedure}.rs` — hand-written,
+    not macro-generated from `Hir*`, deliberately (independence is the
+    point; see the new module doc on `DirStmt`). `NirBinding`'s
+    `initializer: Option<HirExpr>` field meant `NirBinding` itself needed a
+    `DirBinding` counterpart too (`initializer: Option<DirExpr>`) — not
+    purely shared metadata as first assumed; `NirType`/`NirBindingOrigin`
+    *are* genuinely shared (no embedded AST). A real conversion function,
+    `dir_stmts_to_hir_stmts` (plus the reverse, `hir_stmts_to_dir_stmts`,
+    needed once for a structuring-side stats pass re-run on a finished
+    tree), does the structural 1:1 walk. `DirFunction::into_hir_function`
+    carries ABI/param/local metadata across unchanged, converting only
+    `body`. The rename itself was executed as `sed`/`perl` whole-crate
+    passes (`fission-midend-normalize`, `fission-midend-structuring`,
+    `fission-pcode`'s `builder`/`structuring`/`support`/`pass` dirs), not
+    hand-editing — the compiler then found every remaining mismatch, which
+    is what made a 176-file change tractable in one session.
+  - **Real boundary landed in `orchestrate.rs`**: `store_last_dir_snapshot`
+    now captures a full `DirFunction` clone right before
+    `run_structuring_pipeline` runs; immediately after that plus
+    `eliminate_redundant_var_assigns` finish, `hir` is rebound via
+    `hir.into_hir_function(dir_stmts_to_hir_stmts(hir.body.clone()))` --
+    an explicit, real type conversion at the exact point the DIR/HIR
+    boundary already existed in the pipeline, not a redesign of what
+    structuring computes. `take_last_dir_snapshot`/
+    `take_last_hir_function_snapshot` now return the real
+    `DirFunction`/`HirFunction` types directly.
+  - **Non-obvious fallout, each found by the compiler rather than
+    inspection**: (1) `fission-midend-core`'s `util`/`action_pipeline`/`vsa`
+    modules are "pure HIR helpers shared by normalize/structuring/builder"
+    per their own doc comment, but `render` also calls some of them
+    (`expr_type`) — `action_pipeline`/`vsa` had zero render callers (safe
+    to rename outright), `util` needed a parallel `util_dir` module
+    (same function names, `Dir*`-typed) instead, since render genuinely
+    needs the `Hir*`-typed originals. (2) `fission-pcode` has its own
+    *second*, independent copy of `expr_type`/`is_pure_intrinsic_call`/etc.
+    in `midend/support/expr_util.rs` (not the same as midend-core's `util`)
+    — this is the file that already defined the canonical
+    `__carry`/`__scarry`/`__sborrow`/`__popcount` intrinsic list `fission-dir`
+    reused earlier — it's genuinely builder-only, so renaming it outright
+    was correct, but `render/mod.rs`'s own `expr_type` import (via
+    `crate::midend::expr_type`) turned out to resolve to *this* file all
+    along, not midend-core's, so render needed its own tiny local
+    `expr_type` added directly. (3) `builder/type_hints.rs` (`apply_preview_type_hints`)
+    lives under `builder/` by historical location but is only ever called
+    *after* structuring finishes, on the real `HirFunction` — reverted to
+    Hir-typed specifically, both in `type_hints.rs` and its
+    `builder/mod.rs` wrapper, plus the matching `#[cfg(test)]` helper.
+    Builder also calls the real printer (`print_expr`) at ~14 call sites to
+    embed rendered text into diagnostics/evidence fields (not into the
+    AST) — added `print_dir_expr` (converts via `dir_expr_to_hir_expr`,
+    reusing the real printer rather than duplicating it) and swapped every
+    Dir-side call site to it.
+  - **`fission-dir` itself**: `interp.rs` rewritten around one
+    `define_interp!` macro instantiated twice (`dir::interpret`/
+    `hir::interpret`) instead of two hand-written copies or a shared
+    generic/trait — deliberate: the whole point of this crate is
+    comparing DIR vs. HIR execution, so if the two interpreters' *logic*
+    could silently drift apart, that would corrupt the comparison itself.
+    `diff_dir_hir` now takes `&DirFunction`/`&HirFunction` directly
+    (dropped the old `Dir`/`Hir` newtypes entirely) — each side's own
+    `params`/`locals` travel with it, so `diff_dir_hir` no longer needs
+    them as separate arguments. Added `dir_assign_and_while_loop_interpreted_correctly`,
+    a DIR-side mirror of the existing HIR while-loop test, specifically to
+    prove the macro's two instantiations aren't accidentally different.
+  - Validated: `fission-pcode --lib` + `--tests` 927/927 (zero regressions
+    from the entire rename), `fission-midend-normalize` 270/270,
+    `fission-midend-structuring` 99/99, `fission-dir` 5/5 (including the
+    real `max2.elf` end-to-end test, now exercising genuinely independent
+    `DirFunction`/`HirFunction` instead of two clones of one type), full
+    `cargo build --workspace` clean, `golden_corpus_check.py check` clean
+    (160/160, byte-identical, determinism holds — the load-bearing proof
+    that a 176-file type-identity rename plus one real conversion function
+    changed zero decompiler output), `cargo nextest run --workspace`
+    2157/2164 passed — the same 7 pre-existing, already-documented
+    failures (unrelated memcpy/`.text`-overrun bug), zero new regressions.

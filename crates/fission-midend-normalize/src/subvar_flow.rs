@@ -14,7 +14,7 @@ struct ReplaceVar {
 #[derive(Debug, Clone)]
 struct AssignInfo {
     lhs: String,
-    rhs: HirExpr,
+    rhs: DirExpr,
 }
 
 /// Helper to identify if a bitmask represents a standard narrow subvariable size.
@@ -46,14 +46,14 @@ fn compute_sizes(mask: u64) -> Option<(u32, u32)> {
 
 /// Recursively scans statement trees to collect all local assignments and track multi-defined variables.
 fn collect_assignments(
-    stmts: &[HirStmt],
+    stmts: &[DirStmt],
     assigns: &mut Vec<AssignInfo>,
     multi_def: &mut HashSet<String>,
 ) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(name),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(name),
                 rhs,
             } => {
                 if assigns.iter().any(|a| &a.lhs == name) {
@@ -64,38 +64,38 @@ fn collect_assignments(
                     rhs: rhs.clone(),
                 });
             }
-            HirStmt::Assign {
-                lhs: HirLValue::Deref { ptr, .. },
+            DirStmt::Assign {
+                lhs: DirLValue::Deref { ptr, .. },
                 rhs,
             } => {
                 collect_expr_assigns(ptr, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            HirStmt::Assign {
-                lhs: HirLValue::Index { base, index, .. },
+            DirStmt::Assign {
+                lhs: DirLValue::Index { base, index, .. },
                 rhs,
             } => {
                 collect_expr_assigns(base, assigns, multi_def);
                 collect_expr_assigns(index, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            HirStmt::Assign {
-                lhs: HirLValue::FieldAccess { base, .. },
+            DirStmt::Assign {
+                lhs: DirLValue::FieldAccess { base, .. },
                 rhs,
             } => {
                 collect_expr_assigns(base, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
                 collect_expr_assigns(expr, assigns, multi_def);
             }
-            HirStmt::VaStart { va_list, .. } => {
+            DirStmt::VaStart { va_list, .. } => {
                 collect_expr_assigns(va_list, assigns, multi_def);
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
                 collect_assignments(body, assigns, multi_def);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -112,7 +112,7 @@ fn collect_assignments(
                 }
                 collect_assignments(body, assigns, multi_def);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -121,7 +121,7 @@ fn collect_assignments(
                 collect_assignments(then_body, assigns, multi_def);
                 collect_assignments(else_body, assigns, multi_def);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -138,7 +138,7 @@ fn collect_assignments(
 }
 
 fn collect_expr_assigns(
-    _expr: &HirExpr,
+    _expr: &DirExpr,
     _assigns: &mut Vec<AssignInfo>,
     _multi_def: &mut HashSet<String>,
 ) {
@@ -161,16 +161,16 @@ enum UseContext {
         dest: String,
     },
     Binary {
-        op: HirBinaryOp,
-        other: HirExpr,
+        op: DirBinaryOp,
+        other: DirExpr,
         dest: String,
     },
     Compare {
-        op: HirBinaryOp,
-        other: HirExpr,
+        op: DirBinaryOp,
+        other: DirExpr,
     },
     ShiftAmount {
-        op: HirBinaryOp,
+        op: DirBinaryOp,
         dest: String,
     },
     Call {
@@ -182,23 +182,23 @@ enum UseContext {
 }
 
 /// Determines if an expression contains references to a variable.
-fn expr_contains_var(expr: &HirExpr, var_name: &str) -> bool {
+fn expr_contains_var(expr: &DirExpr, var_name: &str) -> bool {
     match expr {
-        HirExpr::Var(name) => name == var_name,
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Var(name) => name == var_name,
+        DirExpr::Cast { expr, .. }
+        | DirExpr::Unary { expr, .. }
+        | DirExpr::Load { ptr: expr, .. }
+        | DirExpr::PtrOffset { base: expr, .. }
+        | DirExpr::AggregateCopy { src: expr, .. }
+        | DirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
+        DirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_var(lhs, var_name) || expr_contains_var(rhs, var_name)
         }
-        HirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, var_name)),
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, var_name)),
+        DirExpr::Index { base, index, .. } => {
             expr_contains_var(base, var_name) || expr_contains_var(index, var_name)
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -213,25 +213,25 @@ fn expr_contains_var(expr: &HirExpr, var_name: &str) -> bool {
 }
 
 /// Scans statement body recursively to find all usages and their contextual patterns for a given variable.
-fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
+fn find_uses(stmts: &[DirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
     for stmt in stmts {
         match stmt {
-            HirStmt::Assign {
-                lhs: HirLValue::Var(dest),
+            DirStmt::Assign {
+                lhs: DirLValue::Var(dest),
                 rhs,
             } => {
                 analyze_expr_use(rhs, var_name, Some(dest), uses);
             }
-            HirStmt::Assign { lhs, rhs } => {
+            DirStmt::Assign { lhs, rhs } => {
                 analyze_lvalue_use(lhs, var_name, uses);
                 analyze_expr_use(rhs, var_name, None, uses);
             }
-            HirStmt::Expr(expr) => {
+            DirStmt::Expr(expr) => {
                 analyze_expr_use(expr, var_name, None, uses);
             }
-            HirStmt::Return(Some(expr)) => {
+            DirStmt::Return(Some(expr)) => {
                 if expr_contains_var(expr, var_name) {
-                    if let HirExpr::Var(name) = expr {
+                    if let DirExpr::Var(name) = expr {
                         if name == var_name {
                             uses.push(UseInfo {
                                 context: UseContext::Return,
@@ -244,19 +244,19 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                     });
                 }
             }
-            HirStmt::Return(None) => {}
-            HirStmt::Block(body) => {
+            DirStmt::Return(None) => {}
+            DirStmt::Block(body) => {
                 find_uses(body, var_name, uses);
             }
-            HirStmt::While { cond, body } => {
+            DirStmt::While { cond, body } => {
                 analyze_expr_use(cond, var_name, None, uses);
                 find_uses(body, var_name, uses);
             }
-            HirStmt::DoWhile { body, cond } => {
+            DirStmt::DoWhile { body, cond } => {
                 find_uses(body, var_name, uses);
                 analyze_expr_use(cond, var_name, None, uses);
             }
-            HirStmt::For {
+            DirStmt::For {
                 init,
                 cond,
                 update,
@@ -273,7 +273,7 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 }
                 find_uses(body, var_name, uses);
             }
-            HirStmt::If {
+            DirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -282,7 +282,7 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 find_uses(then_body, var_name, uses);
                 find_uses(else_body, var_name, uses);
             }
-            HirStmt::Switch {
+            DirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -298,18 +298,18 @@ fn find_uses(stmts: &[HirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
     }
 }
 
-fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &mut Vec<UseInfo>) {
+fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &mut Vec<UseInfo>) {
     if !expr_contains_var(expr, var_name) {
         return;
     }
     match expr {
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             if name == var_name {
                 if let Some(d) = dest {
                     uses.push(UseInfo {
                         context: UseContext::Binary {
-                            op: HirBinaryOp::And,
-                            other: HirExpr::Const(-1, NirType::Unknown),
+                            op: DirBinaryOp::And,
+                            other: DirExpr::Const(-1, NirType::Unknown),
                             dest: d.to_string(),
                         },
                     });
@@ -320,29 +320,29 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                 }
             }
         }
-        HirExpr::Binary { op, lhs, rhs, .. } => {
+        DirExpr::Binary { op, lhs, rhs, .. } => {
             let left_var = match &**lhs {
-                HirExpr::Var(name) => name == var_name,
+                DirExpr::Var(name) => name == var_name,
                 _ => false,
             };
             let right_var = match &**rhs {
-                HirExpr::Var(name) => name == var_name,
+                DirExpr::Var(name) => name == var_name,
                 _ => false,
             };
 
             if left_var || right_var {
                 let other = if left_var { &**rhs } else { &**lhs };
                 match op {
-                    HirBinaryOp::Eq
-                    | HirBinaryOp::Ne
-                    | HirBinaryOp::Lt
-                    | HirBinaryOp::Le
-                    | HirBinaryOp::Gt
-                    | HirBinaryOp::Ge
-                    | HirBinaryOp::SLt
-                    | HirBinaryOp::SLe
-                    | HirBinaryOp::SGt
-                    | HirBinaryOp::SGe => {
+                    DirBinaryOp::Eq
+                    | DirBinaryOp::Ne
+                    | DirBinaryOp::Lt
+                    | DirBinaryOp::Le
+                    | DirBinaryOp::Gt
+                    | DirBinaryOp::Ge
+                    | DirBinaryOp::SLt
+                    | DirBinaryOp::SLe
+                    | DirBinaryOp::SGt
+                    | DirBinaryOp::SGe => {
                         uses.push(UseInfo {
                             context: UseContext::Compare {
                                 op: *op,
@@ -350,8 +350,8 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                             },
                         });
                     }
-                    HirBinaryOp::And => {
-                        if let (Some(d), HirExpr::Const(mask, _)) = (dest, other) {
+                    DirBinaryOp::And => {
+                        if let (Some(d), DirExpr::Const(mask, _)) = (dest, other) {
                             uses.push(UseInfo {
                                 context: UseContext::AndMask {
                                     mask: *mask as u64,
@@ -372,17 +372,17 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                             });
                         }
                     }
-                    HirBinaryOp::Add
-                    | HirBinaryOp::Sub
-                    | HirBinaryOp::Or
-                    | HirBinaryOp::Xor
-                    | HirBinaryOp::Shl
-                    | HirBinaryOp::Shr
-                    | HirBinaryOp::Sar => {
+                    DirBinaryOp::Add
+                    | DirBinaryOp::Sub
+                    | DirBinaryOp::Or
+                    | DirBinaryOp::Xor
+                    | DirBinaryOp::Shl
+                    | DirBinaryOp::Shr
+                    | DirBinaryOp::Sar => {
                         if let Some(d) = dest {
-                            if (*op == HirBinaryOp::Shl
-                                || *op == HirBinaryOp::Shr
-                                || *op == HirBinaryOp::Sar)
+                            if (*op == DirBinaryOp::Shl
+                                || *op == DirBinaryOp::Shr
+                                || *op == DirBinaryOp::Sar)
                                 && right_var
                             {
                                 uses.push(UseInfo {
@@ -418,8 +418,8 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                 });
             }
         }
-        HirExpr::Cast { ty, expr } => {
-            if let HirExpr::Var(name) = &**expr {
+        DirExpr::Cast { ty, expr } => {
+            if let DirExpr::Var(name) = &**expr {
                 if name == var_name {
                     if let Some(d) = dest {
                         uses.push(UseInfo {
@@ -440,9 +440,9 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
                 context: UseContext::Incompatible,
             });
         }
-        HirExpr::Call { target, args, .. } => {
+        DirExpr::Call { target, args, .. } => {
             for (idx, arg) in args.iter().enumerate() {
-                if let HirExpr::Var(name) = arg {
+                if let DirExpr::Var(name) = arg {
                     if name == var_name {
                         uses.push(UseInfo {
                             context: UseContext::Call {
@@ -469,26 +469,26 @@ fn analyze_expr_use(expr: &HirExpr, var_name: &str, dest: Option<&str>, uses: &m
 }
 
 /// RuleSubvarShift: trace SUBPIECE/CONCAT-style `Or` reassembly back to the source varnode.
-fn trace_or_subvar_piece(lhs: &HirExpr, rhs: &HirExpr, mask: u64) -> Option<(String, u64)> {
+fn trace_or_subvar_piece(lhs: &DirExpr, rhs: &DirExpr, mask: u64) -> Option<(String, u64)> {
     let (low_part, high_part) = match (lhs, rhs) {
         (
             low,
-            HirExpr::Binary {
-                op: HirBinaryOp::Shl,
+            DirExpr::Binary {
+                op: DirBinaryOp::Shl,
                 ..
             },
         ) => (low, rhs),
         (
-            HirExpr::Binary {
-                op: HirBinaryOp::Shl,
+            DirExpr::Binary {
+                op: DirBinaryOp::Shl,
                 ..
             },
             low,
         ) => (low, lhs),
         _ => return None,
     };
-    let HirExpr::Binary {
-        op: HirBinaryOp::Shl,
+    let DirExpr::Binary {
+        op: DirBinaryOp::Shl,
         lhs: shifted,
         rhs: shift_amt,
         ..
@@ -496,7 +496,7 @@ fn trace_or_subvar_piece(lhs: &HirExpr, rhs: &HirExpr, mask: u64) -> Option<(Str
     else {
         return None;
     };
-    let HirExpr::Const(n, _) = shift_amt.as_ref() else {
+    let DirExpr::Const(n, _) = shift_amt.as_ref() else {
         return None;
     };
     if *n <= 0 || *n >= 64 {
@@ -507,14 +507,14 @@ fn trace_or_subvar_piece(lhs: &HirExpr, rhs: &HirExpr, mask: u64) -> Option<(Str
         return None;
     }
     let (src, and_mask) = match low_part {
-        HirExpr::Binary {
-            op: HirBinaryOp::And,
+        DirExpr::Binary {
+            op: DirBinaryOp::And,
             lhs: and_lhs,
             rhs: and_rhs,
             ..
         } => match (and_lhs.as_ref(), and_rhs.as_ref()) {
-            (HirExpr::Var(name), HirExpr::Const(m, _)) => (name.clone(), *m as u64),
-            (HirExpr::Const(m, _), HirExpr::Var(name)) => (name.clone(), *m as u64),
+            (DirExpr::Var(name), DirExpr::Const(m, _)) => (name.clone(), *m as u64),
+            (DirExpr::Const(m, _), DirExpr::Var(name)) => (name.clone(), *m as u64),
             _ => return None,
         },
         _ => return None,
@@ -522,8 +522,8 @@ fn trace_or_subvar_piece(lhs: &HirExpr, rhs: &HirExpr, mask: u64) -> Option<(Str
     if and_mask != expected_low_mask {
         return None;
     }
-    let HirExpr::Binary {
-        op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+    let DirExpr::Binary {
+        op: DirBinaryOp::Shr | DirBinaryOp::Sar,
         lhs: shr_lhs,
         rhs: shr_amt,
         ..
@@ -531,36 +531,36 @@ fn trace_or_subvar_piece(lhs: &HirExpr, rhs: &HirExpr, mask: u64) -> Option<(Str
     else {
         return None;
     };
-    let HirExpr::Const(shr_n, _) = shr_amt.as_ref() else {
+    let DirExpr::Const(shr_n, _) = shr_amt.as_ref() else {
         return None;
     };
     if shr_n != n {
         return None;
     }
     match shr_lhs.as_ref() {
-        HirExpr::Var(name) if name == &src => Some((src, mask)),
+        DirExpr::Var(name) if name == &src => Some((src, mask)),
         _ => None,
     }
 }
 
-fn analyze_lvalue_use(lhs: &HirLValue, var_name: &str, uses: &mut Vec<UseInfo>) {
+fn analyze_lvalue_use(lhs: &DirLValue, var_name: &str, uses: &mut Vec<UseInfo>) {
     match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => {
             if expr_contains_var(ptr, var_name) {
                 uses.push(UseInfo {
                     context: UseContext::Incompatible,
                 });
             }
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             if expr_contains_var(base, var_name) || expr_contains_var(index, var_name) {
                 uses.push(UseInfo {
                     context: UseContext::Incompatible,
                 });
             }
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             if expr_contains_var(base, var_name) {
                 uses.push(UseInfo {
                     context: UseContext::Incompatible,
@@ -572,7 +572,7 @@ fn analyze_lvalue_use(lhs: &HirLValue, var_name: &str, uses: &mut Vec<UseInfo>) 
 
 /// Global Subvariable Flow solver executing worklist bit constraint propagation backward and forward.
 struct SubvarFlowSolver {
-    def_map: HashMap<String, HirExpr>,
+    def_map: HashMap<String, DirExpr>,
     type_map: HashMap<String, NirType>,
     multi_defined: HashSet<String>,
     varmap: HashMap<String, ReplaceVar>,
@@ -582,7 +582,7 @@ struct SubvarFlowSolver {
 }
 
 impl SubvarFlowSolver {
-    fn solve(&mut self, body: &[HirStmt]) -> bool {
+    fn solve(&mut self, body: &[DirStmt]) -> bool {
         while let Some((var_name, mask)) = self.worklist.pop() {
             if let Some(existing) = self.varmap.get(&var_name) {
                 if existing.mask != mask {
@@ -647,44 +647,44 @@ impl SubvarFlowSolver {
             // but produces a bogus, uninitialized-looking declaration for a
             // synthetic named value that isn't backed by any real storage
             // (e.g. a fixed-address field read materialized as a bare,
-            // deliberately-unregistered `HirExpr::Var`, as in the Windows
+            // deliberately-unregistered `DirExpr::Var`, as in the Windows
             // TEB/PEB field recognition in `fission-pcode`).
             None => return self.type_map.contains_key(var_name),
         };
 
         match def_expr {
-            HirExpr::Binary { op, lhs, rhs, .. } => match op {
-                HirBinaryOp::Or => {
+            DirExpr::Binary { op, lhs, rhs, .. } => match op {
+                DirBinaryOp::Or => {
                     if let Some((src, piece_mask)) = trace_or_subvar_piece(lhs, rhs, mask) {
                         self.worklist.push((src, piece_mask));
                         return true;
                     }
-                    if let HirExpr::Var(l) = &**lhs {
+                    if let DirExpr::Var(l) = &**lhs {
                         self.worklist.push((l.clone(), mask));
                     }
-                    if let HirExpr::Var(r) = &**rhs {
+                    if let DirExpr::Var(r) = &**rhs {
                         self.worklist.push((r.clone(), mask));
                     }
                     true
                 }
-                HirBinaryOp::Add | HirBinaryOp::Sub | HirBinaryOp::And | HirBinaryOp::Xor => {
-                    if let HirExpr::Var(l) = &**lhs {
+                DirBinaryOp::Add | DirBinaryOp::Sub | DirBinaryOp::And | DirBinaryOp::Xor => {
+                    if let DirExpr::Var(l) = &**lhs {
                         self.worklist.push((l.clone(), mask));
                     }
-                    if let HirExpr::Var(r) = &**rhs {
+                    if let DirExpr::Var(r) = &**rhs {
                         self.worklist.push((r.clone(), mask));
                     }
                     true
                 }
-                HirBinaryOp::Shl => {
-                    if let HirExpr::Const(sa, _) = &**rhs {
+                DirBinaryOp::Shl => {
+                    if let DirExpr::Const(sa, _) = &**rhs {
                         let sa = *sa as u32;
                         if sa < 64 {
                             let new_mask = mask >> sa;
                             if new_mask == 0 {
                                 true
                             } else if (new_mask << sa) == mask {
-                                if let HirExpr::Var(l) = &**lhs {
+                                if let DirExpr::Var(l) = &**lhs {
                                     self.worklist.push((l.clone(), new_mask));
                                 }
                                 true
@@ -698,13 +698,13 @@ impl SubvarFlowSolver {
                         false
                     }
                 }
-                HirBinaryOp::Shr | HirBinaryOp::Sar => {
-                    if let HirExpr::Const(sa, _) = &**rhs {
+                DirBinaryOp::Shr | DirBinaryOp::Sar => {
+                    if let DirExpr::Const(sa, _) = &**rhs {
                         let sa = *sa as u32;
                         if sa < 64 {
                             let new_mask = mask << sa;
                             if (new_mask >> sa) == mask {
-                                if let HirExpr::Var(l) = &**lhs {
+                                if let DirExpr::Var(l) = &**lhs {
                                     self.worklist.push((l.clone(), new_mask));
                                 }
                                 true
@@ -720,17 +720,17 @@ impl SubvarFlowSolver {
                 }
                 _ => false,
             },
-            HirExpr::Cast { expr, .. } => {
-                if let HirExpr::Var(inner) = &**expr {
+            DirExpr::Cast { expr, .. } => {
+                if let DirExpr::Var(inner) = &**expr {
                     self.worklist.push((inner.clone(), mask));
                     true
                 } else {
                     false
                 }
             }
-            HirExpr::Unary { op, expr, .. } => {
-                if *op == HirUnaryOp::BitNot || *op == HirUnaryOp::Neg {
-                    if let HirExpr::Var(inner) = &**expr {
+            DirExpr::Unary { op, expr, .. } => {
+                if *op == DirUnaryOp::BitNot || *op == DirUnaryOp::Neg {
+                    if let DirExpr::Var(inner) = &**expr {
                         self.worklist.push((inner.clone(), mask));
                         true
                     } else {
@@ -740,17 +740,17 @@ impl SubvarFlowSolver {
                     false
                 }
             }
-            HirExpr::Var(src) => {
+            DirExpr::Var(src) => {
                 self.worklist.push((src.clone(), mask));
                 true
             }
-            HirExpr::Const(_, _) => true,
-            HirExpr::Load { .. } | HirExpr::Call { .. } => true,
+            DirExpr::Const(_, _) => true,
+            DirExpr::Load { .. } | DirExpr::Call { .. } => true,
             _ => false,
         }
     }
 
-    fn trace_forward(&mut self, body: &[HirStmt], var_name: &str, mask: u64) -> bool {
+    fn trace_forward(&mut self, body: &[DirStmt], var_name: &str, mask: u64) -> bool {
         let mut uses = Vec::new();
         find_uses(body, var_name, &mut uses);
 
@@ -788,13 +788,13 @@ impl SubvarFlowSolver {
                     }
                 }
                 UseContext::Binary { op, other, dest } => match op {
-                    HirBinaryOp::Add
-                    | HirBinaryOp::Sub
-                    | HirBinaryOp::And
-                    | HirBinaryOp::Or
-                    | HirBinaryOp::Xor => {
+                    DirBinaryOp::Add
+                    | DirBinaryOp::Sub
+                    | DirBinaryOp::And
+                    | DirBinaryOp::Or
+                    | DirBinaryOp::Xor => {
                         self.worklist.push((dest.clone(), mask));
-                        if let HirExpr::Var(o) = other {
+                        if let DirExpr::Var(o) = other {
                             self.worklist.push((o.clone(), mask));
                         }
                     }
@@ -802,12 +802,12 @@ impl SubvarFlowSolver {
                 },
                 UseContext::Compare { op: _, other } => {
                     match other {
-                        HirExpr::Const(val, _) => {
+                        DirExpr::Const(val, _) => {
                             if (val as u64 & !mask) != 0 {
                                 return false;
                             }
                         }
-                        HirExpr::Var(o) => {
+                        DirExpr::Var(o) => {
                             self.worklist.push((o.clone(), mask));
                         }
                         _ => return false,
@@ -822,14 +822,14 @@ impl SubvarFlowSolver {
 }
 
 /// Recursively applies subvariable replacements to a given expression.
-fn rewrite_expr(expr: &mut HirExpr, varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_expr(expr: &mut DirExpr, varmap: &HashMap<String, ReplaceVar>) {
     match expr {
-        HirExpr::Cast { ty, expr: inner } => {
-            if let HirExpr::Var(name) = &**inner {
+        DirExpr::Cast { ty, expr: inner } => {
+            if let DirExpr::Var(name) = &**inner {
                 if let Some(rep) = varmap.get(name) {
                     if let NirType::Int { bits, .. } = ty {
                         if *bits == rep.bitsize {
-                            *expr = HirExpr::Var(rep.new_name.clone());
+                            *expr = DirExpr::Var(rep.new_name.clone());
                             return;
                         }
                     }
@@ -837,32 +837,32 @@ fn rewrite_expr(expr: &mut HirExpr, varmap: &HashMap<String, ReplaceVar>) {
             }
             rewrite_expr(inner, varmap);
         }
-        HirExpr::Binary { op, lhs, rhs, ty } => {
-            if *op == HirBinaryOp::And {
-                if let (HirExpr::Var(name), HirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
+        DirExpr::Binary { op, lhs, rhs, ty } => {
+            if *op == DirBinaryOp::And {
+                if let (DirExpr::Var(name), DirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
                     if let Some(rep) = varmap.get(name) {
                         if *mask as u64 == rep.mask {
-                            *expr = HirExpr::Var(rep.new_name.clone());
+                            *expr = DirExpr::Var(rep.new_name.clone());
                             return;
                         }
                     }
                 }
-                if let (HirExpr::Const(mask, _), HirExpr::Var(name)) = (&**lhs, &**rhs) {
+                if let (DirExpr::Const(mask, _), DirExpr::Var(name)) = (&**lhs, &**rhs) {
                     if let Some(rep) = varmap.get(name) {
                         if *mask as u64 == rep.mask {
-                            *expr = HirExpr::Var(rep.new_name.clone());
+                            *expr = DirExpr::Var(rep.new_name.clone());
                             return;
                         }
                     }
                 }
             }
 
-            let l_narrow_ty = if let HirExpr::Var(n) = &**lhs {
+            let l_narrow_ty = if let DirExpr::Var(n) = &**lhs {
                 varmap.get(n).map(|r| r.new_type.clone())
             } else {
                 None
             };
-            let r_narrow_ty = if let HirExpr::Var(n) = &**rhs {
+            let r_narrow_ty = if let DirExpr::Var(n) = &**rhs {
                 varmap.get(n).map(|r| r.new_type.clone())
             } else {
                 None
@@ -875,10 +875,10 @@ fn rewrite_expr(expr: &mut HirExpr, varmap: &HashMap<String, ReplaceVar>) {
                 *ty = nty;
             }
         }
-        HirExpr::Unary {
+        DirExpr::Unary {
             expr: inner, ty, ..
         } => {
-            let narrow_ty = if let HirExpr::Var(name) = &**inner {
+            let narrow_ty = if let DirExpr::Var(name) = &**inner {
                 varmap.get(name).map(|rep| rep.new_type.clone())
             } else {
                 None
@@ -888,7 +888,7 @@ fn rewrite_expr(expr: &mut HirExpr, varmap: &HashMap<String, ReplaceVar>) {
                 *ty = nty;
             }
         }
-        HirExpr::Var(name) => {
+        DirExpr::Var(name) => {
             if let Some(rep) = varmap.get(name) {
                 *name = rep.new_name.clone();
             }
@@ -899,33 +899,33 @@ fn rewrite_expr(expr: &mut HirExpr, varmap: &HashMap<String, ReplaceVar>) {
     }
 }
 
-fn for_each_child_expr<F>(expr: &mut HirExpr, mut f: F)
+fn for_each_child_expr<F>(expr: &mut DirExpr, mut f: F)
 where
-    F: FnMut(&mut HirExpr),
+    F: FnMut(&mut DirExpr),
 {
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             f(inner);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             f(lhs);
             f(rhs);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 f(arg);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             f(base);
             f(index);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -939,50 +939,50 @@ where
     }
 }
 
-fn rewrite_lvalue(lhs: &mut HirLValue, varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_lvalue(lhs: &mut DirLValue, varmap: &HashMap<String, ReplaceVar>) {
     match lhs {
-        HirLValue::Var(name) => {
+        DirLValue::Var(name) => {
             if let Some(rep) = varmap.get(name) {
                 *name = rep.new_name.clone();
             }
         }
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Deref { ptr, .. } => {
             rewrite_expr(ptr, varmap);
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             rewrite_expr(base, varmap);
             rewrite_expr(index, varmap);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             rewrite_expr(base, varmap);
         }
     }
 }
 
-fn rewrite_stmt(stmt: &mut HirStmt, varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_stmt(stmt: &mut DirStmt, varmap: &HashMap<String, ReplaceVar>) {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             rewrite_lvalue(lhs, varmap);
             rewrite_expr(rhs, varmap);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             rewrite_expr(expr, varmap);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             rewrite_expr(va_list, varmap);
         }
-        HirStmt::Block(body) => {
+        DirStmt::Block(body) => {
             rewrite_stmts(body, varmap);
         }
-        HirStmt::While { cond, body } => {
+        DirStmt::While { cond, body } => {
             rewrite_expr(cond, varmap);
             rewrite_stmts(body, varmap);
         }
-        HirStmt::DoWhile { body, cond } => {
+        DirStmt::DoWhile { body, cond } => {
             rewrite_stmts(body, varmap);
             rewrite_expr(cond, varmap);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -999,7 +999,7 @@ fn rewrite_stmt(stmt: &mut HirStmt, varmap: &HashMap<String, ReplaceVar>) {
             }
             rewrite_stmts(body, varmap);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1008,7 +1008,7 @@ fn rewrite_stmt(stmt: &mut HirStmt, varmap: &HashMap<String, ReplaceVar>) {
             rewrite_stmts(then_body, varmap);
             rewrite_stmts(else_body, varmap);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -1023,14 +1023,14 @@ fn rewrite_stmt(stmt: &mut HirStmt, varmap: &HashMap<String, ReplaceVar>) {
     }
 }
 
-fn rewrite_stmts(stmts: &mut [HirStmt], varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_stmts(stmts: &mut [DirStmt], varmap: &HashMap<String, ReplaceVar>) {
     for stmt in stmts.iter_mut() {
         rewrite_stmt(stmt, varmap);
     }
 }
 
 /// Pipeline entry point for the Global Subvariable Flow Analyzer normalization pass.
-pub fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
+pub fn apply_subvar_flow_pass(func: &mut DirFunction) -> bool {
     let mut assigns = Vec::new();
     let mut multi_defined = HashSet::default();
     collect_assignments(&func.body, &mut assigns, &mut multi_defined);
@@ -1048,25 +1048,25 @@ pub fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
             continue;
         }
         match &assign.rhs {
-            HirExpr::Binary {
-                op: HirBinaryOp::And,
+            DirExpr::Binary {
+                op: DirBinaryOp::And,
                 lhs,
                 rhs,
                 ..
             } => {
-                if let (HirExpr::Var(name), HirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
+                if let (DirExpr::Var(name), DirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
                     if is_valid_subvar_mask(*mask as u64) {
                         candidate_set.insert((name.clone(), *mask as u64));
                     }
                 }
-                if let (HirExpr::Const(mask, _), HirExpr::Var(name)) = (&**lhs, &**rhs) {
+                if let (DirExpr::Const(mask, _), DirExpr::Var(name)) = (&**lhs, &**rhs) {
                     if is_valid_subvar_mask(*mask as u64) {
                         candidate_set.insert((name.clone(), *mask as u64));
                     }
                 }
             }
-            HirExpr::Cast { ty, expr } => {
-                if let HirExpr::Var(name) = &**expr {
+            DirExpr::Cast { ty, expr } => {
+                if let DirExpr::Var(name) = &**expr {
                     if let NirType::Int { bits, .. } = ty {
                         if *bits == 8 || *bits == 16 || *bits == 32 {
                             let mask = (1u64 << bits) - 1;
@@ -1121,7 +1121,7 @@ pub fn apply_subvar_flow_pass(func: &mut HirFunction) -> bool {
         if solver.solve(&func.body) {
             for replace_var in solver.varmap.values() {
                 if !func.locals.iter().any(|l| l.name == replace_var.new_name) {
-                    let binding = NirBinding {
+                    let binding = DirBinding {
                         name: replace_var.new_name.clone(),
                         ty: replace_var.new_type.clone(),
                         surface_type_name: None,
@@ -1167,7 +1167,7 @@ mod tests {
 
     #[test]
     fn test_subvar_flow_rewrite() {
-        let mut func = HirFunction::default();
+        let mut func = DirFunction::default();
         func.name = "test_subflow".to_string();
 
         // `a`/`b` are function parameters (real, declared storage feeding
@@ -1177,35 +1177,35 @@ mod tests {
         // is treated as a synthetic value with no real storage to declare,
         // not a parameter -- see the Windows TEB/PEB field regression this
         // guarded against).
-        func.params.push(NirBinding {
+        func.params.push(DirBinding {
             name: "a".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::ParamIndex(0)),
             initializer: None,
         });
-        func.params.push(NirBinding {
+        func.params.push(DirBinding {
             name: "b".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::ParamIndex(1)),
             initializer: None,
         });
-        func.locals.push(NirBinding {
+        func.locals.push(DirBinding {
             name: "x".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
         });
-        func.locals.push(NirBinding {
+        func.locals.push(DirBinding {
             name: "y".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
         });
-        func.locals.push(NirBinding {
+        func.locals.push(DirBinding {
             name: "z".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
@@ -1217,30 +1217,30 @@ mod tests {
         // x = a + b;
         // y = x & 0xff;
         // z = y == 12;
-        let stmt1 = HirStmt::Assign {
-            lhs: HirLValue::Var("x".to_string()),
-            rhs: HirExpr::Binary {
-                op: HirBinaryOp::Add,
-                lhs: Box::new(HirExpr::Var("a".to_string())),
-                rhs: Box::new(HirExpr::Var("b".to_string())),
+        let stmt1 = DirStmt::Assign {
+            lhs: DirLValue::Var("x".to_string()),
+            rhs: DirExpr::Binary {
+                op: DirBinaryOp::Add,
+                lhs: Box::new(DirExpr::Var("a".to_string())),
+                rhs: Box::new(DirExpr::Var("b".to_string())),
                 ty: u64_ty(),
             },
         };
-        let stmt2 = HirStmt::Assign {
-            lhs: HirLValue::Var("y".to_string()),
-            rhs: HirExpr::Binary {
-                op: HirBinaryOp::And,
-                lhs: Box::new(HirExpr::Var("x".to_string())),
-                rhs: Box::new(HirExpr::Const(0xff, u64_ty())),
+        let stmt2 = DirStmt::Assign {
+            lhs: DirLValue::Var("y".to_string()),
+            rhs: DirExpr::Binary {
+                op: DirBinaryOp::And,
+                lhs: Box::new(DirExpr::Var("x".to_string())),
+                rhs: Box::new(DirExpr::Const(0xff, u64_ty())),
                 ty: u64_ty(),
             },
         };
-        let stmt3 = HirStmt::Assign {
-            lhs: HirLValue::Var("z".to_string()),
-            rhs: HirExpr::Binary {
-                op: HirBinaryOp::Eq,
-                lhs: Box::new(HirExpr::Var("y".to_string())),
-                rhs: Box::new(HirExpr::Const(12, u64_ty())),
+        let stmt3 = DirStmt::Assign {
+            lhs: DirLValue::Var("z".to_string()),
+            rhs: DirExpr::Binary {
+                op: DirBinaryOp::Eq,
+                lhs: Box::new(DirExpr::Var("y".to_string())),
+                rhs: Box::new(DirExpr::Const(12, u64_ty())),
                 ty: NirType::Bool,
             },
         };
@@ -1251,14 +1251,14 @@ mod tests {
         assert!(changed);
 
         // Verify z comparison is bridged and y's masking AND is completely eliminated
-        if let HirStmt::Assign { rhs, .. } = &func.body[2] {
-            if let HirExpr::Binary { lhs, rhs, .. } = rhs {
-                if let HirExpr::Var(name) = &**lhs {
+        if let DirStmt::Assign { rhs, .. } = &func.body[2] {
+            if let DirExpr::Binary { lhs, rhs, .. } = rhs {
+                if let DirExpr::Var(name) = &**lhs {
                     assert_eq!(name, "x_sub8");
                 } else {
                     panic!("LHS should be narrow variable x_sub8");
                 }
-                if let HirExpr::Const(val, _) = &**rhs {
+                if let DirExpr::Const(val, _) = &**rhs {
                     assert_eq!(*val, 12);
                 } else {
                     panic!("RHS should be constant 12");

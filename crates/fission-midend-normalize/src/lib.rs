@@ -32,7 +32,7 @@ pub mod prelude {
         count_hir_stmts, fn_pass, group, hir_shape, is_large_hir_function, run_pass_logged,
     };
     pub use fission_midend_core::ir::*;
-    pub use fission_midend_core::util::{
+    pub use fission_midend_core::util_dir::{
         cleanup_redundant_labels, collect_referenced_labels, expr_has_side_effecting_call,
         expr_type, fold_logical_chain, is_pure_intrinsic_call, negate_expr, next_temp_name,
         format_expr_key, rename_vars_in_stmts, simplify_logical_expr, strip_casts,
@@ -42,7 +42,7 @@ pub mod prelude {
     };
     pub use fission_midend_core::wave_stats;
     pub use fission_midend_core::{
-        AbiState, CallingConvention, HirExpr, HirFunction, HirStmt, NirBuildStats, NirType,
+        AbiState, CallingConvention, DirExpr, DirFunction, DirStmt, NirBuildStats, NirType,
         SWITCH_FALLTHROUGH_SENTINEL,
     };
     pub use std::collections::{BTreeMap, BTreeSet};
@@ -68,12 +68,12 @@ pub use types::is_known_api_signature;
 pub use cleanup::eliminate_redundant_var_assigns;
 
 #[allow(dead_code)]
-pub fn normalize_function_body(body: &mut Vec<prelude::HirStmt>) {
+pub fn normalize_function_body(body: &mut Vec<prelude::DirStmt>) {
     pipeline::normalize_function_body(body);
 }
 
 /// Run the full normalize pipeline on a structured function.
-pub fn normalize_hir_function(func: &mut prelude::HirFunction) {
+pub fn normalize_hir_function(func: &mut prelude::DirFunction) {
     pipeline::normalize_hir_function(func);
 }
 
@@ -83,9 +83,9 @@ pub fn take_normalize_wave_stats() -> fission_midend_core::NirBuildStats {
 }
 
 #[allow(dead_code)]
-pub fn normalize_stmt(stmt: &mut prelude::HirStmt) {
+pub fn normalize_stmt(stmt: &mut prelude::DirStmt) {
     pipeline::normalize_stmt(stmt);
 }
 
 // Re-export shared types for facade callers.
-pub use fission_midend_core::{HirFunction, HirStmt, NirBuildStats};
+pub use fission_midend_core::{DirFunction, DirStmt, NirBuildStats};

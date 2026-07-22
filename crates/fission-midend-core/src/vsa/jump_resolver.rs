@@ -1,7 +1,7 @@
 /// Jump table resolution using VSA range information.
 ///
 /// After solving ranges for all variables in a function, this module
-/// attempts to refine `HirStmt::Switch` expressions by:
+/// attempts to refine `DirStmt::Switch` expressions by:
 ///
 /// 1. Detecting switch index variables whose range is `[0, N)`.
 /// 2. Propagating the inferred case count down to switches that were
@@ -17,12 +17,12 @@ use super::transfer::{RangeEnv, eval_expr};
 use crate::wave_stats::{
     add_dispatcher_shape_recoveries, add_indirect_target_set_refinements,
 };
-use crate::ir::{HirFunction, HirStmt};
+use crate::ir::{DirFunction, DirStmt};
 
 /// Apply VSA-based switch refinement to a function's body.
 ///
 /// Returns `true` if any changes were made.
-pub fn apply_jump_resolver_pass(func: &mut HirFunction) -> bool {
+pub fn apply_jump_resolver_pass(func: &mut DirFunction) -> bool {
     if jump_resolver_candidate_count(&func.body) == 0 {
         return false;
     }
@@ -30,14 +30,14 @@ pub fn apply_jump_resolver_pass(func: &mut HirFunction) -> bool {
     refine_stmts(&mut func.body, &env)
 }
 
-pub fn jump_resolver_candidate_count(stmts: &[HirStmt]) -> usize {
-    fn count_opt_stmt(stmt: &Option<Box<HirStmt>>) -> usize {
+pub fn jump_resolver_candidate_count(stmts: &[DirStmt]) -> usize {
+    fn count_opt_stmt(stmt: &Option<Box<DirStmt>>) -> usize {
         stmt.as_deref().map_or(0, count_stmt)
     }
 
-    fn count_stmt(stmt: &HirStmt) -> usize {
+    fn count_stmt(stmt: &DirStmt) -> usize {
         match stmt {
-            HirStmt::Switch { cases, default, .. } => {
+            DirStmt::Switch { cases, default, .. } => {
                 let local_cost = 1 + cases.len().min(8) + usize::from(!default.is_empty());
                 local_cost
                     + cases
@@ -46,17 +46,17 @@ pub fn jump_resolver_candidate_count(stmts: &[HirStmt]) -> usize {
                         .sum::<usize>()
                     + jump_resolver_candidate_count(default)
             }
-            HirStmt::If {
+            DirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
                 jump_resolver_candidate_count(then_body) + jump_resolver_candidate_count(else_body)
             }
-            HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::Block(body) => {
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } | DirStmt::Block(body) => {
                 jump_resolver_candidate_count(body)
             }
-            HirStmt::For {
+            DirStmt::For {
                 init, body, update, ..
             } => {
                 count_opt_stmt(init) + jump_resolver_candidate_count(body) + count_opt_stmt(update)
@@ -68,7 +68,7 @@ pub fn jump_resolver_candidate_count(stmts: &[HirStmt]) -> usize {
     stmts.iter().map(count_stmt).sum()
 }
 
-fn refine_stmts(stmts: &mut Vec<HirStmt>, env: &RangeEnv) -> bool {
+fn refine_stmts(stmts: &mut Vec<DirStmt>, env: &RangeEnv) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
@@ -77,7 +77,7 @@ fn refine_stmts(stmts: &mut Vec<HirStmt>, env: &RangeEnv) -> bool {
         }
         // If the stmt was reduced to a singleton-constant switch,
         // inline the matching case in place.
-        if let HirStmt::Switch {
+        if let DirStmt::Switch {
             expr,
             cases,
             default,
@@ -104,9 +104,9 @@ fn refine_stmts(stmts: &mut Vec<HirStmt>, env: &RangeEnv) -> bool {
     changed
 }
 
-fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
+fn refine_stmt(stmt: &mut DirStmt, env: &RangeEnv) -> bool {
     match stmt {
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -155,7 +155,7 @@ fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
             }
             changed
         }
-        HirStmt::If {
+        DirStmt::If {
             then_body,
             else_body,
             cond,
@@ -173,29 +173,29 @@ fn refine_stmt(stmt: &mut HirStmt, env: &RangeEnv) -> bool {
                 } else {
                     else_body.drain(..).collect::<Vec<_>>()
                 };
-                *stmt = HirStmt::Block(replacement);
+                *stmt = DirStmt::Block(replacement);
                 return true;
             }
             changed
         }
-        HirStmt::While { body, cond } => {
+        DirStmt::While { body, cond } => {
             let changed = refine_stmts(body, env);
             // If condition is provably false, remove the loop.
             let range = eval_expr(cond, env);
             if range.singleton_value() == Some(0) {
-                *stmt = HirStmt::Block(vec![]);
+                *stmt = DirStmt::Block(vec![]);
                 return true;
             }
             changed
         }
-        HirStmt::DoWhile { body, cond: _ } => refine_stmts(body, env),
-        HirStmt::For {
+        DirStmt::DoWhile { body, cond: _ } => refine_stmts(body, env),
+        DirStmt::For {
             init: _,
             body,
             update: _,
             ..
         } => refine_stmts(body, env),
-        HirStmt::Block(stmts) => refine_stmts(stmts, env),
+        DirStmt::Block(stmts) => refine_stmts(stmts, env),
         _ => false,
     }
 }

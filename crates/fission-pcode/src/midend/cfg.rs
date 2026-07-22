@@ -356,19 +356,19 @@ pub(super) fn block_label(address: u64) -> String {
     }
 }
 
-pub(super) fn fold_logical_chain(mut exprs: Vec<HirExpr>, op: HirBinaryOp) -> HirExpr {
+pub(super) fn fold_logical_chain(mut exprs: Vec<DirExpr>, op: DirBinaryOp) -> DirExpr {
     debug_assert!(matches!(
         op,
-        HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr
+        DirBinaryOp::LogicalAnd | DirBinaryOp::LogicalOr
     ));
     if exprs.is_empty() {
-        return HirExpr::Const(
-            if op == HirBinaryOp::LogicalAnd { 1 } else { 0 },
+        return DirExpr::Const(
+            if op == DirBinaryOp::LogicalAnd { 1 } else { 0 },
             NirType::Bool,
         );
     }
     let first = exprs.remove(0);
-    exprs.into_iter().fold(first, |lhs, rhs| HirExpr::Binary {
+    exprs.into_iter().fold(first, |lhs, rhs| DirExpr::Binary {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -376,32 +376,32 @@ pub(super) fn fold_logical_chain(mut exprs: Vec<HirExpr>, op: HirBinaryOp) -> Hi
     })
 }
 
-pub(super) fn negate_expr(expr: HirExpr) -> HirExpr {
+pub(super) fn negate_expr(expr: DirExpr) -> DirExpr {
     match expr {
-        HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr,
             ..
         } => *expr,
-        other => HirExpr::Unary {
-            op: HirUnaryOp::Not,
+        other => DirExpr::Unary {
+            op: DirUnaryOp::Not,
             expr: Box::new(other),
             ty: NirType::Bool,
         },
     }
 }
 
-pub(super) fn strip_casts(expr: &HirExpr) -> HirExpr {
+pub(super) fn strip_casts(expr: &DirExpr) -> DirExpr {
     match expr {
-        HirExpr::Cast { expr, .. } => strip_casts(expr),
+        DirExpr::Cast { expr, .. } => strip_casts(expr),
         other => other.clone(),
     }
 }
 
-pub(super) fn simplify_logical_expr(expr: HirExpr) -> HirExpr {
+pub(super) fn simplify_logical_expr(expr: DirExpr) -> DirExpr {
     match expr {
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalAnd,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalAnd,
             lhs,
             rhs,
             ty,
@@ -410,22 +410,22 @@ pub(super) fn simplify_logical_expr(expr: HirExpr) -> HirExpr {
             let rhs = Box::new(simplify_logical_expr(*rhs));
 
             if let (
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+                DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: inner_lhs,
                     ..
                 },
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+                DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: inner_rhs,
                     ..
                 },
             ) = (&*lhs, &*rhs)
             {
-                return HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::LogicalOr,
+                return DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::LogicalOr,
                         lhs: inner_lhs.clone(),
                         rhs: inner_rhs.clone(),
                         ty,
@@ -434,15 +434,15 @@ pub(super) fn simplify_logical_expr(expr: HirExpr) -> HirExpr {
                 };
             }
 
-            HirExpr::Binary {
-                op: HirBinaryOp::LogicalAnd,
+            DirExpr::Binary {
+                op: DirBinaryOp::LogicalAnd,
                 lhs,
                 rhs,
                 ty,
             }
         }
-        HirExpr::Binary {
-            op: HirBinaryOp::LogicalOr,
+        DirExpr::Binary {
+            op: DirBinaryOp::LogicalOr,
             lhs,
             rhs,
             ty,
@@ -451,22 +451,22 @@ pub(super) fn simplify_logical_expr(expr: HirExpr) -> HirExpr {
             let rhs = Box::new(simplify_logical_expr(*rhs));
 
             if let (
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+                DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: inner_lhs,
                     ..
                 },
-                HirExpr::Unary {
-                    op: HirUnaryOp::Not,
+                DirExpr::Unary {
+                    op: DirUnaryOp::Not,
                     expr: inner_rhs,
                     ..
                 },
             ) = (&*lhs, &*rhs)
             {
-                return HirExpr::Unary {
-                    op: HirUnaryOp::Not,
-                    expr: Box::new(HirExpr::Binary {
-                        op: HirBinaryOp::LogicalAnd,
+                return DirExpr::Unary {
+                    op: DirUnaryOp::Not,
+                    expr: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::LogicalAnd,
                         lhs: inner_lhs.clone(),
                         rhs: inner_rhs.clone(),
                         ty,
@@ -475,14 +475,14 @@ pub(super) fn simplify_logical_expr(expr: HirExpr) -> HirExpr {
                 };
             }
 
-            HirExpr::Binary {
-                op: HirBinaryOp::LogicalOr,
+            DirExpr::Binary {
+                op: DirBinaryOp::LogicalOr,
                 lhs,
                 rhs,
                 ty,
             }
         }
-        HirExpr::Unary { op, expr, ty } => HirExpr::Unary {
+        DirExpr::Unary { op, expr, ty } => DirExpr::Unary {
             op,
             expr: Box::new(simplify_logical_expr(*expr)),
             ty,

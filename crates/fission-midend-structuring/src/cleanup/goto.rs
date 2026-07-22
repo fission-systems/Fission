@@ -1,5 +1,5 @@
 use fission_midend_core::ir::*;
-use fission_midend_core::{collect_referenced_label_counts, negate_expr};
+use fission_midend_core::util_dir::{collect_referenced_label_counts, negate_expr};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -23,7 +23,7 @@ use crate::HashSet;
 
 /// Apply all three goto-elimination rules at the top level of a statement list.
 /// Returns `(cleaned, changed)` where `changed` indicates whether any rule fired.
-fn goto_elim_pass(stmts: Vec<HirStmt>) -> (Vec<HirStmt>, bool) {
+fn goto_elim_pass(stmts: Vec<DirStmt>) -> (Vec<DirStmt>, bool) {
     let mut changed = false;
     let stmts = strip_unreachable_after_unconditional_transfer(stmts, &mut changed);
     let stmts = empty_jump_removal(stmts, &mut changed);
@@ -34,14 +34,14 @@ fn goto_elim_pass(stmts: Vec<HirStmt>) -> (Vec<HirStmt>, bool) {
 }
 
 fn strip_unreachable_after_unconditional_transfer(
-    stmts: Vec<HirStmt>,
+    stmts: Vec<DirStmt>,
     changed: &mut bool,
-) -> Vec<HirStmt> {
+) -> Vec<DirStmt> {
     let mut out = Vec::with_capacity(stmts.len());
     let mut dropping = false;
     for (idx, stmt) in stmts.iter().cloned().enumerate() {
         if dropping {
-            if matches!(stmt, HirStmt::Label(_)) {
+            if matches!(stmt, DirStmt::Label(_)) {
                 dropping = false;
                 out.push(stmt);
             } else {
@@ -51,9 +51,9 @@ fn strip_unreachable_after_unconditional_transfer(
         }
 
         dropping = match &stmt {
-            HirStmt::Goto(label) => stmts[idx + 1..]
+            DirStmt::Goto(label) => stmts[idx + 1..]
                 .iter()
-                .any(|candidate| matches!(candidate, HirStmt::Label(next) if next == label)),
+                .any(|candidate| matches!(candidate, DirStmt::Label(next) if next == label)),
             _ => false,
         };
         out.push(stmt);
@@ -62,12 +62,12 @@ fn strip_unreachable_after_unconditional_transfer(
 }
 
 /// Rule 1: If a `Goto(L)` is immediately followed by `Label(L)`, remove the Goto.
-fn empty_jump_removal(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
+fn empty_jump_removal(stmts: Vec<DirStmt>, changed: &mut bool) -> Vec<DirStmt> {
     let mut out = Vec::with_capacity(stmts.len());
     let mut iter = stmts.into_iter().peekable();
     while let Some(stmt) = iter.next() {
-        if let HirStmt::Goto(ref label) = stmt {
-            if let Some(HirStmt::Label(next_label)) = iter.peek() {
+        if let DirStmt::Goto(ref label) = stmt {
+            if let Some(DirStmt::Label(next_label)) = iter.peek() {
                 if label == next_label {
                     *changed = true;
                     continue; // drop the Goto; Label stays
@@ -81,7 +81,7 @@ fn empty_jump_removal(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
 
 /// Rule 2: If a `Label(L)` is referenced exactly once (as a `Goto(L)`) in the same list,
 /// and that Goto immediately precedes the Label (after rule 1), remove both.
-fn single_ref_label_inline(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
+fn single_ref_label_inline(stmts: Vec<DirStmt>, changed: &mut bool) -> Vec<DirStmt> {
     let ref_counts = collect_referenced_label_counts(&stmts);
     let singleton_labels: HashSet<&str> = ref_counts
         .iter()
@@ -98,9 +98,9 @@ fn single_ref_label_inline(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirSt
         // If we see `Goto(L)` where L has exactly one reference and the next stmt is
         // `Label(L)`, drop both (the label was already removed by rule 1 in the same
         // pass, or the Goto and Label are genuinely adjacent here).
-        if let HirStmt::Goto(ref label) = stmt {
+        if let DirStmt::Goto(ref label) = stmt {
             if singleton_labels.contains(label.as_str()) {
-                if let Some(HirStmt::Label(next_label)) = iter.peek() {
+                if let Some(DirStmt::Label(next_label)) = iter.peek() {
                     if label == next_label {
                         *changed = true;
                         let _ = iter.next(); // consume the Label
@@ -116,29 +116,29 @@ fn single_ref_label_inline(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirSt
 
 /// Rule 3: `if (cond) { Goto(L) }` directly followed by `Label(L)` + rest →
 /// `if (!cond) { rest }`.  This handles early-exit / guard patterns.
-fn cond_goto_inversion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
+fn cond_goto_inversion(stmts: Vec<DirStmt>, changed: &mut bool) -> Vec<DirStmt> {
     let mut out = Vec::with_capacity(stmts.len());
     let mut i = 0;
     while i < stmts.len() {
         // Pattern: If { cond, then=[Goto(L)], else=[] }  followed by  Label(L)  and rest
-        if let HirStmt::If {
+        if let DirStmt::If {
             cond,
             then_body,
             else_body,
         } = &stmts[i]
         {
             if else_body.is_empty() {
-                if let [HirStmt::Goto(goto_label)] = then_body.as_slice() {
+                if let [DirStmt::Goto(goto_label)] = then_body.as_slice() {
                     // Find the immediately following Label(L) at the top level.
                     if i + 1 < stmts.len() {
-                        if let HirStmt::Label(label) = &stmts[i + 1] {
+                        if let DirStmt::Label(label) = &stmts[i + 1] {
                             if goto_label == label {
                                 // Collect everything after the label as the inlined else body.
                                 let inverted_cond = negate_expr(cond.clone());
-                                let rest_body: Vec<HirStmt> = stmts[i + 2..].to_vec();
+                                let rest_body: Vec<DirStmt> = stmts[i + 2..].to_vec();
                                 if !rest_body.is_empty() {
                                     *changed = true;
-                                    out.push(HirStmt::If {
+                                    out.push(DirStmt::If {
                                         cond: inverted_cond,
                                         then_body: rest_body,
                                         else_body: Vec::new(),
@@ -175,32 +175,32 @@ fn cond_goto_inversion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> 
 ///   xor eax, eax
 ///   ret
 /// ```
-fn guard_clause_promotion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStmt> {
+fn guard_clause_promotion(stmts: Vec<DirStmt>, changed: &mut bool) -> Vec<DirStmt> {
     let ref_counts = collect_referenced_label_counts(&stmts);
     let mut out = Vec::with_capacity(stmts.len());
     let mut i = 0;
     while i < stmts.len() {
         // Look for: if (cond) { Goto(L) } where L is referenced exactly once.
-        if let HirStmt::If {
+        if let DirStmt::If {
             cond,
             then_body,
             else_body,
         } = &stmts[i]
         {
             if else_body.is_empty() {
-                if let [HirStmt::Goto(goto_label)] = then_body.as_slice() {
+                if let [DirStmt::Goto(goto_label)] = then_body.as_slice() {
                     if ref_counts.get(goto_label).copied() == Some(1) {
                         // Scan forward for `Label(L)` at the top level.
                         if let Some(label_pos) = (i + 1..stmts.len())
-                            .find(|&j| matches!(&stmts[j], HirStmt::Label(l) if l == goto_label))
+                            .find(|&j| matches!(&stmts[j], DirStmt::Label(l) if l == goto_label))
                         {
                             // Collect the tail after the label.
-                            let tail: Vec<HirStmt> = stmts[label_pos + 1..].to_vec();
+                            let tail: Vec<DirStmt> = stmts[label_pos + 1..].to_vec();
                             // Only promote if the tail is a simple return or
                             // a short sequence ending with a return (assignments + return).
                             if is_promotable_guard_tail(&tail) {
                                 *changed = true;
-                                out.push(HirStmt::If {
+                                out.push(DirStmt::If {
                                     cond: cond.clone(),
                                     then_body: tail,
                                     else_body: Vec::new(),
@@ -228,25 +228,25 @@ fn guard_clause_promotion(stmts: Vec<HirStmt>, changed: &mut bool) -> Vec<HirStm
 /// The limit is set to 8 rather than something smaller because
 /// structuring runs before normalization, so dead temp cleanups
 /// (assignments to variables that are never read) are still present.
-fn is_promotable_guard_tail(tail: &[HirStmt]) -> bool {
+fn is_promotable_guard_tail(tail: &[DirStmt]) -> bool {
     if tail.is_empty() || tail.len() > 8 {
         return false;
     }
     // Last statement must be a Return.
     let last = &tail[tail.len() - 1];
-    if !matches!(last, HirStmt::Return(_)) {
+    if !matches!(last, DirStmt::Return(_)) {
         return false;
     }
     // All preceding statements must be simple assignments or expressions.
     tail[..tail.len() - 1]
         .iter()
-        .all(|s| matches!(s, HirStmt::Assign { .. } | HirStmt::Expr(_)))
+        .all(|s| matches!(s, DirStmt::Assign { .. } | DirStmt::Expr(_)))
 }
 
 /// Apply `goto_elim_pass` to fixpoint (convergence when no rule fires).
 /// Only operates at the TOP LEVEL of `stmts`; nested scopes are not recursed.
 /// Callers that need nested cleanup should call this recursively.
-pub fn eliminate_redundant_gotos(mut stmts: Vec<HirStmt>) -> Vec<HirStmt> {
+pub fn eliminate_redundant_gotos(mut stmts: Vec<DirStmt>) -> Vec<DirStmt> {
     const MAX_GOTO_ELIM_ITERS: usize = 32;
     for _ in 0..MAX_GOTO_ELIM_ITERS {
         let (new_stmts, changed) = goto_elim_pass(stmts);

@@ -2,8 +2,8 @@
 
 use crate::admission::StructuringAdmissionReason;
 use crate::regions::RegionKind;
-use fission_midend_core::format_expr_key;
-use fission_midend_core::ir::HirStmt;
+use fission_midend_core::util_dir::format_expr_key;
+use fission_midend_core::ir::DirStmt;
 
 pub fn apply_blockgraph_collapse_admission_gate(
     admission: StructuringAdmissionReason,
@@ -16,27 +16,27 @@ pub fn apply_blockgraph_collapse_admission_gate(
     }
 }
 
-pub fn is_switch_scaffold_stmt(stmt: &HirStmt) -> bool {
+pub fn is_switch_scaffold_stmt(stmt: &DirStmt) -> bool {
         match stmt {
-            HirStmt::Goto(_) => true,
-            HirStmt::Block(body) => body.iter().all(is_switch_scaffold_stmt),
-            HirStmt::Label(_)
-            | HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::VaStart { .. }
-            | HirStmt::If { .. }
-            | HirStmt::Switch { .. }
-            | HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::For { .. }
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => false,
+            DirStmt::Goto(_) => true,
+            DirStmt::Block(body) => body.iter().all(is_switch_scaffold_stmt),
+            DirStmt::Label(_)
+            | DirStmt::Assign { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::VaStart { .. }
+            | DirStmt::If { .. }
+            | DirStmt::Switch { .. }
+            | DirStmt::While { .. }
+            | DirStmt::DoWhile { .. }
+            | DirStmt::For { .. }
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => false,
         }
     }
 
-pub fn switch_stmt_has_scaffold_only_arms(stmt: &HirStmt) -> bool {
-        let HirStmt::Switch { cases, default, .. } = stmt else {
+pub fn switch_stmt_has_scaffold_only_arms(stmt: &DirStmt) -> bool {
+        let DirStmt::Switch { cases, default, .. } = stmt else {
             return false;
         };
         !cases.is_empty()
@@ -46,40 +46,40 @@ pub fn switch_stmt_has_scaffold_only_arms(stmt: &HirStmt) -> bool {
             && default.iter().all(is_switch_scaffold_stmt)
     }
 
-pub fn region_kind_for_stmt(stmt: &HirStmt) -> Option<RegionKind> {
+pub fn region_kind_for_stmt(stmt: &DirStmt) -> Option<RegionKind> {
         match stmt {
-            HirStmt::Switch { .. } => Some(RegionKind::Switch),
-            HirStmt::If { .. } => Some(RegionKind::Conditional),
-            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {
+            DirStmt::Switch { .. } => Some(RegionKind::Switch),
+            DirStmt::If { .. } => Some(RegionKind::Conditional),
+            DirStmt::While { .. } | DirStmt::DoWhile { .. } | DirStmt::For { .. } => {
                 Some(RegionKind::Loop)
             }
-            HirStmt::Block(_) => Some(RegionKind::Sequence),
-            HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::VaStart { .. }
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => None,
+            DirStmt::Block(_) => Some(RegionKind::Sequence),
+            DirStmt::Assign { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::VaStart { .. }
+            | DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => None,
         }
     }
 
-pub fn region_selector_or_condition(stmt: &HirStmt) -> Option<String> {
+pub fn region_selector_or_condition(stmt: &DirStmt) -> Option<String> {
         match stmt {
-            HirStmt::Switch { expr, .. } => Some(format_expr_key(expr)),
-            HirStmt::If { cond, .. }
-            | HirStmt::While { cond, .. }
-            | HirStmt::DoWhile { cond, .. } => Some(format_expr_key(cond)),
-            HirStmt::For { cond, .. } => cond.as_ref().map(format_expr_key),
-            HirStmt::Block(_)
-            | HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::VaStart { .. }
-            | HirStmt::Label(_)
-            | HirStmt::Goto(_)
-            | HirStmt::Return(_)
-            | HirStmt::Break
-            | HirStmt::Continue => None,
+            DirStmt::Switch { expr, .. } => Some(format_expr_key(expr)),
+            DirStmt::If { cond, .. }
+            | DirStmt::While { cond, .. }
+            | DirStmt::DoWhile { cond, .. } => Some(format_expr_key(cond)),
+            DirStmt::For { cond, .. } => cond.as_ref().map(format_expr_key),
+            DirStmt::Block(_)
+            | DirStmt::Assign { .. }
+            | DirStmt::Expr(_)
+            | DirStmt::VaStart { .. }
+            | DirStmt::Label(_)
+            | DirStmt::Goto(_)
+            | DirStmt::Return(_)
+            | DirStmt::Break
+            | DirStmt::Continue => None,
         }
     }

@@ -69,14 +69,14 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn normalize_recovered_call_arg(&self, expr: HirExpr) -> HirExpr {
+    fn normalize_recovered_call_arg(&self, expr: DirExpr) -> DirExpr {
         let (value, fallback) = match expr {
-            HirExpr::Const(value, ty) => (value, HirExpr::Const(value, ty)),
-            HirExpr::Cast { ty, expr } => {
-                let HirExpr::Const(value, _) = *expr else {
-                    return HirExpr::Cast { ty, expr };
+            DirExpr::Const(value, ty) => (value, DirExpr::Const(value, ty)),
+            DirExpr::Cast { ty, expr } => {
+                let DirExpr::Const(value, _) = *expr else {
+                    return DirExpr::Cast { ty, expr };
                 };
-                (value, HirExpr::Const(value, ty))
+                (value, DirExpr::Const(value, ty))
             }
             expr => return expr,
         };
@@ -88,7 +88,7 @@ impl<'a> PreviewBuilder<'a> {
         };
         ctx.call_target_refs
             .get(&(value as u64))
-            .map(|target_ref| HirExpr::Var(target_ref.symbol.clone()))
+            .map(|target_ref| DirExpr::Var(target_ref.symbol.clone()))
             .unwrap_or(fallback)
     }
 
@@ -182,7 +182,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
         let abi = self.abi_state();
         if !self.options.is_64bit && self.x86_32_stack_call_args_enabled() {
             return self.recover_x86_32_stack_args_from_block(block, call_idx);
@@ -193,7 +193,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
-        let mut recovered = std::collections::BTreeMap::<usize, HirExpr>::new();
+        let mut recovered = std::collections::BTreeMap::<usize, DirExpr>::new();
         for prev_idx in (0..scan_end).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
@@ -253,7 +253,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
 
         // Prefer ESP-staged [esp+k] (k≥0) for CallInd/Call: gcc -O0 writes
@@ -332,7 +332,7 @@ impl<'a> PreviewBuilder<'a> {
     fn lower_x86_32_staged_store_value(
         &mut self,
         rhs: &Varnode,
-    ) -> Result<HirExpr, MlilPreviewError> {
+    ) -> Result<DirExpr, MlilPreviewError> {
         if let Some((def_site, def_op)) = self.lookup_def_site(rhs)
             && matches!(
                 def_op.opcode,
@@ -343,13 +343,13 @@ impl<'a> PreviewBuilder<'a> {
             let src = def_op.inputs[0].clone();
             return self.with_lowering_site(def_site, |this| {
                 if let Some(name) = this.try_x86_32_stack_param_snapshot(&src) {
-                    return Ok(HirExpr::Var(name));
+                    return Ok(DirExpr::Var(name));
                 }
                 this.lower_varnode(&src, &mut HashSet::default())
             });
         }
         if let Some(name) = self.try_x86_32_stack_param_snapshot(rhs) {
-            return Ok(HirExpr::Var(name));
+            return Ok(DirExpr::Var(name));
         }
         self.lower_varnode(rhs, &mut HashSet::default())
     }
@@ -393,7 +393,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
         let ptr_size = i64::from(self.options.pointer_size);
         if ptr_size <= 0 {
@@ -401,7 +401,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
-        let mut recovered = std::collections::BTreeMap::<usize, HirExpr>::new();
+        let mut recovered = std::collections::BTreeMap::<usize, DirExpr>::new();
 
         for prev_idx in (0..scan_end).rev() {
             if recovered.len() >= MAX_STACK_ARGS {
@@ -476,12 +476,12 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<HirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
         let abi = self.abi_state();
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
-        let mut recovered = std::collections::BTreeMap::<usize, HirExpr>::new();
+        let mut recovered = std::collections::BTreeMap::<usize, DirExpr>::new();
 
         let mut scan_blocks: Vec<(&crate::pcode::PcodeBasicBlock, usize)> = vec![(block, scan_end)];
         if matches!(
@@ -756,7 +756,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<DirExpr>>, MlilPreviewError> {
         self.recover_call_args_from_block_with_mode(block, call_idx, false)
     }
 
@@ -764,7 +764,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<DirExpr>>, MlilPreviewError> {
         self.recover_call_args_from_block_with_mode(block, call_idx, true)
     }
 
@@ -877,7 +877,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
         prefer_source_values: bool,
-    ) -> Result<Option<Vec<HirExpr>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<DirExpr>>, MlilPreviewError> {
         if !self.options.is_64bit
             && !self.x86_32_stack_call_args_enabled()
             && !matches!(
@@ -894,7 +894,7 @@ impl<'a> PreviewBuilder<'a> {
         let abi = self.abi_state();
         let param_slots = abi.effective_param_reg_slots();
         let param_count = param_slots.len();
-        let mut recovered: Vec<Option<HirExpr>> = vec![None; param_count];
+        let mut recovered: Vec<Option<DirExpr>> = vec![None; param_count];
         let skip_param = self.callind_target_param_slot_index(block, call_idx);
         // Also skip BranchInd target register if it aliases a param slot (rare).
         let skip_param = skip_param.or_else(|| {
@@ -988,14 +988,14 @@ impl<'a> PreviewBuilder<'a> {
                 } else if prefer_source_values
                     && let Some(name) = self.surface_call_carrier_name(&source)
                 {
-                    HirExpr::Var(name)
+                    DirExpr::Var(name)
                 } else {
                     match self.lower_varnode(&source, &mut HashSet::default()) {
                         Ok(expr) => expr,
                         Err(MlilPreviewError::UnsupportedPattern("opcode"))
                             if self.surface_call_carrier_name(output).is_some() =>
                         {
-                            HirExpr::Var(
+                            DirExpr::Var(
                                 self.surface_call_carrier_name(output)
                                     .expect("surface carrier exists after guard"),
                             )

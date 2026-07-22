@@ -2,46 +2,46 @@ use super::contracts::*;
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn should_preserve_materialized_expr(expr: &HirExpr) -> bool {
+    pub(super) fn should_preserve_materialized_expr(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => false,
-            HirExpr::Cast { expr, .. } => Self::should_preserve_materialized_expr(expr),
-            HirExpr::Select { .. } => true,
-            HirExpr::Unary { .. }
-            | HirExpr::Binary { .. }
-            | HirExpr::Call { .. }
-            | HirExpr::Load { .. }
-            | HirExpr::PtrOffset { .. }
-            | HirExpr::FieldAccess { .. }
-            | HirExpr::Index { .. }
-            | HirExpr::AggregateCopy { .. } => true,
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(..) => false,
+            DirExpr::Cast { expr, .. } => Self::should_preserve_materialized_expr(expr),
+            DirExpr::Select { .. } => true,
+            DirExpr::Unary { .. }
+            | DirExpr::Binary { .. }
+            | DirExpr::Call { .. }
+            | DirExpr::Load { .. }
+            | DirExpr::PtrOffset { .. }
+            | DirExpr::FieldAccess { .. }
+            | DirExpr::Index { .. }
+            | DirExpr::AggregateCopy { .. } => true,
         }
     }
 
-    pub(super) fn expr_is_side_effectful_for_materialization_trace(expr: &HirExpr) -> bool {
+    pub(super) fn expr_is_side_effectful_for_materialization_trace(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Call { .. } => true,
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Call { .. } => true,
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Binary { lhs, rhs, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(lhs)
                     || Self::expr_is_side_effectful_for_materialization_trace(rhs)
             }
-            HirExpr::Load { ptr, .. } => {
+            DirExpr::Load { ptr, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(ptr)
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(base)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(base)
                     || Self::expr_is_side_effectful_for_materialization_trace(index)
             }
-            HirExpr::AggregateCopy { src, .. } => {
+            DirExpr::AggregateCopy { src, .. } => {
                 Self::expr_is_side_effectful_for_materialization_trace(src)
             }
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -51,7 +51,7 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::expr_is_side_effectful_for_materialization_trace(then_expr)
                     || Self::expr_is_side_effectful_for_materialization_trace(else_expr)
             }
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => false,
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(..) => false,
         }
     }
 
@@ -80,7 +80,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn replacement_read_requires_stable_representative(
         read_class: ReplacementReadClass,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> bool {
         matches!(
             read_class,
@@ -91,7 +91,7 @@ impl<'a> PreviewBuilder<'a> {
             || !Self::expr_is_low_cost_builder_inline_candidate(rhs))
     }
 
-    pub(super) fn same_block_replacement_requires_stable_representative(rhs: &HirExpr) -> bool {
+    pub(super) fn same_block_replacement_requires_stable_representative(rhs: &DirExpr) -> bool {
         Self::should_preserve_materialized_expr(rhs)
     }
 
@@ -178,7 +178,7 @@ impl<'a> PreviewBuilder<'a> {
         AliasStableRequiredFamily::UnknownAliasStable
     }
 
-    fn classify_address_stable_required_base_kind(rhs: &HirExpr) -> AddressStableRequiredBaseKind {
+    fn classify_address_stable_required_base_kind(rhs: &DirExpr) -> AddressStableRequiredBaseKind {
         fn classify_var_name(name: &str) -> AddressStableRequiredBaseKind {
             if name.starts_with("stack_")
                 || name.starts_with("local_")
@@ -249,27 +249,27 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => classify_var_name(name),
-            HirExpr::Const(..) => AddressStableRequiredBaseKind::UnknownBase,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => {
+            DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => classify_var_name(name),
+            DirExpr::Const(..) => AddressStableRequiredBaseKind::UnknownBase,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => {
                 Self::classify_address_stable_required_base_kind(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => merge_base_kinds(
+            DirExpr::Binary { lhs, rhs, .. } => merge_base_kinds(
                 Self::classify_address_stable_required_base_kind(lhs),
                 Self::classify_address_stable_required_base_kind(rhs),
             ),
-            HirExpr::Call { .. } => AddressStableRequiredBaseKind::UnknownBase,
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::Call { .. } => AddressStableRequiredBaseKind::UnknownBase,
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::classify_address_stable_required_base_kind(base)
             }
-            HirExpr::Index { base, index, .. } => merge_base_kinds(
+            DirExpr::Index { base, index, .. } => merge_base_kinds(
                 Self::classify_address_stable_required_base_kind(base),
                 Self::classify_address_stable_required_base_kind(index),
             ),
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -284,7 +284,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn classify_address_stable_required_expr_kind(rhs: &HirExpr) -> AddressStableRequiredExprKind {
+    fn classify_address_stable_required_expr_kind(rhs: &DirExpr) -> AddressStableRequiredExprKind {
         fn merge_expr_kinds(
             lhs: AddressStableRequiredExprKind,
             rhs: AddressStableRequiredExprKind,
@@ -303,28 +303,28 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(..) => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(..) => {
                 AddressStableRequiredExprKind::PureArithmetic
             }
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::classify_address_stable_required_expr_kind(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => merge_expr_kinds(
+            DirExpr::Binary { lhs, rhs, .. } => merge_expr_kinds(
                 Self::classify_address_stable_required_expr_kind(lhs),
                 Self::classify_address_stable_required_expr_kind(rhs),
             ),
-            HirExpr::Call { .. } => AddressStableRequiredExprKind::HasCall,
-            HirExpr::Load { .. } | HirExpr::AggregateCopy { .. } => {
+            DirExpr::Call { .. } => AddressStableRequiredExprKind::HasCall,
+            DirExpr::Load { .. } | DirExpr::AggregateCopy { .. } => {
                 AddressStableRequiredExprKind::HasLoad
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::classify_address_stable_required_expr_kind(base)
             }
-            HirExpr::Index { base, index, .. } => merge_expr_kinds(
+            DirExpr::Index { base, index, .. } => merge_expr_kinds(
                 Self::classify_address_stable_required_expr_kind(base),
                 Self::classify_address_stable_required_expr_kind(index),
             ),
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -399,7 +399,7 @@ impl<'a> PreviewBuilder<'a> {
         AddressStableRequiredFamily::AddressExprUnknownBase
     }
 
-    pub(super) fn classify_stack_address_base_reg(rhs: &HirExpr) -> StackAddressBaseReg {
+    pub(super) fn classify_stack_address_base_reg(rhs: &DirExpr) -> StackAddressBaseReg {
         fn classify_var_name(name: &str) -> StackAddressBaseReg {
             match name {
                 "rsp" => StackAddressBaseReg::Rsp,
@@ -427,26 +427,26 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         match rhs {
-            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => classify_var_name(name),
-            HirExpr::Const(..) | HirExpr::Call { .. } => StackAddressBaseReg::Unknown,
-            HirExpr::Cast { expr, .. }
-            | HirExpr::Unary { expr, .. }
-            | HirExpr::Load { ptr: expr, .. }
-            | HirExpr::AggregateCopy { src: expr, .. } => {
+            DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => classify_var_name(name),
+            DirExpr::Const(..) | DirExpr::Call { .. } => StackAddressBaseReg::Unknown,
+            DirExpr::Cast { expr, .. }
+            | DirExpr::Unary { expr, .. }
+            | DirExpr::Load { ptr: expr, .. }
+            | DirExpr::AggregateCopy { src: expr, .. } => {
                 Self::classify_stack_address_base_reg(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => merge_base_regs(
+            DirExpr::Binary { lhs, rhs, .. } => merge_base_regs(
                 Self::classify_stack_address_base_reg(lhs),
                 Self::classify_stack_address_base_reg(rhs),
             ),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::classify_stack_address_base_reg(base)
             }
-            HirExpr::Index { base, index, .. } => merge_base_regs(
+            DirExpr::Index { base, index, .. } => merge_base_regs(
                 Self::classify_stack_address_base_reg(base),
                 Self::classify_stack_address_base_reg(index),
             ),
-            HirExpr::Select {
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -461,33 +461,33 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn extract_stack_address_offset(rhs: &HirExpr) -> Option<i64> {
-        fn is_stack_base(expr: &HirExpr) -> bool {
+    pub(super) fn extract_stack_address_offset(rhs: &DirExpr) -> Option<i64> {
+        fn is_stack_base(expr: &DirExpr) -> bool {
             PreviewBuilder::classify_stack_address_base_reg(expr) != StackAddressBaseReg::Unknown
         }
 
         match rhs {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => is_stack_base(rhs).then_some(0),
-            HirExpr::Const(..)
-            | HirExpr::Unary { .. }
-            | HirExpr::Call { .. }
-            | HirExpr::Load { .. }
-            | HirExpr::Index { .. }
-            | HirExpr::Select { .. }
-            | HirExpr::AggregateCopy { .. } => None,
-            HirExpr::Cast { expr, .. } => Self::extract_stack_address_offset(expr),
-            HirExpr::PtrOffset { base, offset } => is_stack_base(base).then_some(*offset),
-            HirExpr::FieldAccess { base, offset, .. } => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => is_stack_base(rhs).then_some(0),
+            DirExpr::Const(..)
+            | DirExpr::Unary { .. }
+            | DirExpr::Call { .. }
+            | DirExpr::Load { .. }
+            | DirExpr::Index { .. }
+            | DirExpr::Select { .. }
+            | DirExpr::AggregateCopy { .. } => None,
+            DirExpr::Cast { expr, .. } => Self::extract_stack_address_offset(expr),
+            DirExpr::PtrOffset { base, offset } => is_stack_base(base).then_some(*offset),
+            DirExpr::FieldAccess { base, offset, .. } => {
                 is_stack_base(base).then_some(*offset as i64)
             }
-            HirExpr::Binary { op, lhs, rhs, .. } => match (op, lhs.as_ref(), rhs.as_ref()) {
-                (HirBinaryOp::Add, base, HirExpr::Const(offset, _)) if is_stack_base(base) => {
+            DirExpr::Binary { op, lhs, rhs, .. } => match (op, lhs.as_ref(), rhs.as_ref()) {
+                (DirBinaryOp::Add, base, DirExpr::Const(offset, _)) if is_stack_base(base) => {
                     Some(*offset)
                 }
-                (HirBinaryOp::Add, HirExpr::Const(offset, _), base) if is_stack_base(base) => {
+                (DirBinaryOp::Add, DirExpr::Const(offset, _), base) if is_stack_base(base) => {
                     Some(*offset)
                 }
-                (HirBinaryOp::Sub, base, HirExpr::Const(offset, _)) if is_stack_base(base) => {
+                (DirBinaryOp::Sub, base, DirExpr::Const(offset, _)) if is_stack_base(base) => {
                     Some(-*offset)
                 }
                 _ => None,
@@ -495,17 +495,17 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn stack_address_frame_relative_candidate(rhs: &HirExpr) -> bool {
-        fn is_simple_frame_relative_expr(expr: &HirExpr) -> bool {
+    fn stack_address_frame_relative_candidate(rhs: &DirExpr) -> bool {
+        fn is_simple_frame_relative_expr(expr: &DirExpr) -> bool {
             match expr {
-                HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => true,
-                HirExpr::Cast { expr, .. } => is_simple_frame_relative_expr(expr),
-                HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+                DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => true,
+                DirExpr::Cast { expr, .. } => is_simple_frame_relative_expr(expr),
+                DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                     is_simple_frame_relative_expr(base)
                 }
-                HirExpr::Binary { op, lhs, rhs, .. } => {
-                    matches!(op, HirBinaryOp::Add | HirBinaryOp::Sub)
-                        && matches!(rhs.as_ref(), HirExpr::Const(..))
+                DirExpr::Binary { op, lhs, rhs, .. } => {
+                    matches!(op, DirBinaryOp::Add | DirBinaryOp::Sub)
+                        && matches!(rhs.as_ref(), DirExpr::Const(..))
                         && is_simple_frame_relative_expr(lhs)
                 }
                 _ => false,
@@ -647,7 +647,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<StableRepresentativeOwnerProof> {
         let rhs_kind = Self::classify_disallowed_single_consumer_rhs_kind(rhs);
         let use_sites = Self::collect_output_use_sites_in_block(block, op_idx, output);
@@ -744,7 +744,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<AliasStableRequiredProof> {
         let proof = self.describe_stable_representative_owner_proof(
             block,
@@ -784,7 +784,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<AddressStableRequiredProof> {
         let proof = self.describe_alias_stable_required_proof(
             block,
@@ -832,7 +832,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<StackAddressStabilityProof> {
         let proof = self.describe_address_stable_required_proof(
             block,
@@ -888,7 +888,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Result<StackAddressStabilityProof, StackAddrFrameStableTrialReason> {
         let proof = self
             .describe_stack_address_stability_proof(block, op_idx, terminator_index, output, rhs)
@@ -916,7 +916,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> AliasUnsafeHazard {
         let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
         if let Some(hazard) = Self::first_intervening_alias_unsafe_hazard(block, op_idx, &uses, rhs)
@@ -978,25 +978,25 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
-    fn materialize_expr_contains_load(expr: &HirExpr) -> bool {
+    fn materialize_expr_contains_load(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Load { .. } => true,
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Load { .. } => true,
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::materialize_expr_contains_load(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Binary { lhs, rhs, .. } => {
                 Self::materialize_expr_contains_load(lhs)
                     || Self::materialize_expr_contains_load(rhs)
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::materialize_expr_contains_load(base)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 Self::materialize_expr_contains_load(base)
                     || Self::materialize_expr_contains_load(index)
             }
-            HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_load(src),
-            HirExpr::Select {
+            DirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_load(src),
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -1006,33 +1006,33 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_load(then_expr)
                     || Self::materialize_expr_contains_load(else_expr)
             }
-            HirExpr::Call { .. }
-            | HirExpr::Var(_)
-            | HirExpr::AddressOfGlobal(_)
-            | HirExpr::Const(_, _) => false,
+            DirExpr::Call { .. }
+            | DirExpr::Var(_)
+            | DirExpr::AddressOfGlobal(_)
+            | DirExpr::Const(_, _) => false,
         }
     }
 
-    fn materialize_expr_contains_call(expr: &HirExpr) -> bool {
+    fn materialize_expr_contains_call(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Call { .. } => true,
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Call { .. } => true,
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::materialize_expr_contains_call(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => {
+            DirExpr::Binary { lhs, rhs, .. } => {
                 Self::materialize_expr_contains_call(lhs)
                     || Self::materialize_expr_contains_call(rhs)
             }
-            HirExpr::Load { ptr, .. } => Self::materialize_expr_contains_call(ptr),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::Load { ptr, .. } => Self::materialize_expr_contains_call(ptr),
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::materialize_expr_contains_call(base)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 Self::materialize_expr_contains_call(base)
                     || Self::materialize_expr_contains_call(index)
             }
-            HirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_call(src),
-            HirExpr::Select {
+            DirExpr::AggregateCopy { src, .. } => Self::materialize_expr_contains_call(src),
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -1042,28 +1042,28 @@ impl<'a> PreviewBuilder<'a> {
                     || Self::materialize_expr_contains_call(then_expr)
                     || Self::materialize_expr_contains_call(else_expr)
             }
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
         }
     }
 
     fn first_call_expr_in_materialize_expr<'b>(
-        expr: &'b HirExpr,
-    ) -> Option<(&'b str, &'b [HirExpr])> {
+        expr: &'b DirExpr,
+    ) -> Option<(&'b str, &'b [DirExpr])> {
         match expr {
-            HirExpr::Call { target, args, .. } => Some((target.as_str(), args.as_slice())),
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Call { target, args, .. } => Some((target.as_str(), args.as_slice())),
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::first_call_expr_in_materialize_expr(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => Self::first_call_expr_in_materialize_expr(lhs)
+            DirExpr::Binary { lhs, rhs, .. } => Self::first_call_expr_in_materialize_expr(lhs)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(rhs)),
-            HirExpr::Load { ptr, .. } => Self::first_call_expr_in_materialize_expr(ptr),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::Load { ptr, .. } => Self::first_call_expr_in_materialize_expr(ptr),
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::first_call_expr_in_materialize_expr(base)
             }
-            HirExpr::Index { base, index, .. } => Self::first_call_expr_in_materialize_expr(base)
+            DirExpr::Index { base, index, .. } => Self::first_call_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(index)),
-            HirExpr::AggregateCopy { src, .. } => Self::first_call_expr_in_materialize_expr(src),
-            HirExpr::Select {
+            DirExpr::AggregateCopy { src, .. } => Self::first_call_expr_in_materialize_expr(src),
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -1071,25 +1071,25 @@ impl<'a> PreviewBuilder<'a> {
             } => Self::first_call_expr_in_materialize_expr(cond)
                 .or_else(|| Self::first_call_expr_in_materialize_expr(then_expr))
                 .or_else(|| Self::first_call_expr_in_materialize_expr(else_expr)),
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => None,
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => None,
         }
     }
 
-    fn first_load_expr_in_materialize_expr<'b>(expr: &'b HirExpr) -> Option<&'b HirExpr> {
+    fn first_load_expr_in_materialize_expr<'b>(expr: &'b DirExpr) -> Option<&'b DirExpr> {
         match expr {
-            HirExpr::Load { ptr, .. } => Some(ptr.as_ref()),
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Load { ptr, .. } => Some(ptr.as_ref()),
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::first_load_expr_in_materialize_expr(expr)
             }
-            HirExpr::Binary { lhs, rhs, .. } => Self::first_load_expr_in_materialize_expr(lhs)
+            DirExpr::Binary { lhs, rhs, .. } => Self::first_load_expr_in_materialize_expr(lhs)
                 .or_else(|| Self::first_load_expr_in_materialize_expr(rhs)),
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 Self::first_load_expr_in_materialize_expr(base)
             }
-            HirExpr::Index { base, index, .. } => Self::first_load_expr_in_materialize_expr(base)
+            DirExpr::Index { base, index, .. } => Self::first_load_expr_in_materialize_expr(base)
                 .or_else(|| Self::first_load_expr_in_materialize_expr(index)),
-            HirExpr::AggregateCopy { src, .. } => Self::first_load_expr_in_materialize_expr(src),
-            HirExpr::Select {
+            DirExpr::AggregateCopy { src, .. } => Self::first_load_expr_in_materialize_expr(src),
+            DirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -1097,10 +1097,10 @@ impl<'a> PreviewBuilder<'a> {
             } => Self::first_load_expr_in_materialize_expr(cond)
                 .or_else(|| Self::first_load_expr_in_materialize_expr(then_expr))
                 .or_else(|| Self::first_load_expr_in_materialize_expr(else_expr)),
-            HirExpr::Call { .. }
-            | HirExpr::Var(_)
-            | HirExpr::AddressOfGlobal(_)
-            | HirExpr::Const(_, _) => None,
+            DirExpr::Call { .. }
+            | DirExpr::Var(_)
+            | DirExpr::AddressOfGlobal(_)
+            | DirExpr::Const(_, _) => None,
         }
     }
 
@@ -1116,41 +1116,41 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn classify_disallowed_single_consumer_rhs_kind(
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> DisallowedSingleConsumerRhsKind {
         match rhs {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {
                 DisallowedSingleConsumerRhsKind::VarOrConst
             }
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
+            DirExpr::Unary {
+                op: DirUnaryOp::Not,
                 ..
             } => DisallowedSingleConsumerRhsKind::UnaryBoolean,
-            HirExpr::Binary { op, .. }
+            DirExpr::Binary { op, .. }
                 if matches!(
                     op,
-                    HirBinaryOp::LogicalAnd
-                        | HirBinaryOp::LogicalOr
-                        | HirBinaryOp::Eq
-                        | HirBinaryOp::Ne
-                        | HirBinaryOp::Lt
-                        | HirBinaryOp::Le
-                        | HirBinaryOp::SLt
-                        | HirBinaryOp::SLe
+                    DirBinaryOp::LogicalAnd
+                        | DirBinaryOp::LogicalOr
+                        | DirBinaryOp::Eq
+                        | DirBinaryOp::Ne
+                        | DirBinaryOp::Lt
+                        | DirBinaryOp::Le
+                        | DirBinaryOp::SLt
+                        | DirBinaryOp::SLe
                 ) =>
             {
                 DisallowedSingleConsumerRhsKind::BinaryBoolean
             }
-            HirExpr::Binary { .. } => DisallowedSingleConsumerRhsKind::Arithmetic,
-            HirExpr::Load { .. }
-            | HirExpr::PtrOffset { .. }
-            | HirExpr::FieldAccess { .. }
-            | HirExpr::Index { .. }
-            | HirExpr::AggregateCopy { .. } => DisallowedSingleConsumerRhsKind::LoadLike,
-            HirExpr::Call { .. } => DisallowedSingleConsumerRhsKind::CallLike,
-            HirExpr::Cast { expr, .. } => Self::classify_disallowed_single_consumer_rhs_kind(expr),
-            HirExpr::Unary { .. } => DisallowedSingleConsumerRhsKind::Other,
-            HirExpr::Select { .. } => DisallowedSingleConsumerRhsKind::Other,
+            DirExpr::Binary { .. } => DisallowedSingleConsumerRhsKind::Arithmetic,
+            DirExpr::Load { .. }
+            | DirExpr::PtrOffset { .. }
+            | DirExpr::FieldAccess { .. }
+            | DirExpr::Index { .. }
+            | DirExpr::AggregateCopy { .. } => DisallowedSingleConsumerRhsKind::LoadLike,
+            DirExpr::Call { .. } => DisallowedSingleConsumerRhsKind::CallLike,
+            DirExpr::Cast { expr, .. } => Self::classify_disallowed_single_consumer_rhs_kind(expr),
+            DirExpr::Unary { .. } => DisallowedSingleConsumerRhsKind::Other,
+            DirExpr::Select { .. } => DisallowedSingleConsumerRhsKind::Other,
         }
     }
 
@@ -1448,60 +1448,60 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn classify_single_consumer_predicate_family(expr: &HirExpr) -> SingleConsumerPredicateFamily {
+    fn classify_single_consumer_predicate_family(expr: &DirExpr) -> SingleConsumerPredicateFamily {
         match expr {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => {
                 SingleConsumerPredicateFamily::DirectFlag
             }
-            HirExpr::Cast { expr, .. } => Self::classify_single_consumer_predicate_family(expr),
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
+            DirExpr::Cast { expr, .. } => Self::classify_single_consumer_predicate_family(expr),
+            DirExpr::Unary {
+                op: DirUnaryOp::Not,
                 ..
             } => SingleConsumerPredicateFamily::NegatedFlag,
-            HirExpr::Unary { .. } => SingleConsumerPredicateFamily::UnknownPredicate,
-            HirExpr::Binary { op, lhs, rhs, .. } => match op {
-                HirBinaryOp::Eq => {
-                    if matches!(&**lhs, HirExpr::Const(0, _))
-                        || matches!(&**rhs, HirExpr::Const(0, _))
+            DirExpr::Unary { .. } => SingleConsumerPredicateFamily::UnknownPredicate,
+            DirExpr::Binary { op, lhs, rhs, .. } => match op {
+                DirBinaryOp::Eq => {
+                    if matches!(&**lhs, DirExpr::Const(0, _))
+                        || matches!(&**rhs, DirExpr::Const(0, _))
                     {
                         SingleConsumerPredicateFamily::CompareZero
-                    } else if matches!(&**lhs, HirExpr::Const(_, _))
-                        || matches!(&**rhs, HirExpr::Const(_, _))
+                    } else if matches!(&**lhs, DirExpr::Const(_, _))
+                        || matches!(&**rhs, DirExpr::Const(_, _))
                     {
                         SingleConsumerPredicateFamily::CompareConst
                     } else {
                         SingleConsumerPredicateFamily::CompareOtherVar
                     }
                 }
-                HirBinaryOp::Ne => {
-                    if matches!(&**lhs, HirExpr::Const(0, _))
-                        || matches!(&**rhs, HirExpr::Const(0, _))
+                DirBinaryOp::Ne => {
+                    if matches!(&**lhs, DirExpr::Const(0, _))
+                        || matches!(&**rhs, DirExpr::Const(0, _))
                     {
                         SingleConsumerPredicateFamily::CompareNonZero
-                    } else if matches!(&**lhs, HirExpr::Const(_, _))
-                        || matches!(&**rhs, HirExpr::Const(_, _))
+                    } else if matches!(&**lhs, DirExpr::Const(_, _))
+                        || matches!(&**rhs, DirExpr::Const(_, _))
                     {
                         SingleConsumerPredicateFamily::CompareConst
                     } else {
                         SingleConsumerPredicateFamily::CompareOtherVar
                     }
                 }
-                HirBinaryOp::LogicalAnd
-                | HirBinaryOp::LogicalOr
-                | HirBinaryOp::Lt
-                | HirBinaryOp::Le
-                | HirBinaryOp::SLt
-                | HirBinaryOp::SLe => SingleConsumerPredicateFamily::ComposedPredicate,
+                DirBinaryOp::LogicalAnd
+                | DirBinaryOp::LogicalOr
+                | DirBinaryOp::Lt
+                | DirBinaryOp::Le
+                | DirBinaryOp::SLt
+                | DirBinaryOp::SLe => SingleConsumerPredicateFamily::ComposedPredicate,
                 _ => SingleConsumerPredicateFamily::UnknownPredicate,
             },
-            HirExpr::Call { .. }
-            | HirExpr::Load { .. }
-            | HirExpr::PtrOffset { .. }
-            | HirExpr::FieldAccess { .. }
-            | HirExpr::Index { .. }
-            | HirExpr::AggregateCopy { .. }
-            | HirExpr::Select { .. }
-            | HirExpr::Const(_, _) => SingleConsumerPredicateFamily::UnknownPredicate,
+            DirExpr::Call { .. }
+            | DirExpr::Load { .. }
+            | DirExpr::PtrOffset { .. }
+            | DirExpr::FieldAccess { .. }
+            | DirExpr::Index { .. }
+            | DirExpr::AggregateCopy { .. }
+            | DirExpr::Select { .. }
+            | DirExpr::Const(_, _) => SingleConsumerPredicateFamily::UnknownPredicate,
         }
     }
 
@@ -1582,16 +1582,16 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn classify_arithmetic_predicate_shape(
-        expr: &HirExpr,
+        expr: &DirExpr,
     ) -> (ArithmeticPredicateShape, Option<u64>) {
         match expr {
-            HirExpr::Cast { expr, .. } => Self::classify_arithmetic_predicate_shape(expr),
-            HirExpr::Binary { op, lhs, rhs, .. } if matches!(op, HirBinaryOp::And) => {
+            DirExpr::Cast { expr, .. } => Self::classify_arithmetic_predicate_shape(expr),
+            DirExpr::Binary { op, lhs, rhs, .. } if matches!(op, DirBinaryOp::And) => {
                 let (value_expr, mask_value) = match (&**lhs, &**rhs) {
-                    (HirExpr::Const(value, _), other) if *value >= 0 => {
+                    (DirExpr::Const(value, _), other) if *value >= 0 => {
                         (other, Some(*value as u64))
                     }
-                    (other, HirExpr::Const(value, _)) if *value >= 0 => {
+                    (other, DirExpr::Const(value, _)) if *value >= 0 => {
                         (other, Some(*value as u64))
                     }
                     _ => return (ArithmeticPredicateShape::UnknownArithmetic, None),
@@ -1601,8 +1601,8 @@ impl<'a> PreviewBuilder<'a> {
                 };
                 let shape = if matches!(
                     value_expr,
-                    HirExpr::Binary {
-                        op: HirBinaryOp::Shr | HirBinaryOp::Sar | HirBinaryOp::Shl,
+                    DirExpr::Binary {
+                        op: DirBinaryOp::Shr | DirBinaryOp::Sar | DirBinaryOp::Shl,
                         ..
                     }
                 ) {
@@ -1645,12 +1645,12 @@ impl<'a> PreviewBuilder<'a> {
         Some(ArithmeticPredicateStableReason::PredicateSensitive)
     }
 
-    fn low_bit_mask_input_expr<'b>(expr: &'b HirExpr) -> Option<&'b HirExpr> {
+    fn low_bit_mask_input_expr<'b>(expr: &'b DirExpr) -> Option<&'b DirExpr> {
         match expr {
-            HirExpr::Cast { expr, .. } => Self::low_bit_mask_input_expr(expr),
-            HirExpr::Binary { op, lhs, rhs, .. } if matches!(op, HirBinaryOp::And) => {
+            DirExpr::Cast { expr, .. } => Self::low_bit_mask_input_expr(expr),
+            DirExpr::Binary { op, lhs, rhs, .. } if matches!(op, DirBinaryOp::And) => {
                 match (&**lhs, &**rhs) {
-                    (HirExpr::Const(1, _), other) | (other, HirExpr::Const(1, _)) => Some(other),
+                    (DirExpr::Const(1, _), other) | (other, DirExpr::Const(1, _)) => Some(other),
                     _ => None,
                 }
             }
@@ -1658,97 +1658,97 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn expr_boolean_like(expr: &HirExpr) -> bool {
+    fn expr_boolean_like(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Const(_, ty) => {
+            DirExpr::Const(_, ty) => {
                 matches!(ty, NirType::Bool) || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
             }
-            HirExpr::Cast { ty, expr } => match ty {
+            DirExpr::Cast { ty, expr } => match ty {
                 NirType::Bool => true,
                 NirType::Int { bits, .. } if *bits == 1 => true,
                 _ => Self::expr_boolean_like(expr),
             },
-            HirExpr::Unary { op, ty, expr } => match op {
-                HirUnaryOp::Not => true,
+            DirExpr::Unary { op, ty, expr } => match op {
+                DirUnaryOp::Not => true,
                 _ => {
                     matches!(ty, NirType::Bool)
                         || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
                         || Self::expr_boolean_like(expr)
                 }
             },
-            HirExpr::Binary { op, ty, .. } => {
+            DirExpr::Binary { op, ty, .. } => {
                 matches!(
                     op,
-                    HirBinaryOp::LogicalAnd
-                        | HirBinaryOp::LogicalOr
-                        | HirBinaryOp::Eq
-                        | HirBinaryOp::Ne
-                        | HirBinaryOp::Lt
-                        | HirBinaryOp::Le
-                        | HirBinaryOp::SLt
-                        | HirBinaryOp::SLe
+                    DirBinaryOp::LogicalAnd
+                        | DirBinaryOp::LogicalOr
+                        | DirBinaryOp::Eq
+                        | DirBinaryOp::Ne
+                        | DirBinaryOp::Lt
+                        | DirBinaryOp::Le
+                        | DirBinaryOp::SLt
+                        | DirBinaryOp::SLe
                 ) || matches!(ty, NirType::Bool)
                     || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
             }
-            HirExpr::Call { ty, .. } | HirExpr::Load { ty, .. } => {
+            DirExpr::Call { ty, .. } | DirExpr::Load { ty, .. } => {
                 matches!(ty, NirType::Bool) || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
             }
-            HirExpr::Select { ty, .. } => {
+            DirExpr::Select { ty, .. } => {
                 matches!(ty, NirType::Bool) || matches!(ty, NirType::Int { bits, .. } if *bits == 1)
             }
-            HirExpr::PtrOffset { .. }
-            | HirExpr::FieldAccess { .. }
-            | HirExpr::Index { .. }
-            | HirExpr::AggregateCopy { .. }
-            | HirExpr::Var(_)
-            | HirExpr::AddressOfGlobal(_) => false,
+            DirExpr::PtrOffset { .. }
+            | DirExpr::FieldAccess { .. }
+            | DirExpr::Index { .. }
+            | DirExpr::AggregateCopy { .. }
+            | DirExpr::Var(_)
+            | DirExpr::AddressOfGlobal(_) => false,
         }
     }
 
-    fn classify_low_bit_mask_input_origin_kind(expr: &HirExpr) -> LowBitMaskInputOriginKind {
+    fn classify_low_bit_mask_input_origin_kind(expr: &DirExpr) -> LowBitMaskInputOriginKind {
         match expr {
-            HirExpr::Cast { expr, .. } => Self::classify_low_bit_mask_input_origin_kind(expr),
-            HirExpr::Unary {
-                op: HirUnaryOp::Not,
+            DirExpr::Cast { expr, .. } => Self::classify_low_bit_mask_input_origin_kind(expr),
+            DirExpr::Unary {
+                op: DirUnaryOp::Not,
                 ..
             } => LowBitMaskInputOriginKind::BoolOp,
-            HirExpr::Unary { .. } => LowBitMaskInputOriginKind::Unknown,
-            HirExpr::Binary { op, .. } => match op {
-                HirBinaryOp::Eq
-                | HirBinaryOp::Ne
-                | HirBinaryOp::Lt
-                | HirBinaryOp::Le
-                | HirBinaryOp::Gt
-                | HirBinaryOp::Ge
-                | HirBinaryOp::SLt
-                | HirBinaryOp::SLe
-                | HirBinaryOp::SGt
-                | HirBinaryOp::SGe => LowBitMaskInputOriginKind::Compare,
-                HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr => {
+            DirExpr::Unary { .. } => LowBitMaskInputOriginKind::Unknown,
+            DirExpr::Binary { op, .. } => match op {
+                DirBinaryOp::Eq
+                | DirBinaryOp::Ne
+                | DirBinaryOp::Lt
+                | DirBinaryOp::Le
+                | DirBinaryOp::Gt
+                | DirBinaryOp::Ge
+                | DirBinaryOp::SLt
+                | DirBinaryOp::SLe
+                | DirBinaryOp::SGt
+                | DirBinaryOp::SGe => LowBitMaskInputOriginKind::Compare,
+                DirBinaryOp::LogicalAnd | DirBinaryOp::LogicalOr => {
                     LowBitMaskInputOriginKind::BoolOp
                 }
-                HirBinaryOp::And
-                | HirBinaryOp::Or
-                | HirBinaryOp::Xor
-                | HirBinaryOp::Add
-                | HirBinaryOp::Sub
-                | HirBinaryOp::Mul
-                | HirBinaryOp::Div
-                | HirBinaryOp::Mod
-                | HirBinaryOp::Shl
-                | HirBinaryOp::Shr
-                | HirBinaryOp::Sar => LowBitMaskInputOriginKind::Arithmetic,
+                DirBinaryOp::And
+                | DirBinaryOp::Or
+                | DirBinaryOp::Xor
+                | DirBinaryOp::Add
+                | DirBinaryOp::Sub
+                | DirBinaryOp::Mul
+                | DirBinaryOp::Div
+                | DirBinaryOp::Mod
+                | DirBinaryOp::Shl
+                | DirBinaryOp::Shr
+                | DirBinaryOp::Sar => LowBitMaskInputOriginKind::Arithmetic,
             },
-            HirExpr::Load { .. }
-            | HirExpr::PtrOffset { .. }
-            | HirExpr::FieldAccess { .. }
-            | HirExpr::Index { .. } => LowBitMaskInputOriginKind::Load,
-            HirExpr::Call { .. } => LowBitMaskInputOriginKind::Call,
-            HirExpr::AggregateCopy { .. }
-            | HirExpr::Select { .. }
-            | HirExpr::Var(_)
-            | HirExpr::AddressOfGlobal(_)
-            | HirExpr::Const(_, _) => LowBitMaskInputOriginKind::Unknown,
+            DirExpr::Load { .. }
+            | DirExpr::PtrOffset { .. }
+            | DirExpr::FieldAccess { .. }
+            | DirExpr::Index { .. } => LowBitMaskInputOriginKind::Load,
+            DirExpr::Call { .. } => LowBitMaskInputOriginKind::Call,
+            DirExpr::AggregateCopy { .. }
+            | DirExpr::Select { .. }
+            | DirExpr::Var(_)
+            | DirExpr::AddressOfGlobal(_)
+            | DirExpr::Const(_, _) => LowBitMaskInputOriginKind::Unknown,
         }
     }
 
@@ -1777,7 +1777,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<DisallowedSingleConsumerProof> {
         let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
         let (_, use_op) = *uses.first()?;
@@ -1849,7 +1849,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<UnknownConsumerKindProof> {
         let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
         if base.reason != DisallowedSingleConsumerReason::UnknownConsumerKind {
@@ -1873,7 +1873,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<SingleConsumerCallRhsProof> {
         let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
         if base.reason != DisallowedSingleConsumerReason::RhsHasCall {
@@ -1988,7 +1988,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<CarryIntrinsicPredicateProof> {
         let base = self.describe_single_consumer_call_rhs_proof(block, op_idx, output, rhs)?;
         if base.family != SingleConsumerCallRhsFamily::KnownPureIntrinsic
@@ -2113,7 +2113,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<IntrinsicCompareOnlyProof> {
         let base = self.describe_single_consumer_call_rhs_proof(block, op_idx, output, rhs)?;
         if base.family != SingleConsumerCallRhsFamily::KnownPureIntrinsic
@@ -2188,7 +2188,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn classify_single_consumer_load_alias_class(
-        ptr: &HirExpr,
+        ptr: &DirExpr,
         same_block_store_before: bool,
         same_block_store_after: bool,
         same_block_call_before: bool,
@@ -2201,31 +2201,31 @@ impl<'a> PreviewBuilder<'a> {
             return SingleConsumerLoadAliasClass::MayAliasCall;
         }
         match ptr {
-            HirExpr::Var(name)
+            DirExpr::Var(name)
                 if name == "rsp" || name == "rbp" || name == "sp" || name == "bp" =>
             {
                 SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
             }
-            HirExpr::PtrOffset { base, .. } | HirExpr::FieldAccess { base, .. } => {
+            DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
                 match base.as_ref() {
-                    HirExpr::Var(name)
+                    DirExpr::Var(name)
                         if name == "rsp" || name == "rbp" || name == "sp" || name == "bp" =>
                     {
                         SingleConsumerLoadAliasClass::ReadOnlyLocalLoad
                     }
-                    HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+                    DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => {
                         SingleConsumerLoadAliasClass::GlobalOrExternalLoad
                     }
-                    HirExpr::Call { .. } | HirExpr::Load { .. } => {
+                    DirExpr::Call { .. } | DirExpr::Load { .. } => {
                         SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
                     }
                     _ => SingleConsumerLoadAliasClass::UnknownLoad,
                 }
             }
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => {
                 SingleConsumerLoadAliasClass::GlobalOrExternalLoad
             }
-            HirExpr::Call { .. } | HirExpr::Load { .. } => {
+            DirExpr::Call { .. } | DirExpr::Load { .. } => {
                 SingleConsumerLoadAliasClass::VolatileOrUnknownLoad
             }
             _ => SingleConsumerLoadAliasClass::UnknownLoad,
@@ -2236,7 +2236,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<SingleConsumerLoadRhsProof> {
         let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
         if base.reason != DisallowedSingleConsumerReason::RhsHasLoad {
@@ -2288,7 +2288,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<PopCountConsumerProof> {
         let base = Self::describe_unknown_consumer_kind_proof(block, op_idx, output, rhs)?;
         if base.consumer_opcode != PcodeOpcode::PopCount {
@@ -2359,7 +2359,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<PopCountIntAndChainProof> {
         let popcount = self.describe_popcount_consumer_proof(block, op_idx, output, rhs)?;
         if popcount.downstream_consumer_opcode != Some(PcodeOpcode::IntAnd) {
@@ -2447,17 +2447,17 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn extract_popcount_input_expr<'b>(rhs: &'b HirExpr) -> Option<&'b HirExpr> {
-        let HirExpr::Call { target, args, .. } = rhs else {
+    fn extract_popcount_input_expr<'b>(rhs: &'b DirExpr) -> Option<&'b DirExpr> {
+        let DirExpr::Call { target, args, .. } = rhs else {
             return None;
         };
         (target == "__popcount" && args.len() == 1).then_some(&args[0])
     }
 
-    fn extract_intand_popcount_operand<'b>(rhs: &'b HirExpr) -> Option<(&'b HirExpr, Option<u64>)> {
+    fn extract_intand_popcount_operand<'b>(rhs: &'b DirExpr) -> Option<(&'b DirExpr, Option<u64>)> {
         match rhs {
-            HirExpr::Binary {
-                op: HirBinaryOp::And,
+            DirExpr::Binary {
+                op: DirBinaryOp::And,
                 lhs,
                 rhs,
                 ..
@@ -2465,11 +2465,11 @@ impl<'a> PreviewBuilder<'a> {
                 let lhs_popcount = Self::extract_popcount_input_expr(lhs);
                 let rhs_popcount = Self::extract_popcount_input_expr(rhs);
                 let lhs_const = match rhs.as_ref() {
-                    HirExpr::Const(value, _) => Some(*value as u64),
+                    DirExpr::Const(value, _) => Some(*value as u64),
                     _ => None,
                 };
                 let rhs_const = match lhs.as_ref() {
-                    HirExpr::Const(value, _) => Some(*value as u64),
+                    DirExpr::Const(value, _) => Some(*value as u64),
                     _ => None,
                 };
                 if let Some(popcount_input) = lhs_popcount {
@@ -2564,7 +2564,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<Result<ParityChainProof, ParityChainKeepReason>> {
         let current_op = block.ops.get(op_idx)?;
         match current_op.opcode {
@@ -2764,7 +2764,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn describe_parity_chain_final_hir_expr(
-        rhs: &HirExpr,
+        rhs: &DirExpr,
         proof: &ParityChainProof,
     ) -> Option<String> {
         let input_expr = match proof.role {
@@ -2787,7 +2787,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<SingleConsumerPredicateProof> {
         let base = Self::describe_disallowed_single_consumer_proof(block, op_idx, output, rhs)?;
         if base.reason != DisallowedSingleConsumerReason::ConsumerIsPredicate {
@@ -2831,7 +2831,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<ArithmeticPredicateProof> {
         let predicate = Self::describe_single_consumer_predicate_proof(block, op_idx, output, rhs)?;
         if predicate.predicate_family != SingleConsumerPredicateFamily::UnknownPredicate {
@@ -2856,7 +2856,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<LowBitMaskPredicateProof> {
         let arithmetic = Self::describe_arithmetic_predicate_proof(block, op_idx, output, rhs)?;
         if arithmetic.mask_kind != ArithmeticPredicateShape::LowBitAndOne {
@@ -2882,7 +2882,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         uses: &[(usize, &PcodeOp)],
-        rhs: &HirExpr,
+        rhs: &DirExpr,
     ) -> Option<AliasUnsafeHazard> {
         let has_mem_dep =
             Self::materialize_expr_contains_load(rhs) || Self::materialize_expr_contains_call(rhs);
@@ -3014,45 +3014,45 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn expr_is_low_cost_builder_inline_candidate(expr: &HirExpr) -> bool {
+    pub(super) fn expr_is_low_cost_builder_inline_candidate(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => true,
-            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => {
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => true,
+            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
                 Self::expr_is_low_cost_builder_inline_candidate(expr)
             }
-            HirExpr::Load { ptr, .. }
-            | HirExpr::PtrOffset { base: ptr, .. }
-            | HirExpr::FieldAccess { base: ptr, .. }
-            | HirExpr::AggregateCopy { src: ptr, .. } => {
+            DirExpr::Load { ptr, .. }
+            | DirExpr::PtrOffset { base: ptr, .. }
+            | DirExpr::FieldAccess { base: ptr, .. }
+            | DirExpr::AggregateCopy { src: ptr, .. } => {
                 Self::expr_is_low_cost_builder_inline_candidate(ptr)
             }
-            HirExpr::Index { base, index, .. } => {
+            DirExpr::Index { base, index, .. } => {
                 Self::expr_is_low_cost_builder_inline_candidate(base)
                     && Self::expr_is_low_cost_builder_inline_candidate(index)
             }
-            HirExpr::Binary { op, lhs, rhs, .. } => {
+            DirExpr::Binary { op, lhs, rhs, .. } => {
                 matches!(
                     op,
-                    HirBinaryOp::Eq
-                        | HirBinaryOp::Ne
-                        | HirBinaryOp::Lt
-                        | HirBinaryOp::Le
-                        | HirBinaryOp::SLt
-                        | HirBinaryOp::SLe
-                        | HirBinaryOp::And
-                        | HirBinaryOp::Or
-                        | HirBinaryOp::Xor
-                        | HirBinaryOp::Add
-                        | HirBinaryOp::Sub
-                        | HirBinaryOp::Shl
-                        | HirBinaryOp::Shr
-                        | HirBinaryOp::Sar
-                        | HirBinaryOp::Mul
+                    DirBinaryOp::Eq
+                        | DirBinaryOp::Ne
+                        | DirBinaryOp::Lt
+                        | DirBinaryOp::Le
+                        | DirBinaryOp::SLt
+                        | DirBinaryOp::SLe
+                        | DirBinaryOp::And
+                        | DirBinaryOp::Or
+                        | DirBinaryOp::Xor
+                        | DirBinaryOp::Add
+                        | DirBinaryOp::Sub
+                        | DirBinaryOp::Shl
+                        | DirBinaryOp::Shr
+                        | DirBinaryOp::Sar
+                        | DirBinaryOp::Mul
                 ) && Self::expr_is_low_cost_builder_inline_candidate(lhs)
                     && Self::expr_is_low_cost_builder_inline_candidate(rhs)
             }
-            HirExpr::Select { .. } => false,
-            HirExpr::Call { target, args, .. } => {
+            DirExpr::Select { .. } => false,
+            DirExpr::Call { target, args, .. } => {
                 Self::materialize_call_target_is_known_pure_intrinsic(target)
                     && args
                         .iter()
@@ -3112,32 +3112,32 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
-    pub(super) fn expr_requires_passthrough_single_use_inline(expr: &HirExpr) -> bool {
+    pub(super) fn expr_requires_passthrough_single_use_inline(expr: &DirExpr) -> bool {
         match expr {
-            HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => false,
-            HirExpr::Cast { expr, .. } => Self::expr_requires_passthrough_single_use_inline(expr),
-            HirExpr::Unary { op, expr, .. } => {
-                matches!(op, HirUnaryOp::Not)
+            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
+            DirExpr::Cast { expr, .. } => Self::expr_requires_passthrough_single_use_inline(expr),
+            DirExpr::Unary { op, expr, .. } => {
+                matches!(op, DirUnaryOp::Not)
                     || Self::expr_requires_passthrough_single_use_inline(expr)
             }
-            HirExpr::Load { .. }
-            | HirExpr::PtrOffset { .. }
-            | HirExpr::FieldAccess { .. }
-            | HirExpr::Index { .. }
-            | HirExpr::AggregateCopy { .. } => true,
-            HirExpr::Binary { op, .. } => matches!(
+            DirExpr::Load { .. }
+            | DirExpr::PtrOffset { .. }
+            | DirExpr::FieldAccess { .. }
+            | DirExpr::Index { .. }
+            | DirExpr::AggregateCopy { .. } => true,
+            DirExpr::Binary { op, .. } => matches!(
                 op,
-                HirBinaryOp::LogicalAnd
-                    | HirBinaryOp::LogicalOr
-                    | HirBinaryOp::Eq
-                    | HirBinaryOp::Ne
-                    | HirBinaryOp::Lt
-                    | HirBinaryOp::Le
-                    | HirBinaryOp::SLt
-                    | HirBinaryOp::SLe
+                DirBinaryOp::LogicalAnd
+                    | DirBinaryOp::LogicalOr
+                    | DirBinaryOp::Eq
+                    | DirBinaryOp::Ne
+                    | DirBinaryOp::Lt
+                    | DirBinaryOp::Le
+                    | DirBinaryOp::SLt
+                    | DirBinaryOp::SLe
             ),
-            HirExpr::Select { .. } => true,
-            HirExpr::Call { .. } => true,
+            DirExpr::Select { .. } => true,
+            DirExpr::Call { .. } => true,
         }
     }
 

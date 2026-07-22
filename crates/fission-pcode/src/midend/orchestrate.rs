@@ -171,14 +171,17 @@ pub fn render_mlil_preview_with_binary_and_context(
     normalize_pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
         *protected.borrow_mut() = builder.lsda_landing_pad_labels().into_iter().collect();
     });
-    // Stage: midend-normalize (owner crate).
+    // Stage: midend-normalize (owner crate). `hir` is a real `DirFunction`
+    // here (builder's native output) -- kept named `hir` through this
+    // function for minimal diff, but its type is DIR until the explicit
+    // conversion below.
     normalize_hir_function(&mut hir);
     // Observation side channel (mirrors `take_last_layered_pseudocode`
-    // below): the flattened, goto/label-based body structuring is about to
-    // consume, captured before any structuring rewrite touches it. Zero
-    // effect on `hir` itself -- purely a clone for whoever reads it back via
+    // below): the real `DirFunction` structuring is about to consume,
+    // captured before any structuring rewrite touches it. Zero effect on
+    // `hir` itself -- purely a clone for whoever reads it back via
     // `take_last_dir_snapshot`.
-    store_last_dir_snapshot(hir.body.clone());
+    store_last_dir_snapshot(hir.clone());
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
     structuring::passes::pipeline::run_structuring_pipeline(
@@ -189,6 +192,13 @@ pub fn render_mlil_preview_with_binary_and_context(
     // Structuring may wrap/rearrange after normalize; drop pure identity
     // assigns that only become adjacent post-layout.
     let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut hir.body);
+    // The real DirFunction -> HirFunction boundary: structuring's CFG-to-AST
+    // rewrite is done, so `hir.body` (still `Vec<DirStmt>`) is converted to
+    // the genuinely separate `HirStmt` grammar and `hir` is rebound to a
+    // real `HirFunction` from here on -- not a type pun, an actual
+    // structural conversion (`dir_stmts_to_hir_stmts`).
+    let hir_body = fission_midend_core::ir::dir_stmts_to_hir_stmts(hir.body.clone());
+    let mut hir = hir.into_hir_function(hir_body);
     // Observation side channel, same rationale as `store_last_dir_snapshot`
     // above: the fully-finalized `HirFunction` (structured body, plus the
     // `params`/`locals` an interpreter needs) as of the point a real caller
@@ -205,7 +215,13 @@ pub fn render_mlil_preview_with_binary_and_context(
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);
     build_stats.merge_assign(&take_normalize_wave_stats());
-    let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(&hir.body);
+    // `discover_guarded_tail_candidates_for_stats` is a structuring-side stats
+    // pass (re-runs guarded-tail promotion discovery for telemetry, doesn't
+    // mutate `hir`) defined for `DirStmt` input -- convert back via
+    // `hir_stmts_to_dir_stmts` rather than duplicating the pass for `HirStmt`.
+    let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(
+        &fission_midend_core::ir::hir_stmts_to_dir_stmts(hir.body.clone()),
+    );
     build_stats.merge_guarded_tail_discovery_assign(&normalized_discovery_stats);
     build_stats.refresh_structuring_reason_families();
     build_stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
@@ -289,28 +305,30 @@ pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
 }
 
 thread_local! {
-    static LAST_DIR_SNAPSHOT: std::cell::RefCell<Option<super::Dir>> =
+    static LAST_DIR_SNAPSHOT: std::cell::RefCell<Option<super::DirFunction>> =
         const { std::cell::RefCell::new(None) };
 }
 
-fn store_last_dir_snapshot(body: Vec<super::HirStmt>) {
+fn store_last_dir_snapshot(func: super::DirFunction) {
     LAST_DIR_SNAPSHOT.with(|slot| {
-        *slot.borrow_mut() = Some(super::Dir(body));
+        *slot.borrow_mut() = Some(func);
     });
 }
 
-/// Take the flattened, goto/label-based HIR body ([`super::Dir`]) that
+/// Take the real [`super::DirFunction`] (builder's native output, the same
+/// one normalize/structuring's own internal passes read and rewrite) that
 /// structuring consumed as input on the most recent
-/// `render_mlil_preview*`/`render_nir*` call on this thread -- the same
-/// `HirStmt`/`HirExpr` grammar as the final structured HIR, just captured
-/// immediately before structuring's CFG-to-AST rewrite runs and tagged with
-/// a distinct type so callers can't accidentally swap it with the
-/// structured HIR. Pairing this with the structured HIR the normal call
-/// already returns lets an external verifier (e.g. `fission-dir`) interpret
-/// both and diff results for the same concrete inputs, without any change
-/// to what structuring itself computes -- purely observational, same
-/// pattern as `take_last_layered_pseudocode` above.
-pub fn take_last_dir_snapshot() -> Option<super::Dir> {
+/// `render_mlil_preview*`/`render_nir*` call on this thread -- captured
+/// immediately before structuring's CFG-to-AST rewrite runs. `DirFunction`
+/// is a genuinely independent type from [`super::HirFunction`] (see
+/// `fission_midend_core::ir::hir`'s module doc), not the same type under a
+/// different name, so callers can't accidentally swap this with the
+/// structured HIR `take_last_hir_function_snapshot` returns. Pairing the
+/// two lets an external verifier (e.g. `fission-dir`) interpret both and
+/// diff results for the same concrete inputs, without any change to what
+/// structuring itself computes -- purely observational, same pattern as
+/// `take_last_layered_pseudocode` above.
+pub fn take_last_dir_snapshot() -> Option<super::DirFunction> {
     LAST_DIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
 }
 

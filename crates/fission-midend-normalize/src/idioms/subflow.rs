@@ -3,7 +3,7 @@ use crate::HashMap;
 
 /// Optimizes redundant bit-widths, casts, and bitmasks in HIR expressions.
 /// Drawn from Ghidra's `subflow.cc` active bit analysis and bitstream pruning.
-pub fn apply_subflow_pruning(func: &mut HirFunction) -> bool {
+pub fn apply_subflow_pruning(func: &mut DirFunction) -> bool {
     let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
@@ -27,13 +27,13 @@ pub fn apply_subflow_pruning(func: &mut HirFunction) -> bool {
 /// Recursively evaluates the conservative mask of possible active bits for an expression.
 /// If a bit is 0 in the returned mask, it is guaranteed to be 0 at runtime.
 fn active_bits(
-    expr: &HirExpr,
+    expr: &DirExpr,
     type_map: &HashMap<String, NirType>,
     nz_masks: &HashMap<String, u64>,
 ) -> u64 {
     match expr {
-        HirExpr::Const(val, _) => *val as u64,
-        HirExpr::Var(name) => {
+        DirExpr::Const(val, _) => *val as u64,
+        DirExpr::Var(name) => {
             if let Some(mask) = nz_masks.get(name) {
                 *mask
             } else if let Some(ty) = type_map.get(name) {
@@ -42,7 +42,7 @@ fn active_bits(
                 u64::MAX
             }
         }
-        HirExpr::Cast { ty, expr } => {
+        DirExpr::Cast { ty, expr } => {
             let outer_mask = type_mask(ty);
             let inner_ty = get_expr_type(expr, type_map);
             if let NirType::Int {
@@ -66,18 +66,18 @@ fn active_bits(
             let inner_active = active_bits(expr, type_map, nz_masks);
             inner_active & outer_mask
         }
-        HirExpr::Binary { op, lhs, rhs, ty } => match op {
-            HirBinaryOp::And => {
+        DirExpr::Binary { op, lhs, rhs, ty } => match op {
+            DirBinaryOp::And => {
                 active_bits(lhs, type_map, nz_masks) & active_bits(rhs, type_map, nz_masks)
             }
-            HirBinaryOp::Or | HirBinaryOp::Xor => {
+            DirBinaryOp::Or | DirBinaryOp::Xor => {
                 active_bits(lhs, type_map, nz_masks) | active_bits(rhs, type_map, nz_masks)
             }
-            HirBinaryOp::Shr | HirBinaryOp::Sar => {
-                if let HirExpr::Const(shift, _) = &**rhs {
+            DirBinaryOp::Shr | DirBinaryOp::Sar => {
+                if let DirExpr::Const(shift, _) = &**rhs {
                     if *shift < 64 {
                         let left = active_bits(lhs, type_map, nz_masks);
-                        if *op == HirBinaryOp::Sar {
+                        if *op == DirBinaryOp::Sar {
                             let shifted = left >> shift;
                             let bits = match ty {
                                 NirType::Bool => 1,
@@ -101,8 +101,8 @@ fn active_bits(
                     type_mask(ty)
                 }
             }
-            HirBinaryOp::Shl => {
-                if let HirExpr::Const(shift, _) = &**rhs {
+            DirBinaryOp::Shl => {
+                if let DirExpr::Const(shift, _) = &**rhs {
                     if *shift < 64 {
                         let inner = active_bits(lhs, type_map, nz_masks);
                         let mask = type_mask(ty);
@@ -139,9 +139,9 @@ fn type_mask(ty: &NirType) -> u64 {
 }
 
 /// Helper to get the type of an expression, checking the local/parameter binding map for variables.
-fn get_expr_type(expr: &HirExpr, type_map: &HashMap<String, NirType>) -> NirType {
+fn get_expr_type(expr: &DirExpr, type_map: &HashMap<String, NirType>) -> NirType {
     match expr {
-        HirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
+        DirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
         _ => expr_type(expr),
     }
 }
@@ -157,7 +157,7 @@ fn scalar_bit_width(ty: &NirType) -> Option<u32> {
 
 /// Recursively optimizes expressions in HIR statements.
 fn optimize_stmts(
-    stmts: &mut [HirStmt],
+    stmts: &mut [DirStmt],
     type_map: &HashMap<String, NirType>,
     nz_masks: &HashMap<String, u64>,
 ) -> bool {
@@ -169,26 +169,26 @@ fn optimize_stmts(
 }
 
 fn optimize_stmt(
-    stmt: &mut HirStmt,
+    stmt: &mut DirStmt,
     type_map: &HashMap<String, NirType>,
     nz_masks: &HashMap<String, u64>,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        HirStmt::Assign { lhs, rhs } => {
+        DirStmt::Assign { lhs, rhs } => {
             changed |= optimize_lvalue(lhs, type_map, nz_masks);
             changed |= optimize_expr(rhs, type_map, nz_masks);
         }
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
             changed |= optimize_expr(expr, type_map, nz_masks);
         }
-        HirStmt::VaStart { va_list, .. } => {
+        DirStmt::VaStart { va_list, .. } => {
             changed |= optimize_expr(va_list, type_map, nz_masks);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
             changed |= optimize_stmts(body, type_map, nz_masks);
         }
-        HirStmt::For {
+        DirStmt::For {
             init,
             cond,
             update,
@@ -205,7 +205,7 @@ fn optimize_stmt(
             }
             changed |= optimize_stmts(body, type_map, nz_masks);
         }
-        HirStmt::If {
+        DirStmt::If {
             cond,
             then_body,
             else_body,
@@ -214,7 +214,7 @@ fn optimize_stmt(
             changed |= optimize_stmts(then_body, type_map, nz_masks);
             changed |= optimize_stmts(else_body, type_map, nz_masks);
         }
-        HirStmt::Switch {
+        DirStmt::Switch {
             expr,
             cases,
             default,
@@ -225,31 +225,31 @@ fn optimize_stmt(
             }
             changed |= optimize_stmts(default, type_map, nz_masks);
         }
-        HirStmt::Return(None)
-        | HirStmt::Label(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Break
-        | HirStmt::Continue => {}
+        DirStmt::Return(None)
+        | DirStmt::Label(_)
+        | DirStmt::Goto(_)
+        | DirStmt::Break
+        | DirStmt::Continue => {}
     }
     changed
 }
 
 fn optimize_lvalue(
-    lhs: &mut HirLValue,
+    lhs: &mut DirLValue,
     type_map: &HashMap<String, NirType>,
     nz_masks: &HashMap<String, u64>,
 ) -> bool {
     let mut changed = false;
     match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => {
+        DirLValue::Var(_) => {}
+        DirLValue::Deref { ptr, .. } => {
             changed |= optimize_expr(ptr, type_map, nz_masks);
         }
-        HirLValue::Index { base, index, .. } => {
+        DirLValue::Index { base, index, .. } => {
             changed |= optimize_expr(base, type_map, nz_masks);
             changed |= optimize_expr(index, type_map, nz_masks);
         }
-        HirLValue::FieldAccess { base, .. } => {
+        DirLValue::FieldAccess { base, .. } => {
             changed |= optimize_expr(base, type_map, nz_masks);
         }
     }
@@ -257,7 +257,7 @@ fn optimize_lvalue(
 }
 
 fn optimize_expr(
-    expr: &mut HirExpr,
+    expr: &mut DirExpr,
     type_map: &HashMap<String, NirType>,
     nz_masks: &HashMap<String, u64>,
 ) -> bool {
@@ -265,28 +265,28 @@ fn optimize_expr(
 
     // 1. Optimize children first (bottom-up)
     match expr {
-        HirExpr::Cast { expr: inner, .. }
-        | HirExpr::Unary { expr: inner, .. }
-        | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => {
+        DirExpr::Cast { expr: inner, .. }
+        | DirExpr::Unary { expr: inner, .. }
+        | DirExpr::Load { ptr: inner, .. }
+        | DirExpr::PtrOffset { base: inner, .. }
+        | DirExpr::AggregateCopy { src: inner, .. }
+        | DirExpr::FieldAccess { base: inner, .. } => {
             changed |= optimize_expr(inner, type_map, nz_masks);
         }
-        HirExpr::Binary { lhs, rhs, .. } => {
+        DirExpr::Binary { lhs, rhs, .. } => {
             changed |= optimize_expr(lhs, type_map, nz_masks);
             changed |= optimize_expr(rhs, type_map, nz_masks);
         }
-        HirExpr::Call { args, .. } => {
+        DirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= optimize_expr(arg, type_map, nz_masks);
             }
         }
-        HirExpr::Index { base, index, .. } => {
+        DirExpr::Index { base, index, .. } => {
             changed |= optimize_expr(base, type_map, nz_masks);
             changed |= optimize_expr(index, type_map, nz_masks);
         }
-        HirExpr::Select {
+        DirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -296,27 +296,27 @@ fn optimize_expr(
             changed |= optimize_expr(then_expr, type_map, nz_masks);
             changed |= optimize_expr(else_expr, type_map, nz_masks);
         }
-        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
     }
 
     // 2. Apply current-level optimizations
     // (A) Constant folding of Cast: (T)0x1234 -> 0x1234 (with T)
-    if let HirExpr::Cast { ty, expr: inner } = expr {
-        if let HirExpr::Const(val, _) = &**inner {
+    if let DirExpr::Cast { ty, expr: inner } = expr {
+        if let DirExpr::Const(val, _) = &**inner {
             let mask = type_mask(ty);
             let folded_val = *val & (mask as i64);
-            *expr = HirExpr::Const(folded_val, ty.clone());
+            *expr = DirExpr::Const(folded_val, ty.clone());
             return true;
         }
     }
 
     // (B) Redundant double casts: (T_outer)(T_inner)val -> (T_outer)val
-    if let HirExpr::Cast {
+    if let DirExpr::Cast {
         ty: outer_ty,
         expr: inner_cast,
     } = expr
     {
-        if let HirExpr::Cast {
+        if let DirExpr::Cast {
             ty: inner_ty,
             expr: val,
         } = &mut **inner_cast
@@ -327,7 +327,7 @@ fn optimize_expr(
                 let val_ty = get_expr_type(val, type_map);
                 let val_bits = scalar_bit_width(&val_ty).unwrap_or(64);
                 if outer_bits <= inner_bits || val_bits <= inner_bits {
-                    *expr = HirExpr::Cast {
+                    *expr = DirExpr::Cast {
                         ty: outer_ty.clone(),
                         expr: Box::new((**val).clone()),
                     };
@@ -338,7 +338,7 @@ fn optimize_expr(
     }
 
     // (C) Redundant Cast to same/wider type: (T)val -> val
-    if let HirExpr::Cast { ty, expr: inner } = expr {
+    if let DirExpr::Cast { ty, expr: inner } = expr {
         let inner_ty = get_expr_type(inner, type_map);
         if *ty == inner_ty {
             *expr = (**inner).clone();
@@ -347,20 +347,20 @@ fn optimize_expr(
     }
 
     // (D) Redundant bitmask: lhs & Const(mask) -> lhs
-    if let HirExpr::Binary {
-        op: HirBinaryOp::And,
+    if let DirExpr::Binary {
+        op: DirBinaryOp::And,
         lhs,
         rhs,
         ..
     } = expr
     {
-        if let HirExpr::Const(mask, _) = &**rhs {
+        if let DirExpr::Const(mask, _) = &**rhs {
             let active = active_bits(lhs, type_map, nz_masks);
             if (active & !(*mask as u64)) == 0 {
                 *expr = (**lhs).clone();
                 return true;
             }
-        } else if let HirExpr::Const(mask, _) = &**lhs {
+        } else if let DirExpr::Const(mask, _) = &**lhs {
             let active = active_bits(rhs, type_map, nz_masks);
             if (active & !(*mask as u64)) == 0 {
                 *expr = (**rhs).clone();
@@ -404,16 +404,16 @@ mod tests {
         type_map.insert("x".to_string(), u8_ty());
 
         // x & 0xff where x is u8
-        let mut expr = HirExpr::Binary {
-            op: HirBinaryOp::And,
-            lhs: Box::new(HirExpr::Var("x".to_string())),
-            rhs: Box::new(HirExpr::Const(0xff, u8_ty())),
+        let mut expr = DirExpr::Binary {
+            op: DirBinaryOp::And,
+            lhs: Box::new(DirExpr::Var("x".to_string())),
+            rhs: Box::new(DirExpr::Const(0xff, u8_ty())),
             ty: u8_ty(),
         };
 
         let nz_masks = HashMap::default();
         assert!(optimize_expr(&mut expr, &type_map, &nz_masks));
-        assert_eq!(expr, HirExpr::Var("x".to_string()));
+        assert_eq!(expr, DirExpr::Var("x".to_string()));
     }
 
     #[test]
@@ -422,11 +422,11 @@ mod tests {
         type_map.insert("x".to_string(), u8_ty());
 
         // (u64)(u32)x where x is u8
-        let mut expr = HirExpr::Cast {
+        let mut expr = DirExpr::Cast {
             ty: u64_ty(),
-            expr: Box::new(HirExpr::Cast {
+            expr: Box::new(DirExpr::Cast {
                 ty: u32_ty(),
-                expr: Box::new(HirExpr::Var("x".to_string())),
+                expr: Box::new(DirExpr::Var("x".to_string())),
             }),
         };
 
@@ -434,9 +434,9 @@ mod tests {
         assert!(optimize_expr(&mut expr, &type_map, &nz_masks));
         assert_eq!(
             expr,
-            HirExpr::Cast {
+            DirExpr::Cast {
                 ty: u64_ty(),
-                expr: Box::new(HirExpr::Var("x".to_string())),
+                expr: Box::new(DirExpr::Var("x".to_string())),
             }
         );
     }

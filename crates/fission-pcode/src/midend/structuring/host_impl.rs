@@ -117,7 +117,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn pcode_block_idx(&self, idx: usize) -> usize {
         PreviewBuilder::pcode_block_idx(self, idx)
     }
-    fn lower_block_stmts(&mut self, block_idx: usize) -> Result<Vec<HirStmt>, MlilPreviewError> {
+    fn lower_block_stmts(&mut self, block_idx: usize) -> Result<Vec<DirStmt>, MlilPreviewError> {
         let pcode_idx = PreviewBuilder::pcode_block_idx(self, block_idx);
         // Index into blocks without holding a borrow across the mutable lower call.
         let block_ptr = self.pcode.blocks.as_ptr();
@@ -136,14 +136,14 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         &mut self,
         pred_idx: usize,
         join_idx: usize,
-    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+    ) -> Result<Option<DirExpr>, MlilPreviewError> {
         PreviewBuilder::lower_return_join_expr_for_predecessor(self, pred_idx, join_idx)
     }
     fn lower_linear_body(
         &mut self,
         start_idx: usize,
         exit: LinearExit,
-    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(Vec<DirStmt>, usize)>, MlilPreviewError> {
         fission_midend_structuring::lower_linear_body(self, start_idx, exit)
     }
     fn lower_linear_body_with_budget(
@@ -151,7 +151,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         start_idx: usize,
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(Vec<DirStmt>, usize)>, MlilPreviewError> {
         fission_midend_structuring::lower_linear_body_with_budget(self, start_idx, exit, budget)
     }
     fn linear_exit(&mut self, idx: usize) -> Result<Option<LinearExit>, MlilPreviewError> {
@@ -520,7 +520,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
 
     fn try_build_guarded_tail_trial(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         idx: usize,
         referenced: &HashMap<String, usize>,
     ) -> Option<
@@ -535,7 +535,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn verify_guarded_tail_trial(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         idx: usize,
         trial: &fission_midend_structuring::guarded_tail::GuardedTailTrial,
     ) -> fission_midend_structuring::guarded_tail::GuardedTailVerification {
@@ -543,7 +543,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn build_guarded_tail_execution_plan(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         idx: usize,
         trial: &fission_midend_structuring::guarded_tail::GuardedTailTrial,
         verification: &fission_midend_structuring::guarded_tail::GuardedTailVerification,
@@ -557,17 +557,17 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn execute_guarded_tail_plan(
         &mut self,
-        body: &mut Vec<HirStmt>,
+        body: &mut Vec<DirStmt>,
         idx: usize,
         trial: fission_midend_structuring::guarded_tail::GuardedTailTrial,
         plan: fission_midend_structuring::guarded_tail::GuardedTailExecutionPlan,
-        cond: HirExpr,
+        cond: DirExpr,
     ) {
         fission_midend_structuring::guarded_tail::execute_guarded_tail_plan(
             self, body, idx, trial, plan, cond,
         )
     }
-    fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]) {
+    fn discover_guarded_tail_candidates_in_body(&mut self, body: &[DirStmt]) {
         fission_midend_structuring::guarded_tail::discover_guarded_tail_candidates_in_body(
             self, body,
         )
@@ -625,7 +625,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn resolve_terminal_join_target(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         target_label: &str,
         referenced: &HashMap<String, usize>,
@@ -654,7 +654,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
             .map(|block| block.start_address)
             .unwrap_or(0)
     }
-    fn guarded_tail_trace_emit_snapshot(&self, prefix: &str, stmts: &[HirStmt], limit: usize) {
+    fn guarded_tail_trace_emit_snapshot(&self, prefix: &str, stmts: &[DirStmt], limit: usize) {
         let take_n = stmts.len().min(limit.max(1));
         for (idx, stmt) in stmts.iter().take(take_n).enumerate() {
             eprintln!("{prefix} [{idx:02}] {stmt:?}");
@@ -754,7 +754,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         self.temp_next_id = self.temp_next_id.saturating_add(1);
         self.temps.insert(
             name.clone(),
-            fission_midend_core::ir::NirBinding {
+            fission_midend_core::ir::DirBinding {
                 name: name.clone(),
                 ty,
                 surface_type_name: None,
@@ -766,7 +766,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     }
     fn find_earliest_owned_join_label_with_diag(
         &mut self,
-        body: &[HirStmt],
+        body: &[DirStmt],
         anchor_idx: usize,
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
@@ -782,7 +782,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         )
     }
 
-    fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &HirStmt) -> Option<String> {
+    fn suffix_call_uses_preview_unsafe_callee(&self, stmt: &DirStmt) -> Option<String> {
         let (target, _, _) = fission_midend_structuring::guarded_tail::pure_hir::suffix_call_expr(stmt)?;
         let summary = self.call_effect_summary_for_target(target);
         fission_midend_structuring::guarded_tail::suffix_window::preview_unsafe_callee_target(
@@ -791,7 +791,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         )
     }
 
-    fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &HirStmt) {
+    fn trace_suffix_unknown_call_provenance(&self, stmt_idx: usize, stmt: &DirStmt) {
         fission_midend_structuring::guarded_tail::suffix_window::trace_suffix_unknown_call_provenance(
             self, stmt_idx, stmt,
         )
@@ -866,8 +866,8 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn emit_unsupported_control_surface(
         &mut self,
         evidence: fission_midend_core::ir::UnsupportedControlEvidence,
-        target_expr: Option<HirExpr>,
-    ) -> HirStmt {
+        target_expr: Option<DirExpr>,
+    ) -> DirStmt {
         PreviewBuilder::emit_unsupported_control_surface(self, evidence, target_expr)
     }
 }
@@ -875,7 +875,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
 /// Free helpers that call inherent PreviewBuilder methods without trait UFCS recursion.
 fn gt_resolve_terminal_join_target(
     builder: &mut PreviewBuilder<'_>,
-    body: &[HirStmt],
+    body: &[DirStmt],
     anchor_idx: usize,
     target_label: &str,
     referenced: &HashMap<String, usize>,
