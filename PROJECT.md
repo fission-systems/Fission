@@ -4976,3 +4976,70 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     nextest 105/112 (+1, same 7 pre-existing unrelated failures), full
     workspace nextest 2188/2195 (+1, zero regressions), full workspace
     build clean, `golden_corpus_check.py check` clean.
+- **`selfjit`: fixed per-TB scratch buffer added, unblocking the >8-byte
+  `Load`/`Store` path, 2026-07-23.** User asked to continue with the
+  stack-slot allocator and deeper corpus coverage. The allocator: a
+  generic, cross-arch mechanism, not something bolted onto `Load`/`Store`
+  specifically -- reusable by any future opcode that needs a real,
+  addressable host-memory buffer (`CallOther`'s own argument marshaling
+  will want the same buffer, once it also gets a direct-store primitive
+  this phase doesn't add -- see below).
+  - **Design**: a fixed `SCRATCH_BUF_BYTES = 64` region reserved in every
+    compiled TB's own prologue (not a per-TB-sized allocator computed from
+    a first pass over the ops -- this backend's whole design already
+    trades "correct and simple" for "fast" everywhere else, so a small
+    always-reserved pool fits that same bar). `scratch_buf_addr(dst)`
+    computes its address in one instruction on both arches
+    (`ADD dst, SP, #offset`) via the already-existing, already-tested
+    `add_imm` primitive -- no new emitter primitive needed, just a new
+    generic `SP` role constant (`emit::aarch64::SP`/`emit::x86_64::SP`,
+    re-exported like `ARG0`/`RET`). One real, non-obvious wrinkle
+    documented at the constant itself: AArch64's register 31 is context-
+    dependent -- `ADD`/`SUB` *immediate* forms (what `add_imm`/`sub_imm`
+    emit) treat it as SP, but `mov_reg`'s `ORR`-based alias would read it
+    as the zero register (XZR) instead -- `SP` is only ever meant to be
+    passed through `add_imm`/`sub_imm`, documented explicitly so a future
+    caller doesn't reach for `mov_reg` by habit and silently compute from
+    0.
+  - **Frame layout extended on both arches** to reserve the buffer
+    alongside the existing named-register save area: AArch64's
+    `FRAME_BYTES` grows from 48 to 112 (both individually 16-aligned, so
+    no extra padding needed; buffer starts at SP+48). x86-64's prologue's
+    existing `sub rsp, 8` alignment pad grows to `sub rsp, 72` (72 mod 16
+    == 8, the same residue the original 8-byte pad had, so 16-alignment
+    for this function's own subsequent `call`s is preserved; buffer
+    starts at SP+0, right at the top of the newly reserved region).
+  - **Wide `Load`/`Store` wired up**: matches `crate::jit::compiler`'s own
+    shape exactly -- a plain two-call byte copy through the scratch
+    buffer (`jit_read_bytes` then `jit_write_bytes` for `Load`, the same
+    pair in the same order for `Store`), never a register-sized value.
+    Kept one Cranelift parity quirk deliberately rather than "fixing" it
+    unilaterally: a `>8`-byte *constant* `Store` value leaves the scratch
+    buffer unpopulated on both backends (real p-code essentially never
+    encodes a >8-byte compile-time constant for a Store's value operand,
+    so this is unreachable in practice, not a live gap). A value wider
+    than the 64-byte buffer still fails loudly (`bail!`), never silently
+    truncates -- the old `wide_load_and_store_fail_loudly_not_silently`
+    test (which asserted 16-byte Load/Store *must* fail) was replaced
+    with a real 16-byte round-trip test plus a new test confirming the
+    *actual* remaining limit (`SCRATCH_BUF_BYTES + 8`) still fails loudly.
+  - **`CallOther` explicitly not attempted this phase**, and the reason
+    is now precisely characterized rather than just "needs an allocator":
+    its host callback needs its variadic arguments *written* into a
+    `*const u64` buffer directly from native code first (Cranelift does
+    this with a plain `stack_store` per argument); this file has no
+    "store a register to `[scratch_addr + offset]`" primitive yet
+    (`str_imm` is aarch64-only, not part of the generic `Asm` shape other
+    opcodes use) -- so `CallOther` needs that additional primitive on top
+    of the buffer this phase adds, not just the buffer itself.
+  - `selfjit_supports` updated (Load/Store gated on `SCRATCH_BUF_BYTES`
+    now, not a flat 8); re-ran both hand-picked differential fixtures and
+    the 16-binary sweep -- unchanged, still clean (none of them happen to
+    reach a >8-byte Load/Store in their walked TBs, but confirms the new
+    frame layout doesn't break anything for every *other* opcode either,
+    since literally every compiled TB now goes through the larger frame).
+  - Validated on both host backends: `selfjit::*` 33/33 (aarch64, +1) and
+    39/39 (x86-64 via Rosetta, +1), `fission-emulator` nextest 106/113
+    (+2, same 7 pre-existing unrelated failures), full workspace nextest
+    2189/2196 (+2, zero regressions), full workspace build clean,
+    `golden_corpus_check.py check` clean.

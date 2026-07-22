@@ -121,10 +121,17 @@ fn selfjit_supports<'a>(ops: impl IntoIterator<Item = &'a fission_pcode::ir::Pco
         | PcodeOpcode::MultiEqual
         | PcodeOpcode::Indirect
         | PcodeOpcode::SegmentOp => true,
-        // Load/Store: implemented, but only the <=8-byte path (see
-        // `selfjit/compiler.rs`'s wide-path gap note).
-        PcodeOpcode::Load => op.output.as_ref().is_none_or(|o| o.size <= 8),
-        PcodeOpcode::Store => op.inputs.len() < 3 || op.inputs[2].size <= 8,
+        // Load/Store: implemented up to the fixed per-TB scratch buffer
+        // width (`crate::selfjit::compiler::SCRATCH_BUF_BYTES`); wider
+        // than that fails loudly at compile time, correctly excluded here.
+        PcodeOpcode::Load => op
+            .output
+            .as_ref()
+            .is_none_or(|o| o.size <= crate::selfjit::compiler::SCRATCH_BUF_BYTES),
+        PcodeOpcode::Store => {
+            op.inputs.len() < 3
+                || op.inputs[2].size <= crate::selfjit::compiler::SCRATCH_BUF_BYTES
+        }
         _ => false,
     })
 }

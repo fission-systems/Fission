@@ -72,6 +72,14 @@ pub const EMU_PTR_SLOT: u32 = RBX;
 pub const A_VAL_SLOT: u32 = R12;
 pub const B_VAL_SLOT: u32 = R13;
 pub const RESULT_SLOT: u32 = R14;
+/// Stack pointer, for `add_imm`-based scratch-buffer address computation
+/// (`compiler.rs`'s `scratch_buf_addr`). Unlike aarch64's SP, RSP is a
+/// perfectly ordinary GPR encoding in register-to-register contexts (no
+/// XZR-style ambiguity) -- safe to pass through `add_imm` (which does
+/// `mov_reg(dst, RSP)` internally when `dst != RSP`, an entirely normal
+/// register-register MOV, not a memory operand, so RSP's usual "needs a
+/// SIB byte as a memory base" quirk doesn't apply here).
+pub const SP: u32 = RSP;
 
 // Raw SysV64 register encodings (the 4-bit number ModRM/REX/opcode-plus-reg
 // fields ultimately need -- 0-7 need no REX extension bit, 8-15 do).
@@ -79,8 +87,7 @@ const RAX: u32 = 0;
 const RCX: u32 = 1;
 const RDX: u32 = 2;
 const RBX: u32 = 3;
-#[allow(dead_code)]
-const RSP: u32 = 4; // documented for completeness; sub_rsp_imm8/add_rsp_imm8 hardcode its ModRM field directly
+const RSP: u32 = 4;
 #[allow(dead_code)]
 const RBP: u32 = 5;
 const RSI: u32 = 6;

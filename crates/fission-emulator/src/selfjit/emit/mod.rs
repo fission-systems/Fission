@@ -25,7 +25,7 @@ pub mod aarch64;
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     Asm, Cond, ARG0, ARG1, ARG2, ARG3, ARG4, A_VAL_SLOT, B_VAL_SLOT, EMU_PTR_SLOT, RESULT_SLOT,
-    RET,
+    RET, SP,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -33,7 +33,7 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     Asm, Cond, ARG0, ARG1, ARG2, ARG3, ARG4, A_VAL_SLOT, B_VAL_SLOT, EMU_PTR_SLOT, RESULT_SLOT,
-    RET,
+    RET, SP,
 };
 
 /// A forward-branch fixup site: an instruction slot already emitted (as a

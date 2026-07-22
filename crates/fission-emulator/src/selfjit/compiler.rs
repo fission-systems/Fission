@@ -52,8 +52,9 @@
 //! the exact same pure `jit_float_binop`/`jit_float_unop` host callbacks
 //! `crate::jit::compiler` (Cranelift) already uses, since this file has
 //! no native SIMD/FP emitter primitives of its own,
-//! `Load`, `Store` (computed-address memory access -- **≤8 bytes only**,
-//! see below), and `Branch`/`CBranch`, including both shapes: a
+//! `Load`, `Store` (computed-address memory access, both the narrow
+//! ≤8-byte path and the wide path up to `SCRATCH_BUF_BYTES`, see below),
+//! and `Branch`/`CBranch`, including both shapes: a
 //! cross-instruction jump to a real guest address (ends the compiled
 //! function, matching `crate::jit::compiler`'s exit block) *and* an
 //! intra-instruction relative branch (SLEIGH's own p-code-level loops,
@@ -113,35 +114,48 @@
 //! that same technique (shift the value into the top of the register,
 //! then back down arithmetically), used at every affected signed-op site.
 //!
-//! `Load`/`Store`'s own gap: only the ≤8-byte path is implemented (`jit_
-//! read_space`/`jit_write_space`, the same host callbacks `load_value`/
-//! `store_value` already use, just with a runtime-computed address
-//! register in the X2 argument slot instead of a compile-time-constant
-//! offset). A `>8`-byte `Load`/`Store` (e.g. an XMM/YMM-width value or a
-//! struct copy) returns `Err`, not a silently-truncated result --
-//! `crate::jit::compiler`'s wide path additionally allocates a Cranelift
-//! stack slot and calls `jit_read_bytes`/`jit_write_bytes`; this hand-
-//! rolled backend has no stack-slot allocator yet, so porting that shape
-//! safely is real, separate follow-up work rather than something to rush
-//! alongside the ≤8-byte path.
+//! `Load`/`Store`'s gap is now closed: `jit_read_space`/`jit_write_space`
+//! (the same host callbacks `load_value`/`store_value` already use,
+//! with a runtime-computed address in the `ARG2` argument slot instead
+//! of a compile-time-constant offset) still handle the narrow ≤8-byte
+//! path. A `>8`-byte value routes through `jit_read_bytes`/
+//! `jit_write_bytes` and the fixed per-TB scratch buffer (see
+//! `SCRATCH_BUF_BYTES`'s own doc) instead: a plain two-call byte copy
+//! through host memory (source -> scratch, scratch -> destination for
+//! `Load`; scratch -> destination for `Store`), never a register-sized
+//! value. Matches `crate::jit::compiler`'s own wide-path shape exactly
+//! (its Cranelift stack slot plays the same role this file's scratch
+//! buffer does) -- including one Cranelift parity quirk kept
+//! deliberately, not fixed here: a `>8`-byte *constant* `Store` value
+//! leaves the scratch buffer unpopulated (real p-code essentially never
+//! encodes a >8-byte compile-time constant for a Store's value operand,
+//! so this is unreachable in practice on both backends, not a gap unique
+//! to this one). A value wider than `SCRATCH_BUF_BYTES` (64 bytes) still
+//! fails loudly (`bail!`), never silently truncates.
 //!
 //! Not implemented at all (of ~70 `PcodeOpcode` variants): `CallOther`
-//! (Ghidra's generic HLE/pseudo-op mechanism, e.g. syscalls -- needs a
-//! real stack-slot allocator to marshal variadic arguments into a
-//! `*const u64` buffer for the host callback, which this backend doesn't
-//! have yet, tied to the same gap blocking `Load`/`Store`'s >8-byte
-//! path). `compile_translation_block` returns a descriptive
-//! `Err` for any of these rather than emitting wrong code -- matching this
-//! session's own repeated finding (the 8 missing `FLOAT_*` decompiler
-//! opcodes, the emulator's own TZCNT bug) that a loud failure beats
-//! silently-wrong output every time.
+//! (Ghidra's generic HLE/pseudo-op mechanism, e.g. syscalls). The
+//! scratch buffer above unblocks *reading through* a host-memory pointer
+//! (`jit_read_bytes`/`jit_write_bytes`'s own shape), but `CallOther`'s
+//! own host callback needs its variadic arguments *written* into a
+//! `*const u64` buffer directly from native code first (Cranelift does
+//! this with a plain `stack_store` per argument) -- this file has no
+//! "store a register to [scratch_addr + offset]" primitive yet (`str_imm`
+//! is aarch64-only and not part of the generic `Asm` shape other opcodes
+//! use), so `CallOther` needs that additional primitive on top of the
+//! scratch buffer, not just the buffer itself. `compile_translation_block`
+//! returns a descriptive `Err` for `CallOther` rather than emitting wrong
+//! code -- matching this session's own repeated finding (the 8 missing
+//! `FLOAT_*` decompiler opcodes, the emulator's own TZCNT bug) that a
+//! loud failure beats silently-wrong output every time.
 
 use anyhow::{bail, Result};
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::jit::backend::{GuestInsn, TbBackend};
 use crate::jit::callbacks::{
-    jit_float_binop, jit_float_unop, jit_int_flag, jit_read_space, jit_write_space,
+    jit_float_binop, jit_float_unop, jit_int_flag, jit_read_bytes, jit_read_space,
+    jit_write_bytes, jit_write_space,
 };
 use crate::selfjit::codebuf::CodeBuffer;
 use crate::selfjit::emit::{
@@ -199,6 +213,21 @@ mod scratch_regs {
     pub const R10: u32 = 10;
     pub const R11: u32 = 11;
 }
+
+/// A fixed, generously-sized scratch buffer reserved on the stack for
+/// every compiled TB (see `frame` module below), used by the >8-byte
+/// `Load`/`Store` path (`jit_read_bytes`/`jit_write_bytes` need a real,
+/// addressable host buffer to copy through -- there's no register wide
+/// enough). Fixed and unconditional rather than sized per-TB from a
+/// first pass over its ops: this backend's whole design already trades
+/// "correct and simple" for "fast" everywhere else (every operand
+/// round-trips through a host callback), so a small always-reserved pool
+/// fits that same bar -- a real per-TB allocator sized to the actual
+/// maximum need would be a legitimate follow-up, not attempted here. 64
+/// bytes covers every real p-code varnode width this emulator's own
+/// architectures produce (double-XMM/YMM-range values, small struct
+/// copies); a wider one fails loudly (`bail!`), never silently truncates.
+pub(crate) const SCRATCH_BUF_BYTES: u32 = 64;
 
 /// `code_arena` keeps every compiled TB's [`ExecutableCode`] mapping alive
 /// for as long as the compiler itself lives -- matching Cranelift's own
@@ -361,15 +390,22 @@ fn emit_insn_count(asm: &mut Asm) {
 /// generic body in favor of `#[cfg(target_arch = ...)]`-gated ones.
 #[cfg(target_arch = "aarch64")]
 mod frame {
-    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET};
+    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET, SCRATCH_BUF_BYTES};
     use crate::selfjit::emit::aarch64;
 
     /// Frame layout for the 5 callee-saved registers this file repurposes
     /// (X19=EMU_PTR, X20=A_VAL, X21=B_VAL, X22=RESULT) plus X30 (link
     /// register, clobbered by every `blr`) -- 40 bytes rounded up to 48 to
     /// keep SP 16-byte aligned throughout (required at every `blr` per
-    /// AAPCS64, not just at entry/exit).
-    const FRAME_BYTES: u32 = 48;
+    /// AAPCS64, not just at entry/exit) -- plus `SCRATCH_BUF_BYTES` more
+    /// for the >8-byte `Load`/`Store` scratch buffer (see that constant's
+    /// own doc), placed immediately after the named-register save area.
+    /// 48 and `SCRATCH_BUF_BYTES` (64) are both already 16-aligned, so
+    /// their sum needs no extra padding.
+    const FRAME_BYTES: u32 = 48 + SCRATCH_BUF_BYTES;
+    /// Where the scratch buffer starts, in bytes from `SP` (as adjusted
+    /// by this frame's own prologue) -- see [`super::scratch_buf_addr`].
+    pub(super) const SCRATCH_BUF_SP_OFFSET: u32 = 48;
 
     /// Save the callee-saved registers this file uses as fixed value slots
     /// (see [`FRAME_BYTES`]'s doc), then move the incoming arg (`ARG0`,
@@ -403,22 +439,33 @@ mod frame {
 
 #[cfg(target_arch = "x86_64")]
 mod frame {
-    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET};
+    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET, SCRATCH_BUF_BYTES};
 
     /// PUSH-ing 4 callee-saved registers (8 bytes each = 32, a multiple of
     /// 16) leaves RSP's alignment exactly where it started -- this
     /// function is entered with `RSP % 16 == 8` (SysV64: the caller's
     /// `call` pushed an 8-byte return address onto a 16-aligned RSP), so
     /// after the 4 pushes RSP is still `% 16 == 8`, not the `% 16 == 0`
-    /// required immediately before *this* function's own `call`s. One
-    /// extra 8-byte pad (`sub rsp, 8`) fixes that; the epilogue undoes it
-    /// (`add rsp, 8`) before popping back in reverse order.
+    /// required immediately before *this* function's own `call`s. An
+    /// extra `8 + SCRATCH_BUF_BYTES` pad (`sub rsp, ...`) both fixes that
+    /// alignment (`SCRATCH_BUF_BYTES` is itself a multiple of 16, so it
+    /// doesn't change the alignment math the original flat 8-byte pad
+    /// already established) and reserves the >8-byte `Load`/`Store`
+    /// scratch buffer (see that constant's own doc) right at the
+    /// resulting `RSP`; the epilogue undoes the same total (`add rsp,
+    /// ...`) before popping back in reverse order.
+    const EXTRA_SUB_BYTES: u8 = 8 + SCRATCH_BUF_BYTES as u8;
+    /// Where the scratch buffer starts, in bytes from `SP` -- right at
+    /// the top, unlike aarch64's offset-48 (see
+    /// [`super::scratch_buf_addr`]).
+    pub(super) const SCRATCH_BUF_SP_OFFSET: u32 = 0;
+
     pub(super) fn prologue(asm: &mut Asm) {
         asm.push_reg(EMU_PTR);
         asm.push_reg(A_VAL);
         asm.push_reg(B_VAL);
         asm.push_reg(RESULT);
-        asm.sub_rsp_imm8(8);
+        asm.sub_rsp_imm8(EXTRA_SUB_BYTES);
         asm.mov_reg(EMU_PTR, super::ARG0);
     }
 
@@ -426,7 +473,7 @@ mod frame {
         if result_reg != RET {
             asm.mov_reg(RET, result_reg);
         }
-        asm.add_rsp_imm8(8);
+        asm.add_rsp_imm8(EXTRA_SUB_BYTES);
         asm.pop_reg(RESULT);
         asm.pop_reg(B_VAL);
         asm.pop_reg(A_VAL);
@@ -436,6 +483,16 @@ mod frame {
 }
 
 use frame::{epilogue_return, prologue};
+
+/// Computes the address of the fixed per-TB scratch buffer
+/// (`SCRATCH_BUF_BYTES` bytes, see that constant's own doc) into `dst`.
+/// One instruction on both arches (`ADD dst, SP, #offset`), using
+/// `add_imm` specifically -- not `mov_reg`, which on AArch64 would read
+/// register 31 as the zero register (XZR) instead of SP (see
+/// `emit::aarch64::SP`'s own doc on that context-dependent quirk).
+fn scratch_buf_addr(asm: &mut Asm, dst: u32) {
+    asm.add_imm(dst, crate::selfjit::emit::SP, frame::SCRATCH_BUF_SP_OFFSET);
+}
 
 /// Emit a call to `jit_read_space(emu, space_id, offset, size) -> u64`,
 /// leaving the result in `dst`. `vn.is_constant` short-circuits to a plain
@@ -541,14 +598,48 @@ fn compile_op(
                 "Load needs a space-id input and an address input"
             );
             let out = require_output(op)?;
-            if out.size > 8 {
-                bail!(
-                    "selfjit: Load of a {}-byte (>8) value is not supported yet \
-                     -- see module docs' wide-path note",
-                    out.size
-                );
-            }
             let space_id = space_const(&op.inputs[0]);
+            if out.size > 8 {
+                anyhow::ensure!(
+                    out.size <= SCRATCH_BUF_BYTES,
+                    "selfjit: Load of a {}-byte value exceeds the {}-byte \
+                     scratch buffer -- see SCRATCH_BUF_BYTES's own doc",
+                    out.size,
+                    SCRATCH_BUF_BYTES
+                );
+                // Resolve the address first (may itself `blr` into
+                // `jit_read_space`), then the scratch buffer's own
+                // address, both into callee-saved slots so they survive
+                // the two host calls below (same reasoning as the narrow
+                // path's own `A_VAL` comment, just with a second
+                // surviving value this time).
+                load_value(asm, &op.inputs[1], A_VAL);
+                scratch_buf_addr(asm, B_VAL);
+                // jit_read_bytes(emu, space_id, addr, scratch_ptr, size):
+                // copies the source memory's raw bytes into the scratch
+                // buffer.
+                asm.mov_reg(ARG0, EMU_PTR);
+                asm.mov_imm64(ARG1, space_id);
+                asm.mov_reg(ARG2, A_VAL);
+                asm.mov_reg(ARG3, B_VAL);
+                asm.mov_imm64(ARG4, out.size as u64);
+                asm.mov_imm64(CALLEE_ADDR, jit_read_bytes as *const () as usize as u64);
+                asm.blr(CALLEE_ADDR);
+                // jit_write_bytes(emu, out.space_id, out.offset,
+                // scratch_ptr, size): copies those same bytes from the
+                // scratch buffer into the destination varnode's real
+                // location -- a plain byte copy through host memory, no
+                // register-sized value ever materializes for a >8-byte
+                // transfer.
+                asm.mov_reg(ARG0, EMU_PTR);
+                asm.mov_imm64(ARG1, out.space_id);
+                asm.mov_imm64(ARG2, out.offset);
+                asm.mov_reg(ARG3, B_VAL);
+                asm.mov_imm64(ARG4, out.size as u64);
+                asm.mov_imm64(CALLEE_ADDR, jit_write_bytes as *const () as usize as u64);
+                asm.blr(CALLEE_ADDR);
+                return Ok(());
+            }
             // Resolve the address into a callee-saved slot *before* the
             // X0-X3 call-argument setup below -- `load_value` may itself
             // `blr` into `jit_read_space` (if `inputs[1]` isn't a compile-
@@ -575,14 +666,52 @@ fn compile_op(
                 return Ok(());
             }
             let val_vn = &op.inputs[2];
-            if val_vn.size > 8 {
-                bail!(
-                    "selfjit: Store of a {}-byte (>8) value is not supported yet \
-                     -- see module docs' wide-path note",
-                    val_vn.size
-                );
-            }
             let space_id = space_const(&op.inputs[0]);
+            if val_vn.size > 8 {
+                anyhow::ensure!(
+                    val_vn.size <= SCRATCH_BUF_BYTES,
+                    "selfjit: Store of a {}-byte value exceeds the {}-byte \
+                     scratch buffer -- see SCRATCH_BUF_BYTES's own doc",
+                    val_vn.size,
+                    SCRATCH_BUF_BYTES
+                );
+                // Resolve the destination address, then the scratch
+                // buffer's own address, both into callee-saved slots so
+                // they survive the host calls below.
+                load_value(asm, &op.inputs[1], A_VAL);
+                scratch_buf_addr(asm, B_VAL);
+                if !val_vn.is_constant {
+                    // jit_read_bytes(emu, val_vn.space_id, val_vn.offset,
+                    // scratch_ptr, size): copies the source value's real
+                    // bytes into the scratch buffer.
+                    asm.mov_reg(ARG0, EMU_PTR);
+                    asm.mov_imm64(ARG1, val_vn.space_id);
+                    asm.mov_imm64(ARG2, val_vn.offset);
+                    asm.mov_reg(ARG3, B_VAL);
+                    asm.mov_imm64(ARG4, val_vn.size as u64);
+                    asm.mov_imm64(CALLEE_ADDR, jit_read_bytes as *const () as usize as u64);
+                    asm.blr(CALLEE_ADDR);
+                }
+                // A >8-byte *constant* source value (`val_vn.is_constant`)
+                // is not populated into the scratch buffer here -- matches
+                // `crate::jit::compiler`'s own arm exactly (its Cranelift
+                // stack slot is left unwritten in that case too); real
+                // p-code essentially never encodes a >8-byte compile-time
+                // constant for a Store's value operand, so this is
+                // parity, not a gap unique to this backend.
+                //
+                // jit_write_bytes(emu, space_id, addr, scratch_ptr, size):
+                // copies the scratch buffer's bytes into the destination
+                // memory address.
+                asm.mov_reg(ARG0, EMU_PTR);
+                asm.mov_imm64(ARG1, space_id);
+                asm.mov_reg(ARG2, A_VAL);
+                asm.mov_reg(ARG3, B_VAL);
+                asm.mov_imm64(ARG4, val_vn.size as u64);
+                asm.mov_imm64(CALLEE_ADDR, jit_write_bytes as *const () as usize as u64);
+                asm.blr(CALLEE_ADDR);
+                return Ok(());
+            }
             // Resolve address, then value, both into callee-saved slots
             // (same reasoning as `Load` above) so they survive each
             // other's potential nested `blr` and the write call's own
@@ -1921,16 +2050,46 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 8), 0xFFFFFFFF, "4-byte round trip, zero-extended");
     }
 
-    /// A `>8`-byte `Load`/`Store` isn't implemented (no stack-slot
-    /// allocator in this hand-rolled backend yet -- see module docs) --
-    /// must fail loudly at compile time, never silently truncate/corrupt.
+    /// `Load`/`Store` beyond the 8-byte narrow path -- copies the raw
+    /// bytes through the fixed per-TB scratch buffer
+    /// (`jit_read_bytes`/`jit_write_bytes`), not a register-sized value.
+    /// Round trip: write a 16-byte source value (two 8-byte halves, kept
+    /// distinguishable -- one arbitrary pattern, one all-ones) to register
+    /// space, `Store` it (wide) to a computed address, `Load` it back
+    /// (wide) into a *different* register range, and check both halves
+    /// landed correctly -- proves the scratch buffer round-trips real
+    /// bytes end to end, not just "it compiled".
     #[test]
-    fn wide_load_and_store_fail_loudly_not_silently() {
+    fn wide_load_and_store_round_trip_16_bytes() {
+        let ops = vec![
+            copy_const(300, 0x1122334455667788u64 as i64), // source low 8 bytes
+            copy_const(308, -1i64),                         // source high 8 bytes (all-ones)
+            store_op(4, imm(400, 8), reg(300, 16)), // wide Store: 16 bytes, reg space offset 300 -> address 400
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::Load,
+                address: 0x1000,
+                output: Some(reg(500, 16)), // wide Load: 16 bytes, address 400 -> reg space offset 500
+                inputs: vec![imm(4, 8), imm(400, 8)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 500), 0x1122334455667788, "wide round trip: low 8 bytes");
+        assert_eq!(read_reg(&mut emu, 508), u64::MAX, "wide round trip: high 8 bytes");
+    }
+
+    /// A value wider than the fixed scratch buffer (`SCRATCH_BUF_BYTES`,
+    /// 64 bytes) must still fail loudly at compile time, never silently
+    /// truncate/corrupt.
+    #[test]
+    fn load_and_store_past_the_scratch_buffer_fail_loudly_not_silently() {
+        let too_wide = SCRATCH_BUF_BYTES + 8;
         let load_ops = vec![PcodeOp {
             seq_num: 0,
             opcode: PcodeOpcode::Load,
             address: 0x1000,
-            output: Some(reg(0, 16)),
+            output: Some(reg(0, too_wide)),
             inputs: vec![imm(4, 8), imm(200, 8)],
             asm_mnemonic: None,
         }];
@@ -1938,23 +2097,23 @@ mod tests {
         let mut compiler = SelfJitCompiler::new().expect("selfjit backend available");
         let err = compiler
             .compile_translation_block(&insns, 4)
-            .expect_err("wide Load must fail loudly, not silently truncate");
-        assert!(err.to_string().contains("not supported"), "unexpected error: {err}");
+            .expect_err("Load past the scratch buffer must fail loudly, not silently truncate");
+        assert!(err.to_string().contains("scratch buffer"), "unexpected error: {err}");
 
         let store_ops = vec![PcodeOp {
             seq_num: 0,
             opcode: PcodeOpcode::Store,
             address: 0x1000,
             output: None,
-            inputs: vec![imm(4, 8), imm(200, 8), reg(0, 16)],
+            inputs: vec![imm(4, 8), imm(200, 8), reg(0, too_wide)],
             asm_mnemonic: None,
         }];
         let insns2 = [GuestInsn { pc: 0x1000, len: 4, ops: store_ops }];
         let mut compiler2 = SelfJitCompiler::new().expect("selfjit backend available");
         let err2 = compiler2
             .compile_translation_block(&insns2, 4)
-            .expect_err("wide Store must fail loudly, not silently truncate");
-        assert!(err2.to_string().contains("not supported"), "unexpected error: {err2}");
+            .expect_err("Store past the scratch buffer must fail loudly, not silently truncate");
+        assert!(err2.to_string().contains("scratch buffer"), "unexpected error: {err2}");
     }
 
     /// `IntCarry`/`IntSCarry`/`IntSBorrow` -- checked against known

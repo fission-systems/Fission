@@ -51,6 +51,15 @@ pub const EMU_PTR_SLOT: u32 = X19;
 pub const A_VAL_SLOT: u32 = X20;
 pub const B_VAL_SLOT: u32 = X21;
 pub const RESULT_SLOT: u32 = X22;
+/// Stack pointer, for `add_imm`/`sub_imm`-based scratch-buffer address
+/// computation (`compiler.rs`'s `scratch_buf_addr`). Register 31 is
+/// context-dependent on AArch64: `ADD`/`SUB` *immediate* forms (what
+/// `add_imm`/`sub_imm` emit) treat it as SP, but most other encodings
+/// (e.g. `mov_reg`'s `ORR`-based alias) treat it as the zero register
+/// (XZR) instead -- this constant is only ever meant to be passed through
+/// `add_imm`/`sub_imm`, never `mov_reg`, or it would silently compute
+/// from 0 instead of SP.
+pub const SP: u32 = 31;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Cond {

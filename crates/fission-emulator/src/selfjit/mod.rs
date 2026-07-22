@@ -62,9 +62,12 @@
 //! also clean (see `selfjit::differential`'s own doc for the honest
 //! caveat: that sweep is shallow -- CRT startup only, not each family's
 //! real logic -- reaching deeper needs per-binary symbol resolution, not
-//! attempted here). The remaining real gap is `CallOther` (item 1 below,
-//! needing a stack-slot allocator) and the >8-byte `Load`/`Store` path
-//! (the same allocator gap).
+//! attempted here). The >8-byte `Load`/`Store` path is done now too (a
+//! fixed per-TB scratch buffer, `compiler.rs`'s own `SCRATCH_BUF_BYTES`
+//! doc has the full story). The remaining real gap is `CallOther` (item 1
+//! below) -- it needs *more* than the scratch buffer alone: writing its
+//! variadic arguments into that buffer directly from native code, a
+//! primitive this file doesn't have yet (see `compiler.rs`'s own doc).
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -121,18 +124,26 @@
 //!    `Call` alone took the ELF-entry-point walk from `matched=8,
 //!    skipped=2` to `matched=10, skipped=0`. **Also done**: `SegmentOp`
 //!    (simplified to base + offset, matching `crate::jit::compiler`'s own
-//!    arm). `CallOther` is still not implemented -- it specifically needs
-//!    a real stack-slot allocator (its host callback takes a `*const u64`
-//!    argument buffer), the same gap blocking `Load`/`Store`'s >8-byte
-//!    path below.
+//!    arm).
 //!    **Done**, ahead of this list's original ordering too: the narrow-
 //!    negative-operand sign-extension bug and the shift-amount-clamping
 //!    bug (both were already-documented, already-diagnosed gaps -- see
 //!    `compiler.rs`'s own doc for the fix and for why the *other*
 //!    documented gap, arithmetic truncation, turned out not to be a real
-//!    bug on investigation). Still open: port the >8-byte `Load`/`Store`
-//!    path (needs a stack-slot allocator this backend doesn't have yet --
-//!    see `compiler.rs`'s `Load`/`Store` doc).
+//!    bug on investigation). **Also done**: the >8-byte `Load`/`Store`
+//!    path, via a fixed per-TB scratch buffer (`SCRATCH_BUF_BYTES`, 64
+//!    bytes, reserved in the frame's own prologue on both host backends;
+//!    `compiler.rs`'s own doc has the full stack-layout story). `Load`
+//!    reads the source into it (`jit_read_bytes`) then writes it out to
+//!    the destination (`jit_write_bytes`); `Store` does the same in
+//!    reverse -- a plain byte copy through host memory, never a
+//!    register-sized value, matching `crate::jit::compiler`'s own
+//!    Cranelift-stack-slot shape exactly. Still open: `CallOther` needs
+//!    *more* than this buffer alone -- writing its variadic arguments
+//!    into it directly from native code (Cranelift does this with a
+//!    plain `stack_store` per argument) needs a "store a register to
+//!    [scratch_addr + offset]" primitive this file doesn't have yet, on
+//!    top of the buffer itself.
 //! 2. **Done.** Intra-instruction relative BRANCH/CBRANCH (the TZCNT-style
 //!    loop construct) is supported -- `compiler.rs` now flattens every
 //!    instruction's ops into one TB-wide list and reuses `crate::jit::
