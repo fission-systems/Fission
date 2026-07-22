@@ -4360,3 +4360,71 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     7 pre-existing unrelated failures throughout), full workspace build
     clean. `selfjit` is still not wired in anywhere live, so blast radius
     to existing behavior is structurally zero.
+- **`selfjit`: `IntCarry`/`IntSCarry`/`IntSBorrow`/`PopCount`, and a real,
+  precisely-located lead in *production* Cranelift found while validating
+  them, 2026-07-22.** User's explicit "다음단계 진행합니다" (proceed with the
+  next step) after the differential harness re-prioritized these four
+  opcodes above the scaffold's original roadmap ordering (see previous
+  entry).
+  - **`IntCarry`/`IntSCarry`/`IntSBorrow`**: route through `jit_int_flag
+    (kind, size, a, b) -> u64` -- the exact same pure host callout
+    `crate::jit::compiler`'s own arm already uses (no `emu_ptr`, already
+    size-aware/sign-correct internally via `int_flag_op`'s own `sign_
+    extend_n`), so unlike `IntSLess`/`IntSDiv`/etc there's no narrow-
+    negative-operand trap to fix here -- purely mechanical call-site wiring
+    (X0=kind, X1=size, X2=a, X3=b per AAPCS64, matching the existing
+    `load_value`/`store_value` call-setup pattern).
+  - **`PopCount`**: no host callout in either backend -- ported Cranelift's
+    own SWAR (SIMD-within-a-register) bit-twiddling algorithm instruction-
+    for-instruction into raw AArch64 ops (`and_reg`/`lsr_reg`/`add_reg`/
+    `sub_reg`/`mul_reg`, all already available in `emit/aarch64.rs` -- no
+    new emitter primitives needed) rather than re-deriving it, since
+    Cranelift's version is already proven correct. Added two new caller-
+    saved scratch constants (`TMP1`/`TMP2` = X10/X11) for the algorithm's
+    intermediate values -- safe as caller-saved specifically because this
+    algorithm makes no nested `blr` between reading and writing them
+    (unlike `A_VAL`/`B_VAL`, callee-saved because they *do* need to survive
+    a nested call -- see this file's own pre-existing bug-postmortem
+    comment on that distinction).
+  - Both checked against known-correct cases (not just "it ran"): `IntCarry
+    /IntSCarry/IntSBorrow` against hand-computed carry/signed-overflow
+    cases (`u64::MAX+1` carries, `i64::MAX+1` signed-overflows, `i64::MIN-1`
+    sborrows); `PopCount` against `u64::count_ones` for boundary values.
+  - **Re-ran the differential harness with the new opcodes wired into
+    `selfjit_supports`**: `checksum`'s real `Load`-in-a-loop (0 matchable
+    TBs before this phase, entirely blocked on these four opcodes per the
+    previous entry's finding) now replays cleanly -- `matched=2, skipped=1
+    (only Return remains unsupported), diverged=0`.
+  - **A real, precisely-located, unconfirmed lead in *production*
+    Cranelift, found by this exact validation run** (not a `selfjit` bug):
+    re-running the ELF-entry-point differential test with the new opcodes
+    exposed a genuine divergence at a *later* TB (`0x10067e4`, `testdata/
+    x64_static_printf_malloc.elf`) that the earlier, narrower opcode
+    coverage never reached before. A plain register-to-register `Copy`
+    (`out=offset:128,size:8 in=offset:56,size:8`) -- `SelfJitCompiler`'s
+    result matches the copy's real 8-byte source value exactly; Cranelift's
+    does not (2 of 8 bytes come out `0x00`). Investigated by reading
+    `crate::jit::compiler`'s actual register-caching machinery end to end
+    (`ensure_var!`'s `host_reg_file` fast-path load/store, the `dirty`-
+    entries dedup, `jit_reg_bulk_flush`'s bulk write-back, `MachineState::
+    read_space`/`write_space`'s `reg_cache` synchronization) rather than
+    guessing -- everything inspected looks individually correct in
+    isolation, so the exact mechanism remains unfound. Confirmed the test
+    harness's own call pattern (`func(&mut emu as *mut _)`) exactly matches
+    `Emulator::run_instruction`'s real invocation of a compiled TB, ruling
+    out an obvious "harness calling convention mismatch" explanation.
+    **Not fixed this session** -- flagged precisely rather than patched
+    blind: `selfjit::differential::tests::known_issue_cranelift_register_
+    copy_divergence_at_0x10067e4` (`#[ignore]`d, reproducible via `cargo
+    test -p fission-emulator -- --ignored`), with the full investigation
+    trail in that test's module doc and this entry. The main entry-point
+    differential test is capped at 7 TBs (just short of the divergent one)
+    so this doesn't block CI on an issue outside `selfjit`'s own scope --
+    a scope decision, not a cover-up: the finding is documented, not
+    hidden, and the isolated repro test keeps it runnable on demand.
+  - Validated: 15/16 `selfjit::*` tests passing + 1 correctly `#[ignore]`d
+    (4 new: 2 `IntCarry`/`IntSCarry`/`IntSBorrow`+`PopCount`, 1 known-issue
+    repro, plus the checksum differential test's assertions strengthened),
+    `fission-emulator` suite 88/95 (same 7 pre-existing unrelated failures,
+    1 correctly skipped), full workspace nextest 2171/2178 (zero new
+    regressions), full workspace build clean.

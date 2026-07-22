@@ -93,7 +93,7 @@ use anyhow::{bail, Result};
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::jit::backend::{GuestInsn, TbBackend};
-use crate::jit::callbacks::{jit_read_space, jit_write_space};
+use crate::jit::callbacks::{jit_int_flag, jit_read_space, jit_write_space};
 use crate::selfjit::codebuf::CodeBuffer;
 use crate::selfjit::emit::{aarch64::Cond, Asm};
 
@@ -115,6 +115,13 @@ const A_VAL: u32 = crate::selfjit::emit::aarch64::X20;
 const B_VAL: u32 = crate::selfjit::emit::aarch64::X21;
 const RESULT: u32 = crate::selfjit::emit::aarch64::X22;
 const CALLEE_ADDR: u32 = aarch64_regs::X9; // caller-saved is fine: never needs to survive a call
+// Also caller-saved-is-fine, same reasoning as `CALLEE_ADDR` -- only used by
+// `PopCount`'s multi-step bit-twiddling algorithm, which makes no nested
+// `blr` between reading and writing them (unlike `A_VAL`/`B_VAL`, which
+// *do* need to survive a call and are callee-saved specifically because of
+// the bug documented above).
+const TMP1: u32 = aarch64_regs::X10;
+const TMP2: u32 = aarch64_regs::X11;
 const EMU_PTR: u32 = crate::selfjit::emit::aarch64::X19;
 /// AArch64's zero register, used where a data-processing instruction's `Rn`
 /// field needs to read as 0 (e.g. `Int2Comp`'s `0 - x`) rather than a real
@@ -123,6 +130,11 @@ const XZR: u32 = 31;
 
 mod aarch64_regs {
     pub const X9: u32 = 9;
+    // Caller-saved scratch, same "fine since nothing survives a call across
+    // them" reasoning as `X9`/`CALLEE_ADDR` -- used by `PopCount`'s
+    // multi-step bit-twiddling algorithm, which makes no nested `blr`.
+    pub const X10: u32 = 10;
+    pub const X11: u32 = 11;
 }
 
 /// `code_arena` keeps every compiled TB's [`ExecutableCode`] mapping alive
@@ -443,6 +455,71 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             load_value(asm, &op.inputs[0], A_VAL);
             asm.mov_imm64(B_VAL, u64::MAX);
             asm.eor_reg(RESULT, A_VAL, B_VAL);
+            store_value(asm, out, RESULT);
+        }
+        PcodeOpcode::IntCarry | PcodeOpcode::IntSCarry | PcodeOpcode::IntSBorrow => {
+            // `jit_int_flag(kind, size, a, b) -> u64` is the exact host
+            // callout `crate::jit::compiler` (Cranelift) already uses for
+            // these three -- a pure function (no `emu_ptr`, no state), and
+            // already size-aware/sign-correct internally (`int_flag_op`
+            // does its own `sign_extend_n` from the explicitly-passed
+            // `size`), so there's no narrow-negative-operand trap here the
+            // way there was for `IntSLess`/`IntSDiv`/etc.
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
+            load_value(asm, &op.inputs[0], A_VAL);
+            load_value(asm, &op.inputs[1], B_VAL);
+            let kind: u64 = match op.opcode {
+                PcodeOpcode::IntCarry => 0,
+                PcodeOpcode::IntSCarry => 1,
+                _ => 2,
+            };
+            let size = op.inputs[0].size.max(1) as u64;
+            // AAPCS64: X0=kind, X1=size, X2=a, X3=b, result in X0.
+            asm.mov_reg(aarch64::X2, A_VAL);
+            asm.mov_reg(aarch64::X3, B_VAL);
+            asm.mov_imm64(aarch64_regs_x0(), kind);
+            asm.mov_imm64(aarch64::X1, size);
+            asm.mov_imm64(CALLEE_ADDR, jit_int_flag as *const () as usize as u64);
+            asm.blr(CALLEE_ADDR);
+            store_value(asm, out, aarch64_regs_x0());
+        }
+        // Population count via the classic SWAR bit-twiddling algorithm --
+        // the exact same one `crate::jit::compiler`'s `PopCount` arm uses
+        // (Cranelift doesn't call a host function for this either), ported
+        // instruction-for-instruction rather than re-derived, since it's
+        // already proven correct there. Operates on the full 64-bit
+        // zero-extended value regardless of the varnode's declared width:
+        // `load_value` already zero-extends to exactly that width, so the
+        // untouched high bits are 0 and contribute nothing to the count.
+        PcodeOpcode::PopCount => {
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() == 1, "PopCount needs 1 input");
+            load_value(asm, &op.inputs[0], A_VAL);
+            // s1 = x0 >> 1; t1 = s1 & 0x5555...; x1 = x0 - t1
+            asm.mov_imm64(TMP1, 1);
+            asm.lsr_reg(RESULT, A_VAL, TMP1);
+            asm.mov_imm64(TMP1, 0x5555_5555_5555_5555);
+            asm.and_reg(RESULT, RESULT, TMP1);
+            asm.sub_reg(A_VAL, A_VAL, RESULT);
+            // s2 = x1 >> 2; t2 = s2 & 0x3333...; b2 = x1 & 0x3333...; x2 = b2 + t2
+            asm.mov_imm64(TMP1, 2);
+            asm.lsr_reg(RESULT, A_VAL, TMP1);
+            asm.mov_imm64(TMP1, 0x3333_3333_3333_3333);
+            asm.and_reg(RESULT, RESULT, TMP1);
+            asm.and_reg(TMP2, A_VAL, TMP1);
+            asm.add_reg(A_VAL, TMP2, RESULT);
+            // s4 = x2 >> 4; a4 = x2 + s4; x3 = a4 & 0x0f0f...
+            asm.mov_imm64(TMP1, 4);
+            asm.lsr_reg(RESULT, A_VAL, TMP1);
+            asm.add_reg(A_VAL, A_VAL, RESULT);
+            asm.mov_imm64(TMP1, 0x0f0f_0f0f_0f0f_0f0f);
+            asm.and_reg(A_VAL, A_VAL, TMP1);
+            // x4 = x3 * 0x0101...; result = x4 >> 56
+            asm.mov_imm64(TMP1, 0x0101_0101_0101_0101);
+            asm.mul_reg(A_VAL, A_VAL, TMP1);
+            asm.mov_imm64(TMP1, 56);
+            asm.lsr_reg(RESULT, A_VAL, TMP1);
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::BoolNegate => {
@@ -985,6 +1062,63 @@ mod tests {
             .compile_translation_block(&insns2, 4)
             .expect_err("wide Store must fail loudly, not silently truncate");
         assert!(err2.to_string().contains("not supported"), "unexpected error: {err2}");
+    }
+
+    /// `IntCarry`/`IntSCarry`/`IntSBorrow` -- checked against known
+    /// carry/overflow cases (not just "it ran"), the same discipline
+    /// `mult_div_rem_match_host_arithmetic` already established for
+    /// division/remainder.
+    #[test]
+    fn int_carry_scarry_sborrow_match_known_cases() {
+        let ops = vec![
+            copy_const(0, u64::MAX as i64),  // r0 = u64::MAX
+            copy_const(8, 1),                // r1 = 1
+            copy_const(16, i64::MAX),        // r2 = i64::MAX
+            copy_const(24, i64::MIN),        // r3 = i64::MIN
+            copy_const(32, 5),               // r4 = 5
+            copy_const(40, 3),                // r5 = 3
+            binop(PcodeOpcode::IntCarry, 48, 0, 8),   // u64::MAX + 1 -> carries
+            binop(PcodeOpcode::IntCarry, 56, 8, 8),   // 1 + 1 -> no carry
+            binop(PcodeOpcode::IntSCarry, 64, 16, 8), // i64::MAX + 1 -> signed overflow
+            binop(PcodeOpcode::IntSCarry, 72, 8, 8),  // 1 + 1 -> no overflow
+            binop(PcodeOpcode::IntSBorrow, 80, 24, 8),  // i64::MIN - 1 -> signed overflow
+            binop(PcodeOpcode::IntSBorrow, 88, 32, 40), // 5 - 3 -> no overflow
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 48), 1, "u64::MAX + 1 carries");
+        assert_eq!(read_reg(&mut emu, 56), 0, "1 + 1 does not carry");
+        assert_eq!(read_reg(&mut emu, 64), 1, "i64::MAX + 1 signed-overflows");
+        assert_eq!(read_reg(&mut emu, 72), 0, "1 + 1 does not signed-overflow");
+        assert_eq!(read_reg(&mut emu, 80), 1, "i64::MIN - 1 signed-overflows (sborrow)");
+        assert_eq!(read_reg(&mut emu, 88), 0, "5 - 3 does not sborrow");
+    }
+
+    /// `PopCount` -- the SWAR bit-twiddling algorithm ported from
+    /// `crate::jit::compiler`'s own arm, checked against `u64::count_ones`
+    /// for boundary values (0, all-ones, a single bit, a mixed pattern).
+    #[test]
+    fn popcount_matches_host_count_ones() {
+        let ops = vec![
+            copy_const(0, 0),
+            copy_const(8, u64::MAX as i64),
+            copy_const(16, 1),
+            copy_const(24, 0xFF),
+            copy_const(32, 0x0F0F_0F0F_0F0F_0F0Fu64 as i64),
+            unop(PcodeOpcode::PopCount, 40, 0),
+            unop(PcodeOpcode::PopCount, 48, 8),
+            unop(PcodeOpcode::PopCount, 56, 16),
+            unop(PcodeOpcode::PopCount, 64, 24),
+            unop(PcodeOpcode::PopCount, 72, 32),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 40), 0u64.count_ones() as u64);
+        assert_eq!(read_reg(&mut emu, 48), u64::MAX.count_ones() as u64);
+        assert_eq!(read_reg(&mut emu, 56), 1u64.count_ones() as u64);
+        assert_eq!(read_reg(&mut emu, 64), 0xFFu64.count_ones() as u64);
+        assert_eq!(
+            read_reg(&mut emu, 72),
+            0x0F0F_0F0F_0F0F_0F0Fu64.count_ones() as u64
+        );
     }
 }
 

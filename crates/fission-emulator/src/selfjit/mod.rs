@@ -65,19 +65,19 @@
 //!   register allocator or an instruction scheduler.
 //!
 //! Concretely, the remaining work (roughly the recommended order):
-//! 1. Add the ~43 missing `PcodeOpcode` variants to `compiler.rs`'s match
-//!    (integer arithmetic/shifts/comparisons, zero/sign extension, and
-//!    `Load`/`Store` -- narrow, ≤8-byte path only -- are now covered).
-//!    **`IntCarry`/`IntSCarry`/`IntSBorrow`/`PopCount` are next, and are
-//!    higher-priority than this list originally had them**: confirmed via
-//!    `selfjit::differential` (item 4, done early -- see below) that
-//!    x86-64 SLEIGH's own lowering of `CMP` unconditionally emits all
-//!    four as flag-register side effects alongside *any* comparison, even
-//!    when the actual branch only reads one flag -- so they're closer to
-//!    a hard prerequisite for covering any real x86 comparison/branch
-//!    sequence than an independent, deferrable opcode group.
-//!    `Piece`/`SubPiece`/`PtrAdd`/`PtrSub`/`LzCount` remain the next tier
-//!    after that; `Float*`/`Call*`/`MultiEqual` are larger, later.
+//! 1. Add the ~39 missing `PcodeOpcode` variants to `compiler.rs`'s match
+//!    (integer arithmetic/shifts/comparisons, zero/sign extension,
+//!    `Load`/`Store` -- narrow, ≤8-byte path only -- and now `IntCarry`/
+//!    `IntSCarry`/`IntSBorrow`/`PopCount` are covered; the latter four were
+//!    re-prioritized *ahead* of this list's original ordering after
+//!    `selfjit::differential` (item 4, done early -- see below) confirmed
+//!    x86-64 SLEIGH's own lowering of `CMP` unconditionally emits all four
+//!    as flag-register side effects alongside *any* comparison, even when
+//!    the actual branch only reads one flag -- validated against real
+//!    corpus code, not just synthetic unit tests: `checksum`'s real
+//!    `Load`-in-a-loop, previously 0 matchable TBs, now replays cleanly).
+//!    `Piece`/`SubPiece`/`PtrAdd`/`PtrSub`/`LzCount` are the next tier;
+//!    `Float*`/`Call*`/`MultiEqual` are larger, later.
 //!    Also close the two documented-but-real correctness gaps in what's
 //!    already implemented: results aren't truncated to the varnode's
 //!    declared bit width, and shift amounts aren't clamped to that width
@@ -96,13 +96,31 @@
 //!    `Emulator::collect_translation_block`) and replays each one both
 //!    backends can run through `JitCompiler` (trusted pathfinder for real,
 //!    data-dependent control flow) and `SelfJitCompiler` independently,
-//!    diffing final register state -- zero divergences found so far. Not
-//!    "done": only exercises whatever opcode subset is currently
-//!    implemented (which is exactly why item 1 above was refined the way
-//!    it was), doesn't yet cross-check memory-space bytes beyond
-//!    registers, and hasn't been run at real scale across the corpus.
-//!    Re-run (and extend) it after every future opcode addition, not just
-//!    once at the end, before ever considering flipping the default.
+//!    diffing final register state. Not "done": only exercises whatever
+//!    opcode subset is currently implemented (which is exactly why item 1
+//!    above was refined the way it was), doesn't yet cross-check memory-
+//!    space bytes beyond registers, and hasn't been run at real scale
+//!    across the corpus. Re-run (and extend) it after every future opcode
+//!    addition, not just once at the end, before ever considering flipping
+//!    the default.
+//!
+//!    **A real, precisely-located but unconfirmed lead this harness
+//!    already found**: `selfjit::differential::tests::
+//!    known_issue_cranelift_register_copy_divergence_at_0x10067e4`
+//!    (`#[ignore]`d, not blocking) -- a plain register-to-register `Copy`
+//!    in `testdata/x64_static_printf_malloc.elf`'s real CRT startup code
+//!    where `SelfJitCompiler`'s result matches the copy's real source
+//!    bytes exactly and Cranelift's does not (2 of 8 bytes come out `0`).
+//!    Read through `crate::jit::compiler`'s `host_reg_file` fast path,
+//!    `dirty`-entry tracking, and `jit_reg_bulk_flush` end-to-end without
+//!    finding the mechanism -- everything inspected looks individually
+//!    correct in isolation. Flagged here rather than fixed blind; a real
+//!    fix needs either reproducing it through production's normal
+//!    `run_instruction` orchestration first (this harness calls a compiled
+//!    TB's function pointer directly, the same call shape `run_instruction`
+//!    itself uses, but hasn't been proven identical in every other respect)
+//!    or bisecting Cranelift's register-caching path with the same rigor
+//!    this session's signed-comparison JIT fix used.
 //! 5. Only then: migrate to copy-and-patch stencils for performance parity,
 //!    and retire the `cranelift-*` dependencies from `Cargo.toml`.
 
