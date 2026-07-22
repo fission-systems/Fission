@@ -4512,3 +4512,46 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     full workspace build clean, `golden_corpus_check.py check` clean
     (160/160 functions, determinism holds -- expected, decompilation
     itself doesn't exercise the emulator/JIT).
+- **`selfjit`: `PtrAdd`/`PtrSub`/`Piece`/`SubPiece`/`LzCount` implemented,
+  2026-07-22.** Continuing the roadmap's opcode-coverage tier (user
+  confirmed this is still scaffold work, not yet a Cranelift-replacement
+  path -- `Emulator::new` still only ever constructs `crate::jit::
+  JitCompiler`; `selfjit` remains reachable only from `#[cfg(test)]`).
+  - `PtrSub` folded into the existing `IntSub`/`PtrAdd` binop-style match
+    arm group (identical bit-level subtract). `PtrAdd` (2- or 3-input
+    scaled-offset form), `Piece` (concatenate high\|\|low via shift+or),
+    and `SubPiece` (shift-right-then-mask) ported mechanically from
+    `crate::jit::compiler`'s own already-proven-correct arms, reusing the
+    `TMP1`/`TMP2` caller-saved scratch registers `PopCount` introduced
+    (safe here too: none of these ops make a nested `blr` between reading
+    and writing them).
+  - `LzCount` needed one new emitter primitive: `clz_reg` (`emit/
+    aarch64.rs`, raw `CLZ` encoding `0xDAC01000 | (Rn<<5) | Rd`) --
+    AArch64's hardware CLZ is well-defined for a zero input (`clz(0) ==
+    64`, unlike x86's BSR), which already makes `clz(x) - (64 - width)`
+    correct even at `x == 0` without special-casing -- but branched
+    explicitly anyway, mirroring `crate::jit::compiler`'s own arm's
+    belt-and-suspenders shape exactly rather than trusting that reasoning
+    unverified.
+  - **Real finding from `selfjit::differential`, the harness earning its
+    keep again**: re-running the ELF-entry-point differential test after
+    landing these opcodes turned a `TB@0x1006754 skipped -- unsupported
+    opcodes: [SubPiece]` into a matched, clean TB -- `matched` went from 5
+    to 8 with `diverged=[]`. Only `Call` remains unsupported in this
+    fixture's reachable TBs (expected -- `Call`/`CallInd`/`CallOther` are
+    explicitly a later, larger tier).
+  - A real test bug caught along the way, not a `selfjit` bug: the first
+    version of the `Piece`/`SubPiece` round-trip test wrote a 2-byte
+    `SubPiece` output to register-space offsets 24/32 and read back 8
+    bytes, expecting the untouched high 6 bytes to be zero -- they weren't
+    (`0x7fffffff3344` instead of `0x3344`), because those offsets are real,
+    already-initialized x86-64 registers (e.g. RSP) in this space, not
+    free scratch. Fixed by zeroing the full 8-byte register first
+    (`Load`/`Store`'s own test already avoids this by using far-away
+    offsets 200+; this test instead zero-inits in place). Caught by the
+    test itself, not by inspection.
+  - Validated: `selfjit::*` 19/19 passing (3 new opcode tests, `PopCount`
+    unaffected), `fission-emulator` nextest 92/99 (same 7 pre-existing
+    unrelated failures, +3 vs. previous baseline from the new tests), full
+    workspace nextest 2175/2182 (same +3, zero regressions), full
+    workspace build clean, `golden_corpus_check.py check` clean.

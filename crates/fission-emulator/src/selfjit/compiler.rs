@@ -18,11 +18,13 @@
 //!
 //! Implemented, and covered by a real end-to-end test (compiled, mapped
 //! executable, called, result checked against the real host arithmetic):
-//! `Copy`, `IntZExt`, `IntSExt`, `IntAdd`, `IntSub`, `IntAnd`, `IntOr`,
-//! `IntXor`, `IntMult`, `IntDiv`, `IntSDiv`, `IntRem`, `IntSRem`,
+//! `Copy`, `IntZExt`, `IntSExt`, `IntAdd`, `IntSub`, `PtrSub`, `IntAnd`,
+//! `IntOr`, `IntXor`, `IntMult`, `IntDiv`, `IntSDiv`, `IntRem`, `IntSRem`,
 //! `IntLeft`, `IntRight`, `IntSRight`, `Int2Comp`, `IntNegate`,
 //! `BoolAnd`, `BoolOr`, `BoolXor`, `BoolNegate`, `IntEqual`,
 //! `IntNotEqual`, `IntSLess`, `IntLess`, `IntSLessEqual`, `IntLessEqual`,
+//! `IntCarry`, `IntSCarry`, `IntSBorrow`, `PopCount`, `PtrAdd`, `Piece`,
+//! `SubPiece`, `LzCount`,
 //! `Load`, `Store` (computed-address memory access -- **≤8 bytes only**,
 //! see below), and TB-terminating `Branch`/`CBranch` -- but **only as a straight-line,
 //! single-exit TB**: every `Branch`/`CBranch` here ends the compiled
@@ -78,13 +80,9 @@
 //! alongside the ≤8-byte path.
 //!
 //! Not implemented at all (of ~70 `PcodeOpcode` variants): the remaining
-//! ~43 -- all `Float*`, `Call`/`CallInd`/`CallOther`, `MultiEqual`,
-//! `Piece`/`SubPiece`, `PtrAdd`/`PtrSub`, `PopCount`/`LzCount`,
-//! `IntCarry`/`IntSCarry`/`IntSBorrow` (x86-flag-style carry/overflow
-//! opcodes -- deferred since they need either ARM's own NZCV flag
-//! extraction or manual overflow arithmetic, neither implemented in the
-//! emitter yet). `compile_translation_block` returns a descriptive `Err`
-//! for any of these rather than emitting wrong code -- matching this
+//! ones -- `Float*`, `Call`/`CallInd`/`CallOther`, `MultiEqual`, `Extract`,
+//! `Insert`, `SegmentOp`. `compile_translation_block` returns a descriptive
+//! `Err` for any of these rather than emitting wrong code -- matching this
 //! session's own repeated finding (the 8 missing `FLOAT_*` decompiler
 //! opcodes, the emulator's own TZCNT bug) that a loud failure beats
 //! silently-wrong output every time.
@@ -365,6 +363,7 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
         }
         PcodeOpcode::IntAdd
         | PcodeOpcode::IntSub
+        | PcodeOpcode::PtrSub
         | PcodeOpcode::IntAnd
         | PcodeOpcode::IntOr
         | PcodeOpcode::IntXor
@@ -372,19 +371,113 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
         | PcodeOpcode::BoolOr
         | PcodeOpcode::BoolXor
         | PcodeOpcode::IntMult => {
+            // PtrSub shares IntSub's body -- matches `crate::jit::compiler`'s
+            // own `IntSub | PtrSub` arm: p-code's PTRSUB is just pointer
+            // arithmetic (base - offset for a sub-component reference),
+            // identical bit-level operation to a plain subtract.
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
             load_value(asm, &op.inputs[0], A_VAL);
             load_value(asm, &op.inputs[1], B_VAL);
             match op.opcode {
                 PcodeOpcode::IntAdd => asm.add_reg(RESULT, A_VAL, B_VAL),
-                PcodeOpcode::IntSub => asm.sub_reg(RESULT, A_VAL, B_VAL),
+                PcodeOpcode::IntSub | PcodeOpcode::PtrSub => asm.sub_reg(RESULT, A_VAL, B_VAL),
                 PcodeOpcode::IntAnd | PcodeOpcode::BoolAnd => asm.and_reg(RESULT, A_VAL, B_VAL),
                 PcodeOpcode::IntOr | PcodeOpcode::BoolOr => asm.orr_reg(RESULT, A_VAL, B_VAL),
                 PcodeOpcode::IntXor | PcodeOpcode::BoolXor => asm.eor_reg(RESULT, A_VAL, B_VAL),
                 PcodeOpcode::IntMult => asm.mul_reg(RESULT, A_VAL, B_VAL),
                 _ => unreachable!(),
             }
+            store_value(asm, out, RESULT);
+        }
+        // PTRADD: ptr + offset * (element size, or 1 if no 3rd input) --
+        // matches `crate::jit::compiler`'s own arm exactly.
+        PcodeOpcode::PtrAdd => {
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() >= 2, "PtrAdd needs at least 2 inputs");
+            load_value(asm, &op.inputs[0], A_VAL); // ptr
+            load_value(asm, &op.inputs[1], B_VAL); // offset
+            if op.inputs.len() > 2 {
+                // RESULT is callee-saved (safe across this load_value's
+                // possible nested call, same reasoning as A_VAL/B_VAL).
+                load_value(asm, &op.inputs[2], RESULT); // element size
+                asm.mul_reg(RESULT, B_VAL, RESULT);
+            } else {
+                asm.mov_reg(RESULT, B_VAL);
+            }
+            asm.add_reg(RESULT, A_VAL, RESULT);
+            store_value(asm, out, RESULT);
+        }
+        // PIECE: concatenate high || low -> (high << low_bits) | low --
+        // matches `crate::jit::compiler`'s own arm (including its `.min(63)`
+        // shift-amount clamp, for parity).
+        PcodeOpcode::Piece => {
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() == 2, "Piece needs 2 inputs");
+            load_value(asm, &op.inputs[0], A_VAL); // high
+            load_value(asm, &op.inputs[1], B_VAL); // low
+            let low_bits = (op.inputs[1].size as i64).saturating_mul(8).min(63);
+            if low_bits > 0 {
+                asm.mov_imm64(TMP1, low_bits as u64);
+                asm.lsl_reg(RESULT, A_VAL, TMP1);
+            } else {
+                asm.mov_reg(RESULT, A_VAL);
+            }
+            asm.orr_reg(RESULT, RESULT, B_VAL);
+            store_value(asm, out, RESULT);
+        }
+        // SUBPIECE: (val >> shift_bytes*8), truncated to out.size*8 bits --
+        // matches `crate::jit::compiler`'s own arm (dynamic-offset second
+        // operand is not handled here either, same as that backend).
+        PcodeOpcode::SubPiece => {
+            let out = require_output(op)?;
+            anyhow::ensure!(!op.inputs.is_empty(), "SubPiece needs at least 1 input");
+            load_value(asm, &op.inputs[0], A_VAL);
+            let shift_bytes = if op.inputs.len() > 1 && op.inputs[1].is_constant {
+                op.inputs[1].constant_val
+            } else {
+                0
+            };
+            if shift_bytes > 0 {
+                asm.mov_imm64(TMP1, (shift_bytes as u64).wrapping_mul(8));
+                asm.lsr_reg(RESULT, A_VAL, TMP1);
+            } else {
+                asm.mov_reg(RESULT, A_VAL);
+            }
+            let bits = (out.size as u64).saturating_mul(8).min(63);
+            let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+            asm.mov_imm64(TMP1, mask);
+            asm.and_reg(RESULT, RESULT, TMP1);
+            store_value(asm, out, RESULT);
+        }
+        // LZCOUNT: leading zero bits relative to the input's declared
+        // width -- `load_value` already zero-extends, so the untouched
+        // high bits (above the declared width) are genuinely 0 and would
+        // otherwise inflate a raw 64-bit CLZ. AArch64's CLZ is well-defined
+        // for a zero input (returns 64), which already makes
+        // `clz(x) - (64 - width)` correct even for `x == 0` without a
+        // separate branch -- but branch explicitly anyway, matching
+        // `crate::jit::compiler`'s own arm's belt-and-suspenders shape
+        // exactly rather than relying on that reasoning unverified.
+        PcodeOpcode::LzCount => {
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() == 1, "LzCount needs 1 input");
+            let width = (op.inputs[0].size as i64).saturating_mul(8).min(64);
+            load_value(asm, &op.inputs[0], A_VAL);
+            asm.cmp_reg(A_VAL, XZR);
+            let branch_to_zero_case = asm.placeholder();
+            // non-zero arm (falls through: cmp was not-equal-to-zero)
+            asm.clz_reg(RESULT, A_VAL);
+            let adj = (64 - width) as u32;
+            if adj > 0 {
+                asm.sub_imm(RESULT, RESULT, adj);
+            }
+            let jump_to_end = asm.placeholder();
+            let zero_case_at = asm.offset();
+            asm.patch_b_cond(branch_to_zero_case, Cond::Eq, zero_case_at);
+            asm.mov_imm64(RESULT, width as u64);
+            let end = asm.offset();
+            asm.patch_b(jump_to_end, end);
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv => {
@@ -1119,6 +1212,127 @@ mod tests {
             read_reg(&mut emu, 72),
             0x0F0F_0F0F_0F0F_0F0Fu64.count_ones() as u64
         );
+    }
+
+    /// `PtrAdd` (3-input scaled form and the 2-input unscaled fallback)
+    /// and `PtrSub` (shares `IntSub`'s body) -- checked against plain
+    /// pointer arithmetic, not just "it ran".
+    #[test]
+    fn ptr_add_and_ptr_sub_match_pointer_arithmetic() {
+        let ops = vec![
+            copy_const(0, 0x1000), // ptr
+            copy_const(8, 3),      // index
+            copy_const(16, 8),     // element size
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::PtrAdd,
+                address: 0x1000,
+                output: Some(reg(24, 8)),
+                inputs: vec![reg(0, 8), reg(8, 8), reg(16, 8)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::PtrAdd,
+                address: 0x1000,
+                output: Some(reg(32, 8)),
+                inputs: vec![reg(0, 8), reg(8, 8)],
+                asm_mnemonic: None,
+            },
+            binop(PcodeOpcode::PtrSub, 40, 0, 8),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 24), 0x1000 + 3 * 8, "scaled PtrAdd");
+        assert_eq!(read_reg(&mut emu, 32), 0x1000 + 3, "unscaled (mul=1) PtrAdd");
+        assert_eq!(read_reg(&mut emu, 40), 0x1000 - 3, "PtrSub");
+    }
+
+    /// `Piece` (concatenate high||low) followed by `SubPiece` (extract a
+    /// byte-shifted, width-masked slice back out) -- a round trip checked
+    /// against the known concatenated value, not just "it ran".
+    #[test]
+    fn piece_and_subpiece_round_trip() {
+        let ops = vec![
+            copy_const(0, 0x1122), // high (read back as 2 bytes)
+            copy_const(8, 0x3344), // low (read back as 2 bytes)
+            // SubPiece's own outputs below only write 2 of the 8 bytes at
+            // their offset -- zero the full registers first so the
+            // untouched high 6 bytes are deterministic 0 rather than
+            // whatever offsets 24/32 happen to hold already (real,
+            // already-initialized x86-64 registers in this space, e.g.
+            // RSP -- not free scratch the way `Load`/`Store`'s own test
+            // uses far-away offsets 200+ for exactly this reason).
+            copy_const(24, 0),
+            copy_const(32, 0),
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Piece,
+                address: 0x1000,
+                output: Some(reg(16, 8)),
+                inputs: vec![reg(0, 2), reg(8, 2)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::SubPiece,
+                address: 0x1000,
+                output: Some(reg(24, 2)),
+                inputs: vec![reg(16, 8), imm(2, 4)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::SubPiece,
+                address: 0x1000,
+                output: Some(reg(32, 2)),
+                inputs: vec![reg(16, 8), imm(0, 4)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), 0x1122 << 16 | 0x3344, "Piece concat");
+        assert_eq!(read_reg(&mut emu, 24), 0x1122, "SubPiece extracts high 2 bytes back");
+        assert_eq!(read_reg(&mut emu, 32), 0x3344, "SubPiece extracts low 2 bytes back");
+    }
+
+    /// `LzCount` -- checked against known leading-zero-count cases,
+    /// including the zero-input edge case (must return the operand's
+    /// declared *width*, not the host CLZ instruction's raw 64-bit count).
+    #[test]
+    fn lzcount_matches_known_cases() {
+        let ops = vec![
+            copy_const(0, 0),          // all-zero
+            copy_const(8, 1),          // 8-byte: 1 leading zero bit short of 64
+            copy_const(16, 0x80u8 as i64), // read back as 1 byte: top bit set
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::LzCount,
+                address: 0x1000,
+                output: Some(reg(40, 8)),
+                inputs: vec![reg(0, 8)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::LzCount,
+                address: 0x1000,
+                output: Some(reg(48, 8)),
+                inputs: vec![reg(8, 8)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::LzCount,
+                address: 0x1000,
+                output: Some(reg(56, 8)),
+                inputs: vec![reg(16, 1)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 40), 64, "lzcount(0) over 8 bytes == width, not 0");
+        assert_eq!(read_reg(&mut emu, 48), 63, "lzcount(1) over 8 bytes");
+        assert_eq!(read_reg(&mut emu, 56), 0, "lzcount(0x80) over 1 byte -- top bit set");
     }
 }
 

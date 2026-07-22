@@ -67,17 +67,18 @@
 //! Concretely, the remaining work (roughly the recommended order):
 //! 1. Add the ~39 missing `PcodeOpcode` variants to `compiler.rs`'s match
 //!    (integer arithmetic/shifts/comparisons, zero/sign extension,
-//!    `Load`/`Store` -- narrow, ≤8-byte path only -- and now `IntCarry`/
-//!    `IntSCarry`/`IntSBorrow`/`PopCount` are covered; the latter four were
-//!    re-prioritized *ahead* of this list's original ordering after
-//!    `selfjit::differential` (item 4, done early -- see below) confirmed
-//!    x86-64 SLEIGH's own lowering of `CMP` unconditionally emits all four
-//!    as flag-register side effects alongside *any* comparison, even when
-//!    the actual branch only reads one flag -- validated against real
-//!    corpus code, not just synthetic unit tests: `checksum`'s real
-//!    `Load`-in-a-loop, previously 0 matchable TBs, now replays cleanly).
-//!    `Piece`/`SubPiece`/`PtrAdd`/`PtrSub`/`LzCount` are the next tier;
-//!    `Float*`/`Call*`/`MultiEqual` are larger, later.
+//!    `Load`/`Store` -- narrow, ≤8-byte path only -- `IntCarry`/
+//!    `IntSCarry`/`IntSBorrow`/`PopCount` (re-prioritized *ahead* of this
+//!    list's original ordering after `selfjit::differential`, item 4, done
+//!    early -- see below -- confirmed x86-64 SLEIGH's own lowering of `CMP`
+//!    unconditionally emits all four as flag-register side effects
+//!    alongside *any* comparison, even when the actual branch only reads
+//!    one flag), and `PtrSub`/`PtrAdd`/`Piece`/`SubPiece`/`LzCount` (this
+//!    tier's own real finding, from the same differential harness: a real
+//!    TB in the corpus fixture was skipping entirely on `SubPiece` alone
+//!    until this landed -- now replays clean) are covered.
+//!    `Float*`/`Call*`/`MultiEqual`/`Extract`/`Insert`/`SegmentOp` are
+//!    larger, later.
 //!    Also close the two documented-but-real correctness gaps in what's
 //!    already implemented: results aren't truncated to the varnode's
 //!    declared bit width, and shift amounts aren't clamped to that width

@@ -212,6 +212,14 @@ impl<'a> Asm<'a> {
             .emit_u32_le(0x9AC02800 | (rm << 16) | (rn << 5) | rd);
     }
 
+    /// `clz xd, xn` (count leading zero bits, 64-bit form). Well-defined
+    /// for a zero input -- `clz(0) == 64`, unlike x86's BSR -- so callers
+    /// needing a p-code-width-relative count can compute
+    /// `clz_reg(x) - (64 - width)` directly without special-casing zero.
+    pub fn clz_reg(&mut self, rd: u32, rn: u32) {
+        self.buf.emit_u32_le(0xDAC01000 | (rn << 5) | rd);
+    }
+
     /// `sub xd, xn, #imm12` (imm12 unsigned, 0..=4095, unscaled).
     pub fn sub_imm(&mut self, rd: u32, rn: u32, imm12: u32) {
         debug_assert!(imm12 <= 0xFFF);
