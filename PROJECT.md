@@ -4942,3 +4942,37 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     (+2, same 7 pre-existing unrelated failures), full workspace nextest
     2186/2193 (+2, zero regressions), full workspace build clean,
     `golden_corpus_check.py check` clean.
+- **`selfjit`: `SegmentOp` implemented; differential harness widened past
+  its two hand-picked fixtures to a 16-binary corpus sweep, 2026-07-23.**
+  `SegmentOp` (simplified to base + offset, matching `crate::jit::
+  compiler`'s own arm exactly) was the last small mechanical opcode left
+  on the list.
+  - **Widened `selfjit::differential` to sweep all 16 binaries
+    `scripts/quality/golden_corpus_check.py`'s own `DEFAULT_BINARIES`
+    uses** (8 function families x {gcc_O0, gcc_O2}) rather than staying
+    at the two hand-picked fixtures that had already found two real bugs
+    (the Cranelift `ensure_var!` cache-key bug, the `SubPiece` opcode
+    gap) -- widening coverage past those two is worth doing for its own
+    sake. New test collects every divergence across all 16 before
+    panicking (not stopping at the first), so one run reports the full
+    picture; errors from `run_differential` itself are reported but don't
+    fail the test, matching this harness's existing "skips/errors are
+    reported, not failures" philosophy.
+  - **Result: clean across all 16**, no divergences found. **Honest
+    caveat, documented rather than glossed over**: every binary reports
+    exactly `matched=4` -- all 16 hit the same wall after their shared
+    CRT startup path (same toolchain, same libc init sequence), not each
+    family's actual logic (`crypto`'s real hashing, `math`'s real
+    arithmetic, etc.). Still a genuine addition, not a redundant rerun --
+    real, independently-compiled machine code and memory content per
+    binary, not the same bytes 16 times -- but reaching deeper (each
+    family's real `main` or a named function) needs per-binary symbol-
+    address resolution, a separate undertaking not attempted here.
+  - Validated on both host backends: `selfjit::*` 32/32 (aarch64, +1) and
+    38/38 (x86-64 via Rosetta, +1 -- this one noticeably slower under
+    Rosetta translation, ~126s for the full module vs. aarch64's ~46s,
+    expected given it now runs 16 real binaries' worth of TB compilation
+    through both JIT backends on emulated silicon), `fission-emulator`
+    nextest 105/112 (+1, same 7 pre-existing unrelated failures), full
+    workspace nextest 2188/2195 (+1, zero regressions), full workspace
+    build clean, `golden_corpus_check.py check` clean.

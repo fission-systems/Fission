@@ -54,12 +54,17 @@
 //! doc entry, arithmetic results not being truncated to declared width,
 //! turned out on investigation not to be a real bug at all, given this
 //! backend's memory-round-trip architecture -- see that doc for the
-//! proof). As of this phase, `selfjit::differential`'s two existing real-
-//! corpus fixtures both replay with **zero unsupported-opcode skips** --
-//! every TB either backend reaches from those entry points now matches
-//! cleanly. The remaining real gap is `CallOther` (item 1 below, needing
-//! a stack-slot allocator) and the >8-byte `Load`/`Store` path (the same
-//! allocator gap).
+//! proof). As of this phase, `selfjit::differential`'s two hand-picked
+//! real-corpus fixtures both replay with **zero unsupported-opcode
+//! skips** -- every TB either backend reaches from those entry points now
+//! matches cleanly -- and a third, broader test walks entry-point TBs
+//! across all 16 binaries `scripts/quality/golden_corpus_check.py` uses,
+//! also clean (see `selfjit::differential`'s own doc for the honest
+//! caveat: that sweep is shallow -- CRT startup only, not each family's
+//! real logic -- reaching deeper needs per-binary symbol resolution, not
+//! attempted here). The remaining real gap is `CallOther` (item 1 below,
+//! needing a stack-slot allocator) and the >8-byte `Load`/`Store` path
+//! (the same allocator gap).
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a

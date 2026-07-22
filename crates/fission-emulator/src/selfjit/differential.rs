@@ -410,4 +410,89 @@ mod tests {
             "expected at least one TB both backends could run and agree on"
         );
     }
+
+    /// Broader real-corpus sweep: walk entry-point TBs across all 16
+    /// binaries `scripts/quality/golden_corpus_check.py`'s own
+    /// `DEFAULT_BINARIES` uses (8 function families x {gcc_O0, gcc_O2}),
+    /// each independently, collecting every divergence before panicking
+    /// (not stopping at the first) so one run reports the full picture.
+    /// This harness has already found two real bugs this way -- the
+    /// Cranelift `ensure_var!` cache-key bug, the `SubPiece` opcode gap --
+    /// both from the two hand-picked fixtures above; widening past those
+    /// two is worth doing for its own sake, not just as a coverage
+    /// metric. Errors from `run_differential` itself (as opposed to a
+    /// genuine `diverged` result) are reported but don't fail the test --
+    /// matches this harness's existing "skips/errors are reported, not
+    /// failures" philosophy elsewhere, since the goal here is finding
+    /// *correctness* divergences specifically, not universal harness
+    /// robustness across every binary format/arch variant.
+    ///
+    /// Honest caveat: every binary here reports `matched=4` -- all 16 hit
+    /// the same wall after their shared CRT startup path (same toolchain,
+    /// same libc init sequence), not their family-specific logic
+    /// (`crypto`'s real hashing, `math`'s real arithmetic, etc.). Still a
+    /// genuine addition, not a redundant rerun: real, independently-
+    /// compiled machine code and memory content per binary, not the same
+    /// bytes 16 times -- but reaching deeper (each family's actual `main`
+    /// or a named function) needs per-binary symbol-address resolution,
+    /// a separate undertaking not attempted here.
+    #[test]
+    fn selfjit_matches_cranelift_across_golden_corpus_entry_points() {
+        const FAMILIES: [&str; 8] = [
+            "advanced_patterns",
+            "control_flow",
+            "crypto",
+            "data_structures",
+            "math",
+            "memory_layouts",
+            "semantic_stress",
+            "string_utils",
+        ];
+        let mut any_ran = false;
+        let mut diverged = Vec::new();
+        for family in FAMILIES {
+            for variant in ["gcc_O0", "gcc_O2"] {
+                let name = format!("{family}_{variant}.exe");
+                let path = corpus_binary(&name);
+                if !path.exists() {
+                    eprintln!("skipping {name}: not found at {}", path.display());
+                    continue;
+                }
+                let binary = match fission_loader::loader::LoadedBinary::from_file(&path) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("{name}: load failed: {e}");
+                        continue;
+                    }
+                };
+                let entry_pc = binary.inner().entry_point;
+                match run_differential(&path, entry_pc, 40) {
+                    Ok(report) => {
+                        any_ran = true;
+                        eprintln!(
+                            "{name}: matched={} skipped_unsupported={} \
+                             skipped_errors={:?} diverged={:?}",
+                            report.matched,
+                            report.skipped_unsupported_opcode,
+                            report.skipped_compile_error,
+                            report.diverged
+                        );
+                        if !report.is_clean() {
+                            diverged.push(format!("{name}: {:?}", report.diverged));
+                        }
+                    }
+                    Err(e) => eprintln!("{name}: run_differential error: {e}"),
+                }
+            }
+        }
+        if !any_ran {
+            eprintln!("skipping: no golden corpus binaries found");
+            return;
+        }
+        assert!(
+            diverged.is_empty(),
+            "SelfJitCompiler diverged from Cranelift on real corpus binaries:\n{}",
+            diverged.join("\n")
+        );
+    }
 }
