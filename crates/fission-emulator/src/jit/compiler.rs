@@ -623,6 +623,40 @@ impl JitCompiler {
             }};
         }
 
+        // `load_vn!` always zero-extends a narrower-than-8-byte operand into
+        // its I64 Cranelift value (see `ensure_var!`'s masking and the
+        // `jit_read_space` host callout, both size-aware but sign-agnostic).
+        // That's correct for unsigned ops (IntLess/IntAdd/IntAnd/...) and for
+        // ops where signedness of the *input* representation doesn't affect
+        // the result (Add/Sub/Mult: two's-complement wraparound arithmetic
+        // is identical either way once the output is masked to its own
+        // width). It is **wrong** for ops whose result genuinely depends on
+        // the input's sign -- signed compare/divide/remainder/arithmetic-
+        // shift -- where a negative narrow value (e.g. a `dword` `-1` =
+        // `0xFFFFFFFF`) must be sign-extended to a huge *negative* I64
+        // (`0xFFFFFFFFFFFFFFFF`), not left as a huge *positive* one. Same
+        // ishl/sshr-immediate technique `IntSExt` below already uses.
+        macro_rules! sign_extend_val {
+            ($val:expr, $size:expr) => {{
+                let val = $val;
+                let shift = 64i64 - (($size as i64) * 8);
+                if shift > 0 && shift < 64 {
+                    let s = builder.ins().ishl_imm(val, shift);
+                    builder.ins().sshr_imm(s, shift)
+                } else {
+                    val
+                }
+            }};
+        }
+
+        macro_rules! load_vn_signed {
+            ($vn:expr) => {{
+                let vn: &Varnode = $vn;
+                let val = load_vn!(vn);
+                sign_extend_val!(val, vn.size.min(8))
+            }};
+        }
+
         macro_rules! store_vn {
             ($vn:expr, $val:expr) => {{
                 let vn: &Varnode = $vn;
@@ -950,8 +984,8 @@ impl JitCompiler {
                 }
                 PcodeOpcode::IntSDiv => {
                     if let Some(out) = op.output.as_ref() {
-                        let a = load_vn!(&op.inputs[0]);
-                        let b = load_vn!(&op.inputs[1]);
+                        let a = load_vn_signed!(&op.inputs[0]);
+                        let b = load_vn_signed!(&op.inputs[1]);
                         store_vn!(out, builder.ins().sdiv(a, b));
                     }
                 }
@@ -964,8 +998,8 @@ impl JitCompiler {
                 }
                 PcodeOpcode::IntSRem => {
                     if let Some(out) = op.output.as_ref() {
-                        let a = load_vn!(&op.inputs[0]);
-                        let b = load_vn!(&op.inputs[1]);
+                        let a = load_vn_signed!(&op.inputs[0]);
+                        let b = load_vn_signed!(&op.inputs[1]);
                         store_vn!(out, builder.ins().srem(a, b));
                     }
                 }
@@ -1030,7 +1064,11 @@ impl JitCompiler {
                 }
                 PcodeOpcode::IntSRight => {
                     if let Some(out) = op.output.as_ref() {
-                        let a = load_vn!(&op.inputs[0]);
+                        // Only the value being shifted needs sign-extension;
+                        // the shift *count* (`b`) is a plain magnitude, not
+                        // a signed quantity -- sign-extending it would be
+                        // wrong if its own high bit happened to be set.
+                        let a = load_vn_signed!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
                         store_vn!(out, builder.ins().sshr(a, b));
                     }
@@ -1063,8 +1101,26 @@ impl JitCompiler {
                 | PcodeOpcode::IntLess
                 | PcodeOpcode::IntLessEqual => {
                     if let Some(out) = op.output.as_ref() {
+                        // `a`/`b` (zero-extended) still feed `emit_shadow_binop!`
+                        // below unchanged -- the symbolic/taint side-channel
+                        // re-derives sign context itself from each operand's
+                        // own declared size, so it isn't affected by (and
+                        // shouldn't be given) the sign-extended values used
+                        // only for the *actual* signed comparison here.
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
+                        let signed = matches!(
+                            op.opcode,
+                            PcodeOpcode::IntSLess | PcodeOpcode::IntSLessEqual
+                        );
+                        let (cmp_a, cmp_b) = if signed {
+                            (
+                                sign_extend_val!(a, op.inputs[0].size.min(8)),
+                                sign_extend_val!(b, op.inputs[1].size.min(8)),
+                            )
+                        } else {
+                            (a, b)
+                        };
                         let cc = match op.opcode {
                             PcodeOpcode::IntEqual => IntCC::Equal,
                             PcodeOpcode::IntNotEqual => IntCC::NotEqual,
@@ -1074,7 +1130,7 @@ impl JitCompiler {
                             PcodeOpcode::IntLessEqual => IntCC::UnsignedLessThanOrEqual,
                             _ => unreachable!(),
                         };
-                        let b_res = builder.ins().icmp(cc, a, b);
+                        let b_res = builder.ins().icmp(cc, cmp_a, cmp_b);
                         store_vn!(out, builder.ins().uextend(types::I64, b_res));
                         let sk = match op.opcode {
                             PcodeOpcode::IntEqual => SymBinOpKind::Eq as u32,
@@ -1911,4 +1967,160 @@ fn emit_cond_branch(
         return;
     }
     builder.ins().brif(is_true, taken, &[], not_taken, &[]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reg(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 4, // matches RUST_SLEIGH_REGISTER_SPACE_ID's numbering
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn imm(val: i64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 0,
+            offset: 0,
+            size,
+            is_constant: true,
+            constant_val: val,
+        }
+    }
+
+    /// Real `Emulator` construction, same pattern as `selfjit::compiler`'s
+    /// own tests -- a real loaded ELF is the simplest way to get a
+    /// fully-formed `MachineState`/register space, even though these
+    /// tests' compiled code never touches the binary's own instructions.
+    fn make_emu() -> crate::core::Emulator {
+        use crate::core::Emulator;
+        use crate::os::LinuxEnv;
+        use crate::pcode::state::MachineState;
+
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_static_printf_malloc.elf");
+        let binary = fission_loader::loader::LoadedBinary::from_file(&path)
+            .expect("load real test ELF");
+        let mut state = MachineState::new();
+        let _info = crate::os::linux::loader::load_elf(&mut state, &binary).expect("load_elf");
+        let load_spec = binary.load_spec().expect("load spec").clone();
+        let sleigh =
+            fission_sleigh::runtime::RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(
+                &load_spec,
+            )
+            .expect("sleigh frontend candidates")
+            .into_iter()
+            .next()
+            .expect("at least one sleigh frontend");
+        let arch = crate::arch::ArchInfo::from_language_id(
+            load_spec.pair.language_id.as_str(),
+            Some(&binary),
+        )
+        .expect("arch info");
+        Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).expect("emulator")
+    }
+
+    /// Compiles `ops` as a single-instruction TB via the real Cranelift
+    /// `JitCompiler` (the backend `run_instruction` actually dispatches to
+    /// -- unlike `selfjit`, which is scaffolding, not the live execution
+    /// path), executes it against a real `Emulator`, and returns that
+    /// emulator so the caller can read out whichever register-space
+    /// offsets it cares about.
+    fn compile_and_run(ops: Vec<PcodeOp>) -> crate::core::Emulator {
+        let insns = [GuestInsn {
+            pc: 0x1000,
+            len: 4,
+            ops,
+        }];
+        let mut compiler = JitCompiler::new().expect("cranelift backend available");
+        let func_ptr = compiler
+            .compile_translation_block(&insns, 4)
+            .expect("compile");
+        let mut emu = make_emu();
+        let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+            unsafe { std::mem::transmute(func_ptr) };
+        let next_pc = f(&mut emu as *mut _);
+        assert_eq!(next_pc, 0x1004, "unconditional fallthrough PC");
+        emu
+    }
+
+    fn read_reg(emu: &mut crate::core::Emulator, offset: u64) -> u64 {
+        let bytes = emu.state.read_space(4, offset, 8).expect("read register");
+        u64::from_le_bytes(bytes.try_into().unwrap())
+    }
+
+    fn copy_const(out_offset: u64, val: i64, size: u32) -> PcodeOp {
+        PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(reg(out_offset, size)),
+            inputs: vec![imm(val, size)],
+            asm_mnemonic: None,
+        }
+    }
+
+    fn binop_sized(opcode: PcodeOpcode, out: u64, a: u64, a_size: u32, b: u64, b_size: u32) -> PcodeOp {
+        PcodeOp {
+            seq_num: 1,
+            opcode,
+            address: 0x1000,
+            output: Some(reg(out, 8)),
+            inputs: vec![reg(a, a_size), reg(b, b_size)],
+            asm_mnemonic: None,
+        }
+    }
+
+    /// Regression test for a real bug found via `fission-verify`'s
+    /// emulator-grounded ground-truth tier: a *narrower-than-register*
+    /// (`dword`) negative operand in a signed comparison used to evaluate
+    /// wrong, because `load_vn!` always zero-extends into the I64
+    /// Cranelift value it works with, and `IntSLess`/`IntSLessEqual`
+    /// compared that zero-extended (i.e. now huge-positive) value directly
+    /// -- `0 >= -1i32` (stored as a `dword` `0xFFFFFFFF`) evaluated false.
+    /// Real repro: `clamp(0, -1, 0)` in `control_flow_gcc_O0.exe` took the
+    /// wrong branch at its first `cmp`/`jge`. Also covers `IntSDiv`/
+    /// `IntSRem`/`IntSRight`, which had the identical defect.
+    #[test]
+    fn signed_ops_on_narrow_negative_memory_operand_are_correct() {
+        // r0 = -1 (dword, i.e. 0xFFFFFFFF); r1 = 0 (dword).
+        let ops = vec![
+            copy_const(0, -1, 4),
+            copy_const(8, 0, 4),
+            // 0 >= -1 (signed) -- i.e. !(0 < -1) -- must be true.
+            binop_sized(PcodeOpcode::IntSLess, 16, 8, 4, 0, 4), // 0 <s -1 -> 0 (false)
+            binop_sized(PcodeOpcode::IntSLessEqual, 24, 0, 4, 8, 4), // -1 <=s 0 -> 1 (true)
+            binop_sized(PcodeOpcode::IntSDiv, 32, 8, 4, 0, 4), // 0 / -1 -> 0
+            binop_sized(PcodeOpcode::IntSRem, 40, 8, 4, 0, 4), // 0 % -1 -> 0
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), 0, "0 <s -1 should be false");
+        assert_eq!(read_reg(&mut emu, 24), 1, "-1 <=s 0 should be true");
+        assert_eq!(read_reg(&mut emu, 32), 0, "0 / -1 == 0");
+        assert_eq!(read_reg(&mut emu, 40), 0, "0 % -1 == 0");
+
+        // A case where the *sign* of the divisor actually changes the
+        // result: -6 / -1 == 6 (would be a huge unsigned value if -1
+        // wasn't correctly sign-extended before the divide). Also checks
+        // `IntSRight` (arithmetic shift) preserves the sign of a narrow
+        // negative value being shifted: -8 (dword) >> 1 == -4, not some
+        // huge positive value from shifting zeros into a wrongly
+        // zero-extended operand.
+        let ops2 = vec![
+            copy_const(0, -6, 4),
+            copy_const(8, -1, 4),
+            copy_const(16, -8, 4),
+            copy_const(24, 1, 4),
+            binop_sized(PcodeOpcode::IntSDiv, 32, 0, 4, 8, 4),
+            binop_sized(PcodeOpcode::IntSRight, 40, 16, 4, 24, 4),
+        ];
+        let mut emu2 = compile_and_run(ops2);
+        assert_eq!(read_reg(&mut emu2, 32), 6, "-6 / -1 == 6");
+        assert_eq!(read_reg(&mut emu2, 40) as i64, -4, "-8 >>s 1 == -4");
+    }
 }

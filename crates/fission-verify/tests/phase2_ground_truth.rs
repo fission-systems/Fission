@@ -92,3 +92,48 @@ fn corrupted_hir_is_caught_against_real_machine_code() {
         other => panic!("expected the corrupted HIR to diverge from real machine code, got {other:?}"),
     }
 }
+
+/// Regression test for the real bug this session's manual `clamp`
+/// investigation found via this exact tier: a 3-argument, `-O0`-compiled
+/// function whose prologue spills its register args to stack home slots
+/// (needing `EmulatorHarness`'s Win64 shadow-space reservation), where one
+/// arg is negative (needing `fission-emulator`'s JIT to sign-extend a
+/// narrower-than-register operand before a signed comparison -- see
+/// `jit::compiler::tests::signed_ops_on_narrow_negative_memory_operand_are_
+/// correct` in `fission-emulator` for the unit-level regression). Both
+/// fixes land in this one real-corpus function.
+#[test]
+fn clamp_matches_real_machine_code_including_negative_args() {
+    let path = corpus_binary("control_flow_gcc_O0.exe");
+    if !path.exists() {
+        eprintln!("skipping: corpus binary not found at {}", path.display());
+        return;
+    }
+    let binary = LoadedBinary::from_file(&path).expect("load binary");
+    let facts = FactStore::from_binary(&binary);
+    let func = FunctionInfo {
+        name: "clamp".to_string(),
+        address: 0x14000155f,
+        ..Default::default()
+    };
+
+    let pair = decompile_one(&binary, &facts, &func).expect("decompile_one");
+    let samples = default_samples(pair.hir.params.len());
+    assert!(
+        samples.iter().any(|s| s.iter().any(|&v| v < 0)),
+        "default_samples should include negative args -- otherwise this test can't catch the bug it's for"
+    );
+
+    let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
+    let outcome = check_ground_truth(&mut harness, func.address, &pair.dir, &pair.hir, &samples);
+
+    match outcome {
+        VerifyOutcome::Equivalent { checked } => {
+            assert!(checked > 0, "expected at least one sample groundable against the emulator");
+        }
+        other => panic!(
+            "expected clamp (including negative args) to match the real emulator's return \
+             value, got {other:?}"
+        ),
+    }
+}

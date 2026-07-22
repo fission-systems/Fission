@@ -4205,3 +4205,82 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     `fission-emulator` failures throughout every phase, zero new
     regressions), `fission-cli --lib` 45/45, `golden_corpus_check.py`
     clean (160/160, determinism holds).
+- **Fixed the JIT signed-comparison bug found above, 2026-07-22.** User's
+  explicit follow-up: pursue the `clamp @ 0x14000155f` lead flagged as a
+  concrete, reproducible finding in the previous entry. User also asked
+  whether the fix needed a self-written JIT compiler and an interpreter
+  fallback — answered no and explained why before touching code: `selfjit/`
+  already exists but is an intentionally-incomplete experiment (no x86_64
+  host emission, no register allocation, no loops — its own module doc
+  says completing it is future work, not a quick option), and a compile-
+  failure fallback wouldn't have helped regardless, since the JIT compiled
+  *successfully* here and silently computed the wrong answer — nothing
+  would have triggered a fallback path keyed on compile failure.
+  - **Root cause, confirmed by reading the actual lowering code** (not
+    guessed): `crates/fission-emulator/src/jit/compiler.rs`'s `load_vn!`
+    macro always zero-extends a narrower-than-8-byte p-code operand into
+    its Cranelift `I64` value (`ensure_var!`'s masking, and the
+    `jit_read_space` host callback both size-aware but sign-agnostic).
+    Correct for unsigned ops and for ops where input sign doesn't affect
+    the result (`Add`/`Sub`/`Mul` — two's-complement wraparound is
+    identical either way once the output is masked to its own width).
+    **Wrong** for `IntSLess`/`IntSLessEqual`/`IntSDiv`/`IntSRem`/
+    `IntSRight`, whose result genuinely depends on the operand's sign: a
+    negative `dword` `-1` (`0xFFFFFFFF`) must sign-extend to
+    `0xFFFFFFFF_FFFFFFFF`, not stay a huge positive
+    `0x00000000_FFFFFFFF` — exactly what made `clamp(0, -1, 0)`'s
+    `0 >= -1` (`IntSLess`) evaluate false. Confirmed `IntCarry`/
+    `IntSCarry`/`IntSBorrow` were *not* affected: their host callout
+    (`jit_int_flag`/`int_flag_op` in `float_ops.rs`) already does its own
+    correct `sign_extend_n` internally from the explicitly-passed size,
+    independent of the Cranelift-side load.
+  - **Fix**: new `sign_extend_val!`/`load_vn_signed!` macros in
+    `jit/compiler.rs` (reusing the exact `ishl`/`sshr`-immediate technique
+    the existing, already-correct `IntSExt` opcode handler uses), applied
+    at the five affected sites. For the comparison opcodes specifically,
+    the *shadow/symbolic taint side-channel* (`emit_shadow_binop!`) still
+    receives the original zero-extended values unchanged — deliberately
+    not touched, since the symbolic layer re-derives its own sign context
+    from each operand's separately-passed declared size and touching it
+    risked destabilizing unrelated, already-working concolic-execution
+    tests for no benefit. For `IntSRight`, only the value being shifted
+    (`a`) is sign-extended — the shift *count* (`b`) is a plain magnitude,
+    not a signed quantity.
+  - **Also fixed the analogous Win64 ABI bug this same investigation
+    surfaced in `EmulatorHarness`** (`fission-verify`): the driver only
+    reserved stack space for the return address, not Win64's mandatory
+    32-byte shadow space a callee's prologue spills its register args
+    into — `clamp` (3 args, `-O0`, spills-to-stack-homes prologue) was
+    the first function exercised by this session's work that actually
+    needed it.
+  - **`selfjit/`'s identical latent bug, found but *not* fixed**: `load_
+    value` has the exact same zero-extension defect via the same
+    `jit_read_space`-style host callback, affecting `IntSLess`/
+    `IntSLessEqual`/`IntSDiv`/`IntSRem`/`IntSRight` there too. Left as a
+    documented gap (module doc comment + inline `TODO(correctness)`
+    markers at each site, matching this file's own established practice
+    for its other two known gaps — no width truncation, no shift-amount
+    clamping) rather than a hand-assembly AArch64 patch, since
+    `SelfJitCompiler` is confirmed not wired in anywhere live (`Emulator`
+    only ever constructs `jit::JitCompiler`) and the module's own doc
+    already prescribes the right next step before touching any of its
+    correctness gaps: differential-test it against `jit::compiler` on real
+    corpus binaries first (item 4 in `selfjit/mod.rs`'s doc).
+  - **New regression coverage**: a `jit::compiler::tests` module (this
+    file had zero `#[test]`s before — the actual bug had no unit coverage
+    at all) with `signed_ops_on_narrow_negative_memory_operand_are_
+    correct`, hand-building the exact `dword`-negative-operand p-code
+    shape and checking `IntSLess`/`IntSLessEqual`/`IntSDiv`/`IntSRem`/
+    `IntSRight` against plain Rust arithmetic on the same values — modeled
+    on `selfjit::compiler::tests`'s existing, proven pattern
+    (`compile_and_run`/`read_reg`/`copy_const`/`binop`helpers). Plus an
+    integration-level regression in `fission-verify`
+    (`clamp_matches_real_machine_code_including_negative_args`) closing
+    the loop on the exact real-corpus finding that motivated the fix.
+  - Validated: new `jit::compiler` unit test + all 6 pre-existing
+    `selfjit::compiler` tests pass; `fission-emulator` suite 82/89 (added
+    1 net test; same 7 pre-existing unrelated failures); `fission-verify`
+    11/11; `cargo build --workspace` clean; `golden_corpus_check.py` clean
+    (160/160); `fission_cli verify clamp --tier all` now reports
+    `Equivalent` on all three tiers (was `Diverged` on ground-truth only,
+    before this fix).

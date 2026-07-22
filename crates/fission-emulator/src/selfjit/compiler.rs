@@ -44,6 +44,26 @@
 //! only coincides with p-code's own "shift >= width => 0" semantics for
 //! 64-bit operands).
 //!
+//! A third, real one found and characterized (not yet fixed here) via
+//! `fission-verify`'s emulator-grounded verification tier: `load_value`
+//! (like `crate::jit::compiler`'s `load_vn!`, which had the identical
+//! defect and *was* fixed) always zero-extends a narrower-than-8-byte
+//! operand -- correct for unsigned ops, wrong for `IntSLess`/
+//! `IntSLessEqual`/`IntSDiv`/`IntSRem`/`IntSRight`, whose result depends
+//! on the operand's actual sign (a negative `dword` `-1` = `0xFFFFFFFF`
+//! must sign-extend to `0xFFFFFFFF_FFFFFFFF`, not stay a huge positive
+//! `0x00000000_FFFFFFFF`). `crate::jit::compiler`'s version of this fix
+//! sign-extends via a `ishl`/`sshr`-immediate pair in Cranelift IR right
+//! before the signed op; the AArch64 analog would be `SBFX`/`SXTW`-style
+//! emission ahead of `sdiv_reg`/`asr_reg`/`Cond::Lt`-`Cond::Le` at each of
+//! this file's signed-op sites. Left as a documented gap rather than a
+//! quick hand-assembly patch, consistent with this module's own stated
+//! bar (`SelfJitCompiler` is not wired in anywhere live, and
+//! `crate::selfjit`'s own module doc's item 4 -- differential-test against
+//! `crate::jit::compiler` on real corpus
+//! binaries -- is the right place to catch/fix this class of bug
+//! properly rather than patching call sites ad hoc without that harness).
+//!
 //! Not implemented at all (of ~70 `PcodeOpcode` variants): the remaining
 //! ~45 -- all `Float*`, `Call`/`CallInd`/`CallOther`, `MultiEqual`,
 //! `Piece`/`SubPiece`, `PtrAdd`/`PtrSub`, `PopCount`/`LzCount`,
@@ -267,6 +287,9 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv => {
+            // TODO(correctness): `IntSDiv` on a narrower-than-8-byte
+            // negative operand is wrong -- `load_value` zero-extends, see
+            // this module's own doc comment ("A third, real one...").
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
             load_value(asm, &op.inputs[0], A_VAL);
@@ -281,6 +304,8 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
         PcodeOpcode::IntRem | PcodeOpcode::IntSRem => {
             // AArch64 has no remainder instruction: quotient = a/b, then
             // remainder = a - quotient*b via a single MSUB.
+            // TODO(correctness): same `IntSRem` narrow-negative-operand gap
+            // as `IntSDiv` above.
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
             load_value(asm, &op.inputs[0], A_VAL);
@@ -301,7 +326,9 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             // 64, so a shift of e.g. 40 on a declared-32-bit value comes
             // out wrong here. Same class of gap as IntAdd/etc. not
             // truncating to the varnode's declared width (see this
-            // module's doc) -- flagged, not silently trusted.
+            // module's doc) -- flagged, not silently trusted. `IntSRight`
+            // additionally has the narrow-negative-operand sign-extension
+            // gap (same doc comment) on its `A_VAL` operand specifically.
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
             load_value(asm, &op.inputs[0], A_VAL);
@@ -363,6 +390,11 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             }
             store_value(asm, out, RESULT);
         }
+        // TODO(correctness): `IntSLess`/`IntSLessEqual` on a narrower-
+        // than-8-byte negative operand are wrong -- `load_value` zero-
+        // extends, see this module's own doc comment ("A third, real
+        // one..."). `IntEqual`/`IntNotEqual`/`IntLess`/`IntLessEqual`
+        // (unsigned/equality) are unaffected.
         PcodeOpcode::IntEqual
         | PcodeOpcode::IntNotEqual
         | PcodeOpcode::IntSLess
