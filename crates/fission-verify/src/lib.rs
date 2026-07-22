@@ -25,7 +25,11 @@
 //! rationale and phasing.
 
 pub mod decompile;
+pub mod diff;
+pub mod eval;
 pub mod report;
 
 pub use decompile::{DecompileError, DirHirPair, decompile_one};
+pub use diff::{default_samples, diff_dir_hir};
+pub use eval::{interpret_dir, interpret_hir};
 pub use report::{Divergence, UnsupportedReason, VerifyOutcome};

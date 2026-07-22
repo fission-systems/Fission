@@ -2722,6 +2722,7 @@ dependencies = [
 name = "fission-verify"
 version = "0.1.6"
 dependencies = [
+ "anyhow",
  "fission-core",
  "fission-decompiler",
  "fission-emulator",
