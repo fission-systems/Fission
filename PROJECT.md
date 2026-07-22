@@ -4833,3 +4833,36 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     2180/2187 (+2, zero regressions), full workspace build clean,
     `golden_corpus_check.py check` clean, differential harness re-run
     clean (unchanged `matched=8`, `diverged=[]`).
+- **`selfjit`: all 18 `Float*` opcodes implemented, 2026-07-23.**
+  Continuing opcode coverage down the remaining-gap list. The most
+  mechanical, lowest-risk of the remaining gaps: `crate::jit::compiler`
+  (Cranelift) already routes every `Float*` op through two pure host
+  callbacks, `jit_float_binop(op, size, a, b) -> u64` (8 binops --
+  arithmetic *and* comparison, the comparisons returning a plain 0/1, not
+  a float bit pattern) and `jit_float_unop(op, in_size, out_size, a) ->
+  u64` (10 unops, including the two width-converting ones,
+  `FloatInt2Float`/`FloatFloat2Float`) -- neither takes `emu_ptr`, exactly
+  the same pure-function shape `jit_int_flag` already used for `IntCarry`/
+  `IntSCarry`/`IntSBorrow`. Since `selfjit` has no native SIMD/FP emitter
+  primitives of its own on either host backend, there was no encoding
+  work to do at all -- just the same call-and-dispatch shape already
+  established, reusing `load_value`/`store_value`/`ARG0..ARG3`/`RET`
+  exactly as `IntCarry` does, with the op's own discriminant (matching
+  `crate::jit::float_ops::FloatBinOp`/`FloatUnOp`'s `#[repr(u32)]` values
+  exactly) as the first argument instead of a `kind`.
+  - Three new regression tests, checked against real `f64` arithmetic/math
+    (not just "it ran"): all 8 binops (`3.5+2.25`, comparisons checked as
+    plain 0/1), 7 of the 10 unops (`Neg`/`Abs`/`Sqrt`/`Nan`/`Ceil`/
+    `Floor`/`Round`), and the 3 conversion-flavored ones separately
+    (`FloatTrunc` float->int, `FloatInt2Float` int->float,
+    `FloatFloat2Float` f64->f32 width narrowing).
+  - `selfjit_supports` (the differential harness's opcode-coverage gate)
+    updated to include all 18 -- re-ran the harness against the existing
+    corpus fixtures: unchanged, clean (`matched=8`/`2`, `diverged=[]`),
+    since neither fixture happens to use floating point, but confirms
+    nothing regressed.
+  - Validated on both host backends: `selfjit::*` 27/27 (aarch64, +3) and
+    33/33 (x86-64 via Rosetta, +3), `fission-emulator` nextest 100/107
+    (+3, same 7 pre-existing unrelated failures), full workspace nextest
+    2183/2190 (+3, zero regressions), full workspace build clean,
+    `golden_corpus_check.py check` clean.

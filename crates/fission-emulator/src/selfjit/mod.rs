@@ -37,24 +37,25 @@
 //!
 //! `crate::jit::compiler` (Cranelift) covers effectively the full
 //! `PcodeOpcode` surface and all host register allocation. `selfjit::
-//! compiler` covers ~30 integer/boolean/comparison/pointer opcodes (see
-//! that module's own doc for the exact list) and no register allocation
-//! (every operand round-trips through a host callback call -- correct,
-//! but slow) -- but, as of this phase, *does* support intra-instruction
-//! relative-branch loops (item 2 below) and *both* AArch64 and x86-64
-//! host backends (`emit::x86_64` is a real, verified implementation now,
-//! not the stub it started as -- see `emit::mod`'s own doc for how it was
-//! verified without x86-64 silicon, via Rosetta 2). The narrow-negative-
-//! operand sign-extension bug (`IntSLess`/`IntSLessEqual`/`IntSDiv`/
-//! `IntSRem`/`IntSRight`) and the shift-amount-clamping bug are also fixed
-//! now (`load_value_signed`, and the runtime width-compare in `IntLeft`/
-//! `IntRight`/`IntSRight` -- see `compiler.rs`'s own doc for both; the
-//! *other* half of that same old doc entry, arithmetic results not being
-//! truncated to declared width, turned out on investigation not to be a
-//! real bug at all, given this backend's memory-round-trip architecture --
-//! see that doc for the proof). The remaining real gaps are opcode
-//! coverage (`Float*`/`Call*`/`MultiEqual`/etc. -- item 1 below) and the
-//! >8-byte `Load`/`Store` path.
+//! compiler` covers ~48 opcodes now (integer/boolean/comparison/pointer,
+//! plus all 18 `Float*` ops -- see that module's own doc for the exact
+//! list) and no register allocation (every operand round-trips through a
+//! host callback call -- correct, but slow) -- but, as of this phase,
+//! *does* support intra-instruction relative-branch loops (item 2 below)
+//! and *both* AArch64 and x86-64 host backends (`emit::x86_64` is a real,
+//! verified implementation now, not the stub it started as -- see
+//! `emit::mod`'s own doc for how it was verified without x86-64 silicon,
+//! via Rosetta 2). The narrow-negative-operand sign-extension bug
+//! (`IntSLess`/`IntSLessEqual`/`IntSDiv`/`IntSRem`/`IntSRight`) and the
+//! shift-amount-clamping bug are also fixed now (`load_value_signed`, and
+//! the runtime width-compare in `IntLeft`/`IntRight`/`IntSRight` -- see
+//! `compiler.rs`'s own doc for both; the *other* half of that same old
+//! doc entry, arithmetic results not being truncated to declared width,
+//! turned out on investigation not to be a real bug at all, given this
+//! backend's memory-round-trip architecture -- see that doc for the
+//! proof). The remaining real gaps are the rest of opcode coverage
+//! (`Call*`/`MultiEqual`/`Extract`/`Insert`/`SegmentOp` -- item 1 below)
+//! and the >8-byte `Load`/`Store` path.
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -88,9 +89,15 @@
 //!    one flag), and `PtrSub`/`PtrAdd`/`Piece`/`SubPiece`/`LzCount` (this
 //!    tier's own real finding, from the same differential harness: a real
 //!    TB in the corpus fixture was skipping entirely on `SubPiece` alone
-//!    until this landed -- now replays clean) are covered.
-//!    `Float*`/`Call*`/`MultiEqual`/`Extract`/`Insert`/`SegmentOp` are
-//!    larger, later.
+//!    until this landed -- now replays clean) are covered. **Done**, also
+//!    ahead of this list's original ordering: all 18 `Float*` ops (8
+//!    binops + 10 unops), routed through the exact same pure
+//!    `jit_float_binop`/`jit_float_unop` host callbacks `crate::jit::
+//!    compiler` already uses -- this backend has no native SIMD/FP
+//!    emitter primitives, so there was nothing arch-specific to write,
+//!    just the same call-and-dispatch shape `IntCarry`/`PopCount` already
+//!    established. `Call*`/`MultiEqual`/`Extract`/`Insert`/`SegmentOp`
+//!    are still not implemented, larger/later.
 //!    **Done**, ahead of this list's original ordering too: the narrow-
 //!    negative-operand sign-extension bug and the shift-amount-clamping
 //!    bug (both were already-documented, already-diagnosed gaps -- see

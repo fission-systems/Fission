@@ -42,7 +42,13 @@
 //! `BoolAnd`, `BoolOr`, `BoolXor`, `BoolNegate`, `IntEqual`,
 //! `IntNotEqual`, `IntSLess`, `IntLess`, `IntSLessEqual`, `IntLessEqual`,
 //! `IntCarry`, `IntSCarry`, `IntSBorrow`, `PopCount`, `PtrAdd`, `Piece`,
-//! `SubPiece`, `LzCount`,
+//! `SubPiece`, `LzCount`, all 8 `Float*` binops (`FloatAdd`/`Sub`/`Mult`/
+//! `Div`/`Equal`/`NotEqual`/`Less`/`LessEqual`) and all 10 `Float*` unops
+//! (`FloatNeg`/`Abs`/`Sqrt`/`Nan`/`Ceil`/`Floor`/`Round`/`Trunc`/
+//! `Int2Float`/`Float2Float`) -- routed through the exact same pure
+//! `jit_float_binop`/`jit_float_unop` host callbacks `crate::jit::
+//! compiler` (Cranelift) already uses, since this file has no native
+//! SIMD/FP emitter primitives of its own,
 //! `Load`, `Store` (computed-address memory access -- **≤8 bytes only**,
 //! see below), and `Branch`/`CBranch`, including both shapes: a
 //! cross-instruction jump to a real guest address (ends the compiled
@@ -117,8 +123,8 @@
 //! alongside the ≤8-byte path.
 //!
 //! Not implemented at all (of ~70 `PcodeOpcode` variants): the remaining
-//! ones -- `Float*`, `Call`/`CallInd`/`CallOther`, `MultiEqual`, `Extract`,
-//! `Insert`, `SegmentOp`. `compile_translation_block` returns a descriptive
+//! ones -- `Call`/`CallInd`/`CallOther`, `MultiEqual`, `Extract`, `Insert`,
+//! `SegmentOp`. `compile_translation_block` returns a descriptive
 //! `Err` for any of these rather than emitting wrong code -- matching this
 //! session's own repeated finding (the 8 missing `FLOAT_*` decompiler
 //! opcodes, the emulator's own TZCNT bug) that a loud failure beats
@@ -128,7 +134,9 @@ use anyhow::{bail, Result};
 use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 
 use crate::jit::backend::{GuestInsn, TbBackend};
-use crate::jit::callbacks::{jit_int_flag, jit_read_space, jit_write_space};
+use crate::jit::callbacks::{
+    jit_float_binop, jit_float_unop, jit_int_flag, jit_read_space, jit_write_space,
+};
 use crate::selfjit::codebuf::CodeBuffer;
 use crate::selfjit::emit::{
     Asm, Cond, ARG0, ARG1, ARG2, ARG3, ARG4, A_VAL_SLOT, B_VAL_SLOT, EMU_PTR_SLOT, RESULT_SLOT,
@@ -834,6 +842,98 @@ fn compile_op(
             asm.mov_imm64(ARG0, kind);
             asm.mov_imm64(ARG1, size);
             asm.mov_imm64(CALLEE_ADDR, jit_int_flag as *const () as usize as u64);
+            asm.blr(CALLEE_ADDR);
+            store_value(asm, out, RET);
+        }
+        // `jit_float_binop(op, size, a, b) -> u64` -- the exact host
+        // callout `crate::jit::compiler` (Cranelift) already uses for all
+        // 8 float binops (arithmetic *and* comparison alike -- the
+        // comparisons return a plain 0/1 `u64`, not a float bit pattern;
+        // the callback itself already knows which is which per `op`).
+        // Pure function (no `emu_ptr`, no state), same shape as
+        // `jit_int_flag` above -- this file has no native SIMD/FP
+        // emitter primitives, so every float op routes through the host
+        // the same way both backends' integer flag ops do.
+        PcodeOpcode::FloatAdd
+        | PcodeOpcode::FloatSub
+        | PcodeOpcode::FloatMult
+        | PcodeOpcode::FloatDiv
+        | PcodeOpcode::FloatEqual
+        | PcodeOpcode::FloatNotEqual
+        | PcodeOpcode::FloatLess
+        | PcodeOpcode::FloatLessEqual => {
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
+            load_value(asm, &op.inputs[0], A_VAL);
+            load_value(asm, &op.inputs[1], B_VAL);
+            // Matches `crate::jit::float_ops::FloatBinOp`'s own
+            // discriminant values exactly (`#[repr(u32)]`) -- the host
+            // callback dispatches on this raw integer, not a Rust enum,
+            // so the two sides must agree on the encoding.
+            let fop: u64 = match op.opcode {
+                PcodeOpcode::FloatAdd => 0,
+                PcodeOpcode::FloatSub => 1,
+                PcodeOpcode::FloatMult => 2,
+                PcodeOpcode::FloatDiv => 3,
+                PcodeOpcode::FloatEqual => 4,
+                PcodeOpcode::FloatNotEqual => 5,
+                PcodeOpcode::FloatLess => 6,
+                PcodeOpcode::FloatLessEqual => 7,
+                _ => unreachable!(),
+            };
+            let size = op.inputs[0].size.max(1) as u64;
+            // ARG0=op, ARG1=size, ARG2=a, ARG3=b, result in RET.
+            asm.mov_reg(ARG2, A_VAL);
+            asm.mov_reg(ARG3, B_VAL);
+            asm.mov_imm64(ARG0, fop);
+            asm.mov_imm64(ARG1, size);
+            asm.mov_imm64(CALLEE_ADDR, jit_float_binop as *const () as usize as u64);
+            asm.blr(CALLEE_ADDR);
+            store_value(asm, out, RET);
+        }
+        // `jit_float_unop(op, in_size, out_size, a) -> u64` -- the same
+        // host callout `crate::jit::compiler` uses for all 10 float
+        // unops, including the two width-converting ones
+        // (`FloatInt2Float`/`FloatFloat2Float`, where `in_size`/
+        // `out_size` genuinely differ) -- the callback's own Rust
+        // implementation already handles the size-dependent bit-pattern
+        // interpretation, shared unchanged by both backends.
+        PcodeOpcode::FloatNeg
+        | PcodeOpcode::FloatAbs
+        | PcodeOpcode::FloatSqrt
+        | PcodeOpcode::FloatNan
+        | PcodeOpcode::FloatCeil
+        | PcodeOpcode::FloatFloor
+        | PcodeOpcode::FloatRound
+        | PcodeOpcode::FloatTrunc
+        | PcodeOpcode::FloatInt2Float
+        | PcodeOpcode::FloatFloat2Float => {
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() == 1, "{:?} needs 1 input", op.opcode);
+            load_value(asm, &op.inputs[0], A_VAL);
+            // Matches `crate::jit::float_ops::FloatUnOp`'s own
+            // discriminant values exactly.
+            let fop: u64 = match op.opcode {
+                PcodeOpcode::FloatNeg => 0,
+                PcodeOpcode::FloatAbs => 1,
+                PcodeOpcode::FloatSqrt => 2,
+                PcodeOpcode::FloatNan => 3,
+                PcodeOpcode::FloatCeil => 4,
+                PcodeOpcode::FloatFloor => 5,
+                PcodeOpcode::FloatRound => 6,
+                PcodeOpcode::FloatTrunc => 7,
+                PcodeOpcode::FloatInt2Float => 8,
+                PcodeOpcode::FloatFloat2Float => 9,
+                _ => unreachable!(),
+            };
+            let in_size = op.inputs[0].size as u64;
+            let out_size = out.size as u64;
+            // ARG0=op, ARG1=in_size, ARG2=out_size, ARG3=a, result in RET.
+            asm.mov_reg(ARG3, A_VAL);
+            asm.mov_imm64(ARG0, fop);
+            asm.mov_imm64(ARG1, in_size);
+            asm.mov_imm64(ARG2, out_size);
+            asm.mov_imm64(CALLEE_ADDR, jit_float_unop as *const () as usize as u64);
             asm.blr(CALLEE_ADDR);
             store_value(asm, out, RET);
         }
@@ -1915,6 +2015,129 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 40), 64, "lzcount(0) over 8 bytes == width, not 0");
         assert_eq!(read_reg(&mut emu, 48), 63, "lzcount(1) over 8 bytes");
         assert_eq!(read_reg(&mut emu, 56), 0, "lzcount(0x80) over 1 byte -- top bit set");
+    }
+
+    fn f64_imm(val: f64) -> Varnode {
+        imm(val.to_bits() as i64, 8)
+    }
+
+    fn f64_binop(opcode: PcodeOpcode, out: u64, a: f64, b: f64) -> PcodeOp {
+        PcodeOp {
+            seq_num: 1,
+            opcode,
+            address: 0x1000,
+            output: Some(reg(out, 8)),
+            inputs: vec![f64_imm(a), f64_imm(b)],
+            asm_mnemonic: None,
+        }
+    }
+
+    fn read_f64(emu: &mut crate::core::Emulator, offset: u64) -> f64 {
+        f64::from_bits(read_reg(emu, offset))
+    }
+
+    /// The 8 `Float*` binops, all routed through the same
+    /// `jit_float_binop` host callback: arithmetic (`FloatAdd`/`Sub`/
+    /// `Mult`/`Div`) checked against real `f64` arithmetic; comparisons
+    /// (`FloatEqual`/`NotEqual`/`Less`/`LessEqual`) checked as plain 0/1
+    /// results, not float bit patterns.
+    #[test]
+    fn float_binops_match_host_f64_arithmetic() {
+        let ops = vec![
+            f64_binop(PcodeOpcode::FloatAdd, 0, 3.5, 2.25),
+            f64_binop(PcodeOpcode::FloatSub, 8, 3.5, 2.25),
+            f64_binop(PcodeOpcode::FloatMult, 16, 3.5, 2.0),
+            f64_binop(PcodeOpcode::FloatDiv, 24, 7.0, 2.0),
+            f64_binop(PcodeOpcode::FloatEqual, 32, 3.5, 3.5),
+            f64_binop(PcodeOpcode::FloatNotEqual, 40, 3.5, 2.25),
+            f64_binop(PcodeOpcode::FloatLess, 48, 2.25, 3.5),
+            f64_binop(PcodeOpcode::FloatLessEqual, 56, 3.5, 3.5),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_f64(&mut emu, 0), 3.5 + 2.25, "FloatAdd");
+        assert_eq!(read_f64(&mut emu, 8), 3.5 - 2.25, "FloatSub");
+        assert_eq!(read_f64(&mut emu, 16), 3.5 * 2.0, "FloatMult");
+        assert_eq!(read_f64(&mut emu, 24), 7.0 / 2.0, "FloatDiv");
+        assert_eq!(read_reg(&mut emu, 32), 1, "3.5 == 3.5");
+        assert_eq!(read_reg(&mut emu, 40), 1, "3.5 != 2.25");
+        assert_eq!(read_reg(&mut emu, 48), 1, "2.25 < 3.5");
+        assert_eq!(read_reg(&mut emu, 56), 1, "3.5 <= 3.5");
+    }
+
+    /// `FloatNeg`/`FloatAbs`/`FloatSqrt`/`FloatNan`/`FloatCeil`/
+    /// `FloatFloor`/`FloatRound`/`FloatTrunc` -- checked against real
+    /// `f64` math, not just "it ran".
+    #[test]
+    fn float_unops_match_host_f64_math() {
+        fn f64_unop(opcode: PcodeOpcode, out: u64, a: f64) -> PcodeOp {
+            PcodeOp {
+                seq_num: 1,
+                opcode,
+                address: 0x1000,
+                output: Some(reg(out, 8)),
+                inputs: vec![f64_imm(a)],
+                asm_mnemonic: None,
+            }
+        }
+        let ops = vec![
+            f64_unop(PcodeOpcode::FloatNeg, 0, 3.5),
+            f64_unop(PcodeOpcode::FloatAbs, 8, -3.5),
+            f64_unop(PcodeOpcode::FloatSqrt, 16, 16.0),
+            f64_unop(PcodeOpcode::FloatNan, 24, f64::NAN),
+            f64_unop(PcodeOpcode::FloatCeil, 32, 2.1),
+            f64_unop(PcodeOpcode::FloatFloor, 40, 2.9),
+            f64_unop(PcodeOpcode::FloatRound, 48, 2.6),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_f64(&mut emu, 0), -3.5, "FloatNeg");
+        assert_eq!(read_f64(&mut emu, 8), 3.5, "FloatAbs");
+        assert_eq!(read_f64(&mut emu, 16), 4.0, "FloatSqrt");
+        assert_eq!(read_reg(&mut emu, 24), 1, "FloatNan(NaN) is true");
+        assert_eq!(read_f64(&mut emu, 32), 3.0, "FloatCeil");
+        assert_eq!(read_f64(&mut emu, 40), 2.0, "FloatFloor");
+        assert_eq!(read_f64(&mut emu, 48), 3.0, "FloatRound");
+    }
+
+    /// `FloatTrunc` (float -> int, truncate toward 0), `FloatInt2Float`
+    /// (signed int -> float), `FloatFloat2Float` (width conversion,
+    /// f64 -> f32 here) -- the three ops whose `in_size`/`out_size`
+    /// genuinely differ in kind (int vs. float) or width.
+    #[test]
+    fn float_conversions_match_expected_values() {
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::FloatTrunc,
+                address: 0x1000,
+                output: Some(reg(0, 8)), // int64 output
+                inputs: vec![f64_imm(-3.9)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::FloatInt2Float,
+                address: 0x1000,
+                output: Some(reg(8, 8)), // f64 output
+                inputs: vec![imm(-42, 8)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::FloatFloat2Float,
+                address: 0x1000,
+                output: Some(reg(16, 4)), // f32 output
+                inputs: vec![f64_imm(3.5)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0) as i64, -3, "FloatTrunc(-3.9) toward 0");
+        assert_eq!(read_f64(&mut emu, 8), -42.0, "FloatInt2Float(-42)");
+        assert_eq!(
+            f32::from_bits(read_reg(&mut emu, 16) as u32),
+            3.5f32,
+            "FloatFloat2Float(3.5 f64 -> f32)"
+        );
     }
 }
 

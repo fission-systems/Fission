@@ -93,7 +93,25 @@ fn selfjit_supports<'a>(ops: impl IntoIterator<Item = &'a fission_pcode::ir::Pco
         | PcodeOpcode::PtrAdd
         | PcodeOpcode::Piece
         | PcodeOpcode::SubPiece
-        | PcodeOpcode::LzCount => true,
+        | PcodeOpcode::LzCount
+        | PcodeOpcode::FloatAdd
+        | PcodeOpcode::FloatSub
+        | PcodeOpcode::FloatMult
+        | PcodeOpcode::FloatDiv
+        | PcodeOpcode::FloatEqual
+        | PcodeOpcode::FloatNotEqual
+        | PcodeOpcode::FloatLess
+        | PcodeOpcode::FloatLessEqual
+        | PcodeOpcode::FloatNeg
+        | PcodeOpcode::FloatAbs
+        | PcodeOpcode::FloatSqrt
+        | PcodeOpcode::FloatNan
+        | PcodeOpcode::FloatCeil
+        | PcodeOpcode::FloatFloor
+        | PcodeOpcode::FloatRound
+        | PcodeOpcode::FloatTrunc
+        | PcodeOpcode::FloatInt2Float
+        | PcodeOpcode::FloatFloat2Float => true,
         // Load/Store: implemented, but only the <=8-byte path (see
         // `selfjit/compiler.rs`'s wide-path gap note).
         PcodeOpcode::Load => op.output.as_ref().is_none_or(|o| o.size <= 8),
