@@ -1,4 +1,22 @@
-//! P-code -> native AArch64 machine code, without Cranelift.
+//! P-code -> native host machine code (AArch64 or x86-64), without
+//! Cranelift.
+//!
+//! # Two host backends, one generic translation layer
+//!
+//! This file's own p-code-to-instructions translation (`compile_op` and
+//! everything below it) is written against the `Asm`/`Cond` shape
+//! `crate::selfjit::emit` re-exports for whichever host arch Fission is
+//! compiled for -- not hand-specialized per arch. The one place that
+//! genuinely isn't generic is frame setup (`prologue`/`epilogue_return`,
+//! `#[cfg(target_arch = ...)]`-gated below): AAPCS64 (aarch64) and SysV64
+//! (x86-64) differ in real, structural ways here -- no hardware call stack
+//! vs. one, and AAPCS64 conveniently reuses the same register (X0) for a
+//! call's first argument and its return value where SysV64 uses two
+//! different ones (RDI vs RAX) -- see `emit::x86_64`'s own module doc for
+//! the full account of both differences and how `ARG0`/`RET` (distinct
+//! generic constants here, replacing an earlier `aarch64_regs_x0()` helper
+//! that quietly assumed they were always the same register) resolve the
+//! second one.
 //!
 //! # Strategy: correctness first, no register allocator
 //!
@@ -93,46 +111,60 @@ use fission_pcode::ir::{PcodeOp, PcodeOpcode, Varnode};
 use crate::jit::backend::{GuestInsn, TbBackend};
 use crate::jit::callbacks::{jit_int_flag, jit_read_space, jit_write_space};
 use crate::selfjit::codebuf::CodeBuffer;
-use crate::selfjit::emit::{aarch64::Cond, Asm};
+use crate::selfjit::emit::{
+    Asm, Cond, ARG0, ARG1, ARG2, ARG3, ARG4, A_VAL_SLOT, B_VAL_SLOT, EMU_PTR_SLOT, RESULT_SLOT,
+    RET,
+};
 
 // Fixed "the value is here right now" slots between callback calls -- not
-// a real register allocator, see the module docs.
-//
-// Deliberately callee-saved (X19-X28), *not* caller-saved (X9-X15): a real,
-// live bug this way, not a theoretical AAPCS64 footnote -- A_VAL/B_VAL
-// originally lived in X9/X10, and `IntAdd`'s second `load_value` call
-// (itself a `blr` into `jit_read_space`, which the ABI explicitly permits
-// to clobber any caller-saved register including X9-X15) silently
-// stomped A_VAL's first-loaded value before `add_reg` ever read it back --
-// `10 + 32` came out as some unrelated leftover from inside
-// `jit_read_space`'s own compiled body, not 42. Found by bisecting against
-// the passing `emit`/`codebuf` unit tests (which never make two calls in a
-// row) down to this exact module's own multi-op integration test, not by
-// reasoning about the encoding in the abstract.
-const A_VAL: u32 = crate::selfjit::emit::aarch64::X20;
-const B_VAL: u32 = crate::selfjit::emit::aarch64::X21;
-const RESULT: u32 = crate::selfjit::emit::aarch64::X22;
-const CALLEE_ADDR: u32 = aarch64_regs::X9; // caller-saved is fine: never needs to survive a call
+// a real register allocator, see the module docs. Callee-saved on *every*
+// host arch this file targets (AAPCS64 X19-X28 on aarch64, SysV64
+// RBX/R12-R15 on x86-64 -- see each `emit::<arch>` module's own
+// `*_SLOT` constants), *not* caller-saved: a real, live bug this way on
+// aarch64, not a theoretical footnote -- A_VAL/B_VAL originally lived in
+// X9/X10, and `IntAdd`'s second `load_value` call (itself a `blr` into
+// `jit_read_space`, which the ABI explicitly permits to clobber any
+// caller-saved register including X9-X15) silently stomped A_VAL's
+// first-loaded value before `add_reg` ever read it back -- `10 + 32` came
+// out as some unrelated leftover from inside `jit_read_space`'s own
+// compiled body, not 42. Found by bisecting against the passing `emit`/
+// `codebuf` unit tests (which never make two calls in a row) down to this
+// exact module's own multi-op integration test, not by reasoning about
+// the encoding in the abstract.
+const A_VAL: u32 = A_VAL_SLOT;
+const B_VAL: u32 = B_VAL_SLOT;
+const RESULT: u32 = RESULT_SLOT;
+const CALLEE_ADDR: u32 = scratch_regs::R9; // caller-saved is fine: never needs to survive a call
 // Also caller-saved-is-fine, same reasoning as `CALLEE_ADDR` -- only used by
 // `PopCount`'s multi-step bit-twiddling algorithm, which makes no nested
 // `blr` between reading and writing them (unlike `A_VAL`/`B_VAL`, which
 // *do* need to survive a call and are callee-saved specifically because of
 // the bug documented above).
-const TMP1: u32 = aarch64_regs::X10;
-const TMP2: u32 = aarch64_regs::X11;
-const EMU_PTR: u32 = crate::selfjit::emit::aarch64::X19;
-/// AArch64's zero register, used where a data-processing instruction's `Rn`
-/// field needs to read as 0 (e.g. `Int2Comp`'s `0 - x`) rather than a real
-/// value slot.
+const TMP1: u32 = scratch_regs::R10;
+const TMP2: u32 = scratch_regs::R11;
+const EMU_PTR: u32 = EMU_PTR_SLOT;
+/// AArch64's zero register (register 31 reads as XZR in the data-
+/// processing instruction forms `sub_reg` uses), reused as a cross-arch
+/// sentinel for "read as 0" -- `emit::x86_64::Asm::sub_reg` special-cases
+/// this same raw value (31, out of range for any real x86-64 register
+/// encoding) to synthesize `0 - x` via `NEG`, since x86 has no literal
+/// zero register. Used where a data-processing instruction's `Rn` field
+/// needs to read as 0 (e.g. `Int2Comp`'s `0 - x`) rather than a real value
+/// slot.
 const XZR: u32 = 31;
 
-mod aarch64_regs {
-    pub const X9: u32 = 9;
-    // Caller-saved scratch, same "fine since nothing survives a call across
-    // them" reasoning as `X9`/`CALLEE_ADDR` -- used by `PopCount`'s
-    // multi-step bit-twiddling algorithm, which makes no nested `blr`.
-    pub const X10: u32 = 10;
-    pub const X11: u32 = 11;
+// Raw scratch-register numbers, deliberately arch-agnostic raw literals
+// (not routed through `emit::<arch>::*_SLOT`): 9, 10, 11 are valid,
+// caller-saved-scratch register encodings on *both* supported host arches
+// (AArch64's X9-X11; x86-64's R9-R11 -- confirmed disjoint from that arch's
+// own `ARG0..ARG4`/`RET`/`*_SLOT` role constants, see `emit::x86_64`'s own
+// register-plan doc comment) by coincidence of both ISAs' encoding schemes
+// happening to number their extended/scratch registers similarly here, not
+// because they share any real ABI concept.
+mod scratch_regs {
+    pub const R9: u32 = 9;
+    pub const R10: u32 = 10;
+    pub const R11: u32 = 11;
 }
 
 /// `code_arena` keeps every compiled TB's [`ExecutableCode`] mapping alive
@@ -154,9 +186,9 @@ pub struct SelfJitCompiler {
 
 impl TbBackend for SelfJitCompiler {
     fn new() -> Result<Self> {
-        #[cfg(not(target_arch = "aarch64"))]
-        bail!("selfjit is only implemented for aarch64 hosts (see emit/x86_64.rs)");
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+        bail!("selfjit is only implemented for aarch64/x86-64 hosts");
+        #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
         Ok(Self {
             code_arena: Vec::new(),
         })
@@ -187,8 +219,8 @@ impl TbBackend for SelfJitCompiler {
             // Fell through every instruction with no terminating
             // Branch/CBranch (straight-line TB, e.g. no control flow at
             // all in this block) -- return the natural next PC.
-            asm.mov_imm64(aarch64_regs::X9, fallthrough_pc);
-            epilogue_return(&mut asm, aarch64_regs::X9);
+            asm.mov_imm64(RET, fallthrough_pc);
+            epilogue_return(&mut asm, RET);
         }
 
         let code = buf.finish()?;
@@ -198,47 +230,91 @@ impl TbBackend for SelfJitCompiler {
     }
 }
 
-/// Frame layout for the 5 callee-saved registers this file repurposes
-/// (X19=EMU_PTR, X20=A_VAL, X21=B_VAL, X22=RESULT) plus X30 (link
-/// register, clobbered by every `blr`) -- 40 bytes rounded up to 48 to
-/// keep SP 16-byte aligned throughout (required at every `blr` per
-/// AAPCS64, not just at entry/exit).
-const FRAME_BYTES: u32 = 48;
+/// Frame setup is genuinely arch-specific glue, not part of the shared
+/// `Asm` instruction-semantics shape this file otherwise stays generic
+/// over -- see `emit::x86_64`'s own module doc for why: AArch64 has no
+/// hardware call stack (an explicit link register, saved/restored like any
+/// other value) and no PUSH/POP; x86-64 has both, and PUSH/POP is the
+/// idiomatic way to save callee-saved registers there. `prologue`/
+/// `epilogue_return` are the one place in this file that forgo a single
+/// generic body in favor of `#[cfg(target_arch = ...)]`-gated ones.
+#[cfg(target_arch = "aarch64")]
+mod frame {
+    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET};
+    use crate::selfjit::emit::aarch64;
 
-/// Save the callee-saved registers this file uses as fixed value slots
-/// (see [`FRAME_BYTES`]'s doc), then move the incoming arg (X0, `*mut
-/// Emulator` per AAPCS64) into EMU_PTR (X19).
-fn prologue(asm: &mut Asm) {
-    asm.sub_imm(31 /* sp */, 31, FRAME_BYTES);
-    asm.str_imm(EMU_PTR, 31, 0);
-    asm.str_imm(A_VAL, 31, 8);
-    asm.str_imm(B_VAL, 31, 16);
-    asm.str_imm(RESULT, 31, 24);
-    asm.str_imm(aarch64::X30_LR, 31, 32);
-    asm.mov_reg(EMU_PTR, aarch64_regs_x0());
-}
+    /// Frame layout for the 5 callee-saved registers this file repurposes
+    /// (X19=EMU_PTR, X20=A_VAL, X21=B_VAL, X22=RESULT) plus X30 (link
+    /// register, clobbered by every `blr`) -- 40 bytes rounded up to 48 to
+    /// keep SP 16-byte aligned throughout (required at every `blr` per
+    /// AAPCS64, not just at entry/exit).
+    const FRAME_BYTES: u32 = 48;
 
-fn aarch64_regs_x0() -> u32 {
-    crate::selfjit::emit::aarch64::X0
-}
-
-/// Restore the callee-saved registers, move `result_reg` into X0 (AAPCS64
-/// return value; safe even if `result_reg` is one of the callee-saved
-/// slots being restored, since the move happens first), ret.
-fn epilogue_return(asm: &mut Asm, result_reg: u32) {
-    if result_reg != aarch64_regs_x0() {
-        asm.mov_reg(aarch64_regs_x0(), result_reg);
+    /// Save the callee-saved registers this file uses as fixed value slots
+    /// (see [`FRAME_BYTES`]'s doc), then move the incoming arg (`ARG0`,
+    /// `*mut Emulator` per AAPCS64) into EMU_PTR (X19).
+    pub(super) fn prologue(asm: &mut Asm) {
+        asm.sub_imm(31 /* sp */, 31, FRAME_BYTES);
+        asm.str_imm(EMU_PTR, 31, 0);
+        asm.str_imm(A_VAL, 31, 8);
+        asm.str_imm(B_VAL, 31, 16);
+        asm.str_imm(RESULT, 31, 24);
+        asm.str_imm(aarch64::X30_LR, 31, 32);
+        asm.mov_reg(EMU_PTR, super::ARG0);
     }
-    asm.ldr_imm(EMU_PTR, 31, 0);
-    asm.ldr_imm(A_VAL, 31, 8);
-    asm.ldr_imm(B_VAL, 31, 16);
-    asm.ldr_imm(RESULT, 31, 24);
-    asm.ldr_imm(aarch64::X30_LR, 31, 32);
-    asm.add_imm(31, 31, FRAME_BYTES);
-    asm.ret();
+
+    /// Restore the callee-saved registers, move `result_reg` into `RET`
+    /// (safe even if `result_reg` is one of the callee-saved slots being
+    /// restored, since the move happens first), ret.
+    pub(super) fn epilogue_return(asm: &mut Asm, result_reg: u32) {
+        if result_reg != RET {
+            asm.mov_reg(RET, result_reg);
+        }
+        asm.ldr_imm(EMU_PTR, 31, 0);
+        asm.ldr_imm(A_VAL, 31, 8);
+        asm.ldr_imm(B_VAL, 31, 16);
+        asm.ldr_imm(RESULT, 31, 24);
+        asm.ldr_imm(aarch64::X30_LR, 31, 32);
+        asm.add_imm(31, 31, FRAME_BYTES);
+        asm.ret();
+    }
 }
 
-use crate::selfjit::emit::aarch64;
+#[cfg(target_arch = "x86_64")]
+mod frame {
+    use super::{Asm, A_VAL, B_VAL, EMU_PTR, RESULT, RET};
+
+    /// PUSH-ing 4 callee-saved registers (8 bytes each = 32, a multiple of
+    /// 16) leaves RSP's alignment exactly where it started -- this
+    /// function is entered with `RSP % 16 == 8` (SysV64: the caller's
+    /// `call` pushed an 8-byte return address onto a 16-aligned RSP), so
+    /// after the 4 pushes RSP is still `% 16 == 8`, not the `% 16 == 0`
+    /// required immediately before *this* function's own `call`s. One
+    /// extra 8-byte pad (`sub rsp, 8`) fixes that; the epilogue undoes it
+    /// (`add rsp, 8`) before popping back in reverse order.
+    pub(super) fn prologue(asm: &mut Asm) {
+        asm.push_reg(EMU_PTR);
+        asm.push_reg(A_VAL);
+        asm.push_reg(B_VAL);
+        asm.push_reg(RESULT);
+        asm.sub_rsp_imm8(8);
+        asm.mov_reg(EMU_PTR, super::ARG0);
+    }
+
+    pub(super) fn epilogue_return(asm: &mut Asm, result_reg: u32) {
+        if result_reg != RET {
+            asm.mov_reg(RET, result_reg);
+        }
+        asm.add_rsp_imm8(8);
+        asm.pop_reg(RESULT);
+        asm.pop_reg(B_VAL);
+        asm.pop_reg(A_VAL);
+        asm.pop_reg(EMU_PTR);
+        asm.ret();
+    }
+}
+
+use frame::{epilogue_return, prologue};
 
 /// Emit a call to `jit_read_space(emu, space_id, offset, size) -> u64`,
 /// leaving the result in `dst`. `vn.is_constant` short-circuits to a plain
@@ -248,27 +324,27 @@ fn load_value(asm: &mut Asm, vn: &Varnode, dst: u32) {
         asm.mov_imm64(dst, vn.constant_val as u64);
         return;
     }
-    asm.mov_reg(aarch64_regs_x0(), EMU_PTR);
-    asm.mov_imm64(aarch64::X1, vn.space_id);
-    asm.mov_imm64(aarch64::X2, vn.offset);
-    asm.mov_imm64(aarch64::X3, vn.size as u64);
+    asm.mov_reg(ARG0, EMU_PTR);
+    asm.mov_imm64(ARG1, vn.space_id);
+    asm.mov_imm64(ARG2, vn.offset);
+    asm.mov_imm64(ARG3, vn.size as u64);
     asm.mov_imm64(CALLEE_ADDR, jit_read_space as *const () as usize as u64);
     asm.blr(CALLEE_ADDR);
-    if dst != aarch64_regs_x0() {
-        asm.mov_reg(dst, aarch64_regs_x0());
+    if dst != RET {
+        asm.mov_reg(dst, RET);
     }
 }
 
 /// Emit a call to `jit_write_space(emu, space_id, offset, size, val)`.
-/// `src` is clobbered (moved into the X4 arg slot).
+/// `src` is clobbered (moved into the `ARG4` slot).
 fn store_value(asm: &mut Asm, vn: &Varnode, src: u32) {
-    // src may already be x4-shaped by luck; always re-home defensively
+    // src may already be ARG4-shaped by luck; always re-home defensively
     // since call argument registers are not modeled as "owned" by any op.
-    asm.mov_reg(aarch64::X4, src);
-    asm.mov_reg(aarch64_regs_x0(), EMU_PTR);
-    asm.mov_imm64(aarch64::X1, vn.space_id);
-    asm.mov_imm64(aarch64::X2, vn.offset);
-    asm.mov_imm64(aarch64::X3, vn.size as u64);
+    asm.mov_reg(ARG4, src);
+    asm.mov_reg(ARG0, EMU_PTR);
+    asm.mov_imm64(ARG1, vn.space_id);
+    asm.mov_imm64(ARG2, vn.offset);
+    asm.mov_imm64(ARG3, vn.size as u64);
     asm.mov_imm64(CALLEE_ADDR, jit_write_space as *const () as usize as u64);
     asm.blr(CALLEE_ADDR);
 }
@@ -321,13 +397,13 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             // does for every other multi-call op here (see this file's
             // own `A_VAL`/`B_VAL` doc comment above).
             load_value(asm, &op.inputs[1], A_VAL);
-            asm.mov_reg(aarch64_regs_x0(), EMU_PTR);
-            asm.mov_imm64(aarch64::X1, space_id);
-            asm.mov_reg(aarch64::X2, A_VAL);
-            asm.mov_imm64(aarch64::X3, out.size as u64);
+            asm.mov_reg(ARG0, EMU_PTR);
+            asm.mov_imm64(ARG1, space_id);
+            asm.mov_reg(ARG2, A_VAL);
+            asm.mov_imm64(ARG3, out.size as u64);
             asm.mov_imm64(CALLEE_ADDR, jit_read_space as *const () as usize as u64);
             asm.blr(CALLEE_ADDR);
-            store_value(asm, out, aarch64_regs_x0());
+            store_value(asm, out, RET);
         }
         PcodeOpcode::Store => {
             if op.inputs.len() < 3 {
@@ -353,11 +429,11 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             // X0-X4 setup.
             load_value(asm, &op.inputs[1], A_VAL);
             load_value(asm, val_vn, B_VAL);
-            asm.mov_reg(aarch64::X4, B_VAL);
-            asm.mov_reg(aarch64_regs_x0(), EMU_PTR);
-            asm.mov_imm64(aarch64::X1, space_id);
-            asm.mov_reg(aarch64::X2, A_VAL);
-            asm.mov_imm64(aarch64::X3, val_vn.size as u64);
+            asm.mov_reg(ARG4, B_VAL);
+            asm.mov_reg(ARG0, EMU_PTR);
+            asm.mov_imm64(ARG1, space_id);
+            asm.mov_reg(ARG2, A_VAL);
+            asm.mov_imm64(ARG3, val_vn.size as u64);
             asm.mov_imm64(CALLEE_ADDR, jit_write_space as *const () as usize as u64);
             asm.blr(CALLEE_ADDR);
         }
@@ -568,14 +644,14 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
                 _ => 2,
             };
             let size = op.inputs[0].size.max(1) as u64;
-            // AAPCS64: X0=kind, X1=size, X2=a, X3=b, result in X0.
-            asm.mov_reg(aarch64::X2, A_VAL);
-            asm.mov_reg(aarch64::X3, B_VAL);
-            asm.mov_imm64(aarch64_regs_x0(), kind);
-            asm.mov_imm64(aarch64::X1, size);
+            // ARG0=kind, ARG1=size, ARG2=a, ARG3=b, result in RET.
+            asm.mov_reg(ARG2, A_VAL);
+            asm.mov_reg(ARG3, B_VAL);
+            asm.mov_imm64(ARG0, kind);
+            asm.mov_imm64(ARG1, size);
             asm.mov_imm64(CALLEE_ADDR, jit_int_flag as *const () as usize as u64);
             asm.blr(CALLEE_ADDR);
-            store_value(asm, out, aarch64_regs_x0());
+            store_value(asm, out, RET);
         }
         // Population count via the classic SWAR bit-twiddling algorithm --
         // the exact same one `crate::jit::compiler`'s `PopCount` arm uses
@@ -709,8 +785,8 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
                  loop construct like TZCNT) is not supported yet -- see \
                  module docs"
             );
-            asm.mov_imm64(aarch64_regs_x0(), target.offset);
-            epilogue_return(asm, aarch64_regs_x0());
+            asm.mov_imm64(RET, target.offset);
+            epilogue_return(asm, RET);
         }
         PcodeOpcode::CBranch => {
             anyhow::ensure!(op.inputs.len() >= 2, "CBranch needs a target and a condition");
@@ -728,8 +804,8 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             // fallthrough-pc return if this was the last op).
             let not_taken_label = asm.placeholder();
             let taken_at = asm.offset();
-            asm.mov_imm64(aarch64_regs_x0(), target.offset);
-            epilogue_return(asm, aarch64_regs_x0());
+            asm.mov_imm64(RET, target.offset);
+            epilogue_return(asm, RET);
             let not_taken_at = asm.offset();
             asm.patch_b_cond(taken, Cond::Ne, taken_at);
             asm.patch_b(not_taken_label, not_taken_at);

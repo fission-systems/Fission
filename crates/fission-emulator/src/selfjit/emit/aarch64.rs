@@ -35,6 +35,23 @@ pub const X21: u32 = 21;
 pub const X22: u32 = 22;
 pub const X30_LR: u32 = 30;
 
+// Generic cross-arch role constants `compiler.rs` imports without naming a
+// concrete arch module (see `selfjit::emit::x86_64`'s own doc comment on
+// why `ARG0` and `RET` must be genuinely distinct constants on that arch,
+// even though they're both just `X0` here -- AAPCS64 uses the same
+// register for a call's first argument and its return value; SysV64 does
+// not).
+pub const ARG0: u32 = X0;
+pub const ARG1: u32 = X1;
+pub const ARG2: u32 = X2;
+pub const ARG3: u32 = X3;
+pub const ARG4: u32 = X4;
+pub const RET: u32 = X0;
+pub const EMU_PTR_SLOT: u32 = X19;
+pub const A_VAL_SLOT: u32 = X20;
+pub const B_VAL_SLOT: u32 = X21;
+pub const RESULT_SLOT: u32 = X22;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Cond {
     Eq,

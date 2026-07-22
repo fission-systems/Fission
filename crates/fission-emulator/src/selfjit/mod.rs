@@ -18,7 +18,8 @@
 //! exact covered-opcode list and its own integration test, which builds a
 //! real `Emulator`, compiles a hand-built p-code sequence with
 //! `SelfJitCompiler` (no Cranelift involved anywhere in the call path),
-//! executes the result as real mapped AArch64 machine code, and checks
+//! executes the result as real mapped host machine code (AArch64 or
+//! x86-64, whichever this crate is compiled for), and checks
 //! the guest-visible register state came out correct. That test passing
 //! is the actual proof-of-concept this skeleton delivers: the pipeline
 //! (p-code -> hand-emitted host machine code -> mmap RX -> call -> correct
@@ -38,11 +39,13 @@
 //! `PcodeOpcode` surface, all host register allocation, and intra-
 //! instruction relative-branch loops (the TZCNT bug this session just
 //! fixed lives in exactly that machinery). `selfjit::compiler` covers
-//! ~25 integer/boolean/comparison opcodes (see that module's own doc for
-//! the exact list), no register allocation (every operand round-trips
-//! through a host callback call -- correct, but slow), no loops, and one
-//! host architecture (AArch64; `emit::x86_64` is an unimplemented stub,
-//! see its module doc for why).
+//! ~30 integer/boolean/comparison/pointer opcodes (see that module's own
+//! doc for the exact list), no register allocation (every operand
+//! round-trips through a host callback call -- correct, but slow), and no
+//! loops -- but, as of this phase, *both* AArch64 and x86-64 host
+//! backends (`emit::x86_64` is a real, verified implementation now, not
+//! the stub it started as -- see `emit::mod`'s own doc for how it was
+//! verified without x86-64 silicon, via Rosetta 2).
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -89,9 +92,29 @@
 //!    loop construct) -- `compiler.rs` currently refuses to compile any TB
 //!    containing one, matching `crate::jit::compiler::remap_relative_
 //!    branches`'s own logic once ported over.
-//! 3. Implement `emit::x86_64` (this session's own dev machine is Apple
-//!    Silicon, so it could not be built *and verified* here -- see that
-//!    module's doc for encoding references).
+//! 3. **Done.** `emit::x86_64` is implemented (all the primitives
+//!    `compiler.rs` needs -- ALU ops, shifts by CL, DIV/IDIV,
+//!    BSR-based `clz_reg`, PUSH/POP-based frame setup, `Jcc`/`JMP`
+//!    branch patching -- see that module's own doc for the encoding
+//!    details and the register-role differences from AAPCS64 it had to
+//!    account for) and verified via `rustup target add
+//!    x86_64-apple-darwin` + `cargo test --target x86_64-apple-darwin`
+//!    (Rosetta 2 -- this session's own dev machine is still Apple
+//!    Silicon, so this is real but not equivalent to native-silicon
+//!    verification; see `emit::mod`'s doc). `compiler.rs` itself needed a
+//!    real generalization to support this, not just a new emitter file:
+//!    it used to lean on AAPCS64's happenstance of using the same
+//!    register (X0) for both a call's first argument and its return
+//!    value (a single `aarch64_regs_x0()` helper for both roles); SysV64
+//!    doesn't share that property (RDI vs RAX), so that helper is gone,
+//!    replaced by two distinct generic constants (`ARG0`/`RET`, identical
+//!    on aarch64, genuinely different on x86-64). Frame setup
+//!    (`prologue`/`epilogue_return`) is the one place that stayed
+//!    genuinely arch-specific (`#[cfg(target_arch = ...)]`-gated) rather
+//!    than forced through one shape, since AAPCS64 and SysV64 differ
+//!    structurally there (explicit link-register save/restore vs.
+//!    PUSH/POP with an implicit hardware call stack) -- see
+//!    `compiler.rs`'s own module doc for the full account.
 //! 4. **Started** (`selfjit::differential`, `#[cfg(test)]`-only): captures
 //!    real, SLEIGH-decoded translation blocks from a real binary (via
 //!    `Emulator::collect_translation_block`) and replays each one both

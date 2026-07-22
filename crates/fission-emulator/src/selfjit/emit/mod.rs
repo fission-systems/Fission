@@ -5,23 +5,36 @@
 //! is compiled for -- not the *guest* architecture being emulated (that's
 //! always p-code by the time it reaches here, already architecture-neutral).
 //!
-//! Only [`aarch64`] is implemented -- this workspace's own dev machine is
-//! Apple Silicon, so it's the only target that could actually be built
-//! *and verified* (mmap the generated code, call it, check the result) in
-//! this skeleton. [`x86_64`] is a stub with the same `Asm` shape but no
-//! real encodings, so `compiler.rs` can be written against a stable
-//! interface either way -- filling it in is real, separate follow-up work,
-//! not attempted here without a way to test it.
+//! Both [`aarch64`] and [`x86_64`] are implemented and verified end to end
+//! (mmap the generated code, call it, check the result -- see each
+//! module's own unit tests plus `compiler.rs`'s integration test and the
+//! full `selfjit::differential` suite, all of which pass on both). This
+//! workspace's own dev machine is Apple Silicon, so [`x86_64`] couldn't be
+//! verified on real x86-64 silicon -- it was built and tested via
+//! `rustup target add x86_64-apple-darwin` + `cargo test --target
+//! x86_64-apple-darwin`, which runs under Rosetta 2. Rosetta translates a
+//! process's *own* runtime-generated machine code (not just its
+//! statically-linked instructions) transparently, so this is a real,
+//! meaningful verification of the encodings -- just not on real x86-64
+//! hardware or under a real Linux/Windows SysV64 host, which is why this
+//! is flagged as a real (if narrow) verification gap rather than treated
+//! as equivalent to `aarch64`'s native-silicon confidence level.
 
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::Asm;
+pub use aarch64::{
+    Asm, Cond, ARG0, ARG1, ARG2, ARG3, ARG4, A_VAL_SLOT, B_VAL_SLOT, EMU_PTR_SLOT, RESULT_SLOT,
+    RET,
+};
 
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::Asm;
+pub use x86_64::{
+    Asm, Cond, ARG0, ARG1, ARG2, ARG3, ARG4, A_VAL_SLOT, B_VAL_SLOT, EMU_PTR_SLOT, RESULT_SLOT,
+    RET,
+};
 
 /// A forward-branch fixup site: an instruction slot already emitted (as a
 /// placeholder word) whose real encoding depends on a target offset not

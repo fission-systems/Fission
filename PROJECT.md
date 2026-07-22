@@ -4555,3 +4555,118 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     unrelated failures, +3 vs. previous baseline from the new tests), full
     workspace nextest 2175/2182 (same +3, zero regressions), full
     workspace build clean, `golden_corpus_check.py check` clean.
+- **`selfjit`: `emit::x86_64` implemented and verified via Rosetta 2,
+  2026-07-22.** User asked how to verify the x86-64 host backend given
+  this session's dev machine is Apple Silicon; recommended (and user
+  confirmed) `rustup target add x86_64-apple-darwin` + `cargo test
+  --target x86_64-apple-darwin` for fast local iteration (Rosetta 2
+  transparently translates a process's own *runtime-generated* machine
+  code, not just its statically-linked instructions, so an mmap'd RX page
+  this emitter writes executes correctly there), with real x86-64 CI
+  (GitHub Actions `ubuntu-latest`) as the eventual authoritative check
+  (not set up this phase -- local verification only).
+  - **Real, structural gap found immediately on attempting the cross-
+    compile**: `compiler.rs` wasn't actually arch-generic despite
+    `emit::x86_64`'s stub claiming to "mirror aarch64::Asm's shape" --
+    it directly imported `crate::selfjit::emit::aarch64` (hardcoding the
+    concrete module, not the re-exported generic `Asm`/`Cond`), and
+    leaned on AAPCS64's happenstance of using **the same register (X0)**
+    for both a call's first argument and its return value via a single
+    `aarch64_regs_x0()` helper used for both roles interchangeably.
+    SysV64 (x86-64) does not share that property -- first argument is
+    RDI, return value is RAX, genuinely different registers -- so that
+    helper's assumption silently doesn't generalize. Fixed by splitting
+    it into two distinct generic constants, `ARG0` and `RET`
+    (`emit::<arch>::{ARG0,ARG1,ARG2,ARG3,ARG4,RET,EMU_PTR_SLOT,
+    A_VAL_SLOT,B_VAL_SLOT,RESULT_SLOT}`, re-exported generically from
+    `emit::mod`), identical on aarch64 (both still resolve to X0, zero
+    behavior change there -- confirmed via a full native aarch64 rebuild
+    and test run before touching anything else) but genuinely different
+    on x86-64.
+  - **Frame setup (`prologue`/`epilogue_return`) stayed genuinely
+    arch-specific** rather than forced through one shape: AArch64 has no
+    hardware call stack (an explicit link register, saved/restored like
+    any other value) and no PUSH/POP; x86-64 has both, and PUSH/POP is
+    the idiomatic way to save callee-saved registers there. Rather than
+    invent a lowest-common-denominator abstraction spanning both (real
+    risk to the already-verified, working aarch64 path for no benefit),
+    these two functions are `#[cfg(target_arch = ...)]`-gated: aarch64's
+    original SP-immediate-arithmetic-plus-explicit-link-register-save
+    body is untouched; x86-64 gets a new PUSH/POP-based one (4 pushes
+    leave RSP exactly as misaligned as it started, since 4×8=32 bytes is
+    itself 16-aligned -- an extra `sub rsp,8` pad is needed before this
+    function's own subsequent `call`s, undone by a matching `add rsp,8`
+    in the epilogue before popping back in reverse order).
+  - **`emit::x86_64` implemented from scratch**: hand-encoded REX-prefixed
+    ModRM instructions for the full primitive set `compiler.rs` needs --
+    `MOV`/`ADD`/`SUB`/`AND`/`OR`/`XOR`/`CMP` (`op r/m64,r64` shape),
+    `IMUL`/`BSR` (reversed `op r64,r/m64` shape, two-byte `0F` opcodes),
+    `DIV`/`IDIV` (fixed `RDX:RAX` dividend, not a 3-operand form --
+    always clobbers RAX/RDX as scratch, safe since none of `compiler.rs`'s
+    named slots are ever mapped there), `SHL`/`SHR`/`SAR` by `CL`
+    specifically (x86's register-count shift forms, unlike AArch64's
+    LSLV/LSRV/ASRV which take any register), `NEG` (synthesizes `0 - x`
+    for the `XZR` sentinel `sub_reg`/`cmp_reg` special-case, since x86 has
+    no literal zero register), `CALL r/m64`, `PUSH`/`POP`, and variable-
+    length `Jcc rel32`/`JMP rel32` branch patching (a real difference from
+    aarch64's fixed-4-byte-instruction `placeholder()`/`patch_b*` design:
+    x86's `Jcc` is 6 bytes and `JMP` is 5, so `placeholder()` reserves a
+    fixed 6-byte slot always, and `patch_b`'s 5-byte `JMP` pads with a
+    trailing `NOP` to fill it).
+  - **Register aliasing was the main correctness hazard**, since x86 ALU
+    instructions are destructive 2-operand (`rd = rd OP rm`, no true
+    3-operand form) but `compiler.rs`'s call sites sometimes pass the same
+    physical register for two of the three logical operands (e.g.
+    `PtrAdd`'s `add_reg(RESULT, A_VAL, RESULT)`, `rd == rm`). Handled via
+    a general `binop_general` helper: `rd == rn` emits directly; `rd ==
+    rm` on a commutative op swaps operands (no correctness issue, just
+    algebra); `rd == rm` on the one non-commutative op that reaches this
+    path (`sub_reg`) routes through a dedicated internal scratch register
+    (`R15`, confirmed disjoint from every role `compiler.rs` is aware of)
+    so the aliased operand's value survives being read. `msub_reg`
+    (remainder via multiply-subtract, `rd = ra - rn*rm`) has the same
+    hazard at its own real call site (`msub_reg(RESULT, RESULT, B_VAL,
+    A_VAL)`, `rd == rn`) -- handled by computing `rn*rm` into RAX
+    *before* touching `rd` at all.
+  - **Two real encoding bugs caught by execution, not inspection** --
+    exactly this module's own stated discipline: (1) `cmp_reg` didn't
+    special-case the `XZR` sentinel (31) the way `sub_reg` already did --
+    `LzCount`'s zero-input branch (`cmp_reg(A_VAL, XZR)`) silently
+    compared against whatever real register (R15) `31`'s low 3 bits
+    happened to alias instead of against 0, caught by
+    `lzcount_matches_known_cases` failing with a wildly wrong result, not
+    by re-reading the encoding. (2) `sub_imm`/`add_imm` were initially
+    left as `todo!()` stubs on the (wrong) assumption that only aarch64's
+    frame setup used them -- `LzCount`'s `63 - bsr(x)` adjustment calls
+    `sub_imm` directly, and the same test caught the `todo!()` panic
+    immediately. Both fixed; both primitives are now real, implemented
+    encodings, documented as such (not "unused stubs") in the module doc.
+  - **Verified end to end via Rosetta**: `emit::x86_64`'s own 8 new unit
+    tests (mirroring aarch64.rs's `mov_imm64_add_and_ret_roundtrip`/
+    `cmp_and_conditional_branch` pattern, plus dedicated aliasing/DIV/
+    shift/CLZ/PUSH-POP cases), all of `selfjit::compiler::tests` (19
+    tests, unchanged from the aarch64 suite -- same test code, different
+    compiled backend), and the full `selfjit::differential` suite
+    (including the previously-fixed `known_issue_cranelift_register_copy_
+    divergence_at_0x10067e4` regression test) -- **25/25 passing** under
+    `cargo test -p fission-emulator --target x86_64-apple-darwin --lib
+    selfjit::`. The differential suite result is the most meaningful one:
+    it compiles real, SLEIGH-decoded translation blocks from a real
+    binary into real x86-64 host machine code via this brand-new emitter,
+    executes that code (under Rosetta), and diffs the result against
+    Cranelift byte-for-byte -- clean. Full `fission-emulator` lib test
+    suite (59 tests, everything, not just `selfjit`) also 59/59 on this
+    target, confirming the rest of the crate (including Cranelift's own
+    JIT) cross-compiles and runs correctly too.
+  - Native aarch64 re-validated unchanged throughout (not just at the
+    end): `fission-emulator` nextest 92/99 (same 7 pre-existing failures),
+    full workspace nextest 2175/2182, full workspace build clean,
+    `golden_corpus_check.py check` clean.
+  - Explicitly **not** claimed: equivalence to real x86-64 silicon
+    verification (Rosetta 2 is a real, meaningful check -- it translates
+    this process's own runtime-generated code, not just static
+    instructions -- but isn't the same as running on actual Intel/AMD
+    hardware or under a real Linux/Windows SysV64 host); CI on real
+    x86-64 hardware; wiring `SelfJitCompiler` into `Emulator::new` as the
+    active backend (still not done, still gated on full opcode/loop
+    coverage, per this module's own stated bar).

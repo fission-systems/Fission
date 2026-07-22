@@ -56,6 +56,17 @@ impl CodeBuffer {
         self.bytes[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
     }
 
+    /// Overwrite an arbitrary-length byte range at `offset` -- the x86-64
+    /// emitter's equivalent of [`Self::patch_u32_le`], needed because x86
+    /// instructions are variable-length (unlike AArch64's fixed 4 bytes):
+    /// a placeholder branch slot is reserved at a fixed width up front,
+    /// then patched with whichever real encoding (possibly shorter, padded
+    /// with a trailing NOP) turns out to be needed once the target is
+    /// known.
+    pub fn patch_bytes(&mut self, offset: usize, bytes: &[u8]) {
+        self.bytes[offset..offset + bytes.len()].copy_from_slice(bytes);
+    }
+
     /// Map `self.bytes` RW, copy them in, then flip the mapping to RX.
     ///
     /// TODO(selfjit): macOS/Apple Silicon hardened runtime needs
@@ -98,7 +109,10 @@ impl CodeBuffer {
                 bail!("mprotect(PROT_READ|PROT_EXEC) failed: {}", err);
             }
 
-            #[cfg(target_arch = "aarch64")]
+            // Unconditional: x86-64's I-cache is coherent with the D-cache
+            // by default, so its own `clear_icache` below is correctly a
+            // no-op there -- only AArch64 needs the real invalidation (see
+            // that impl's own doc comment on why it's load-bearing there).
             clear_icache(addr, len);
 
             Ok(ExecutableCode {
