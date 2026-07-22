@@ -23,7 +23,8 @@
 //! `IntLeft`, `IntRight`, `IntSRight`, `Int2Comp`, `IntNegate`,
 //! `BoolAnd`, `BoolOr`, `BoolXor`, `BoolNegate`, `IntEqual`,
 //! `IntNotEqual`, `IntSLess`, `IntLess`, `IntSLessEqual`, `IntLessEqual`,
-//! and TB-terminating `Branch`/`CBranch` -- but **only as a straight-line,
+//! `Load`, `Store` (computed-address memory access -- **≤8 bytes only**,
+//! see below), and TB-terminating `Branch`/`CBranch` -- but **only as a straight-line,
 //! single-exit TB**: every `Branch`/`CBranch` here ends the compiled
 //! function (returns the target PC, or falls through), the same shape
 //! `crate::jit::compiler`'s exit block produces for a cross-instruction
@@ -64,8 +65,20 @@
 //! binaries -- is the right place to catch/fix this class of bug
 //! properly rather than patching call sites ad hoc without that harness).
 //!
+//! `Load`/`Store`'s own gap: only the ≤8-byte path is implemented (`jit_
+//! read_space`/`jit_write_space`, the same host callbacks `load_value`/
+//! `store_value` already use, just with a runtime-computed address
+//! register in the X2 argument slot instead of a compile-time-constant
+//! offset). A `>8`-byte `Load`/`Store` (e.g. an XMM/YMM-width value or a
+//! struct copy) returns `Err`, not a silently-truncated result --
+//! `crate::jit::compiler`'s wide path additionally allocates a Cranelift
+//! stack slot and calls `jit_read_bytes`/`jit_write_bytes`; this hand-
+//! rolled backend has no stack-slot allocator yet, so porting that shape
+//! safely is real, separate follow-up work rather than something to rush
+//! alongside the ≤8-byte path.
+//!
 //! Not implemented at all (of ~70 `PcodeOpcode` variants): the remaining
-//! ~45 -- all `Float*`, `Call`/`CallInd`/`CallOther`, `MultiEqual`,
+//! ~43 -- all `Float*`, `Call`/`CallInd`/`CallOther`, `MultiEqual`,
 //! `Piece`/`SubPiece`, `PtrAdd`/`PtrSub`, `PopCount`/`LzCount`,
 //! `IntCarry`/`IntSCarry`/`IntSBorrow` (x86-flag-style carry/overflow
 //! opcodes -- deferred since they need either ARM's own NZCV flag
@@ -250,6 +263,20 @@ fn store_value(asm: &mut Asm, vn: &Varnode, src: u32) {
     asm.blr(CALLEE_ADDR);
 }
 
+/// Resolve a `Load`/`Store`'s first input (the p-code "constant space id"
+/// operand) to a concrete space id -- matches `crate::jit::compiler`'s own
+/// `space_const`: Fission's raw DTO can encode a constant-space varnode
+/// either as a genuine constant (`is_constant`, value in `constant_val`)
+/// or with the id folded into `offset`; both are compile-time known, so
+/// this resolves fully at compile time, never emitting any code.
+fn space_const(vn: &Varnode) -> u64 {
+    if vn.is_constant {
+        vn.constant_val as u64
+    } else {
+        vn.offset
+    }
+}
+
 fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
     match op.opcode {
         PcodeOpcode::Copy | PcodeOpcode::IntZExt => {
@@ -261,6 +288,68 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             let out = require_output(op)?;
             load_value(asm, &op.inputs[0], RESULT);
             store_value(asm, out, RESULT);
+        }
+        PcodeOpcode::Load => {
+            anyhow::ensure!(
+                op.inputs.len() >= 2,
+                "Load needs a space-id input and an address input"
+            );
+            let out = require_output(op)?;
+            if out.size > 8 {
+                bail!(
+                    "selfjit: Load of a {}-byte (>8) value is not supported yet \
+                     -- see module docs' wide-path note",
+                    out.size
+                );
+            }
+            let space_id = space_const(&op.inputs[0]);
+            // Resolve the address into a callee-saved slot *before* the
+            // X0-X3 call-argument setup below -- `load_value` may itself
+            // `blr` into `jit_read_space` (if `inputs[1]` isn't a compile-
+            // time constant), which the ABI permits to clobber any
+            // caller-saved register. A_VAL survives that the same way it
+            // does for every other multi-call op here (see this file's
+            // own `A_VAL`/`B_VAL` doc comment above).
+            load_value(asm, &op.inputs[1], A_VAL);
+            asm.mov_reg(aarch64_regs_x0(), EMU_PTR);
+            asm.mov_imm64(aarch64::X1, space_id);
+            asm.mov_reg(aarch64::X2, A_VAL);
+            asm.mov_imm64(aarch64::X3, out.size as u64);
+            asm.mov_imm64(CALLEE_ADDR, jit_read_space as *const () as usize as u64);
+            asm.blr(CALLEE_ADDR);
+            store_value(asm, out, aarch64_regs_x0());
+        }
+        PcodeOpcode::Store => {
+            if op.inputs.len() < 3 {
+                // Matches `crate::jit::compiler`'s own `>= 3` gate for
+                // parity -- a legal-but-unseen 2-input Store form
+                // (implicit space id) silently does nothing on that
+                // backend too; diverging here would be a worse surprise
+                // than matching it.
+                return Ok(());
+            }
+            let val_vn = &op.inputs[2];
+            if val_vn.size > 8 {
+                bail!(
+                    "selfjit: Store of a {}-byte (>8) value is not supported yet \
+                     -- see module docs' wide-path note",
+                    val_vn.size
+                );
+            }
+            let space_id = space_const(&op.inputs[0]);
+            // Resolve address, then value, both into callee-saved slots
+            // (same reasoning as `Load` above) so they survive each
+            // other's potential nested `blr` and the write call's own
+            // X0-X4 setup.
+            load_value(asm, &op.inputs[1], A_VAL);
+            load_value(asm, val_vn, B_VAL);
+            asm.mov_reg(aarch64::X4, B_VAL);
+            asm.mov_reg(aarch64_regs_x0(), EMU_PTR);
+            asm.mov_imm64(aarch64::X1, space_id);
+            asm.mov_reg(aarch64::X2, A_VAL);
+            asm.mov_imm64(aarch64::X3, val_vn.size as u64);
+            asm.mov_imm64(CALLEE_ADDR, jit_write_space as *const () as usize as u64);
+            asm.blr(CALLEE_ADDR);
         }
         PcodeOpcode::IntAdd
         | PcodeOpcode::IntSub
@@ -811,6 +900,91 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 56), 0, "7 < 3 signed");
         assert_eq!(read_reg(&mut emu, 64), 1, "3 < 7 unsigned");
         assert_eq!(read_reg(&mut emu, 72), 0, "7 < 3 unsigned");
+    }
+
+    fn store_op(space_id: i64, addr: Varnode, value: Varnode) -> PcodeOp {
+        PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::Store,
+            address: 0x1000,
+            output: None,
+            inputs: vec![imm(space_id, 8), addr, value],
+            asm_mnemonic: None,
+        }
+    }
+
+    fn load_op(out_offset: u64, space_id: i64, addr: Varnode) -> PcodeOp {
+        PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::Load,
+            address: 0x1000,
+            output: Some(reg(out_offset, 8)),
+            inputs: vec![imm(space_id, 8), addr],
+            asm_mnemonic: None,
+        }
+    }
+
+    /// `Load`/`Store` with a *computed* (runtime, not compile-time-
+    /// constant-offset) address -- reuses the register space (id 4, same
+    /// as every other test's `reg()` helper) as the "memory" being
+    /// dereferenced, at offsets distinct from this test's own result
+    /// registers, so a round trip through `Store` then `Load` proves the
+    /// address actually flows through a register (`A_VAL`) into the
+    /// `jit_write_space`/`jit_read_space` call, not a hard-coded offset.
+    #[test]
+    fn load_store_round_trip_with_computed_address() {
+        let ops = vec![
+            // Store 42 (8 bytes) at address 200, load it back into r0.
+            store_op(4, imm(200, 8), imm(42, 8)),
+            load_op(0, 4, imm(200, 8)),
+            // Store a 4-byte value at address 208, load it back as 4
+            // bytes into r8 -- `jit_read_space` always zero-extends to a
+            // full u64 result register, so 0xFFFFFFFF round-trips as
+            // 0x00000000FFFFFFFF (this backend's documented raw-load
+            // contract, same as every other narrow op here; sign
+            // interpretation is the caller's job).
+            store_op(4, imm(208, 8), imm(-1, 4)),
+            load_op(8, 4, imm(208, 4)),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0), 42, "8-byte round trip");
+        assert_eq!(read_reg(&mut emu, 8), 0xFFFFFFFF, "4-byte round trip, zero-extended");
+    }
+
+    /// A `>8`-byte `Load`/`Store` isn't implemented (no stack-slot
+    /// allocator in this hand-rolled backend yet -- see module docs) --
+    /// must fail loudly at compile time, never silently truncate/corrupt.
+    #[test]
+    fn wide_load_and_store_fail_loudly_not_silently() {
+        let load_ops = vec![PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Load,
+            address: 0x1000,
+            output: Some(reg(0, 16)),
+            inputs: vec![imm(4, 8), imm(200, 8)],
+            asm_mnemonic: None,
+        }];
+        let insns = [GuestInsn { pc: 0x1000, len: 4, ops: load_ops }];
+        let mut compiler = SelfJitCompiler::new().expect("selfjit backend available");
+        let err = compiler
+            .compile_translation_block(&insns, 4)
+            .expect_err("wide Load must fail loudly, not silently truncate");
+        assert!(err.to_string().contains("not supported"), "unexpected error: {err}");
+
+        let store_ops = vec![PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Store,
+            address: 0x1000,
+            output: None,
+            inputs: vec![imm(4, 8), imm(200, 8), reg(0, 16)],
+            asm_mnemonic: None,
+        }];
+        let insns2 = [GuestInsn { pc: 0x1000, len: 4, ops: store_ops }];
+        let mut compiler2 = SelfJitCompiler::new().expect("selfjit backend available");
+        let err2 = compiler2
+            .compile_translation_block(&insns2, 4)
+            .expect_err("wide Store must fail loudly, not silently truncate");
+        assert!(err2.to_string().contains("not supported"), "unexpected error: {err2}");
     }
 }
 
