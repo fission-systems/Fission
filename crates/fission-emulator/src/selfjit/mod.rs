@@ -36,16 +36,18 @@
 //! # The real gap vs. Cranelift, and the recommended path to closing it
 //!
 //! `crate::jit::compiler` (Cranelift) covers effectively the full
-//! `PcodeOpcode` surface, all host register allocation, and intra-
-//! instruction relative-branch loops (the TZCNT bug this session just
-//! fixed lives in exactly that machinery). `selfjit::compiler` covers
-//! ~30 integer/boolean/comparison/pointer opcodes (see that module's own
-//! doc for the exact list), no register allocation (every operand
-//! round-trips through a host callback call -- correct, but slow), and no
-//! loops -- but, as of this phase, *both* AArch64 and x86-64 host
-//! backends (`emit::x86_64` is a real, verified implementation now, not
-//! the stub it started as -- see `emit::mod`'s own doc for how it was
-//! verified without x86-64 silicon, via Rosetta 2).
+//! `PcodeOpcode` surface and all host register allocation. `selfjit::
+//! compiler` covers ~30 integer/boolean/comparison/pointer opcodes (see
+//! that module's own doc for the exact list) and no register allocation
+//! (every operand round-trips through a host callback call -- correct,
+//! but slow) -- but, as of this phase, *does* support intra-instruction
+//! relative-branch loops (item 2 below) and *both* AArch64 and x86-64
+//! host backends (`emit::x86_64` is a real, verified implementation now,
+//! not the stub it started as -- see `emit::mod`'s own doc for how it was
+//! verified without x86-64 silicon, via Rosetta 2). The remaining real
+//! gaps are opcode coverage (`Float*`/`Call*`/`MultiEqual`/etc. -- item 1
+//! below) and the truncation/shift-clamp/narrow-sign-extension
+//! correctness gaps `compiler.rs`'s own doc still tracks.
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -88,10 +90,20 @@
 //!    before shifting (see `compiler.rs`'s own doc for both), and port
 //!    the >8-byte `Load`/`Store` path (needs a stack-slot allocator this
 //!    backend doesn't have yet -- see `compiler.rs`'s `Load`/`Store` doc).
-//! 2. Support intra-instruction relative BRANCH/CBRANCH (the TZCNT-style
-//!    loop construct) -- `compiler.rs` currently refuses to compile any TB
-//!    containing one, matching `crate::jit::compiler::remap_relative_
-//!    branches`'s own logic once ported over.
+//! 2. **Done.** Intra-instruction relative BRANCH/CBRANCH (the TZCNT-style
+//!    loop construct) is supported -- `compiler.rs` now flattens every
+//!    instruction's ops into one TB-wide list and reuses `crate::jit::
+//!    compiler::remap_relative_branches` directly (the exact function,
+//!    not a re-derived copy) to resolve relative deltas into absolute
+//!    flat-op-index targets, then jumps between them via a deferred-patch
+//!    pass (each op's real code offset isn't known until it's compiled,
+//!    so forward references patch in a second pass once every offset
+//!    exists). The same livelock fuse `crate::jit::compiler` uses
+//!    (`jit_count_pcode`, called before every op) is wired in too, proven
+//!    by a dedicated test with a *genuinely* infinite loop that would hang
+//!    the test process if the fuse didn't actually work. Verified end to
+//!    end on both host backends (aarch64 natively, x86-64 via Rosetta --
+//!    see item 3's own verification note).
 //! 3. **Done.** `emit::x86_64` is implemented (all the primitives
 //!    `compiler.rs` needs -- ALU ops, shifts by CL, DIV/IDIV,
 //!    BSR-based `clz_reg`, PUSH/POP-based frame setup, `Jcc`/`JMP`

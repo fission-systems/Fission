@@ -1882,7 +1882,17 @@ fn space_const(vn: &Varnode) -> u64 {
 /// instruction* `op` belongs to (before flattening into the TB-wide `flat`
 /// vec) -- used to validate a candidate relative delta, not to bound the
 /// search.
-fn remap_relative_branches(op: &mut PcodeOp, base: usize, local_index: usize, insn_op_count: usize) {
+///
+/// `pub(crate)`, not private: pure `PcodeOp`/`Varnode` manipulation, no
+/// Cranelift dependency, so `crate::selfjit::compiler` reuses this exact
+/// function for its own intra-instruction relative-branch support rather
+/// than re-deriving the same logic.
+pub(crate) fn remap_relative_branches(
+    op: &mut PcodeOp,
+    base: usize,
+    local_index: usize,
+    insn_op_count: usize,
+) {
     match op.opcode {
         PcodeOpcode::Branch | PcodeOpcode::CBranch => {
             if let Some(dest) = op.inputs.first_mut() {

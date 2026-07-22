@@ -4670,3 +4670,72 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     x86-64 hardware; wiring `SelfJitCompiler` into `Emulator::new` as the
     active backend (still not done, still gated on full opcode/loop
     coverage, per this module's own stated bar).
+- **`selfjit`: intra-instruction relative BRANCH/CBRANCH loops
+  implemented (roadmap item 2), 2026-07-22.** Continuing the roadmap
+  in order; this was the one remaining structural gap between `selfjit`
+  and a straight-line-only compiler -- SLEIGH lowers some single guest
+  instructions (the canonical example: `TZCNT`'s bit-scan) into p-code
+  containing a genuine loop *within one instruction's own op list*, via a
+  relative `CBranch`/`Branch` that jumps to another op in that same list,
+  not to a different guest instruction. `compiler.rs` previously refused
+  to compile any TB containing one (`bail!`, fail-safe, never silently
+  wrong).
+  - **Reused `crate::jit::compiler::remap_relative_branches` directly**
+    (made `pub(crate)`, no logic duplicated): pure `PcodeOp`/`Varnode`
+    manipulation with no Cranelift dependency, already fixed a real
+    livelock bug on the Cranelift side (see that function's own doc,
+    referenced repeatedly throughout this session) -- `compiler.rs` now
+    flattens every `GuestInsn`'s ops into one TB-wide list (mirroring
+    `crate::jit::compiler`'s own flattening loop exactly) and runs the
+    same remap over it before compiling anything.
+  - **Two-pass compilation to resolve intra-TB jumps**: unlike Cranelift
+    (separate basic blocks per op, so a jump to any op is just a jump to
+    its block, resolvable in one pass since Cranelift's IR doesn't need
+    real addresses yet), this backend emits linear machine code where an
+    op's real byte offset isn't known until it's actually compiled -- a
+    *forward* relative branch's target doesn't exist yet when the branch
+    itself is emitted. Solved the same way this file's existing
+    placeholder/patch mechanism already handles same-op forward
+    references (e.g. a comparison's own true/false arms): record each
+    op's real offset as it's compiled (`op_offsets[idx]`), collect every
+    intra-TB branch as a `(Label, Option<Cond>, target_flat_index)` in a
+    `deferred` list instead of resolving immediately, then patch all of
+    them in a second pass once compilation finishes and every offset is
+    known -- correct uniformly for both forward and backward references,
+    no direction-based special-casing needed.
+  - **Livelock fuse ported too, not just the jump mechanism**: an
+    intra-instruction loop needs the exact same protection real guest
+    code does against never terminating under a bounded run --
+    `emit_pcode_fuse_check` calls the same `jit_count_pcode` host callback
+    `crate::jit::compiler` already uses (checked every op, not just inside
+    loops, matching that file's own unconditional placement) and exits
+    early with the TB's natural fallthrough PC if the emulator's
+    `max_inst` budget is exhausted; `emit_insn_count` calls the paired
+    `jit_count_insn` callback at each real guest instruction's first op,
+    for correct instruction-count accounting. Verified with a test whose
+    `CBranch` condition is hardcoded to always be taken -- genuinely
+    infinite without the fuse, not just slow -- confirming the fuse
+    actually terminates it (`max_inst = Some(1)`, checked the returned PC
+    is the correct early-exit fallthrough) rather than merely trusting the
+    reasoning; this test would hang the whole test process if the fuse
+    didn't work, not just fail an assertion.
+  - **Real correctness test, not just "it compiled"**: a hand-built
+    single guest instruction whose own op list sums `3+2+1=6` via a
+    backward relative `CBranch` looping while a counter is nonzero --
+    checked against the known sum (`6`, not `3`, which a single pass
+    would wrongly produce) and confirmed the TB still returns the correct
+    natural fallthrough PC once the loop terminates.
+  - Re-ran the differential harness against the existing corpus fixtures
+    after this landed -- honest, unchanged result (`matched=8`/`2`
+    respectively, `diverged=[]`, same as before): neither fixture happens
+    to reach a TB with a real relative-branch loop, so this didn't surface
+    a new matched TB by itself, but confirms nothing regressed and the
+    new code path compiles real fixture TBs without error.
+  - Validated on **both** host backends (aarch64 natively, x86-64 via
+    Rosetta -- same verification method as roadmap item 3): `selfjit::*`
+    21/21 (aarch64) and 27/27 (x86-64, +2 more from x86-64-only low-level
+    emitter tests) passing, `fission-emulator` nextest 94/101 (+2 vs.
+    previous baseline from the new tests, same 7 pre-existing unrelated
+    failures), full workspace nextest 2177/2184 (same +2, zero
+    regressions), full workspace build clean, `golden_corpus_check.py
+    check` clean.

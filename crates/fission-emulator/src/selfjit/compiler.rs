@@ -44,16 +44,30 @@
 //! `IntCarry`, `IntSCarry`, `IntSBorrow`, `PopCount`, `PtrAdd`, `Piece`,
 //! `SubPiece`, `LzCount`,
 //! `Load`, `Store` (computed-address memory access -- **≤8 bytes only**,
-//! see below), and TB-terminating `Branch`/`CBranch` -- but **only as a straight-line,
-//! single-exit TB**: every `Branch`/`CBranch` here ends the compiled
-//! function (returns the target PC, or falls through), the same shape
-//! `crate::jit::compiler`'s exit block produces for a cross-instruction
-//! jump. Intra-instruction relative branches (SLEIGH's own p-code-level
-//! loops, e.g. `TZCNT`'s bit-scan -- see
-//! `crate::jit::compiler::remap_relative_branches`'s doc comment and this
-//! session's own fix for the real bug that construct caused) are **not**
-//! handled -- a TB containing one returns `Err`, not silently wrong
-//! output.
+//! see below), and `Branch`/`CBranch`, including both shapes: a
+//! cross-instruction jump to a real guest address (ends the compiled
+//! function, matching `crate::jit::compiler`'s exit block) *and* an
+//! intra-instruction relative branch (SLEIGH's own p-code-level loops,
+//! e.g. `TZCNT`'s bit-scan) that jumps to another op *within this same
+//! TB*, forward or backward, without leaving the compiled function at
+//! all. `compile_translation_block` flattens every instruction's ops into
+//! one TB-wide list and runs `crate::jit::compiler::remap_relative_
+//! branches` over it (the exact same function, reused directly, that
+//! fixed a real livelock bug on the Cranelift side -- see that function's
+//! own doc), converting relative deltas into absolute flat-op-index
+//! targets; each op's own real code offset is recorded as it's compiled,
+//! and intra-TB jumps are resolved in a second pass once every offset is
+//! known (so a forward reference works exactly like a backward one, no
+//! special-casing direction). A livelock fuse (`emit_pcode_fuse_check`,
+//! the same `jit_count_pcode` host callback `crate::jit::compiler` uses)
+//! runs before every op, guest-instruction-boundary accounting
+//! (`emit_insn_count`, `jit_count_insn`) at each instruction's first op --
+//! both needed for this to be a real loop, not just a resolved jump: an
+//! intra-instruction loop that never naturally terminates must still stop
+//! once the emulator's `max_inst` budget is exhausted (see
+//! `pcode_fuse_stops_a_would_be_infinite_intra_instruction_loop`'s own
+//! test, which -- deliberately -- would hang the test process if this
+//! didn't work, not just fail an assertion).
 //!
 //! Known, deliberate simplifications within what *is* implemented (see
 //! inline `TODO(correctness)` comments at each site, not hidden): none of
@@ -205,15 +219,53 @@ impl TbBackend for SelfJitCompiler {
             last.pc.wrapping_add(last.len as u64)
         };
 
+        // Flatten ops with remapped relative branch targets -- reuses
+        // `crate::jit::compiler::remap_relative_branches` directly (pure
+        // `PcodeOp` manipulation, no Cranelift dependency) rather than
+        // re-deriving the same logic: SLEIGH's own relative BRANCH/CBRANCH
+        // offsets (intra-instruction p-code-level loops, e.g. TZCNT's
+        // bit-scan) are relative to the *current op*, not the instruction
+        // start, and get resolved here into absolute flat-op indices
+        // within this TB (`is_constant=true`, `constant_val` = flat
+        // index) -- see that function's own doc for the full story,
+        // including the real livelock bug this exact remap fixed on the
+        // Cranelift side.
+        let mut flat: Vec<PcodeOp> = Vec::new();
+        let mut insn_start_indices: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+        for insn in insns {
+            let base = flat.len();
+            insn_start_indices.insert(base);
+            for (local_i, op) in insn.ops.iter().enumerate() {
+                let mut op = op.clone();
+                crate::jit::compiler::remap_relative_branches(&mut op, base, local_i, insn.ops.len());
+                flat.push(op);
+            }
+        }
+        let n_ops = flat.len();
+
         let mut buf = CodeBuffer::new();
+        // Recorded per flat-op-index as each op's own codegen starts --
+        // `op_offsets[i]` is where flat op `i`'s compiled code begins.
+        // Backward relative branches (the common TZCNT-loop shape) can
+        // resolve immediately since the target is already known by the
+        // time a later op references it; forward ones can't (target not
+        // compiled yet) -- both go through the same `deferred` list
+        // uniformly, resolved in one second pass once every offset is
+        // known, rather than special-casing direction.
+        let mut op_offsets: Vec<usize> = Vec::with_capacity(n_ops);
+        let mut deferred: Vec<(crate::selfjit::emit::Label, Option<Cond>, usize)> = Vec::new();
         {
             let mut asm = Asm::new(&mut buf);
             prologue(&mut asm);
 
-            for insn in insns {
-                for op in &insn.ops {
-                    compile_op(&mut asm, op, fallthrough_pc)?;
+            for (idx, op) in flat.iter().enumerate() {
+                op_offsets.push(asm.offset());
+                emit_pcode_fuse_check(&mut asm, fallthrough_pc);
+                if insn_start_indices.contains(&idx) {
+                    emit_insn_count(&mut asm);
                 }
+                compile_op(&mut asm, op, n_ops, &mut deferred)?;
             }
 
             // Fell through every instruction with no terminating
@@ -223,11 +275,61 @@ impl TbBackend for SelfJitCompiler {
             epilogue_return(&mut asm, RET);
         }
 
+        // Second pass: resolve every deferred intra-TB jump now that
+        // every flat op's real code offset is known.
+        {
+            let mut asm = Asm::new(&mut buf);
+            for (label, cond, target_idx) in deferred {
+                let target = op_offsets[target_idx];
+                match cond {
+                    Some(c) => asm.patch_b_cond(label, c, target),
+                    None => asm.patch_b(label, target),
+                }
+            }
+        }
+
         let code = buf.finish()?;
         let ptr = code.as_ptr();
         self.code_arena.push(code);
         Ok(ptr)
     }
+}
+
+/// Per-p-code-op livelock fuse: calls the exact same host callback
+/// `crate::jit::compiler` uses (`jit_count_pcode`, real logic lives there
+/// -- see its own doc: "detects infinite relative CBRANCH loops inside a
+/// TB"), and if it signals stop (guest-instruction budget exhausted, or
+/// the tighter pcode-op fuse under a budgeted run), returns early with the
+/// TB's own natural fallthrough PC -- matching `crate::jit::compiler`'s
+/// own per-op fuse block exactly (`jump(exit_block, default_next)` there).
+/// Emitted unconditionally before every op, not just ops inside a
+/// relative-branch loop -- mirrors that file's own unconditional
+/// placement rather than trying to cleverly detect which TBs need it.
+fn emit_pcode_fuse_check(asm: &mut Asm, fallthrough_pc: u64) {
+    asm.mov_reg(ARG0, EMU_PTR);
+    asm.mov_imm64(
+        CALLEE_ADDR,
+        crate::jit::callbacks::jit_count_pcode as *const () as usize as u64,
+    );
+    asm.blr(CALLEE_ADDR);
+    asm.cmp_reg(RET, XZR);
+    let cont = asm.placeholder();
+    asm.mov_imm64(RET, fallthrough_pc);
+    epilogue_return(asm, RET);
+    let cont_at = asm.offset();
+    asm.patch_b_cond(cont, Cond::Eq, cont_at);
+}
+
+/// Guest-instruction-boundary accounting -- the exact same host callback
+/// `crate::jit::compiler` calls once per real instruction (not once per
+/// p-code op); no return value, no branch.
+fn emit_insn_count(asm: &mut Asm) {
+    asm.mov_reg(ARG0, EMU_PTR);
+    asm.mov_imm64(
+        CALLEE_ADDR,
+        crate::jit::callbacks::jit_count_insn as *const () as usize as u64,
+    );
+    asm.blr(CALLEE_ADDR);
 }
 
 /// Frame setup is genuinely arch-specific glue, not part of the shared
@@ -363,7 +465,12 @@ fn space_const(vn: &Varnode) -> u64 {
     }
 }
 
-fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
+fn compile_op(
+    asm: &mut Asm,
+    op: &PcodeOp,
+    n_ops: usize,
+    deferred: &mut Vec<(crate::selfjit::emit::Label, Option<Cond>, usize)>,
+) -> Result<()> {
     match op.opcode {
         PcodeOpcode::Copy | PcodeOpcode::IntZExt => {
             // IntZExt shares Copy's body: `load_value` already returns the
@@ -779,36 +886,72 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
         }
         PcodeOpcode::Branch => {
             let target = &op.inputs[0];
-            anyhow::ensure!(
-                !target.is_constant && target.offset > 0x10000,
-                "selfjit: intra-instruction relative Branch (e.g. a SLEIGH \
-                 loop construct like TZCNT) is not supported yet -- see \
-                 module docs"
-            );
-            asm.mov_imm64(RET, target.offset);
-            epilogue_return(asm, RET);
+            if target.is_constant {
+                // Resolved by `remap_relative_branches` (in the caller's
+                // flattening pass) to an absolute flat-op index within
+                // this TB -- an intra-instruction relative branch (e.g.
+                // SLEIGH's TZCNT bit-scan loop). Deferred: the target op's
+                // real code offset may not be known yet (a forward
+                // branch), so this just reserves the slot and records
+                // what to patch it with once every op's offset is known
+                // (see `compile_translation_block`'s second pass).
+                let target_idx = target.constant_val;
+                anyhow::ensure!(
+                    target_idx >= 0 && (target_idx as usize) < n_ops,
+                    "selfjit: relative Branch target {target_idx} out of range (0..{n_ops})"
+                );
+                let label = asm.placeholder();
+                deferred.push((label, None, target_idx as usize));
+            } else {
+                anyhow::ensure!(
+                    target.offset > 0x10000,
+                    "selfjit: Branch target {:#x} doesn't look like a real \
+                     guest address (too small)",
+                    target.offset
+                );
+                asm.mov_imm64(RET, target.offset);
+                epilogue_return(asm, RET);
+            }
         }
         PcodeOpcode::CBranch => {
             anyhow::ensure!(op.inputs.len() >= 2, "CBranch needs a target and a condition");
             let target = &op.inputs[0];
-            anyhow::ensure!(
-                !target.is_constant && target.offset > 0x10000,
-                "selfjit: intra-instruction relative CBranch is not \
-                 supported yet -- see module docs"
-            );
             load_value(asm, &op.inputs[1], A_VAL);
             asm.mov_imm64(B_VAL, 0);
             asm.cmp_reg(A_VAL, B_VAL);
-            let taken = asm.placeholder();
-            // not-taken: fall through to next op (or the TB's final
-            // fallthrough-pc return if this was the last op).
-            let not_taken_label = asm.placeholder();
-            let taken_at = asm.offset();
-            asm.mov_imm64(RET, target.offset);
-            epilogue_return(asm, RET);
-            let not_taken_at = asm.offset();
-            asm.patch_b_cond(taken, Cond::Ne, taken_at);
-            asm.patch_b(not_taken_label, not_taken_at);
+            if target.is_constant {
+                // Same relative-target story as `Branch` above. Only one
+                // conditional jump is needed here (unlike the absolute-
+                // address arm below, which needs a full if/else shape):
+                // "not taken" is just natural linear fallthrough to
+                // whatever this TB emits next, since (unlike Cranelift's
+                // separate basic blocks) this backend's code for
+                // consecutive flat ops is already contiguous in memory.
+                let target_idx = target.constant_val;
+                anyhow::ensure!(
+                    target_idx >= 0 && (target_idx as usize) < n_ops,
+                    "selfjit: relative CBranch target {target_idx} out of range (0..{n_ops})"
+                );
+                let taken = asm.placeholder();
+                deferred.push((taken, Some(Cond::Ne), target_idx as usize));
+            } else {
+                anyhow::ensure!(
+                    target.offset > 0x10000,
+                    "selfjit: CBranch target {:#x} doesn't look like a real \
+                     guest address (too small)",
+                    target.offset
+                );
+                let taken = asm.placeholder();
+                // not-taken: fall through to next op (or the TB's final
+                // fallthrough-pc return if this was the last op).
+                let not_taken_label = asm.placeholder();
+                let taken_at = asm.offset();
+                asm.mov_imm64(RET, target.offset);
+                epilogue_return(asm, RET);
+                let not_taken_at = asm.offset();
+                asm.patch_b_cond(taken, Cond::Ne, taken_at);
+                asm.patch_b(not_taken_label, not_taken_at);
+            }
         }
         other => bail!(
             "selfjit: PcodeOpcode::{:?} not implemented yet (see module docs \
@@ -816,7 +959,6 @@ fn compile_op(asm: &mut Asm, op: &PcodeOp, fallthrough_pc: u64) -> Result<()> {
             other
         ),
     }
-    let _ = fallthrough_pc;
     Ok(())
 }
 
@@ -848,6 +990,26 @@ mod tests {
             size,
             is_constant: true,
             constant_val: val,
+        }
+    }
+
+    /// A SLEIGH-style relative BRANCH/CBRANCH destination: `delta` p-code
+    /// ops from the *current op*, not yet resolved to an absolute flat
+    /// index -- `compile_translation_block`'s own flattening pass runs
+    /// `crate::jit::compiler::remap_relative_branches` over exactly this
+    /// shape (`offset` holds the raw two's-complement delta, matching what
+    /// this emulator's real SLEIGH decode path produces per that
+    /// function's own doc comment). `is_constant=false`/`space_id=0` here
+    /// mirror the *pre-remap* shape a real decode would hand to
+    /// `compile_translation_block`, not the post-remap
+    /// resolved-to-flat-index shape `compile_op` itself sees.
+    fn rel_branch_target(delta: i32) -> Varnode {
+        Varnode {
+            space_id: 0,
+            offset: delta as u32 as u64,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
         }
     }
 
@@ -1146,6 +1308,84 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 56), 0, "7 < 3 signed");
         assert_eq!(read_reg(&mut emu, 64), 1, "3 < 7 unsigned");
         assert_eq!(read_reg(&mut emu, 72), 0, "7 < 3 unsigned");
+    }
+
+    /// Intra-instruction relative-branch loop -- the exact construct this
+    /// backend used to refuse entirely (SLEIGH's own p-code-level loops,
+    /// e.g. `TZCNT`'s bit-scan; see `crate::jit::compiler::
+    /// remap_relative_branches`'s doc for the real livelock bug this same
+    /// remap logic fixed on the Cranelift side). One guest instruction's
+    /// own op list, with a `CBranch` that jumps *backward* to an earlier
+    /// op within that same instruction (not a straight-line TB, and not a
+    /// cross-instruction jump): sums `3 + 2 + 1` by looping while a
+    /// counter is nonzero. Checked against the known sum, not just "it
+    /// compiled" -- proves the loop actually iterates (a single pass
+    /// would leave `acc == 3`, not `6`) and terminates correctly (falls
+    /// through to the TB's real fallthrough PC once the counter hits 0,
+    /// verified by `compile_and_run`'s own `next_pc == 0x1004` assertion).
+    #[test]
+    fn intra_instruction_relative_branch_loop_sums_via_backward_jump() {
+        let ops = vec![
+            copy_const(0, 3),  // counter = 3               (local_i=0)
+            copy_const(8, 0),  // acc = 0                    (local_i=1)
+            copy_const(16, 1), // one = 1                    (local_i=2)
+            binop(PcodeOpcode::IntAdd, 8, 8, 0), // acc += counter -- LOOP HEAD (local_i=3)
+            binop(PcodeOpcode::IntSub, 0, 0, 16), // counter -= 1  (local_i=4)
+            PcodeOp {
+                seq_num: 5,
+                opcode: PcodeOpcode::CBranch,
+                address: 0x1000,
+                output: None,
+                // local_i=5 + delta(-2) = 3 == the loop head above.
+                inputs: vec![rel_branch_target(-2), reg(0, 8)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 8), 6, "acc == 3+2+1 after the loop runs 3 iterations");
+        assert_eq!(read_reg(&mut emu, 0), 0, "counter reached 0, loop correctly terminated");
+    }
+
+    /// The per-op fuse (`emit_pcode_fuse_check`, the same host callback
+    /// `crate::jit::compiler` uses) actually stops a p-code loop that
+    /// would otherwise run forever -- a real correctness property to
+    /// verify, not just "the loop test above worked": this TB's own
+    /// `CBranch` condition is hardcoded to always be taken (never
+    /// naturally terminates), so if the fuse didn't work this test would
+    /// hang the process rather than fail cleanly. Sets `max_inst` to a
+    /// tiny budget so the fuse trips on the very next op after the
+    /// mandatory one guest-instruction-boundary count, rather than
+    /// waiting for a slow real timeout.
+    #[test]
+    fn pcode_fuse_stops_a_would_be_infinite_intra_instruction_loop() {
+        let ops = vec![
+            copy_const(0, 1), // r0 = 1 -- always-nonzero CBranch condition
+            binop(PcodeOpcode::IntAdd, 8, 8, 0), // acc += 1 -- LOOP HEAD (local_i=1)
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::CBranch,
+                address: 0x1000,
+                output: None,
+                // local_i=2 + delta(-1) = 1 -- always taken, genuinely
+                // infinite without the fuse.
+                inputs: vec![rel_branch_target(-1), reg(0, 8)],
+                asm_mnemonic: None,
+            },
+        ];
+        let insns = [GuestInsn { pc: 0x1000, len: 4, ops }];
+        let mut compiler = SelfJitCompiler::new().expect("selfjit backend available");
+        let func_ptr = compiler
+            .compile_translation_block(&insns, 4)
+            .expect("compile");
+        let mut emu = make_emu();
+        emu.max_inst = Some(1);
+        let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+            unsafe { std::mem::transmute(func_ptr) };
+        let next_pc = f(&mut emu as *mut _);
+        assert_eq!(
+            next_pc, 0x1004,
+            "fuse-triggered early exit returns the TB's natural fallthrough PC"
+        );
     }
 
     fn store_op(space_id: i64, addr: Varnode, value: Varnode) -> PcodeOp {
