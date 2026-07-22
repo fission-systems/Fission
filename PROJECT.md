@@ -3963,3 +3963,92 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     (160/160, byte-identical), `cargo nextest run --workspace --no-fail-fast`
     2152/2159 — the same 7 pre-existing, already-documented failures,
     zero new regressions.
+- **CLI `decomp --dir` flag + Python DIR/HIR structural-signal check
+  (`scripts/quality/dir_hir_check.py`), found and fixed a real HIR
+  content-loss bug, 2026-07-22.** User's explicit follow-up direction
+  after the `fission-dir` deletion: do the DIR/HIR comparison in Python
+  (not another Rust interpreter crate), and expose DIR on the CLI.
+  - **CLI**: `decomp --dir` threaded end-to-end — `DecompArgs` →
+    `OneShotArgs` → `RenderConfig::dir` → `render_with_rust_sleigh`'s
+    `want_dir` param (calls `take_last_dir_snapshot()` immediately after
+    decompile, before any other decompile call on the thread, since the
+    snapshot is a single-slot thread-local) → `RustSleighRender::code_dir`
+    → `CliRustOutcome::Success::code_dir` → JSON `"code_dir"` field
+    (present only when requested) / plain-text `// ===== DIR
+    (pre-structuring) =====` appended section. `print_dir_function`
+    (`fission-pcode/src/midend/mod.rs`) renders a `DirFunction` snapshot
+    by converting it to `HirFunction` via the real `dir_stmts_to_hir_stmts`
+    conversion and reusing the production HIR printer — deliberately not
+    a second hand-written printer, so DIR output can't silently drift
+    from what HIR printing actually does.
+  - **Python tool**: `structural_signal()` extracts a `Counter` of
+    control-flow keywords / comparison operators / integer constants from
+    each side's rendered text (identifiers stripped, since DIR and HIR
+    routinely name the same value differently). Flags "high" severity
+    when HIR is missing a control-flow keyword or comparison operator DIR
+    had — the strongest textual hint of a dropped branch. Explicitly a
+    heuristic on rendered text, not an interpreter — the previous
+    session's `fission-dir` crate was exactly that (a real interpreter)
+    and got deleted by explicit user direction in favor of this cheaper
+    approach.
+  - **Real bug found and fixed, not just a false-positive audit**: running
+    the tool against the full 16-binary/160-function corpus flagged
+    `pre_c_init` (mingw CRT startup, present verbatim in every corpus
+    binary since it's compiler-injected, not user code) with a
+    conspicuously large diff (`missing_in_hir={'if': 3, 'goto': 3, ...}`)
+    in all 17 binaries containing it. Root-caused by hand (not guessed):
+    added temporary instrumentation tracing whether a specific label
+    survived through the pipeline at each of the ~20 `fission-midend-
+    normalize` cleanup passes (all clean), the standalone
+    `eliminate_redundant_var_assigns` call, the `DirFunction → HirFunction`
+    conversion, `apply_preview_type_hints`, and `recover_global_symbol_
+    accesses` (all clean, label present) — only vanishing inside
+    `render_layered_pseudocode`'s HIR-only `apply_hir_presentation` step
+    (`fission-pcode/src/render/presentation/mod.rs`), specifically
+    `prune_unreachable_after_total_return`. That pass truncates a
+    statement list right after any unconditional `return`, on the
+    (usually correct) assumption that anything textually after is dead —
+    but `pre_c_init`'s DIR shape has a `goto` earlier in the function that
+    jumps *forward past* an unconditional return into a labeled block
+    laid out later (PE-header-based subsystem detection, guarding
+    `__set_app_type`/`__p__fmode` setup) — genuinely live code, reachable
+    only via that goto. The pass deleted the labeled block anyway, leaving
+    the goto dangling and silently dropping the PE-header detection branch
+    from HIR output (present in DIR and in NIR, since `apply_hir_
+    presentation` only runs for the HIR profile — this was HIR-only
+    presentation-layer breakage, not a structuring/normalize semantic
+    bug). Confirmed this reproduces in plain `decomp --layer hir` with no
+    `--dir` involved — a pre-existing production bug the new tool
+    surfaced, not something the DIR-capture code introduced.
+  - **Fix**: `prune_unreachable_after_total_return` now computes the set
+    of all `goto` targets referenced anywhere in the function (`collect_
+    goto_targets`) before truncating, and — when the tail it's about to
+    discard contains a still-referenced `Label` — drains only the
+    genuinely dead filler before that label instead of truncating past it,
+    leaving the reachable labeled block intact. Added a regression test
+    (`hir_presentation_keeps_goto_target_after_unconditional_return`)
+    reproducing the minimal shape (`if (c) goto L; x = 1; return x; L: y =
+    2; return y;`). The existing `check_hir_presentation_invariants`
+    revert-on-violation safety net (ADR 0011) did not catch this class of
+    bug — it checks call/load counts, use-without-def, and empty-if
+    shells, not dangling gotos — left as-is rather than expanded, since
+    the root-cause fix in `prune_unreachable_after_total_return` is the
+    correct place to fix it and a second defense-in-depth layer wasn't
+    needed to close this specific finding.
+  - **Confirmed false positives, not chased further** (both from
+    legitimate `apply_hir_presentation` folds, documented in `dir_hir_
+    check.py`'s own docstring): `while (1) { if (!c) break; ... }` →
+    `while (c) { ... }` (`count_bits`, `list_sum`, `sum_array`,
+    `rolling_hash32`), `if (c) { return a; } return b;` → `return c ? a :
+    b;` (`clamp`), and comparison-operand canonicalization `k < x` → `x >
+    k` (`rc4_init`, from `canonicalize_presentation_conditions`'s "prefer
+    `x op k` over `k op x`" rule) plus a single `if (c) goto L` → `if (!c)
+    {...}` inversion (`fibonacci`).
+  - Validated: `golden_corpus_check.py check` — the fix changed rendered
+    output for exactly the 16 `pre_c_init` occurrences (expected, reviewed
+    by hand, snapshot updated via `update`), then re-ran clean (160/160,
+    determinism holds). `dir_hir_check.py check` dropped from 22 to 6
+    HIGH-severity findings (the 16 `pre_c_init` occurrences plus the one
+    Python-classifier count fixed earlier this phase), all 6 remaining
+    confirmed benign by hand. `cargo test -p fission-pcode presentation`
+    32/32 (31 pre-existing + 1 new regression test).

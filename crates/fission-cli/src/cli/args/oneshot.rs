@@ -39,6 +39,9 @@ pub struct OneShotArgs {
     pub profile: Option<String>,
     /// Pseudocode layer: `nir` | `hir` | `both` (see `fission_pcode::PseudocodeLayer`).
     pub layer: Option<String>,
+    /// Also capture/emit DIR (the pre-structuring snapshot `fission_pcode::take_last_dir_snapshot`
+    /// returns) alongside the normal NIR/HIR output (`decomp --dir`).
+    pub dir: bool,
     pub engine: Option<String>,
     pub output: Option<PathBuf>,
     pub json: bool,
@@ -121,6 +124,7 @@ impl Default for OneShotArgs {
             compiler_id: None,
             profile: None,
             layer: None,
+            dir: false,
             engine: None,
             output: None,
             json: false,

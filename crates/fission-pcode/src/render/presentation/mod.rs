@@ -70,7 +70,9 @@ fn apply_hir_presentation_passes(func: &mut HirFunction) {
         changed |= canonicalize_presentation_conditions(func);
         // `x = c ? a : b; return ~c ? x : a` (null-check join) → `return x` / fold.
         changed |= fold_redundant_select_return_join(&mut func.body);
-        changed |= prune_unreachable_after_total_return(&mut func.body);
+        let mut goto_targets = HashSet::new();
+        collect_goto_targets(&func.body, &mut goto_targets);
+        changed |= prune_unreachable_after_total_return(&mut func.body, &goto_targets);
         changed |= inline_single_use_pure_assigns(func);
         changed |= eliminate_pure_dead_assigns(func);
         changed |= remove_unreferenced_labels(&mut func.body);
@@ -2861,8 +2863,54 @@ fn try_recover_if_return_else_fallthrough(stmts: &mut Vec<HirStmt>, i: usize) ->
     true
 }
 
+/// Labels named by any `Goto` anywhere in `stmts` (recursing into nested
+/// bodies) -- a goto can jump into a scope that textually follows an early
+/// return elsewhere in the function, so "referenced" has to be computed
+/// function-wide, not just within the segment being pruned.
+fn collect_goto_targets(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Goto(label) => {
+                out.insert(label.clone());
+            }
+            HirStmt::Block(b) | HirStmt::While { body: b, .. } | HirStmt::DoWhile { body: b, .. } => {
+                collect_goto_targets(b, out);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_goto_targets(then_body, out);
+                collect_goto_targets(else_body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for c in cases {
+                    collect_goto_targets(&c.body, out);
+                }
+                collect_goto_targets(default, out);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(i) = init {
+                    collect_goto_targets(std::slice::from_ref(i.as_ref()), out);
+                }
+                if let Some(u) = update {
+                    collect_goto_targets(std::slice::from_ref(u.as_ref()), out);
+                }
+                collect_goto_targets(body, out);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Drop fallthrough stmts after an if whose every branch already returns.
-fn prune_unreachable_after_total_return(stmts: &mut Vec<HirStmt>) -> bool {
+fn prune_unreachable_after_total_return(
+    stmts: &mut Vec<HirStmt>,
+    goto_targets: &HashSet<String>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
@@ -2870,21 +2918,21 @@ fn prune_unreachable_after_total_return(stmts: &mut Vec<HirStmt>) -> bool {
             | HirStmt::While { body: b, .. }
             | HirStmt::DoWhile { body: b, .. }
             | HirStmt::For { body: b, .. } => {
-                changed |= prune_unreachable_after_total_return(b);
+                changed |= prune_unreachable_after_total_return(b, goto_targets);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= prune_unreachable_after_total_return(then_body);
-                changed |= prune_unreachable_after_total_return(else_body);
+                changed |= prune_unreachable_after_total_return(then_body, goto_targets);
+                changed |= prune_unreachable_after_total_return(else_body, goto_targets);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for c in cases {
-                    changed |= prune_unreachable_after_total_return(&mut c.body);
+                    changed |= prune_unreachable_after_total_return(&mut c.body, goto_targets);
                 }
-                changed |= prune_unreachable_after_total_return(default);
+                changed |= prune_unreachable_after_total_return(default, goto_targets);
             }
             _ => {}
         }
@@ -2893,10 +2941,30 @@ fn prune_unreachable_after_total_return(stmts: &mut Vec<HirStmt>) -> bool {
     let mut i = 0;
     while i < stmts.len() {
         if stmt_seq_always_returns(std::slice::from_ref(&stmts[i])) {
-            let before = stmts.len();
-            stmts.truncate(i + 1);
-            if stmts.len() != before {
-                changed = true;
+            // A `goto` elsewhere in the function may still jump into this
+            // "after the return" tail (e.g. a forward jump past an early/
+            // guarded return into code laid out later) -- pruning past that
+            // label's target would leave the goto dangling and silently drop
+            // real code from the printed tree. Only drop genuinely dead
+            // filler before the first still-targeted label, and keep the
+            // labeled tail itself untouched.
+            let keep_from = stmts[i + 1..]
+                .iter()
+                .position(|s| matches!(s, HirStmt::Label(l) if goto_targets.contains(l)))
+                .map(|offset| i + 1 + offset);
+            match keep_from {
+                Some(keep_from) if keep_from > i + 1 => {
+                    stmts.drain(i + 1..keep_from);
+                    changed = true;
+                }
+                Some(_) => {}
+                None => {
+                    let before = stmts.len();
+                    stmts.truncate(i + 1);
+                    if stmts.len() != before {
+                        changed = true;
+                    }
+                }
             }
             break;
         }
@@ -3614,6 +3682,56 @@ mod tests {
         assert!(
             layered.hir.contains("return"),
             "HIR should return a value:\n{}",
+            layered.hir
+        );
+    }
+
+    #[test]
+    fn hir_presentation_keeps_goto_target_after_unconditional_return() {
+        // A forward `goto` jumps past an unconditional `return` into code
+        // laid out later in the body (e.g. a rarely-taken branch a compiler
+        // placed after the common-path return) -- `prune_unreachable_after_
+        // total_return` must not treat that trailing labeled block as dead
+        // just because it textually follows a `return`, or the goto is left
+        // dangling and the labeled code silently disappears from HIR.
+        let func = HirFunction {
+            name: "f".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x"), local("y")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: le("param_1", "param_1"),
+                    then_body: vec![HirStmt::Goto("L1".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(1, int_ty(32, true)),
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+                HirStmt::Label("L1".into()),
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("y".into()),
+                    rhs: HirExpr::Const(2, int_ty(32, true)),
+                },
+                HirStmt::Return(Some(HirExpr::Var("y".into()))),
+            ],
+            ..Default::default()
+        };
+
+        let options = MlilPreviewOptions::default();
+        let layered = render_layered_pseudocode(&func, &options);
+        if layered.hir.contains("goto") {
+            assert!(
+                layered.hir.contains("L1:"),
+                "HIR keeps a `goto L1` only if `L1:` is still defined somewhere:\n{}",
+                layered.hir
+            );
+        }
+        assert!(
+            layered.hir.contains('2'),
+            "HIR must not drop the labeled tail (y = 2) reachable only via goto:\n{}",
             layered.hir
         );
     }

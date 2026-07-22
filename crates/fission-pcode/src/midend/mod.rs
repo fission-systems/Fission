@@ -105,6 +105,23 @@ pub(crate) fn print_dir_expr(expr: &fission_midend_dir::DirExpr) -> String {
     print_expr(&fission_midend_dir::ir::dir_expr_to_hir_expr(expr.clone()))
 }
 
+/// Render a captured DIR snapshot (see `take_last_dir_snapshot`) as C-like
+/// text, via the same printer HIR output goes through. `DirStmt` and
+/// `HirStmt` share the identical `Goto`/`Label` variants (the printer
+/// already has to render those for any real HIR that structuring couldn't
+/// fully eliminate), so converting via `dir_stmts_to_hir_stmts` and
+/// printing the result is a faithful, unmodified dump of DIR's actual
+/// flattened, goto/label-based shape -- not HIR's structured if/while/for,
+/// which is the whole point of dumping it (comparing this against the real
+/// HIR text is how a human, or an external script, sees whether
+/// structuring changed anything for a given function). `pub`, not
+/// `pub(crate)`, since this is meant to be called from outside this crate
+/// (`fission-cli`'s `decomp --dir`).
+pub fn print_dir_function(func: &fission_midend_dir::DirFunction) -> String {
+    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(func.body.clone());
+    print_hir_function(&func.clone().into_hir_function(hir_body))
+}
+
 pub use fission_core::CallingConvention;
 
 pub use self::abi::infer_entry_register_param_arity;

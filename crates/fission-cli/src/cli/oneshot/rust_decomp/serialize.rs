@@ -30,6 +30,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
             code,
             code_nir,
             code_hir,
+            code_dir,
             fell_back,
             fallback_reason,
             build_stats,
@@ -48,6 +49,11 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "fell_back": fell_back,
                 "fallback_reason": fallback_reason,
             });
+            // Only present when `decomp --dir` was passed -- absence means
+            // "not requested", not "structuring produced nothing".
+            if let Some(dir) = code_dir {
+                obj["code_dir"] = serde_json::json!(dir);
+            }
             if let Some(stats) = build_stats {
                 obj["preview_build_stats"] = serde_json::json!(stats);
             }
@@ -148,8 +154,20 @@ pub(crate) fn record_plain_output(entry: &CliRustDecompileRecord) -> String {
             code,
             code_nir,
             code_hir,
+            code_dir,
             ..
-        } => layered_text(code, code_nir.as_deref(), code_hir.as_deref(), entry.layer),
+        } => {
+            let mut out = layered_text(code, code_nir.as_deref(), code_hir.as_deref(), entry.layer);
+            // Only present when `decomp --dir` was passed. Appended as its
+            // own section (not merged into the NIR/HIR layer switch above)
+            // since DIR is a diagnostic view, not a selectable final
+            // pseudocode surface.
+            if let Some(dir) = code_dir {
+                out.push_str("\n\n// ===== DIR (pre-structuring) =====\n");
+                out.push_str(dir);
+            }
+            out
+        }
         CliRustOutcome::AssemblyFallback { fallback_code, .. } => fallback_code.clone(),
         CliRustOutcome::HardError { error_text, .. } => format!(
             "// Error decompiling {} (0x{:x}): {}",

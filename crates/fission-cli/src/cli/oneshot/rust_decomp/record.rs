@@ -12,6 +12,8 @@ pub(crate) struct RenderConfig {
     pub timeout_ms: Option<u64>,
     /// Pseudocode surface selection (`nir` / `hir` / `both`).
     pub layer: PseudocodeLayer,
+    /// Also capture/render DIR alongside NIR/HIR (`decomp --dir`).
+    pub dir: bool,
 }
 
 pub(crate) struct CliRustDecompileRecord {
@@ -29,6 +31,8 @@ pub(crate) enum CliRustOutcome {
         code_nir: Option<String>,
         /// Dual HIR surface when dual render is available.
         code_hir: Option<String>,
+        /// DIR text, only present when `RenderConfig::dir` was set.
+        code_dir: Option<String>,
         fell_back: bool,
         fallback_reason: Option<String>,
         build_stats: Option<NirBuildStats>,

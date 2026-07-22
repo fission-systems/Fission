@@ -32,7 +32,8 @@ pub use pcode::*;
 // Re-export midend surface (public names historically exported via `nir`).
 pub use midend::{
     AdmissionClass, CallEdgeKind, CallEffectSummarySource, CallSummary, CallTargetProvenance,
-    CallTargetRef, CallingConvention, FormatFamily, HirExpr, HirFunction, HirStmt,
+    CallTargetRef, CallingConvention, DirExpr, DirFunction, DirStmt, FormatFamily, HirExpr,
+    HirFunction, HirStmt,
     IndirectControlClassification, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
     NirAdmissionFacts, NirBindingOrigin, NirBlock, NirBuildStats, NirCallEffectSummary,
     NirCallParamRule, NirCallPrototypeSummary, NirFunction, NirFunctionHints, NirHintStats,
@@ -42,8 +43,9 @@ pub use midend::{
     PrintProfile, ProcedureSummary, PseudocodeLayer, RecoveryMode, RegisterNamer, StackSlotId,
     StructuringBudgetClass, StructuringEngineKind, StructuringFailureKind, StructuringOutcome,
     StructuringReasonFamily, TargetProfile, WrapperClass, infer_entry_register_param_arity,
-    nir_admission_facts_from_pcode, parse_call_target_address, render_contracted_wrapper_summary,
-    render_mlil_preview, render_mlil_preview_with_binary_and_context,
+    nir_admission_facts_from_pcode, parse_call_target_address, print_dir_function,
+    render_contracted_wrapper_summary, render_mlil_preview,
+    render_mlil_preview_with_binary_and_context,
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
     render_nir_with_context, seed_nir_render_options, structuring_outcome_for_signature,
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
