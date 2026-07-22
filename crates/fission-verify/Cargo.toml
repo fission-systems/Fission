@@ -1,0 +1,29 @@
+[package]
+name = "fission-verify"
+version = "0.1.6"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Solver- and emulator-backed DIR/HIR correctness verification: concrete evaluation, emulator-grounded ground truth, and solver-proved symbolic equivalence"
+repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
+readme = "../../README.md"
+keywords = ["decompiler", "verification", "solver", "emulator"]
+categories = ["development-tools"]
+
+[lib]
+name = "fission_verify"
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+fission-static = { path = "../fission-static" }
+fission-midend-core = { path = "../fission-midend-core" }
+fission-midend-dir = { path = "../fission-midend-dir" }
+fission-decompiler = { path = "../fission-decompiler" }
+fission-solver = { path = "../fission-solver" }
+fission-emulator = { path = "../fission-emulator" }
+thiserror = "2.0"
+tracing = "0.1"
+
+[dev-dependencies]
+serde_json = "1.0"

@@ -2719,6 +2719,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-verify"
+version = "0.1.6"
+dependencies = [
+ "fission-core",
+ "fission-decompiler",
+ "fission-emulator",
+ "fission-loader",
+ "fission-midend-core",
+ "fission-midend-dir",
+ "fission-solver",
+ "fission-static",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
