@@ -4,7 +4,8 @@
 //! copy-propagation, and pipeline orchestration do not each carry slightly
 //! different policy checks.
 
-use fission_midend_core::{DirBinding, NirBindingOrigin};
+use fission_midend_core::NirBindingOrigin;
+    use fission_midend_dir::DirBinding;
 use crate::HashSet;
 
 pub fn preserved_materialization_names(bindings: &[DirBinding]) -> HashSet<&str> {

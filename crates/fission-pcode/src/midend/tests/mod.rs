@@ -7,14 +7,14 @@ use crate::pcode::{PcodeBasicBlock, PcodeOp};
 /// typed. Converts via `dir_stmt_to_hir_stmt` rather than duplicating
 /// `print_stmt` for `DirStmt`.
 #[allow(dead_code)]
-pub(super) fn print_dir_stmt(stmt: &ir::DirStmt) -> String {
-    print_stmt(&ir::dir_stmt_to_hir_stmt(stmt.clone()))
+pub(super) fn print_dir_stmt(stmt: &fission_midend_dir::DirStmt) -> String {
+    print_stmt(&fission_midend_dir::ir::dir_stmt_to_hir_stmt(stmt.clone()))
 }
 
 /// Same rationale as [`print_dir_stmt`], for whole-function fixtures.
 #[allow(dead_code)]
-pub(super) fn print_dir_function(func: &ir::DirFunction) -> String {
-    let hir_body = ir::dir_stmts_to_hir_stmts(func.body.clone());
+pub(super) fn print_dir_function(func: &fission_midend_dir::DirFunction) -> String {
+    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(func.body.clone());
     print_hir_function(&func.clone().into_hir_function(hir_body))
 }
 

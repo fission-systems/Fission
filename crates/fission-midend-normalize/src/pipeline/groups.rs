@@ -44,11 +44,11 @@ use super::super::recovery::{
     copy_propagation_pass, join_coalescing_pass,
 };
 use super::super::types::apply_entry_param_promotion_pass;
-use fission_midend_core::action_pipeline::{
+use fission_midend_dir::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, admission_gated, cleanup_pass,
     fn_pass, gated_followup, group,
 };
-use fission_midend_core::ir::DirFunction;
+use fission_midend_dir::DirFunction;
 use std::time::Instant;
 
 struct CanonicalStagePass {
@@ -617,7 +617,7 @@ pub fn run_normalize_pipeline(func: &mut DirFunction, diag: bool, perf: bool) {
         eprintln!(
             "[DIAG] normalize start: {} stmts={} locals={}",
             func.name,
-            fission_midend_core::action_pipeline::count_hir_stmts(&func.body),
+            fission_midend_dir::action_pipeline::count_hir_stmts(&func.body),
             func.locals.len()
         );
     }
@@ -633,7 +633,7 @@ pub fn run_normalize_pipeline(func: &mut DirFunction, diag: bool, perf: bool) {
     pipeline.run(&mut ctx);
 
     if perf {
-        let (final_stmts, final_locals) = fission_midend_core::action_pipeline::hir_shape(func);
+        let (final_stmts, final_locals) = fission_midend_dir::action_pipeline::hir_shape(func);
         eprintln!(
             "[PERF] normalize total: fn={} elapsed_ms={:.3} final_stmts={} final_locals={}",
             func.name,

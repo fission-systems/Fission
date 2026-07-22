@@ -20,7 +20,8 @@ use crate::loops::{
 };
 use crate::regions::{RegionKind, RegionProof};
 use crate::switch::try_lower_switch;
-use fission_midend_core::ir::{DirStmt, MlilPreviewError};
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirStmt};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -399,7 +400,7 @@ pub fn reconstruct_sese_final_body(
     use crate::helpers::{block_label, recovered_switch_case_values};
     use crate::linear_types::LoweredTerminator;
     use crate::regions::EmitReadyDecision;
-    use fission_midend_core::ir::DirSwitchCase;
+    use fission_midend_dir::DirSwitchCase;
 
     let mut graph = StructureGraph::default();
     let mut emitted_labels: HashSet<u64> = HashSet::default();

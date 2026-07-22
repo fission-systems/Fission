@@ -352,7 +352,7 @@ impl<'a> PreviewBuilder<'a> {
                         }
                         let cases = case_values
                             .into_iter()
-                            .map(|(value, target)| crate::midend::ir::DirSwitchCase {
+                            .map(|(value, target)| fission_midend_dir::DirSwitchCase {
                                 values: vec![value],
                                 body: vec![DirStmt::Goto(block_label(target))],
                             })

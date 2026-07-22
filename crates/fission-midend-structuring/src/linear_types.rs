@@ -4,9 +4,8 @@
 //! Owning them here lets residual `try_lower_*` free functions take
 //! [`crate::host::StructuringHost`] without depending on PreviewBuilder.
 
-use fission_midend_core::ir::{
-    DispatcherProofUnit, DirExpr, MlilPreviewOptions, UnsupportedControlEvidence,
-};
+use fission_midend_core::ir::{DispatcherProofUnit, MlilPreviewOptions, UnsupportedControlEvidence};
+use fission_midend_dir::{DirExpr};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Instant;
@@ -178,13 +177,13 @@ pub enum LinearBodyRejectReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearBodyLoweringOutcome {
-    Lowered((Vec<fission_midend_core::ir::DirStmt>, usize)),
+    Lowered((Vec<fission_midend_dir::DirStmt>, usize)),
     Rejected(LinearBodyRejectReason),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearBodyCachedOutcome {
-    Lowered((Vec<fission_midend_core::ir::DirStmt>, usize)),
+    Lowered((Vec<fission_midend_dir::DirStmt>, usize)),
     Rejected(LinearBodyRejectReason),
 }
 
@@ -202,7 +201,7 @@ pub enum ConditionalTailMismatchSubtype {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConditionalTailLoweringResult {
-    Lowered((fission_midend_core::ir::DirStmt, usize)),
+    Lowered((fission_midend_dir::DirStmt, usize)),
     Mismatch(ConditionalTailMismatchSubtype),
 }
 

@@ -2,7 +2,7 @@ use crate::midend::builder::PreviewBuilder;
 use crate::midend::structuring::irreducible::NodeSplitResult;
 use crate::midend::structuring::loop_analysis::LoopBody;
 use crate::midend::support::StackSlot;
-use crate::midend::ir::{DirStmt, DirBinding};
+use fission_midend_dir::{DirBinding, DirStmt};
 use std::collections::BTreeMap;
 
 pub(crate) struct NirFunc<'a, 'b> {

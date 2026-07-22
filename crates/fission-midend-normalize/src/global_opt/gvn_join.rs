@@ -11,7 +11,7 @@ use super::super::analysis::preservation::preserved_binding_origin;
 use super::super::cleanup::expr_has_side_effects;
 use fission_midend_core::wave_stats;
 use crate::prelude::*;
-use fission_midend_core::util_dir::expr_type;
+use fission_midend_dir::util::expr_type;
 
 /// Hoist duplicate pure RHS on the first statement of both `if` arms when LHS
 /// names differ.  Returns `true` if changed.

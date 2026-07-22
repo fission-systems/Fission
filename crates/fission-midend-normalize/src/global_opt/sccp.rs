@@ -4,7 +4,7 @@
 //! `if`/`switch` joins, and conservatively drops variables written in loop bodies
 //! from the map after `while`/`for`/`do-while`.  This complements
 //! [`super::super::analysis::defuse::constant_folding_pass`] (single-statement fold) and VSA
-//! [`fission_midend_core::vsa::jump_resolver`] (intervals, not a constant lattice).
+//! [`fission_midend_dir::vsa::jump_resolver`] (intervals, not a constant lattice).
 
 use super::super::analysis::defuse::{eval_hir_expr_with_const_env, fold_expr_hir};
 use super::super::cleanup::expr_has_side_effects;

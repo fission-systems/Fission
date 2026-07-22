@@ -1,6 +1,7 @@
 use crate::midend::pass::{AnalysisStore, InvariantBasis, NirFunc, NirPass, PassResult};
 use crate::midend::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
-use crate::midend::ir::{DirStmt, MlilPreviewError};
+use crate::midend::ir::MlilPreviewError;
+use fission_midend_dir::DirStmt;
 // ADR 0012: admission / SESE / collapse free-fns owned by midend-structuring.
 use fission_midend_structuring::{
     StructuringAdmissionInput, StructuringAdmissionReason, StructuringHost,

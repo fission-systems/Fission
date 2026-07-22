@@ -1,10 +1,11 @@
 //! Pure DIR helpers shared by builder / normalize / structuring hosts --
-//! the `DirStmt`/`DirExpr` counterpart to [`crate::util`] (which stays
-//! `HirStmt`/`HirExpr`-typed for `fission-pcode`'s `render`/printer layer).
-//! Each function here is an independently-defined twin of its `util`
-//! namesake, not a shared generic implementation -- see
-//! `crate::ir::hir`'s module doc for why DIR and HIR are kept as genuinely
-//! separate types throughout this crate, not one type under two names.
+//! the `DirStmt`/`DirExpr` counterpart to `fission_midend_core::util`
+//! (which stays `HirStmt`/`HirExpr`-typed for `fission-pcode`'s
+//! `render`/printer layer). Each function here is an independently-defined
+//! twin of its `fission_midend_core::util` namesake, not a shared generic
+//! implementation -- see `fission_midend_core::ir::hir`'s module doc for
+//! why DIR and HIR are kept as genuinely separate types, not one type
+//! under two names.
 
 pub mod expr;
 pub mod label_cleanup;

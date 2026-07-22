@@ -1,5 +1,6 @@
 use crate::regions::{RegionKind, RegionProof};
-use fission_midend_core::ir::{DirStmt, MlilPreviewError};
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirStmt};
 use fission_midend_core::ir::*;
 use crate::HashMap;
 use crate::HashSet;

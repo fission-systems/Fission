@@ -267,7 +267,7 @@ fn expr_is_byte_ranged(
                     return true;
                 }
             }
-            match fission_midend_core::util_dir::expr_type(ptr) {
+            match fission_midend_dir::util::expr_type(ptr) {
                 NirType::Ptr(inner) => is_byte_int_ty(&inner),
                 _ => false,
             }

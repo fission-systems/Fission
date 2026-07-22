@@ -20,7 +20,7 @@
 use crate::midend::action_pipeline::{
     GhidraActionConcept, Pass, PassCtx, PassOutcome, Pipeline, Repeat, group,
 };
-use crate::midend::ir::DirFunction;
+use fission_midend_dir::DirFunction;
 
 /// A no-op structuring pass placeholder.
 ///

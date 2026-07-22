@@ -1,6 +1,6 @@
 //! Pure HIR rewrite helpers used by guarded-tail promotion/execution.
 
-use fission_midend_core::ir::{DirExpr, DirLValue, DirStmt};
+use fission_midend_dir::{DirExpr, DirLValue, DirStmt};
 
 pub fn expr_contains_var(expr: &DirExpr, name: &str) -> bool {
         match expr {

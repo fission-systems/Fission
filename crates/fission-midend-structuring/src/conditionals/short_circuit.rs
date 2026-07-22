@@ -5,8 +5,9 @@ use super::{
 };
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
-use fission_midend_core::ir::{DirBinaryOp, DirStmt, MlilPreviewError};
-use fission_midend_core::util_dir::{fold_logical_chain, negate_expr, simplify_logical_expr};
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirBinaryOp, DirStmt};
+use fission_midend_dir::util::{fold_logical_chain, negate_expr, simplify_logical_expr};
 
 /// Dispatch short-circuit or / and-else / and patterns at `idx`.
 pub fn try_lower_short_circuit_if(

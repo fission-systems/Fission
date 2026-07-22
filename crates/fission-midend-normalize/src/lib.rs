@@ -26,25 +26,31 @@ pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHas
 /// Shared prelude for historical `use super::super::*` midend imports.
 pub mod prelude {
     pub(crate) use crate::{HashMap, HashSet};
-    pub use fission_midend_core::action_pipeline::{
+    pub use fission_midend_dir::action_pipeline::{
         self, ActionGroup, ActionPool, Gate, GhidraActionConcept, Pass, PassBudget, PassCtx,
         PassOutcome, Pipeline, Repeat, STRUCTURING_TIME_CEILING_SECS, count_hir_blocks,
         count_hir_stmts, fn_pass, group, hir_shape, is_large_hir_function, run_pass_logged,
     };
+    // Nir* shared metadata (no embedded AST) from the base substrate crate --
+    // glob import rather than a curated list (this crate never constructs
+    // `HirStmt`/etc directly, so the unused Hir* names being in scope too is
+    // harmless dead space, and a curated list is a whack-a-mole of missed
+    // items every time this crate starts using one more Nir*/procedure-
+    // summary type).
     pub use fission_midend_core::ir::*;
-    pub use fission_midend_core::util_dir::{
+    // DirStmt/DirExpr/etc, plus the Nir* re-exports fission-midend-dir itself
+    // needs -- this crate operates purely on DIR, never HIR.
+    pub use fission_midend_dir::ir::*;
+    pub use fission_midend_dir::util::{
         cleanup_redundant_labels, collect_referenced_labels, expr_has_side_effecting_call,
         expr_type, fold_logical_chain, is_pure_intrinsic_call, negate_expr, next_temp_name,
         format_expr_key, rename_vars_in_stmts, simplify_logical_expr, strip_casts,
     };
-    pub use fission_midend_core::vsa::{
+    pub use fission_midend_dir::vsa::{
         apply_jump_resolver_pass, jump_resolver_candidate_count,
     };
     pub use fission_midend_core::wave_stats;
-    pub use fission_midend_core::{
-        AbiState, CallingConvention, DirExpr, DirFunction, DirStmt, NirBuildStats, NirType,
-        SWITCH_FALLTHROUGH_SENTINEL,
-    };
+    pub use fission_midend_core::{AbiState, CallingConvention, SWITCH_FALLTHROUGH_SENTINEL};
     pub use std::collections::{BTreeMap, BTreeSet};
 }
 
@@ -88,4 +94,5 @@ pub fn normalize_stmt(stmt: &mut prelude::DirStmt) {
 }
 
 // Re-export shared types for facade callers.
-pub use fission_midend_core::{DirFunction, DirStmt, NirBuildStats};
+pub use fission_midend_core::NirBuildStats;
+pub use fission_midend_dir::{DirFunction, DirStmt};

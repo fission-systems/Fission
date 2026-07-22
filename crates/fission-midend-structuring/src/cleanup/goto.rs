@@ -1,5 +1,6 @@
 use fission_midend_core::ir::*;
-use fission_midend_core::util_dir::{collect_referenced_label_counts, negate_expr};
+use fission_midend_dir::ir::*;
+use fission_midend_dir::util::{collect_referenced_label_counts, negate_expr};
 use crate::HashMap;
 use crate::HashSet;
 

@@ -1,5 +1,6 @@
 use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-use crate::midend::ir::{DirBinaryOp, DirExpr, MlilPreviewOptions, NirType, StructuringEngineKind};
+use crate::midend::ir::{MlilPreviewOptions, NirType, StructuringEngineKind};
+use fission_midend_dir::{DirBinaryOp, DirExpr};
 use crate::midend::{PreviewBuilder, render_mlil_preview};
 use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
@@ -862,7 +863,7 @@ fn x86_32_epilogue_join_live_eax_when_pred_values_differ() {
 #[test]
 fn x64_eax_int_min_arm_shares_rax_return_surface() {
     use crate::midend::cspec::test_maps::apply_preview_cspec;
-    use crate::midend::ir::DirStmt;
+    use fission_midend_dir::DirStmt;
     use crate::midend::PreviewBuilder;
 
     let eax4 = Varnode {

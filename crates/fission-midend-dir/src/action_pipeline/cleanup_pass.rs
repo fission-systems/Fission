@@ -34,7 +34,7 @@ impl Pass for CleanupPass {
 
     fn run(&self, ctx: &mut PassCtx<'_>) -> PassOutcome {
         if body_exceeds_early_cleanup_budget(&ctx.func.body) {
-            crate::wave_stats::add_cleanup_budget_skips(1);
+            fission_midend_core::wave_stats::add_cleanup_budget_skips(1);
             return PassOutcome::Unchanged;
         }
         let (before_stmts, before_locals) = hir_shape(ctx.func);

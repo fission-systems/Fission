@@ -8,6 +8,7 @@ mod tests {
     use crate::guarded_tail::types::*;
     use crate::cleanup::*;
     use fission_midend_core::ir::*;
+    use fission_midend_dir::ir::*;
     use super::super::*;
 
     fn test_if_goto(label: &str) -> DirStmt {

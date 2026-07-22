@@ -6,7 +6,8 @@ use crate::host::StructuringHost;
 use crate::linear_recovery::build_linear_sese_child_fallback;
 use crate::regions::{RegionKind, RegionProof};
 use crate::sese_driver::build_sese_region_body;
-use fission_midend_core::ir::{DirStmt, MlilPreviewError};
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirStmt};
 use crate::HashMap;
 use crate::HashSet;
 

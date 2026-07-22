@@ -683,7 +683,7 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
     // on the real HIR -- this fixture has no actual structuring step (its
     // body is already a single `Return`), so the DIR->HIR conversion here
     // is the whole boundary crossing.
-    let hir_body = ir::dir_stmts_to_hir_stmts(func.body.clone());
+    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(func.body.clone());
     let mut func = func.into_hir_function(hir_body);
 
     let context = PreviewTypeContext {

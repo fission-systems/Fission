@@ -27,7 +27,8 @@ use crate::linear_types::{
     LinearBodyRejectReason, LinearExit, LoweredTerminator,
 };
 use crate::loop_analysis::LoopBody;
-use fission_midend_core::ir::{DirExpr, DirStmt, MlilPreviewError, MlilPreviewOptions};
+use fission_midend_core::ir::{MlilPreviewError, MlilPreviewOptions};
+use fission_midend_dir::{DirExpr, DirStmt};
 use crate::HashMap;
 use crate::HashSet;
 

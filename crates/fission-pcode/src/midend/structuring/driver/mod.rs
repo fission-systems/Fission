@@ -238,9 +238,8 @@ mod tests {
         apply_blockgraph_collapse_admission_gate, decide_structuring_admission,
     };
     use crate::PcodeFunction;
-    use crate::midend::ir::{
-        DirExpr, DirStmt, DirSwitchCase, MlilPreviewOptions, NirType, StructuringEngineKind,
-    };
+    use crate::midend::ir::{MlilPreviewOptions, NirType, StructuringEngineKind};
+use fission_midend_dir::{DirExpr, DirStmt, DirSwitchCase};
     use crate::midend::{CollapseCandidate, CollapseRule, RegionKind, RegionProof, StructureNode};
 
     fn const_expr(value: i64) -> DirExpr {

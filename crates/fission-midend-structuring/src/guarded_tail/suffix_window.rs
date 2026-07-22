@@ -8,9 +8,8 @@ use super::types::*;
 use crate::cleanup::{has_non_ignorable_payload, is_ignorable_discovery_stmt};
 use crate::guarded_tail::bodies::StructuringCounter;
 use crate::host::StructuringHost;
-use fission_midend_core::ir::{
-    CallEffectSummarySource, DirStmt, NirCallEffectSummary, parse_call_target_address,
-};
+use fission_midend_core::ir::{CallEffectSummarySource, NirCallEffectSummary, parse_call_target_address};
+use fission_midend_dir::{DirStmt};
 use crate::HashMap;
 use crate::HashSet;
 

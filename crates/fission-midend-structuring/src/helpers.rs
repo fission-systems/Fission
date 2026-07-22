@@ -1,9 +1,8 @@
 //! Shared pure helpers for residual structuring free functions.
 
-use fission_midend_core::ir::{
-    DispatcherProofUnit, DirBinaryOp, DirExpr, DirStmt, DirSwitchCase, DirUnaryOp,
-};
-use fission_midend_core::util_dir::strip_casts;
+use fission_midend_core::ir::{DispatcherProofUnit};
+use fission_midend_dir::{DirBinaryOp, DirExpr, DirStmt, DirSwitchCase, DirUnaryOp};
+use fission_midend_dir::util::strip_casts;
 use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
 use crate::regions::EmitReadyDecision;
 

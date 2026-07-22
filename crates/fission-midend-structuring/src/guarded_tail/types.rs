@@ -1,6 +1,6 @@
 //! Guarded-tail shared types.
 
-use fission_midend_core::ir::{DirExpr, DirStmt};
+use fission_midend_dir::{DirExpr, DirStmt};
 use crate::regions::{RegionKind, RegionLegality, RegionRejectionReason};
 use crate::HashMap;
 

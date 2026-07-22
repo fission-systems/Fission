@@ -1,7 +1,7 @@
 //! Composable backward-liveness summaries for structured HIR statements.
 
 use crate::analysis::defuse::collect_expr_vars;
-use fission_midend_core::ir::{DirExpr, DirLValue, DirStmt};
+use fission_midend_dir::{DirExpr, DirLValue, DirStmt};
 use crate::HashSet;
 
 /// Transfer summary for `live_in = uses_before_definition U (live_out - must_definitions)`.
@@ -204,7 +204,8 @@ fn collect_lvalue_reads(lhs: &DirLValue, out: &mut HashSet<String>) {
 mod tests {
     use super::*;
 // prelude via parent
-    use fission_midend_core::{DirBinaryOp, NirType};
+    use fission_midend_core::NirType;
+    use fission_midend_dir::DirBinaryOp;
 
     fn var(name: &str) -> DirExpr {
         DirExpr::Var(name.to_string())

@@ -1,6 +1,6 @@
 //! Heritage stage boundary contract tests.
 
-use fission_midend_core::action_pipeline::{
+use fission_midend_dir::action_pipeline::{
     GHIDRA_CLEAN_ROOM_ACTION_SEQUENCE, GhidraActionConcept, stage_boundary_violation,
 };
 use crate::pipeline::build_normalize_pipeline;

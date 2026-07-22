@@ -3896,3 +3896,70 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     would need again.
   - Validated: `cargo build --workspace` clean, `golden_corpus_check.py
     check` clean (160/160, determinism holds).
+- **New crate `fission-midend-dir`: split DIR out of `fission-midend-core`,
+  2026-07-22.** User's follow-up concern after the `fission-dir` deletion:
+  `fission-midend-core` (the shared substrate nearly everything depends
+  on) was carrying *both* `Dir*` and `Hir*` IR families plus
+  `action_pipeline`/`vsa` (confirmed, while doing this split, to have zero
+  HIR-side callers) — meaning `fission-decompiler`/`fission-cli`, which
+  only ever touch the final `HirFunction`, were compiling in `DirStmt` and
+  the whole DIR-only pass framework for nothing every time they pulled in
+  `fission-midend-core`.
+  - **What moved** to the new crate (depends on `fission-midend-core`, not
+    the reverse — avoids a cycle since the DIR→HIR conversion functions
+    need to see both `Dir*` and `Hir*`, and only this direction allows
+    that): `DirStmt`/`DirExpr`/`DirLValue`/`DirBinaryOp`/`DirUnaryOp`/
+    `DirSwitchCase`/`DirFunction`/`DirBinding` type definitions (moved via
+    `git mv` + precise line-range extraction from `hir.rs`/`procedure.rs`,
+    not re-derived), the whole `action_pipeline` and `vsa` modules
+    (confirmed zero render/HIR-side callers before moving), and
+    `util_dir` (renamed to plain `util` inside its new home, since there's
+    no longer an ambiguity to disambiguate against locally). The real
+    `dir_stmts_to_hir_stmts`/`hir_stmts_to_dir_stmts` conversion functions
+    moved here too, since this crate is the one place that can legitimately
+    see both type families.
+  - **What stayed** in `fission-midend-core`: `HirStmt`/`HirExpr`/etc,
+    `NirType`/`NirBinding`/`NirBindingOrigin`/`CallSummary`/etc (genuinely
+    shared, no embedded AST — confirmed by grep: zero Dir/Hir coupling in
+    `abi_param.rs`/`fast_hash.rs`/`labels.rs`/`wave_stats.rs`/`ir/{build_stats,decomp_facts,inference,options,stats_merge}.rs`),
+    `util` (kept `Hir`-typed for `render`).
+  - **Real, load-bearing discovery made while splitting, not assumed**:
+    `render/mod.rs`'s own `expr_type` import (`use crate::midend::{...
+    expr_type}`) turned out to resolve through `fission-pcode`'s *own*,
+    second, independent `expr_type` copy in `midend/support/expr_util.rs`
+    (the file this session's `is_pure_intrinsic_call` builtin list came
+    from originally) — not `fission-midend-core::util::expr_type` as
+    assumed. Confirmed via a real build failure once `support/expr_util.rs`
+    got renamed wholesale to `DirExpr` (correct, since it's genuinely
+    builder-only) — `render` needed its own small local `expr_type`
+    (`render/mod.rs`), not a redirect to `fission-midend-core`'s copy,
+    which nothing in `render` had actually been using all along.
+  - **Mechanism**: same scripted-rename-then-let-the-compiler-find-it
+    discipline as the earlier DIR-independence split, but for import paths
+    rather than identifiers — `fission_midend_core::{util_dir,
+    action_pipeline, vsa}::` → `fission_midend_dir::{util, action_pipeline,
+    vsa}::`, plus splitting every mixed `use fission_midend_core::ir::{Dir*,
+    Nir*, ...}` import into two lines (scripted via a Python regex pass
+    that classifies each imported name against the known `Dir*` type list,
+    not by hand). `fission-midend-normalize`/`fission-midend-structuring`'s
+    preludes/glob-reexports switched from curated re-export lists to plain
+    `pub use fission_midend_core::ir::*; pub use fission_midend_dir::ir::*;`
+    pairs after a curated list proved to be a whack-a-mole of missed items
+    (`StorageClass`, `ObjectFact`, ...) — a glob import of the same
+    underlying item via two paths (both crates re-export
+    `NirType`/`NirBinding`/etc identically) is not an ambiguity error in
+    Rust, which is what makes this simplification safe.
+  - Hit a real, unrelated blocker mid-validation: `cargo nextest run
+    --workspace` failed with "No space left on device" -- `target/` had
+    grown to 226GiB. `cargo clean` freed 289GiB before re-running; not a
+    code issue.
+  - Validated: `fission-midend-core --lib` 5/5, `fission-midend-dir --lib`
+    4/4, `fission-midend-normalize` 270/270, `fission-midend-structuring`
+    99/99, `fission-pcode` 927/927 (all identical counts to before the
+    split — zero regressions), full `cargo build --workspace` clean with
+    **zero** changes needed in `fission-decompiler`/`fission-cli`/
+    `fission-emulator`/anything else downstream (confirming the split
+    achieved its actual goal), `golden_corpus_check.py check` clean
+    (160/160, byte-identical), `cargo nextest run --workspace --no-fail-fast`
+    2152/2159 — the same 7 pre-existing, already-documented failures,
+    zero new regressions.

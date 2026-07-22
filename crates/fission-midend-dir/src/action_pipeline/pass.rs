@@ -131,7 +131,7 @@ pub fn run_pass_logged<P: Pass + ?Sized>(ctx: &mut PassCtx<'_>, pass: &P) -> Pas
         );
     }
 
-    crate::wave_stats::add_pass_metric(
+    fission_midend_core::wave_stats::add_pass_metric(
         pass_name,
         elapsed_ms,
         changed,

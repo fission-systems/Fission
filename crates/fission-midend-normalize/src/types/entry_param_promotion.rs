@@ -4,10 +4,9 @@
 //! Conservatively only renames when the RHS is a plain (or cast-wrapped) hardware register
 //! for a parameter slot and the assignment appears in the leading linear prefix of the body.
 
-use fission_midend_core::ir::{
-    DirExpr, DirFunction, DirLValue, DirStmt, DirBinding, NirBindingOrigin, NirType,
-};
-use fission_midend_core::util_dir::rename_vars_in_stmts;
+use fission_midend_core::ir::{NirBindingOrigin, NirType};
+use fission_midend_dir::{DirBinding, DirExpr, DirFunction, DirLValue, DirStmt};
+use fission_midend_dir::util::rename_vars_in_stmts;
 use fission_midend_core::{AbiState, CallingConvention};
 use crate::HashSet;
 use std::collections::BTreeSet;
@@ -279,7 +278,7 @@ fn promote_direct_param_register_reads(func: &mut DirFunction) -> usize {
     promotions
 }
 
-fn sort_params_by_index(params: &mut [fission_midend_core::ir::DirBinding]) {
+fn sort_params_by_index(params: &mut [fission_midend_dir::DirBinding]) {
     params.sort_by_key(|b| {
         b.name
             .strip_prefix("param_")

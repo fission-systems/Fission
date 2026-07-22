@@ -7,7 +7,8 @@ mod tests {
     use super::super::super::cleanup::{has_orphan_goto_labels, orphan_goto_labels};
     use crate::PcodeFunction;
     use crate::midend::PreviewBuilder;
-    use crate::midend::ir::{DirStmt, MlilPreviewOptions, StructuringEngineKind};
+    use crate::midend::ir::{MlilPreviewOptions, StructuringEngineKind};
+use fission_midend_dir::{DirStmt};
     use fission_midend_structuring::try_repair_orphan_gotos;
 
     fn test_options() -> MlilPreviewOptions {

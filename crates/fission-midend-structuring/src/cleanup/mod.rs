@@ -1,5 +1,6 @@
-use fission_midend_core::ir::{DirExpr, DirLValue, DirStmt, DirSwitchCase, NirType};
-use fission_midend_core::util_dir::label_cleanup as core_labels;
+use fission_midend_core::ir::{NirType};
+use fission_midend_dir::{DirExpr, DirLValue, DirStmt, DirSwitchCase};
+use fission_midend_dir::util::label_cleanup as core_labels;
 use crate::HashMap;
 use crate::HashSet;
 

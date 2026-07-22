@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use fission_midend_core::util_dir::expr_type;
+use fission_midend_dir::util::expr_type;
 use crate::HashMap;
 
 /// Normalizes floating-point sign bit manipulation patterns (equivalent to Ghidra's RuleFloatSign):

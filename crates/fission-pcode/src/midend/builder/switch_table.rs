@@ -22,7 +22,8 @@
 /// Ghidra reference: `ActionNormalizeSetup` + jump-table analysis in
 /// `jumptable.cc`.  Our approach is simpler (HIR-level only) but covers the
 /// common compiler output.
-use super::super::ir::{DispatcherProofKind, DirBinaryOp, DirExpr, NirRenderOptions, NirType};
+use super::super::ir::{DispatcherProofKind, NirRenderOptions, NirType};
+use fission_midend_dir::{DirBinaryOp, DirExpr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RecoveredSwitchSelector {

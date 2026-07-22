@@ -14,9 +14,10 @@ use crate::regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     RegionKind, RegionLegality, RegionRejectionReason,
 };
-use fission_midend_core::ir::{DirExpr, DirLValue, DirStmt, NirBindingOrigin, NirType};
-use fission_midend_core::util_dir::expr::expr_type;
-use fission_midend_core::util_dir::{negate_expr, simplify_logical_expr, strip_casts};
+use fission_midend_core::ir::{NirBindingOrigin, NirType};
+use fission_midend_dir::{DirExpr, DirLValue, DirStmt};
+use fission_midend_dir::util::expr::expr_type;
+use fission_midend_dir::util::{negate_expr, simplify_logical_expr, strip_casts};
 use crate::HashMap;
 use crate::HashSet;
 

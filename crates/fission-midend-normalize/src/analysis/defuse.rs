@@ -16,7 +16,7 @@ use crate::analysis::expr_key::pure_expr_key;
 use crate::pipeline::normalize_expr;
 use fission_midend_core::wave_stats;
 use fission_midend_core::next_temp_name;
-use fission_midend_core::util_dir::expr_type;
+use fission_midend_dir::util::expr_type;
 use crate::{HashMap, HashSet};
 
 const WIDE_DEAD_ASSIGNMENT_RERUN_STMT_LIMIT: usize = 220;

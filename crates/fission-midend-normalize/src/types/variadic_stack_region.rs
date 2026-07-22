@@ -7,7 +7,8 @@
 //! arguments and the final argument is provably derived from a recovered home
 //! slot.
 
-use fission_midend_core::ir::{DirExpr, DirFunction, DirStmt, NirBindingOrigin};
+use fission_midend_core::ir::NirBindingOrigin;
+use fission_midend_dir::{DirExpr, DirFunction, DirStmt};
 use fission_core::CallingConvention;
 use crate::HashMap;
 use std::collections::BTreeSet;

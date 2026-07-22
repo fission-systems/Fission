@@ -10,7 +10,8 @@ use crate::host::StructuringHost;
 use crate::linear_types::{
     LinearBodyLoweringOutcome, LinearExit, structuring_diag_enabled,
 };
-use fission_midend_core::ir::{DirStmt, MlilPreviewError};
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirStmt};
 use crate::HashSet;
 
 /// Soft SESE region proof budget, in `sese_region_proof_budget_exceeded()`

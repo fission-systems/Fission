@@ -3,8 +3,9 @@
 use super::{forward_join_idx_from_address, shared_forward_linear_exit};
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator};
-use fission_midend_core::ir::{DirStmt, MlilPreviewError};
-use fission_midend_core::util_dir::negate_expr;
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirStmt};
+use fission_midend_dir::util::negate_expr;
 use crate::HashSet;
 
 /// Follow a linear single-predecessor chain to a Return within `[start, follow)`.

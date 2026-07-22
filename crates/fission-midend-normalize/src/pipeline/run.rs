@@ -65,11 +65,11 @@ use super::super::types::{
     apply_type_inference_pass, apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
 use crate::prelude::*;
-use fission_midend_core::action_pipeline::{
+use fission_midend_dir::action_pipeline::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT, PassBudget,
     TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS,
 };
-use fission_midend_core::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
+use fission_midend_dir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
 use fission_midend_core::wave_stats;
 use std::time::Instant;
 use tracing::{debug, debug_span};
@@ -1118,13 +1118,13 @@ where
     let (after_stmts, after_locals) = hir_shape(func);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    if fission_midend_core::action_pipeline::norm_trace_enabled() {
+    if fission_midend_dir::action_pipeline::norm_trace_enabled() {
         eprintln!(
             "[NORM_TRACE] fn={} pass={} changed={} hash={:016x}",
             func.name,
             pass_name,
             changed,
-            fission_midend_core::action_pipeline::norm_trace_hash(func)
+            fission_midend_dir::action_pipeline::norm_trace_hash(func)
         );
     }
 

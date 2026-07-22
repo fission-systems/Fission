@@ -2,9 +2,8 @@
 
 use super::*;
 use crate::midend::normalize::normalize_hir_function;
-use crate::midend::ir::{
-    DirExpr, DirFunction, DirLValue, DirStmt, DirBinding, NirBindingOrigin, NirType,
-};
+use crate::midend::ir::{NirBindingOrigin, NirType};
+use fission_midend_dir::{DirExpr, DirFunction, DirLValue, DirStmt, DirBinding};
 use fission_core::CallingConvention;
 
 fn binding_temp(name: &str) -> DirBinding {

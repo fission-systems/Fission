@@ -13,6 +13,7 @@ categories = ["development-tools"]
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-midend-core = { path = "../fission-midend-core" }
+fission-midend-dir = { path = "../fission-midend-dir" }
 indexmap = "2"
 tracing = "0.1"
 rustc-hash = "2.1"

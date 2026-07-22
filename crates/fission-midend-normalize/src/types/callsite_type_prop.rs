@@ -42,7 +42,7 @@
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
-use fission_midend_core::util_dir::rename_vars_in_stmts;
+use fission_midend_dir::util::rename_vars_in_stmts;
 use fission_midend_core::wave_stats::{
     add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
     add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,

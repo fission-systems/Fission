@@ -53,7 +53,7 @@ mod vsa;
 /// Structured IR substrate (`Hir*`, options, `NirBuildStats`).
 pub use fission_midend_core::ir;
 /// Action-pipeline framework (Pass / ActionGroup / budget helpers).
-pub use fission_midend_core::action_pipeline;
+pub use fission_midend_dir::action_pipeline;
 /// Shared quality-wave telemetry counters.
 pub use fission_midend_core::wave_stats;
 /// Shared label sentinels.
@@ -73,6 +73,13 @@ pub use self::telemetry::{
     take_last_preview_hint_stats,
 };
 pub use ir::*;
+/// DIR-side IR types (`DirStmt`/`DirExpr`/etc, from `fission-midend-dir`) --
+/// `builder`/`structuring` submodules construct these directly via
+/// `use super::*`, `render` never does (stays on the `Hir*` re-export
+/// above). Also re-exports the same `NirType`/`NirBinding`/etc `ir::*`
+/// already brought in -- identical underlying items via two paths, not a
+/// conflict for glob imports.
+pub use fission_midend_dir::ir::*;
 use self::{action_pipeline::*, builder::*, cfg::*, structuring::*};
 #[cfg(test)]
 use normalize::{normalize_function_body, normalize_stmt};
@@ -94,8 +101,8 @@ pub(crate) use crate::render::{
 /// printer.rs's rendering logic for DIR. Not on any hot path -- every call
 /// site is diagnostic-ish or a one-shot summary field, not per-node
 /// expression evaluation.
-pub(crate) fn print_dir_expr(expr: &ir::DirExpr) -> String {
-    print_expr(&ir::dir_expr_to_hir_expr(expr.clone()))
+pub(crate) fn print_dir_expr(expr: &fission_midend_dir::DirExpr) -> String {
+    print_expr(&fission_midend_dir::ir::dir_expr_to_hir_expr(expr.clone()))
 }
 
 pub use fission_core::CallingConvention;

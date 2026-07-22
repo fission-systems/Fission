@@ -1,9 +1,10 @@
 use fission_midend_core::ir::{
-    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef, DirExpr, DirFunction,
-    DirLValue, DirStmt, ProcedureCallShape, ProcedureControlEffect, ProcedureMemoryEffect,
-    ProcedureReturnShape, ProcedureStackEffect, ProcedureSummary, SummarySoundness, WrapperClass,
+    ArgForwardingRelation, CallEdgeKind, CallTargetProvenance, CallTargetRef,
+    ProcedureCallShape, ProcedureControlEffect, ProcedureMemoryEffect, ProcedureReturnShape,
+    ProcedureStackEffect, ProcedureSummary, SummarySoundness, WrapperClass,
     WrapperContractionProof, parse_call_target_address,
 };
+use fission_midend_dir::{DirExpr, DirFunction, DirLValue, DirStmt};
 
 fn summary_seed(target: &str) -> CallTargetRef {
     if let Some(address) = parse_call_target_address(target) {
@@ -100,7 +101,8 @@ pub fn summary_soundness_for_wrapper(summary: &ProcedureSummary) -> SummarySound
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_midend_core::ir::{DirExpr, DirFunction, DirStmt, DirBinding, NirType};
+    use fission_midend_core::ir::NirType;
+    use fission_midend_dir::{DirBinding, DirExpr, DirFunction, DirStmt};
         use fission_core::CallingConvention;
 
     fn empty_binding(name: &str) -> DirBinding {

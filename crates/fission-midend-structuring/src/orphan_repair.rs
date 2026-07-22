@@ -4,7 +4,8 @@ use crate::cleanup::{finalize_structured_body, has_orphan_goto_labels, orphan_go
 use crate::helpers::block_label;
 use crate::host::StructuringHost;
 use crate::linear_types::LoweredTerminator;
-use fission_midend_core::ir::{DirStmt, MlilPreviewError};
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirStmt};
 
 /// Resolve a block index from a structured `block_<addr>` label.
 pub fn find_block_index_by_label(host: &impl StructuringHost, label: &str) -> Option<usize> {

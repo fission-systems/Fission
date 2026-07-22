@@ -14,8 +14,9 @@ use crate::linear_types::{
     NormalizedConditionalTailArm,
 };
 use crate::cfg_analysis::PostDomTree;
-use fission_midend_core::ir::{DirExpr, DirStmt, MlilPreviewError};
-use fission_midend_core::util_dir::negate_expr;
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirExpr, DirStmt};
+use fission_midend_dir::util::negate_expr;
 use crate::HashMap;
 use crate::HashSet;
 

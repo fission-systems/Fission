@@ -2690,7 +2690,8 @@ fn duplicate_start_join_preserves_register_addend_after_zero_extend() {
 fn sat_o2_cmov_block_probe_materialize() {
     use crate::midend::PreviewBuilder;
     use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-    use crate::midend::ir::{DirStmt, MlilPreviewOptions, StructuringEngineKind};
+    use crate::midend::ir::{MlilPreviewOptions, StructuringEngineKind};
+use fission_midend_dir::{DirStmt};
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
     let eax = Varnode {
@@ -3048,9 +3049,8 @@ fn primary_return_add_is_materialized_despite_single_block_inline_consumer() {
 fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
     use crate::midend::PreviewBuilder;
     use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
-    use crate::midend::ir::{
-        DirExpr, DirLValue, DirStmt, MlilPreviewOptions, StructuringEngineKind,
-    };
+    use crate::midend::ir::{MlilPreviewOptions, StructuringEngineKind};
+use fission_midend_dir::{DirExpr, DirLValue, DirStmt};
     use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
     let eax = Varnode {

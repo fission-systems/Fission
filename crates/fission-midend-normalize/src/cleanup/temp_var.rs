@@ -1296,7 +1296,7 @@ fn is_rescue_candidate_name(name: &str) -> bool {
 }
 
 pub fn rescue_undeclared_bindings(func: &mut DirFunction) -> bool {
-    use fission_midend_core::util_dir::expr_type;
+    use fission_midend_dir::util::expr_type;
 
     let mut declared: HashSet<String> = func
         .params
@@ -1474,7 +1474,7 @@ fn collect_all_body_names_stmts(stmts: &[DirStmt], out: &mut HashSet<String>) {
 
 /// Try to infer the type of a variable from its first assignment RHS in the body.
 fn infer_type_from_first_assign(stmts: &[DirStmt], name: &str) -> NirType {
-    use fission_midend_core::util_dir::expr_type;
+    use fission_midend_dir::util::expr_type;
     for stmt in stmts {
         if let Some(ty) = infer_type_from_stmt(stmt, name) {
             return ty;
@@ -1484,7 +1484,7 @@ fn infer_type_from_first_assign(stmts: &[DirStmt], name: &str) -> NirType {
 }
 
 fn infer_type_from_stmt(stmt: &DirStmt, name: &str) -> Option<NirType> {
-    use fission_midend_core::util_dir::expr_type;
+    use fission_midend_dir::util::expr_type;
     match stmt {
         DirStmt::Assign {
             lhs: DirLValue::Var(lhs_name),

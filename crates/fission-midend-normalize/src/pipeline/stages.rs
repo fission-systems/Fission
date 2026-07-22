@@ -48,9 +48,9 @@ use super::run::{
     jump_resolver_admission, memory_fact_prefilter_allows_full, run_cleanup_block,
     run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
 };
-use fission_midend_core::action_pipeline::PassBudget;
-use fission_midend_core::ir::DirFunction;
-use fission_midend_core::vsa::apply_jump_resolver_pass;
+use fission_midend_dir::action_pipeline::PassBudget;
+use fission_midend_dir::DirFunction;
+use fission_midend_dir::vsa::apply_jump_resolver_pass;
 use fission_midend_core::wave_stats;
 use std::time::Instant;
 use tracing::debug_span;

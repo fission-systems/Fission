@@ -2512,11 +2512,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-midend-dir"
+version = "0.1.6"
+dependencies = [
+ "fission-core",
+ "fission-loader",
+ "fission-midend-core",
+ "indexmap 2.14.0",
+ "metrics",
+ "rustc-hash 2.1.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "fission-midend-normalize"
 version = "0.1.6"
 dependencies = [
  "fission-core",
  "fission-midend-core",
+ "fission-midend-dir",
  "fission-signatures",
  "indexmap 2.14.0",
  "once_cell",
@@ -2531,6 +2548,7 @@ version = "0.1.6"
 dependencies = [
  "fission-core",
  "fission-midend-core",
+ "fission-midend-dir",
  "indexmap 2.14.0",
  "rustc-hash 2.1.2",
  "tracing",
@@ -2546,6 +2564,7 @@ dependencies = [
  "fission-core",
  "fission-loader",
  "fission-midend-core",
+ "fission-midend-dir",
  "fission-midend-normalize",
  "fission-midend-structuring",
  "fission-signatures",

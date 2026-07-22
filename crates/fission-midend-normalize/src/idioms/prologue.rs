@@ -924,7 +924,7 @@ fn remove_dead_callee_assigns_from_stmts(
 mod tests {
     use super::*;
 // prelude via parent
-    use fission_midend_core::ir::DirBinding;
+    use fission_midend_dir::DirBinding;
 
     fn u64_ty() -> NirType {
         NirType::Int {

@@ -10,7 +10,8 @@ use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator};
 use crate::regions::EmitReadyDecision;
 use crate::switch::{SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch};
-use fission_midend_core::ir::{DispatcherProofUnit, DirExpr, DirStmt, DirSwitchCase, MlilPreviewError};
+use fission_midend_core::ir::{DispatcherProofUnit, MlilPreviewError};
+use fission_midend_dir::{DirExpr, DirStmt, DirSwitchCase};
 use crate::HashSet;
 
 /// Admit switch-chain recovery from CFG shape alone (no p-code opcodes).

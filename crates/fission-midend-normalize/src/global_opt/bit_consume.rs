@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use fission_midend_core::util_dir::expr_type;
+use fission_midend_dir::util::expr_type;
 use crate::HashMap;
 
 /// Bit-level consumed-mask backward propagation pass.

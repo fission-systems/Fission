@@ -7,7 +7,7 @@ use super::types::*;
 use crate::cleanup::{collect_referenced_label_counts, normalize_guarded_tail_layout};
 use crate::host::StructuringHost;
 use crate::regions::RegionKind;
-use fission_midend_core::ir::{DirExpr, DirStmt};
+use fission_midend_dir::{DirExpr, DirStmt};
 use crate::HashMap;
 
 /// Promote all single-entry guarded-tail shapes in `body` (one pass).

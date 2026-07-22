@@ -14,10 +14,9 @@ use crate::linear_types::{
     structuring_diag_enabled,
 };
 use crate::switch::try_lower_switch;
-use fission_midend_core::ir::{
-    DirExpr, DirLValue, DirStmt, DirSwitchCase, MlilPreviewError, NirType,
-};
-use fission_midend_core::util_dir::negate_expr;
+use fission_midend_core::ir::{MlilPreviewError, NirType};
+use fission_midend_dir::{DirExpr, DirLValue, DirStmt, DirSwitchCase};
+use fission_midend_dir::util::negate_expr;
 use crate::HashSet;
 
 // ---------------------------------------------------------------------------
@@ -1363,7 +1362,8 @@ pub fn try_lower_multiblock_infloop(host: &mut impl StructuringHost,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_midend_core::ir::{DirExpr, DirStmt, NirType};
+    use fission_midend_core::ir::{NirType};
+use fission_midend_dir::{DirExpr, DirStmt};
 
     #[test]
     fn rewrite_loop_control_gotos_converts_break_and_continue_targets() {

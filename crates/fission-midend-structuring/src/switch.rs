@@ -10,13 +10,11 @@ use crate::helpers::{
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
 use crate::regions::EmitReadyDecision;
-use fission_midend_core::util_dir::format_expr_key;
-use fission_midend_core::ir::{
-    DispatcherCaseMapSource, DispatcherLegality, DispatcherProofScope, DispatcherProofUnit,
-    DirExpr, DirStmt, DirSwitchCase, MlilPreviewError, SelectorNormalization,
-};
+use fission_midend_dir::util::format_expr_key;
+use fission_midend_core::ir::{DispatcherCaseMapSource, DispatcherLegality, DispatcherProofScope, DispatcherProofUnit, MlilPreviewError, SelectorNormalization};
+use fission_midend_dir::{DirExpr, DirStmt, DirSwitchCase};
 use fission_midend_core::wave_stats;
-use fission_midend_core::util_dir::strip_casts;
+use fission_midend_dir::util::strip_casts;
 use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
 use crate::HashSet;
 
@@ -527,7 +525,8 @@ pub fn build_compare_chain_proof(host: &impl StructuringHost,
 mod tests {
     use super::*;
     use crate::helpers::extract_eq_const_operands;
-    use fission_midend_core::ir::{DirBinaryOp, DirUnaryOp, NirType};
+    use fission_midend_core::ir::{NirType};
+use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
 
     #[test]
     fn merge_equivalent_switch_cases_merges_non_adjacent_equal_bodies() {

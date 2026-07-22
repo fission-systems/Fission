@@ -66,7 +66,7 @@
 /// This preserves do-while entry semantics without requiring a separate
 /// preheader proof, while still removing the outer label/goto recurrence.
 use crate::prelude::*;
-use fission_midend_core::util_dir::expr_type;
+use fission_midend_dir::util::expr_type;
 use crate::{HashMap, HashSet};
 
 // ── Part B — Break/Continue recovery ─────────────────────────────────────────

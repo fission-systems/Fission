@@ -1,5 +1,5 @@
 use crate::prelude::*; // For accessing normalizer structures
-use fission_midend_core::util_dir::rename_vars_in_stmts;
+use fission_midend_dir::util::rename_vars_in_stmts;
 use crate::{HashMap, HashSet};
 
 fn collect_direct_copies(stmts: &[DirStmt]) -> crate::HashSet<(String, String)> {
@@ -1359,9 +1359,8 @@ fn type_byte_size(ty: &NirType) -> Option<u32> {
 mod tests {
     use super::*;
 // prelude via parent
-    use fission_midend_core::{
-        DirExpr, DirFunction, DirLValue, DirStmt, DirBinding, NirBindingOrigin, NirType,
-    };
+    use fission_midend_core::{NirBindingOrigin, NirType};
+    use fission_midend_dir::{DirBinding, DirExpr, DirFunction, DirLValue, DirStmt};
 
     #[test]
     fn test_stack_slot_coalescing_and_domain_separation() {

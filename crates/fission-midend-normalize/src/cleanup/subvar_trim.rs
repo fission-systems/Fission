@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::analysis::defuse::DefUseMap;
-use fission_midend_core::util_dir::expr_type;
+use fission_midend_dir::util::expr_type;
 use crate::HashMap;
 
 pub fn apply_subvar_trim_pass(func: &mut DirFunction) -> bool {

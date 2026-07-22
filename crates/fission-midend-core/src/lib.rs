@@ -1,8 +1,21 @@
-//! Midend **shared substrate**.
+//! Midend **shared substrate** -- the HIR half, plus genuinely shared
+//! (AST-free) metadata.
 //!
-//! Owns structured IR types (`Hir*`, options, `NirBuildStats`), the
-//! action-pipeline framework, quality-wave counters, pure HIR helpers,
-//! VSA, and shared label sentinels (ADR 0012 Phase D).
+//! Owns the structured `Hir*` IR types, `NirType`/`NirBinding`/etc
+//! (shared declaration/type metadata, consumed by both DIR and HIR),
+//! `NirBuildStats`, pure HIR helpers, and shared label sentinels
+//! (ADR 0012 Phase D).
+//!
+//! The DIR-side counterpart -- `Dir*` IR types, the action-pipeline
+//! framework, VSA, and their own pure-helper twins -- lives in
+//! `fission-midend-dir` (depends on this crate, not the other way around):
+//! `action_pipeline`/`vsa` turned out to have zero HIR-side callers when
+//! this crate was split, and `render`/printer (the only HIR-side consumer
+//! of `util`'s functions) never needs `DirStmt`, so keeping this crate to
+//! just HIR-and-shared keeps it the smaller dependency for anything
+//! downstream of a finished decompile (`fission-decompiler`, `fission-cli`,
+//! ...), which never needs to compile in `DirStmt`/`action_pipeline`/`vsa`
+//! at all.
 
 #![allow(clippy::all)]
 #![allow(dead_code)]
@@ -12,12 +25,9 @@
 
 pub mod abi_param;
 pub mod fast_hash;
-pub mod action_pipeline;
 pub mod ir;
 pub mod labels;
 pub mod util;
-pub mod util_dir;
-pub mod vsa;
 pub mod wave_stats;
 
 /// Shared structured-IR types and telemetry contract.
@@ -35,6 +45,3 @@ pub use util::{
 };
 pub use abi_param::AbiState;
 pub use fission_core::CallingConvention;
-
-/// VSA jump-resolver surface used by the normalize pipeline.
-pub use vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};

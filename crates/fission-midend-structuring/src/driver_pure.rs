@@ -2,8 +2,8 @@
 
 use crate::admission::StructuringAdmissionReason;
 use crate::regions::RegionKind;
-use fission_midend_core::util_dir::format_expr_key;
-use fission_midend_core::ir::DirStmt;
+use fission_midend_dir::util::format_expr_key;
+use fission_midend_dir::DirStmt;
 
 pub fn apply_blockgraph_collapse_admission_gate(
     admission: StructuringAdmissionReason,

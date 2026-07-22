@@ -754,7 +754,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         self.temp_next_id = self.temp_next_id.saturating_add(1);
         self.temps.insert(
             name.clone(),
-            fission_midend_core::ir::DirBinding {
+            fission_midend_dir::ir::DirBinding {
                 name: name.clone(),
                 ty,
                 surface_type_name: None,

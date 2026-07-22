@@ -197,7 +197,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     // the genuinely separate `HirStmt` grammar and `hir` is rebound to a
     // real `HirFunction` from here on -- not a type pun, an actual
     // structural conversion (`dir_stmts_to_hir_stmts`).
-    let hir_body = fission_midend_core::ir::dir_stmts_to_hir_stmts(hir.body.clone());
+    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(hir.body.clone());
     let mut hir = hir.into_hir_function(hir_body);
     // Observation side channel, same rationale as `store_last_dir_snapshot`
     // above: the fully-finalized `HirFunction` (structured body, plus the
@@ -220,7 +220,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     // mutate `hir`) defined for `DirStmt` input -- convert back via
     // `hir_stmts_to_dir_stmts` rather than duplicating the pass for `HirStmt`.
     let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(
-        &fission_midend_core::ir::hir_stmts_to_dir_stmts(hir.body.clone()),
+        &fission_midend_dir::ir::hir_stmts_to_dir_stmts(hir.body.clone()),
     );
     build_stats.merge_guarded_tail_discovery_assign(&normalized_discovery_stats);
     build_stats.refresh_structuring_reason_families();

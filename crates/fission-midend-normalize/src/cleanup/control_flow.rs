@@ -4,7 +4,7 @@ use crate::prelude::{
     HashMap, HashSet, DirBinaryOp, DirExpr, DirStmt, fold_logical_chain, negate_expr,
     simplify_logical_expr,
 };
-use fission_midend_core::util_dir::label_cleanup::cleanup_redundant_labels;
+use fission_midend_dir::util::label_cleanup::cleanup_redundant_labels;
 
 pub fn prune_unreachable_after_terminal(stmts: &mut Vec<DirStmt>) -> bool {
     let mut changed = false;

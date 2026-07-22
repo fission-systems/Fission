@@ -5,8 +5,9 @@ use super::{
 };
 use crate::host::StructuringHost;
 use crate::linear_types::{IfLoweringBudget, LinearExit, LoweredTerminator, structuring_diag_enabled};
-use fission_midend_core::ir::{DirExpr, DirStmt, MlilPreviewError};
-use fission_midend_core::util_dir::negate_expr;
+use fission_midend_core::ir::{MlilPreviewError};
+use fission_midend_dir::{DirExpr, DirStmt};
+use fission_midend_dir::util::negate_expr;
 
 struct PlainIfCandidate {
     cond_prefix: Vec<DirStmt>,

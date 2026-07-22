@@ -9,10 +9,11 @@
 //! monotone lower bound per function.
 
 use fission_midend_core::ir::{
-    CallEdgeKind, CallEffectSummary, CallSummary, CallTargetProvenance, CallTargetRef, DirExpr,
-    DirFunction, DirStmt, MemoryEffectRegion, NirType, PrototypeSummary, SummarySoundness,
-    WrapperClass, parse_call_target_address,
+    CallEdgeKind, CallEffectSummary, CallSummary, CallTargetProvenance, CallTargetRef,
+    MemoryEffectRegion, NirType, PrototypeSummary, SummarySoundness, WrapperClass,
+    parse_call_target_address,
 };
+use fission_midend_dir::{DirExpr, DirFunction, DirStmt};
 use indexmap::IndexMap;
 
 use fission_midend_core::wave_stats::{
@@ -359,7 +360,7 @@ pub fn apply_interproc_callsite_arity_pass(func: &mut DirFunction) -> bool {
 mod tests {
     use super::*;
 // prelude via parent
-    use fission_midend_core::ir::DirBinding;
+    use fission_midend_dir::DirBinding;
     use fission_core::CallingConvention;
 
     fn empty_binding(name: &str) -> DirBinding {

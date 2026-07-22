@@ -3,6 +3,7 @@ use super::*;
 // prelude via parent
 use crate::HashSet;
 use fission_midend_core::*;
+use fission_midend_dir::*;
 
 fn int(bits: u32) -> NirType {
     NirType::Int {
@@ -1712,7 +1713,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
 // (ADR 0011). midend-core::format_expr_key is a deterministic key/diagnostic printer only.
 #[test]
 fn diagnostic_print_expr_renders_callind_opaque_call_shape() {
-    use fission_midend_core::util_dir::format_expr_key;
+    use fission_midend_dir::util::format_expr_key;
 
     let expr = DirExpr::Call {
         target: "__fission_callind_opaque".to_string(),
@@ -1926,7 +1927,8 @@ fn collapse_trivial_assign_returns_folds_eax_const_even_if_preserved() {
 
 #[test]
 fn collapse_trivial_assign_returns_folds_rax_param_add() {
-    use fission_midend_core::ir::{DirBinaryOp, DirExpr, DirLValue, DirStmt, NirType};
+    use fission_midend_core::ir::NirType;
+    use fission_midend_dir::{DirBinaryOp, DirExpr, DirLValue, DirStmt};
     let mut stmts = vec![
         DirStmt::Assign {
             lhs: DirLValue::Var("rax".to_string()),

@@ -1,4 +1,5 @@
-use fission_midend_core::ir::{DirBinaryOp, DirExpr, DirLValue, DirStmt, DirBinding, NirType};
+use fission_midend_core::ir::NirType;
+use fission_midend_dir::{DirBinaryOp, DirBinding, DirExpr, DirLValue, DirStmt};
 use fission_midend_core::is_pure_intrinsic_call;
 use crate::{HashMap, HashSet};
 
