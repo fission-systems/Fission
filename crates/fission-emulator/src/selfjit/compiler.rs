@@ -42,7 +42,7 @@
 //! `BoolAnd`, `BoolOr`, `BoolXor`, `BoolNegate`, `IntEqual`,
 //! `IntNotEqual`, `IntSLess`, `IntLess`, `IntSLessEqual`, `IntLessEqual`,
 //! `IntCarry`, `IntSCarry`, `IntSBorrow`, `PopCount`, `PtrAdd`, `Piece`,
-//! `SubPiece`, `LzCount`, all 8 `Float*` binops (`FloatAdd`/`Sub`/`Mult`/
+//! `SubPiece`, `LzCount`, `Extract`, `Insert`, all 8 `Float*` binops (`FloatAdd`/`Sub`/`Mult`/
 //! `Div`/`Equal`/`NotEqual`/`Less`/`LessEqual`) and all 10 `Float*` unops
 //! (`FloatNeg`/`Abs`/`Sqrt`/`Nan`/`Ceil`/`Floor`/`Round`/`Trunc`/
 //! `Int2Float`/`Float2Float`) -- routed through the exact same pure
@@ -123,8 +123,8 @@
 //! alongside the ≤8-byte path.
 //!
 //! Not implemented at all (of ~70 `PcodeOpcode` variants): the remaining
-//! ones -- `Call`/`CallInd`/`CallOther`, `MultiEqual`, `Extract`, `Insert`,
-//! `SegmentOp`. `compile_translation_block` returns a descriptive
+//! ones -- `Call`/`CallInd`/`CallOther`, `MultiEqual`, `SegmentOp`.
+//! `compile_translation_block` returns a descriptive
 //! `Err` for any of these rather than emitting wrong code -- matching this
 //! session's own repeated finding (the 8 missing `FLOAT_*` decompiler
 //! opcodes, the emulator's own TZCNT bug) that a loud failure beats
@@ -708,6 +708,65 @@ fn compile_op(
             asm.mov_imm64(RESULT, width as u64);
             let end = asm.offset();
             asm.patch_b(jump_to_end, end);
+            store_value(asm, out, RESULT);
+        }
+        // EXTRACT: (val >> offset_bits), truncated to out.size -- matches
+        // `crate::jit::compiler`'s own arm (including its `.min(63)`
+        // mask-width clamp, for parity), except the offset operand isn't
+        // specially bifurcated into a constant-vs-dynamic case the way
+        // that backend's does for its own IR-construction reasons:
+        // `load_value` already handles both a constant and a real
+        // register offset uniformly, so there's nothing to gain from
+        // splitting them here.
+        PcodeOpcode::Extract => {
+            let out = require_output(op)?;
+            anyhow::ensure!(!op.inputs.is_empty(), "Extract needs at least 1 input");
+            load_value(asm, &op.inputs[0], A_VAL);
+            if op.inputs.len() > 1 {
+                load_value(asm, &op.inputs[1], TMP1);
+                asm.lsr_reg(RESULT, A_VAL, TMP1);
+            } else {
+                asm.mov_reg(RESULT, A_VAL);
+            }
+            let bits = (out.size as u64).saturating_mul(8).min(63);
+            let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+            asm.mov_imm64(TMP1, mask);
+            asm.and_reg(RESULT, RESULT, TMP1);
+            store_value(asm, out, RESULT);
+        }
+        // INSERT: dest with `src` bits inserted at `position` for `size`
+        // bits (both compile-time constants -- matches
+        // `crate::jit::compiler`'s own arm exactly, including its
+        // defaults when either is missing/non-constant; real p-code
+        // INSERT always encodes both as immediates, so this isn't
+        // cutting a real corner).
+        PcodeOpcode::Insert => {
+            let out = require_output(op)?;
+            anyhow::ensure!(op.inputs.len() >= 2, "Insert needs at least 2 inputs (dest, src)");
+            load_value(asm, &op.inputs[0], A_VAL); // dest
+            load_value(asm, &op.inputs[1], B_VAL); // src
+            let pos = if op.inputs.len() > 2 && op.inputs[2].is_constant {
+                op.inputs[2].constant_val as u32
+            } else {
+                0
+            };
+            let nbits = if op.inputs.len() > 3 && op.inputs[3].is_constant {
+                op.inputs[3].constant_val as u32
+            } else {
+                (op.inputs[1].size * 8).min(64)
+            };
+            let nbits = nbits.min(64);
+            let mask = if nbits >= 64 { u64::MAX } else { (1u64 << nbits) - 1 };
+            let clear_mask = !(mask.wrapping_shl(pos));
+            asm.mov_imm64(TMP1, clear_mask);
+            asm.and_reg(RESULT, A_VAL, TMP1); // RESULT = dest & clear_mask
+            asm.mov_imm64(TMP1, mask);
+            asm.and_reg(B_VAL, B_VAL, TMP1); // B_VAL = src & mask
+            if pos > 0 {
+                asm.mov_imm64(TMP1, pos as u64);
+                asm.lsl_reg(B_VAL, B_VAL, TMP1);
+            }
+            asm.orr_reg(RESULT, RESULT, B_VAL);
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv => {
@@ -2138,6 +2197,49 @@ mod tests {
             3.5f32,
             "FloatFloat2Float(3.5 f64 -> f32)"
         );
+    }
+
+    /// `Extract` (with and without an explicit bit-offset operand) and
+    /// `Insert` -- checked against hand-computed bit slices, not just "it
+    /// ran".
+    #[test]
+    fn extract_and_insert_bit_slices() {
+        let ops = vec![
+            copy_const(0, 0x1122334455667788u64 as i64),
+            // Extract 2 bytes at bit-offset 16 -> 0x5566.
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Extract,
+                address: 0x1000,
+                output: Some(reg(8, 2)),
+                inputs: vec![reg(0, 8), imm(16, 4)],
+                asm_mnemonic: None,
+            },
+            // Extract with no offset operand -> low 2 bytes -> 0x7788.
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Extract,
+                address: 0x1000,
+                output: Some(reg(16, 2)),
+                inputs: vec![reg(0, 8)],
+                asm_mnemonic: None,
+            },
+            copy_const(24, -1i64), // dest = all-ones (8 bytes)
+            // Insert an 8-bit src at bit-position 8 -> clears bits 8-15,
+            // then ORs in 0xAB there: 0xFFFFFFFFFFFFFFFF -> 0xFFFFFFFFFFFFABFF.
+            PcodeOp {
+                seq_num: 4,
+                opcode: PcodeOpcode::Insert,
+                address: 0x1000,
+                output: Some(reg(32, 8)),
+                inputs: vec![reg(24, 8), imm(0xAB, 1), imm(8, 4), imm(8, 4)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 8) as u16, 0x5566, "Extract(offset=16, 2 bytes)");
+        assert_eq!(read_reg(&mut emu, 16) as u16, 0x7788, "Extract(no offset, 2 bytes)");
+        assert_eq!(read_reg(&mut emu, 32), 0xFFFFFFFFFFFFABFF, "Insert(pos=8, size=8)");
     }
 }
 

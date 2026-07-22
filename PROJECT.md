@@ -4866,3 +4866,32 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     (+3, same 7 pre-existing unrelated failures), full workspace nextest
     2183/2190 (+3, zero regressions), full workspace build clean,
     `golden_corpus_check.py check` clean.
+- **`selfjit`: `Extract`/`Insert` implemented, 2026-07-23.** Continuing
+  opcode coverage. Mechanical ports of `crate::jit::compiler`'s own arms,
+  reusing the shift+mask shape `Piece`/`SubPiece` already established
+  here rather than inventing a new one: `Extract` (`val >> offset_bits`,
+  masked to `out.size`) and `Insert` (clear the destination's target bit
+  range, then OR in the shifted, masked source). One simplification
+  versus Cranelift's own arm: `load_value` already handles both a
+  constant and a real register offset operand uniformly, so `Extract`
+  doesn't need Cranelift's own constant-vs-dynamic bifurcation (that
+  split exists there for Cranelift IR-construction reasons that don't
+  apply to this backend's call-per-operand design). `Insert`'s
+  position/size stay compile-time-constant-only, matching Cranelift's own
+  arm exactly -- real p-code `INSERT` always encodes both as immediates,
+  so this isn't cutting a real corner.
+  - New regression test with hand-computed bit slices: `Extract` both
+    with and without an explicit offset operand, `Insert` at a non-zero
+    bit position -- checked against known values (`0x1122334455667788`
+    extracted at bit-offset 16 -> `0x5566`; inserting `0xAB` at bit
+    position 8 into an all-ones 8-byte destination -> exactly
+    `0xFFFFFFFFFFFFABFF`).
+  - `selfjit_supports` updated; re-ran the differential harness against
+    existing corpus fixtures -- unchanged and clean (neither fixture's
+    reachable TBs happen to use `Extract`/`Insert`, but confirms nothing
+    regressed).
+  - Validated on both host backends: `selfjit::*` 28/28 (aarch64, +1) and
+    34/34 (x86-64 via Rosetta, +1), `fission-emulator` nextest 101/108
+    (+1, same 7 pre-existing unrelated failures), full workspace nextest
+    2184/2191 (+1, zero regressions), full workspace build clean,
+    `golden_corpus_check.py check` clean.
