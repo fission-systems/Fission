@@ -3858,3 +3858,41 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     changed zero decompiler output), `cargo nextest run --workspace`
     2157/2164 passed — the same 7 pre-existing, already-documented
     failures (unrelated memcpy/`.text`-overrun bug), zero new regressions.
+- **`fission-dir` crate deleted, 2026-07-22.** After the type-independence
+  split above landed, the user realized `fission-dir` (the naming
+  suggested an isolated crate) was never actually where isolation
+  happened — `DirStmt`/`DirExpr`/etc. live in `fission-midend-core` (the
+  shared substrate nearly everything depends on) precisely because
+  builder/normalize/structuring needed to construct/consume them directly;
+  `fission-dir` was always a downstream-only consumer (depended on
+  `fission-pcode`/`fission-decompiler`/`fission-emulator`/`fission-solver`,
+  nothing depended on it). Deleting it doesn't touch the dependency
+  direction that actually mattered — no core crate ever depended on
+  `fission-dir` — but it does remove the interpreter/differential-
+  verification tooling itself (Phase 1: `interp.rs`'s macro-generated
+  `dir::interpret`/`hir::interpret`, `diff.rs`'s `diff_dir_hir`, the real
+  `max2.elf` end-to-end test) and the roadmap's Phase 2 (solver-backed
+  equivalence proof, emulator-backed DIR fidelity check).
+  - Explicitly kept: the `DirStmt`/`HirStmt` type-independence split
+    itself (commit `08361455`) — the user confirmed only the crate should
+    go, not the type-identity refactor, since it has independent value
+    (real, compiler-verified separation between pre- and post-structuring
+    data) regardless of whether anything outside the core pipeline
+    consumes it.
+  - Removed: `crates/fission-dir/` entirely, its workspace member entry.
+    Fixed two now-dangling doc-comment references to `fission-dir`/
+    `fission_dir::diff::diff_dir_hir` (in `fission-midend-core/src/ir/
+    hir.rs` and `fission-pcode/src/midend/orchestrate.rs`) — nothing else
+    in the workspace ever referenced the crate (confirmed via grep before
+    deleting). Also fixed a stale doc reference to a
+    `dir_function_to_hir_function` function name that was never actually
+    implemented under that name (the real one is `dir_stmts_to_hir_stmts`)
+    while touching that comment.
+  - The `take_last_dir_snapshot`/`take_last_hir_function_snapshot` hooks
+    in `orchestrate.rs` are left in place (still real, still zero-
+    behavior-change observational side channels) even though nothing
+    currently reads them — cheap to keep, and exactly what a future
+    verifier (this crate's replacement, or a differently-scoped one)
+    would need again.
+  - Validated: `cargo build --workspace` clean, `golden_corpus_check.py
+    check` clean (160/160, determinism holds).

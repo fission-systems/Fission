@@ -324,9 +324,9 @@ fn store_last_dir_snapshot(func: super::DirFunction) {
 /// `fission_midend_core::ir::hir`'s module doc), not the same type under a
 /// different name, so callers can't accidentally swap this with the
 /// structured HIR `take_last_hir_function_snapshot` returns. Pairing the
-/// two lets an external verifier (e.g. `fission-dir`) interpret both and
-/// diff results for the same concrete inputs, without any change to what
-/// structuring itself computes -- purely observational, same pattern as
+/// two lets an external verifier interpret both and diff results for the
+/// same concrete inputs, without any change to what structuring itself
+/// computes -- purely observational, same pattern as
 /// `take_last_layered_pseudocode` above.
 pub fn take_last_dir_snapshot() -> Option<super::DirFunction> {
     LAST_DIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())

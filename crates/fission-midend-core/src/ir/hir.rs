@@ -6,7 +6,7 @@ use super::*;
 /// pre-structuring pipeline stage). Structuring performs a genuine
 /// `DirFunction -> HirFunction` conversion once its CFG-to-AST rewrite is
 /// done (see `fission_pcode::midend::orchestrate`'s call site and
-/// `dir_function_to_hir_function` in this crate); nothing upstream of that
+/// [`dir_stmts_to_hir_stmts`] in this module); nothing upstream of that
 /// conversion ever produces or touches [`HirStmt`].
 ///
 /// [`DirStmt`] and [`HirStmt`] are independently defined (not a shared type
@@ -15,9 +15,8 @@ use super::*;
 /// is that they are allowed to diverge as DIR's and HIR's respective needs
 /// diverge (e.g. HIR-only surface-presentation concerns, or DIR-only
 /// pre-structuring bookkeeping), and a real independent definition makes an
-/// accidental DIR/HIR mix-up (e.g. in `fission_dir::diff::diff_dir_hir`) a
-/// compile error rather than two same-shaped types silently type-checking
-/// while being logically backwards.
+/// accidental DIR/HIR mix-up a compile error rather than two same-shaped
+/// types silently type-checking while being logically backwards.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirStmt {
     Assign {
