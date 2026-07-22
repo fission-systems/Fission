@@ -163,6 +163,9 @@ pub(crate) fn run_differential(binary_path: &Path, entry_pc: u64, max_tbs: usize
     let mut cranelift_emu = build_emulator(binary_path, entry_pc)?;
     let register_space = cranelift_emu.state.register_space();
     let mut report = DifferentialReport::default();
+    // Persistent JitCompiler, matching production's Emulator.jit lifetime
+    // (one instance reused across TBs) rather than a fresh instance per TB.
+    let mut cl_compiler = JitCompiler::new().context("build JitCompiler")?;
 
     let mut pc = entry_pc;
     for _ in 0..max_tbs {
@@ -180,7 +183,6 @@ pub(crate) fn run_differential(binary_path: &Path, entry_pc: u64, max_tbs: usize
         // in *this* loop already mutated.
         let mut pre_state = cranelift_emu.state.clone();
 
-        let mut cl_compiler = JitCompiler::new().context("build JitCompiler")?;
         let cl_func_ptr = cl_compiler
             .compile_translation_block(&insns, register_space)
             .with_context(|| format!("Cranelift failed to compile TB at 0x{pc:x}"))?;
@@ -276,23 +278,17 @@ mod tests {
     /// pass condition; skips (unsupported opcodes elsewhere in the binary)
     /// are expected and reported, not failures.
     ///
-    /// Capped at 7 TBs deliberately, not just "however many happen to run":
-    /// the next TB in this walk (`0x10067e4`, a plain register-to-register
-    /// `Copy`) is a **real, reproducible divergence** this harness found --
-    /// `SelfJitCompiler`'s result matches the copy's real source bytes
-    /// exactly; Cranelift's does not (2 of 8 copied bytes come out `0x00`
-    /// instead of the source's real value). Read straight through
-    /// Cranelift's own register-caching code (`ensure_var!`/`store_vn!`'s
-    /// `host_reg_file` fast path, `dirty` tracking, `jit_reg_bulk_flush`)
-    /// without finding the mechanism -- everything inspected looks
-    /// individually correct, so this is reported as a real, precisely
-    /// located, but *unconfirmed* lead (not yet proven to reproduce via
-    /// production's normal `run_instruction` orchestration, only via this
-    /// harness's direct-call pattern, which does mirror `run_instruction`'s
-    /// own call site) rather than a fix. Left uncapped would fail this test
-    /// permanently on a bug outside this pass's scope (`selfjit` opcode
-    /// coverage); see `PROJECT.md` for the full investigation trail before
-    /// picking this back up.
+    /// Previously capped at 7 TBs to dodge a real divergence at `0x10067e4`
+    /// (a plain register-to-register `Copy` where Cranelift's own
+    /// `ensure_var!` Variable cache was keyed by `(space, offset)` only --
+    /// missing `size` -- so a narrower earlier read's masked, cached value
+    /// got wrongly reused by a later wider read to the same offset). Root-
+    /// caused via `FISSION_JIT_DUMP_IR` tracing Cranelift's generated IR
+    /// SSA value flow directly; fixed by widening the cache key to include
+    /// size (`jit/compiler.rs`'s `ensure_var!`). See
+    /// `known_issue_cranelift_register_copy_divergence_at_0x10067e4` below
+    /// (now a normal passing regression test) and `PROJECT.md` for the full
+    /// investigation trail. Cap raised now that the underlying bug is fixed.
     #[test]
     fn selfjit_matches_cranelift_on_real_entry_point_tbs() {
         let path = fixture_elf();
@@ -301,7 +297,7 @@ mod tests {
         let binary = fission_loader::loader::LoadedBinary::from_file(&path).expect("load binary");
         let entry_pc = binary.inner().entry_point;
 
-        let report = run_differential(&path, entry_pc, 7).expect("run_differential");
+        let report = run_differential(&path, entry_pc, 40).expect("run_differential");
         eprintln!(
             "differential: matched={} skipped_unsupported={} skipped_errors={:?} diverged={:?}",
             report.matched, report.skipped_unsupported_opcode, report.skipped_compile_error, report.diverged
@@ -317,13 +313,13 @@ mod tests {
         );
     }
 
-    /// Isolated repro for the real, precisely-located divergence flagged
-    /// above -- `#[ignore]`d so it doesn't block CI on a bug outside this
-    /// pass's scope, but kept runnable (`cargo test -- --ignored`) so the
-    /// finding isn't lost. Run with `FISSION_DIFF_DEBUG=1` to see the exact
-    /// byte-level diff and the offending TB's ops.
+    /// Regression test for the register-copy divergence fixed in
+    /// `jit/compiler.rs`'s `ensure_var!` (cache key widened to include
+    /// `size`, not just `(space, offset)`). Previously reproduced a real
+    /// Cranelift-glue bug at TB `0x10067e4`; now confirms it stays fixed.
+    /// Run with `FISSION_DIFF_DEBUG=1` to see the byte-level diff and TB
+    /// ops if this ever regresses.
     #[test]
-    #[ignore = "known, unconfirmed Cranelift host_reg_file divergence at 0x10067e4 -- see this module's doc comment on selfjit_matches_cranelift_on_real_entry_point_tbs"]
     fn known_issue_cranelift_register_copy_divergence_at_0x10067e4() {
         let path = fixture_elf();
         assert!(path.is_file(), "missing fixture {}", path.display());
@@ -332,7 +328,7 @@ mod tests {
         let report = run_differential(&path, entry_pc, 10).expect("run_differential");
         assert!(
             report.is_clean(),
-            "expected this to still reproduce the known divergence: {:?}",
+            "regression: register-copy divergence at 0x10067e4 reappeared: {:?}",
             report.diverged
         );
     }

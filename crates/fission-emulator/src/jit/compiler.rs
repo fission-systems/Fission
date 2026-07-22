@@ -447,7 +447,15 @@ impl JitCompiler {
         let reg_base_call = builder.ins().call(host_reg_base_ref, &[emu_ptr]);
         let host_reg_base = builder.inst_results(reg_base_call)[0];
 
-        let mut var_map: HashMap<(u64, u64), Variable> = HashMap::new();
+        // Keyed by (space, offset, size) -- size MUST be part of the key.
+        // The same (space, offset) can be read at different widths within
+        // one TB (e.g. a 32-bit sub-register access followed by a full
+        // 64-bit access to the same base register); a size-less key would
+        // let a narrower access's masked value get wrongly reused by a
+        // later wider access to the same offset. Found via a real
+        // register-copy divergence between this backend and `selfjit` at
+        // TB 0x10067e4 in a real corpus binary -- see PROJECT.md.
+        let mut var_map: HashMap<(u64, u64, u64), Variable> = HashMap::new();
         let mut dirty: Vec<(u64, u64, u32, Variable)> = Vec::new();
 
         // Map insn start op-index → guest len for count call emission.
@@ -456,7 +464,7 @@ impl JitCompiler {
 
         macro_rules! ensure_var {
             ($space:expr, $offset:expr, $size:expr) => {{
-                let key = ($space, $offset);
+                let key = ($space, $offset, $size as u64);
                 if let Some(v) = var_map.get(&key) {
                     *v
                 } else {
@@ -1830,6 +1838,12 @@ impl JitCompiler {
         builder.ins().return_(&[final_pc]);
         builder.finalize();
 
+        // Diagnostic: dump Cranelift's generated IR for this TB. Used to
+        // root-cause the ensure_var! cache-key bug (see its own comment);
+        // kept as a permanent debugging aid for future JIT-glue issues.
+        if std::env::var_os("FISSION_JIT_DUMP_IR").is_some() {
+            eprintln!("=== Cranelift IR for TB@0x{start_pc:x} ===\n{}", self.ctx.func);
+        }
         self.compile_seq = self.compile_seq.wrapping_add(1);
         let name = format!("jit_tb_{:X}_{}", start_pc, self.compile_seq);
         let id = self

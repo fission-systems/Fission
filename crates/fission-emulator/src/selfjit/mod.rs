@@ -104,23 +104,29 @@
 //!    addition, not just once at the end, before ever considering flipping
 //!    the default.
 //!
-//!    **A real, precisely-located but unconfirmed lead this harness
-//!    already found**: `selfjit::differential::tests::
-//!    known_issue_cranelift_register_copy_divergence_at_0x10067e4`
-//!    (`#[ignore]`d, not blocking) -- a plain register-to-register `Copy`
-//!    in `testdata/x64_static_printf_malloc.elf`'s real CRT startup code
-//!    where `SelfJitCompiler`'s result matches the copy's real source
-//!    bytes exactly and Cranelift's does not (2 of 8 bytes come out `0`).
-//!    Read through `crate::jit::compiler`'s `host_reg_file` fast path,
-//!    `dirty`-entry tracking, and `jit_reg_bulk_flush` end-to-end without
-//!    finding the mechanism -- everything inspected looks individually
-//!    correct in isolation. Flagged here rather than fixed blind; a real
-//!    fix needs either reproducing it through production's normal
-//!    `run_instruction` orchestration first (this harness calls a compiled
-//!    TB's function pointer directly, the same call shape `run_instruction`
-//!    itself uses, but hasn't been proven identical in every other respect)
-//!    or bisecting Cranelift's register-caching path with the same rigor
-//!    this session's signed-comparison JIT fix used.
+//!    **A real bug this harness found and that has since been fixed**:
+//!    `selfjit::differential::tests::
+//!    known_issue_cranelift_register_copy_divergence_at_0x10067e4` (now a
+//!    normal passing regression test) caught a plain register-to-register
+//!    `Copy` in `testdata/x64_static_printf_malloc.elf`'s real CRT startup
+//!    code where `SelfJitCompiler`'s result matched the copy's real source
+//!    bytes exactly and Cranelift's did not (2 of 8 bytes came out `0`).
+//!    Root-caused by dumping Cranelift's generated IR (`FISSION_JIT_DUMP_IR`
+//!    env var, `jit::compiler::compile_translation_block`) and tracing the
+//!    SSA value flow directly: `crate::jit::compiler`'s `ensure_var!` macro
+//!    cached Cranelift `Variable`s keyed by `(space, offset)` only -- not
+//!    `size`. When the same register offset was read at two different
+//!    widths within one TB (a narrower earlier read, e.g. a 4-byte flag
+//!    comparison, followed by a wider later read of the same offset, e.g.
+//!    this 8-byte `Copy`), the second access wrongly reused the first
+//!    access's already-masked cached value instead of performing a fresh,
+//!    correctly-sized load. Fixed by widening the cache key to
+//!    `(space, offset, size)`. This was a real, previously-unknown
+//!    correctness bug in the *production* Cranelift JIT path (not
+//!    `selfjit`, which is architecturally immune -- it has no such cache),
+//!    caught only because this differential harness compared both backends
+//!    against each other on real code. See `PROJECT.md` for the full
+//!    investigation trail.
 //! 5. Only then: migrate to copy-and-patch stencils for performance parity,
 //!    and retire the `cranelift-*` dependencies from `Cargo.toml`.
 

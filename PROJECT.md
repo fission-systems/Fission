@@ -4428,3 +4428,87 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     `fission-emulator` suite 88/95 (same 7 pre-existing unrelated failures,
     1 correctly skipped), full workspace nextest 2171/2178 (zero new
     regressions), full workspace build clean.
+- **Cranelift vendored for reference; the register-copy divergence above
+  fully root-caused and fixed, 2026-07-22.** User's explicit direction:
+  continue toward the existing roadmap's end goal (retiring the
+  `cranelift-*` Cargo dependencies, see `selfjit/mod.rs`'s own module doc),
+  and it's fine to vendor Cranelift's source as a reference while doing so.
+  - **Vendoring**: copied the exact `cranelift-{codegen,frontend,jit,
+    module,native,entity,bforest,isle,codegen-meta,codegen-shared,control,
+    bitset,srcgen,assembler-x64,assembler-x64-meta}` 0.133.1 sources (15
+    sub-crates, ~9MB) from the local Cargo registry cache
+    (`~/.cargo/registry/src/index.crates.io-*/cranelift-*-0.133.1/`) into
+    `vendor/cranelift-0.133.1/`, following this repo's pre-existing
+    `vendor/` reference-tree convention (documented in `vendor/MANIFEST.md`
+    + `THIRD_PARTY.md`, same format as the existing "RetDec (reference)"
+    entry). Deliberately sourced from the Cargo registry cache, not a
+    `wasmtime` git tag/checkout: confirmed wasmtime's own release tags use
+    a unified `vN.N.N` scheme that doesn't correspond 1:1 to
+    `cranelift-codegen`'s independent crates.io version numbers, so the
+    registry cache is the only way to guarantee an exact match to what
+    `Cargo.lock` actually resolves. Reference-only, per `vendor/`'s own
+    rules -- not linked into any build; the live dependency still comes
+    from crates.io via `crates/fission-emulator/Cargo.toml` as normal.
+  - **Root-caused the register-copy divergence flagged (unconfirmed) in
+    the previous entry.** First ruled out "fresh vs. persistent
+    `JitCompiler`" (hypothesis: differential harness building a new
+    `JitCompiler` per TB, vs. production's one persistent `Emulator.jit`
+    instance, might explain a caching-related bug) by making
+    `selfjit::differential::run_differential`'s Cranelift compiler
+    persistent across the TB loop and re-running -- bug reproduced
+    identically, hypothesis ruled out (kept the persistent-compiler change
+    anyway: it's a more faithful mirror of production's actual usage
+    pattern, not a special-cased artifact of the test harness).
+  - Then added a `FISSION_JIT_DUMP_IR` env var (permanent diagnostic,
+    `jit::compiler::compile_translation_block`, same precedent as
+    `FISSION_DIFF_DEBUG`) to dump Cranelift's actual generated IR
+    (`self.ctx.func`'s `Display` impl) for each compiled TB, ran the
+    isolated repro test with it, and traced the divergent TB's (`0x10067e4`)
+    IR SSA value flow by hand: a raw 64-bit `load` of register offset 56
+    (belonging to the `Copy`'s source read) got algebraically replaced, via
+    an SSA alias, by a *different, earlier* p-code op's value -- an
+    `IntAnd` that also read offset 56, but masked to only its low 4 bytes.
+    The `Copy`'s store ended up writing that unrelated, masked value
+    instead of its own fresh 64-bit load.
+  - **Confirmed root cause**: `jit::compiler`'s `ensure_var!` macro caches
+    Cranelift `Variable`s in `var_map: HashMap<(u64, u64), Variable>`,
+    keyed by `(space, offset)` only -- **`size` was not part of the key**.
+    When the same `(space, offset)` was read at two different widths
+    within one TB (the `IntAnd` at 4 bytes, the `Copy` at 8 bytes later),
+    the second, wider access's `ensure_var!` call found the first access's
+    cached `Variable` and reused it as-is -- including its already-applied
+    4-byte mask -- instead of performing a fresh, correctly-sized 8-byte
+    load. This is a genuine, previously-unknown correctness bug in
+    Fission's own Cranelift-glue code (not Cranelift itself, and not
+    `selfjit`, which has no such cache and is architecturally immune to
+    this bug class) in the **production** JIT path used by every real
+    analysis this emulator performs -- not a `selfjit`-side risk, as the
+    original framing had it, but a bug in the trusted pathfinder itself.
+    Any TB reading the same register offset at two different widths (very
+    common in real x86-64 code -- e.g. a 32-bit sub-register access
+    followed by a full 64-bit access to the same base register) could
+    silently produce a wrong value.
+  - **Fix**: widened `var_map`'s key to `(space, offset, size)`. Reasoned
+    safe because `host_reg_file` (via `MachineState`) is the actual source
+    of truth for register values, kept correctly synchronized on the write
+    side (`dirty` tracking + `jit_reg_bulk_flush`) regardless of how many
+    differently-sized cached `Variable`s exist for reads at a given offset
+    -- widening the key just means a differently-sized read now correctly
+    re-loads-and-re-masks from that source of truth instead of wrongly
+    reusing a stale, differently-masked cached value.
+  - **Verified fixed**: re-ran
+    `known_issue_cranelift_register_copy_divergence_at_0x10067e4` --
+    clean (`matched` includes the previously-divergent TB, `diverged=[]`).
+    Un-ignored it (now a normal regression test); restored
+    `selfjit_matches_cranelift_on_real_entry_point_tbs`'s TB cap from 7
+    back up to 40 (previously capped specifically to dodge this bug).
+  - **Re-validated broadly, checking for behavior changes beyond the
+    targeted bug** (this fix touches the hottest path in the production
+    JIT, so checked for both new passes and new failures, not just
+    "nothing new failed"): `fission-emulator` nextest 89/96 passing (same
+    7 pre-existing unrelated `Decode/lift failed` failures, unrelated to
+    this fix; +1 vs. previous baseline purely from un-ignoring the fixed
+    test), full workspace nextest 2172/2179 (same +1, zero regressions),
+    full workspace build clean, `golden_corpus_check.py check` clean
+    (160/160 functions, determinism holds -- expected, decompilation
+    itself doesn't exercise the emulator/JIT).
