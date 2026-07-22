@@ -79,25 +79,18 @@
 //! only coincides with p-code's own "shift >= width => 0" semantics for
 //! 64-bit operands).
 //!
-//! A third, real one found and characterized (not yet fixed here) via
-//! `fission-verify`'s emulator-grounded verification tier: `load_value`
-//! (like `crate::jit::compiler`'s `load_vn!`, which had the identical
-//! defect and *was* fixed) always zero-extends a narrower-than-8-byte
+//! A third gap, found and characterized here in an earlier phase, **is
+//! now fixed**: `load_value` always zero-extends a narrower-than-8-byte
 //! operand -- correct for unsigned ops, wrong for `IntSLess`/
 //! `IntSLessEqual`/`IntSDiv`/`IntSRem`/`IntSRight`, whose result depends
 //! on the operand's actual sign (a negative `dword` `-1` = `0xFFFFFFFF`
 //! must sign-extend to `0xFFFFFFFF_FFFFFFFF`, not stay a huge positive
-//! `0x00000000_FFFFFFFF`). `crate::jit::compiler`'s version of this fix
-//! sign-extends via a `ishl`/`sshr`-immediate pair in Cranelift IR right
-//! before the signed op; the AArch64 analog would be `SBFX`/`SXTW`-style
-//! emission ahead of `sdiv_reg`/`asr_reg`/`Cond::Lt`-`Cond::Le` at each of
-//! this file's signed-op sites. Left as a documented gap rather than a
-//! quick hand-assembly patch, consistent with this module's own stated
-//! bar (`SelfJitCompiler` is not wired in anywhere live, and
-//! `crate::selfjit`'s own module doc's item 4 -- differential-test against
-//! `crate::jit::compiler` on real corpus
-//! binaries -- is the right place to catch/fix this class of bug
-//! properly rather than patching call sites ad hoc without that harness).
+//! `0x00000000_FFFFFFFF`). The identical defect in `crate::jit::compiler`
+//! (`load_vn!`) was found and fixed first, via `sign_extend_val!`/
+//! `load_vn_signed!`; this file's own `sign_extend_in_place`/
+//! `load_value_signed` are the direct AArch64/x86-64-emitter analog of
+//! that same technique (shift the value into the top of the register,
+//! then back down arithmetically), used at every affected signed-op site.
 //!
 //! `Load`/`Store`'s own gap: only the ≤8-byte path is implemented (`jit_
 //! read_space`/`jit_write_space`, the same host callbacks `load_value`/
@@ -451,6 +444,40 @@ fn store_value(asm: &mut Asm, vn: &Varnode, src: u32) {
     asm.blr(CALLEE_ADDR);
 }
 
+/// Sign-extend `reg` in place from `size` bytes to a full 64-bit value --
+/// shift the value into the top of the register then back down
+/// arithmetically (fills with the sign bit), the same technique
+/// `crate::jit::compiler`'s `sign_extend_val!` uses (and this file's own
+/// `IntSExt` arm already used before being refactored to call this
+/// directly). `TMP1` holds the shift amount -- deliberately not `B_VAL`,
+/// since callers of [`load_value_signed`] sign-extend *both* operands of
+/// a binop and `B_VAL` may itself be the other operand being loaded.
+fn sign_extend_in_place(asm: &mut Asm, reg: u32, size: u32) {
+    let size = size.min(8);
+    if size == 0 || size >= 8 {
+        return;
+    }
+    let shift = (64 - size * 8) as u64;
+    asm.mov_imm64(TMP1, shift);
+    asm.lsl_reg(reg, reg, TMP1);
+    asm.asr_reg(reg, reg, TMP1);
+}
+
+/// [`load_value`] followed by [`sign_extend_in_place`] -- for ops whose
+/// result genuinely depends on the operand's sign (signed compare/divide/
+/// remainder/arithmetic-shift), where a negative narrow value (e.g. a
+/// `dword` `-1` = `0xFFFFFFFF`) must sign-extend to a huge *negative* I64
+/// (`0xFFFFFFFF_FFFFFFFF`), not stay a huge *positive* one --
+/// `load_value` alone always zero-extends, correct for unsigned ops but
+/// wrong here. This was a real, previously-documented-but-unfixed gap
+/// (this file's own module doc, "A third, real one...") -- the identical
+/// bug class already found and fixed in `crate::jit::compiler` earlier
+/// this session (`ensure_var!`/`load_vn!`'s own zero-extend-only default).
+fn load_value_signed(asm: &mut Asm, vn: &Varnode, dst: u32) {
+    load_value(asm, vn, dst);
+    sign_extend_in_place(asm, dst, vn.size);
+}
+
 /// Resolve a `Load`/`Store`'s first input (the p-code "constant space id"
 /// operand) to a concrete space id -- matches `crate::jit::compiler`'s own
 /// `space_const`: Fission's raw DTO can encode a constant-space varnode
@@ -664,33 +691,32 @@ fn compile_op(
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv => {
-            // TODO(correctness): `IntSDiv` on a narrower-than-8-byte
-            // negative operand is wrong -- `load_value` zero-extends, see
-            // this module's own doc comment ("A third, real one...").
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
-            load_value(asm, &op.inputs[0], A_VAL);
-            load_value(asm, &op.inputs[1], B_VAL);
-            match op.opcode {
-                PcodeOpcode::IntDiv => asm.udiv_reg(RESULT, A_VAL, B_VAL),
-                PcodeOpcode::IntSDiv => asm.sdiv_reg(RESULT, A_VAL, B_VAL),
-                _ => unreachable!(),
+            if op.opcode == PcodeOpcode::IntSDiv {
+                load_value_signed(asm, &op.inputs[0], A_VAL);
+                load_value_signed(asm, &op.inputs[1], B_VAL);
+                asm.sdiv_reg(RESULT, A_VAL, B_VAL);
+            } else {
+                load_value(asm, &op.inputs[0], A_VAL);
+                load_value(asm, &op.inputs[1], B_VAL);
+                asm.udiv_reg(RESULT, A_VAL, B_VAL);
             }
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::IntRem | PcodeOpcode::IntSRem => {
             // AArch64 has no remainder instruction: quotient = a/b, then
             // remainder = a - quotient*b via a single MSUB.
-            // TODO(correctness): same `IntSRem` narrow-negative-operand gap
-            // as `IntSDiv` above.
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
-            load_value(asm, &op.inputs[0], A_VAL);
-            load_value(asm, &op.inputs[1], B_VAL);
-            match op.opcode {
-                PcodeOpcode::IntRem => asm.udiv_reg(RESULT, A_VAL, B_VAL),
-                PcodeOpcode::IntSRem => asm.sdiv_reg(RESULT, A_VAL, B_VAL),
-                _ => unreachable!(),
+            if op.opcode == PcodeOpcode::IntSRem {
+                load_value_signed(asm, &op.inputs[0], A_VAL);
+                load_value_signed(asm, &op.inputs[1], B_VAL);
+                asm.sdiv_reg(RESULT, A_VAL, B_VAL);
+            } else {
+                load_value(asm, &op.inputs[0], A_VAL);
+                load_value(asm, &op.inputs[1], B_VAL);
+                asm.udiv_reg(RESULT, A_VAL, B_VAL);
             }
             asm.msub_reg(RESULT, RESULT, B_VAL, A_VAL);
             store_value(asm, out, RESULT);
@@ -703,12 +729,20 @@ fn compile_op(
             // 64, so a shift of e.g. 40 on a declared-32-bit value comes
             // out wrong here. Same class of gap as IntAdd/etc. not
             // truncating to the varnode's declared width (see this
-            // module's doc) -- flagged, not silently trusted. `IntSRight`
-            // additionally has the narrow-negative-operand sign-extension
-            // gap (same doc comment) on its `A_VAL` operand specifically.
+            // module's doc) -- flagged, not silently trusted.
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
-            load_value(asm, &op.inputs[0], A_VAL);
+            // Only the value being shifted needs sign-extension; the
+            // shift *count* (`op.inputs[1]`) is a plain magnitude, not a
+            // signed quantity -- sign-extending it would be wrong if its
+            // own high bit happened to be set (matches
+            // `crate::jit::compiler`'s own `IntSRight` arm's identical
+            // reasoning).
+            if op.opcode == PcodeOpcode::IntSRight {
+                load_value_signed(asm, &op.inputs[0], A_VAL);
+            } else {
+                load_value(asm, &op.inputs[0], A_VAL);
+            }
             load_value(asm, &op.inputs[1], B_VAL);
             match op.opcode {
                 PcodeOpcode::IntLeft => asm.lsl_reg(RESULT, A_VAL, B_VAL),
@@ -815,28 +849,9 @@ fn compile_op(
                 "IntSExt: unsupported input size {} bytes",
                 in_size
             );
-            load_value(asm, &op.inputs[0], A_VAL);
-            if in_size < 8 {
-                // Sign-extend from `in_size` bytes to a full 64-bit host
-                // register by shifting the value into the top of the
-                // register then back down arithmetically (fills with the
-                // sign bit) -- no SXTB/SXTH/SXTW encodings implemented in
-                // the emitter, so this uses the two shift instructions
-                // IntLeft/IntSRight already needed instead.
-                let shift = (64 - in_size * 8) as u64;
-                asm.mov_imm64(B_VAL, shift);
-                asm.lsl_reg(RESULT, A_VAL, B_VAL);
-                asm.asr_reg(RESULT, RESULT, B_VAL);
-            } else {
-                asm.mov_reg(RESULT, A_VAL);
-            }
+            load_value_signed(asm, &op.inputs[0], RESULT);
             store_value(asm, out, RESULT);
         }
-        // TODO(correctness): `IntSLess`/`IntSLessEqual` on a narrower-
-        // than-8-byte negative operand are wrong -- `load_value` zero-
-        // extends, see this module's own doc comment ("A third, real
-        // one..."). `IntEqual`/`IntNotEqual`/`IntLess`/`IntLessEqual`
-        // (unsigned/equality) are unaffected.
         PcodeOpcode::IntEqual
         | PcodeOpcode::IntNotEqual
         | PcodeOpcode::IntSLess
@@ -845,8 +860,20 @@ fn compile_op(
         | PcodeOpcode::IntLessEqual => {
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
-            load_value(asm, &op.inputs[0], A_VAL);
-            load_value(asm, &op.inputs[1], B_VAL);
+            // Only the signed comparisons need sign-extended operands --
+            // `IntEqual`/`IntNotEqual`/`IntLess`/`IntLessEqual` are
+            // equality/unsigned comparisons, unaffected by sign.
+            let signed = matches!(
+                op.opcode,
+                PcodeOpcode::IntSLess | PcodeOpcode::IntSLessEqual
+            );
+            if signed {
+                load_value_signed(asm, &op.inputs[0], A_VAL);
+                load_value_signed(asm, &op.inputs[1], B_VAL);
+            } else {
+                load_value(asm, &op.inputs[0], A_VAL);
+                load_value(asm, &op.inputs[1], B_VAL);
+            }
             asm.cmp_reg(A_VAL, B_VAL);
             let cond = match op.opcode {
                 PcodeOpcode::IntEqual => Cond::Eq,
@@ -1253,6 +1280,83 @@ mod tests {
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 16), u64::MAX, "sign-extended -1 (0xFF)");
         assert_eq!(read_reg(&mut emu, 24), 5, "sign-extended +5 stays +5");
+    }
+
+    /// Regression test for a real, previously-documented-but-unfixed bug:
+    /// `load_value` always zero-extended narrower-than-8-byte operands,
+    /// wrong for any op whose result depends on the operand's actual
+    /// sign. A 4-byte `-1` (`0xFFFFFFFF`) must sign-extend to a 64-bit
+    /// `-1` (`0xFFFFFFFF_FFFFFFFF`), not stay a huge positive
+    /// `0x00000000_FFFFFFFF` -- exactly the same bug class, and the exact
+    /// same fix technique, as the real one found and fixed in
+    /// `crate::jit::compiler` (Cranelift) earlier this session. Covers
+    /// every affected op: `IntSLess`/`IntSLessEqual` (comparison),
+    /// `IntSDiv`/`IntSRem` (division/remainder), `IntSRight` (arithmetic
+    /// shift).
+    #[test]
+    fn signed_ops_on_narrow_negative_operand_are_correct() {
+        fn copy4(out_offset: u64, val: i64) -> PcodeOp {
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(out_offset, 4)),
+                inputs: vec![imm(val, 4)],
+                asm_mnemonic: None,
+            }
+        }
+        let ops = vec![
+            copy4(0, -1), // a = -1 (4-byte)
+            copy4(8, 1),  // b = 1 (4-byte)
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::IntSLess,
+                address: 0x1000,
+                output: Some(reg(16, 8)),
+                inputs: vec![reg(0, 4), reg(8, 4)], // -1 < 1 -> 1
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::IntSLessEqual,
+                address: 0x1000,
+                output: Some(reg(24, 8)),
+                inputs: vec![reg(8, 4), reg(0, 4)], // 1 <= -1 -> 0
+                asm_mnemonic: None,
+            },
+            copy4(32, -8), // c = -8 (4-byte)
+            copy4(40, 3),  // d = 3 (4-byte)
+            PcodeOp {
+                seq_num: 6,
+                opcode: PcodeOpcode::IntSDiv,
+                address: 0x1000,
+                output: Some(reg(48, 8)),
+                inputs: vec![reg(32, 4), reg(40, 4)], // -8 / 3 -> -2
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 7,
+                opcode: PcodeOpcode::IntSRem,
+                address: 0x1000,
+                output: Some(reg(56, 8)),
+                inputs: vec![reg(32, 4), reg(40, 4)], // -8 % 3 -> -2
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 8,
+                opcode: PcodeOpcode::IntSRight,
+                address: 0x1000,
+                output: Some(reg(64, 8)),
+                inputs: vec![reg(32, 4), imm(1, 4)], // -8 >> 1 (arithmetic) -> -4
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), 1, "-1 < 1 signed");
+        assert_eq!(read_reg(&mut emu, 24), 0, "1 <= -1 signed is false");
+        assert_eq!(read_reg(&mut emu, 48) as i64, -8i32 as i64 / 3, "-8 / 3 signed");
+        assert_eq!(read_reg(&mut emu, 56) as i64, -8i32 as i64 % 3, "-8 % 3 signed");
+        assert_eq!(read_reg(&mut emu, 64) as i64, (-8i32 >> 1) as i64, "-8 >> 1 arithmetic");
     }
 
     /// `IntLessEqual` (unsigned <=) and `IntSLessEqual` (signed <=), plus

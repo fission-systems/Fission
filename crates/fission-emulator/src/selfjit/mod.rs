@@ -44,10 +44,12 @@
 //! relative-branch loops (item 2 below) and *both* AArch64 and x86-64
 //! host backends (`emit::x86_64` is a real, verified implementation now,
 //! not the stub it started as -- see `emit::mod`'s own doc for how it was
-//! verified without x86-64 silicon, via Rosetta 2). The remaining real
-//! gaps are opcode coverage (`Float*`/`Call*`/`MultiEqual`/etc. -- item 1
-//! below) and the truncation/shift-clamp/narrow-sign-extension
-//! correctness gaps `compiler.rs`'s own doc still tracks.
+//! verified without x86-64 silicon, via Rosetta 2). The narrow-negative-
+//! operand sign-extension bug (`IntSLess`/`IntSLessEqual`/`IntSDiv`/
+//! `IntSRem`/`IntSRight`) is also fixed now (`load_value_signed`,
+//! `compiler.rs`'s own doc). The remaining real gaps are opcode coverage
+//! (`Float*`/`Call*`/`MultiEqual`/etc. -- item 1 below) and the
+//! truncation/shift-clamp gaps `compiler.rs`'s own doc still tracks.
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a

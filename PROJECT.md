@@ -4739,3 +4739,45 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     failures), full workspace nextest 2177/2184 (same +2, zero
     regressions), full workspace build clean, `golden_corpus_check.py
     check` clean.
+- **`selfjit`: narrow-negative-operand sign-extension bug fixed
+  (`IntSLess`/`IntSLessEqual`/`IntSDiv`/`IntSRem`/`IntSRight`),
+  2026-07-23.** User asked directly whether `selfjit` was still short of
+  replacing Cranelift and confirmed to keep going; this was the most
+  concretely-scoped item left in that gap list -- an already-documented,
+  already-diagnosed bug (this module's own doc had flagged it since the
+  differential-harness phase), not a new investigation, and the identical
+  bug class already had a proven fix pattern from `crate::jit::compiler`
+  (Cranelift) earlier this session.
+  - `load_value` always zero-extended narrower-than-8-byte operands --
+    correct for unsigned ops, wrong for ops whose result depends on the
+    operand's actual sign: a negative 4-byte `-1` (`0xFFFFFFFF`) must
+    sign-extend to a 64-bit `-1` (`0xFFFFFFFF_FFFFFFFF`), not stay a huge
+    positive `0x00000000_FFFFFFFF`.
+  - Fixed via two new helpers mirroring Cranelift's own `sign_extend_val!`/
+    `load_vn_signed!` technique (shift the value into the top of the
+    register, then back down arithmetically, filling with the sign bit):
+    `sign_extend_in_place` (uses `TMP1` for the shift amount, deliberately
+    not `B_VAL`, since callers sign-extend *both* operands of a binop and
+    `B_VAL` may itself be the other operand being loaded) and
+    `load_value_signed` (load then sign-extend). Applied at every affected
+    site: `IntSDiv`/`IntSRem` (both operands, only when the opcode is the
+    signed variant -- `IntDiv`/`IntRem` stay zero-extended/unsigned),
+    `IntSRight` (only the value being shifted, *not* the shift count,
+    which is a plain magnitude -- matches `crate::jit::compiler`'s own
+    `IntSRight` arm's identical reasoning), `IntSLess`/`IntSLessEqual`
+    (both operands, only for these two -- `IntEqual`/`IntNotEqual`/
+    `IntLess`/`IntLessEqual` are equality/unsigned, unaffected). `IntSExt`
+    was refactored to call `load_value_signed` directly too (it already
+    had its own correct, independent copy of the same shift technique --
+    DRY cleanup, not a behavior change, still covered by its own existing
+    test).
+  - New regression test, `signed_ops_on_narrow_negative_operand_are_
+    correct`: 4-byte `-1`/`1`/`-8`/`3` operands through `IntSLess`,
+    `IntSLessEqual`, `IntSDiv`, `IntSRem`, `IntSRight`, checked against
+    the known correct signed results (e.g. `-8 / 3 == -2`, not the huge
+    positive quotient the zero-extend bug would have produced).
+  - Validated on both host backends: `selfjit::*` 22/22 (aarch64,
+    +1 from the new regression test) and 28/28 (x86-64 via Rosetta, +1),
+    `fission-emulator` nextest 95/102 (+1, same 7 pre-existing unrelated
+    failures), full workspace nextest 2178/2185 (+1, zero regressions),
+    full workspace build clean, `golden_corpus_check.py check` clean.
