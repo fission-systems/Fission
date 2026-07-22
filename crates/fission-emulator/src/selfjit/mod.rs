@@ -46,10 +46,15 @@
 //! not the stub it started as -- see `emit::mod`'s own doc for how it was
 //! verified without x86-64 silicon, via Rosetta 2). The narrow-negative-
 //! operand sign-extension bug (`IntSLess`/`IntSLessEqual`/`IntSDiv`/
-//! `IntSRem`/`IntSRight`) is also fixed now (`load_value_signed`,
-//! `compiler.rs`'s own doc). The remaining real gaps are opcode coverage
-//! (`Float*`/`Call*`/`MultiEqual`/etc. -- item 1 below) and the
-//! truncation/shift-clamp gaps `compiler.rs`'s own doc still tracks.
+//! `IntSRem`/`IntSRight`) and the shift-amount-clamping bug are also fixed
+//! now (`load_value_signed`, and the runtime width-compare in `IntLeft`/
+//! `IntRight`/`IntSRight` -- see `compiler.rs`'s own doc for both; the
+//! *other* half of that same old doc entry, arithmetic results not being
+//! truncated to declared width, turned out on investigation not to be a
+//! real bug at all, given this backend's memory-round-trip architecture --
+//! see that doc for the proof). The remaining real gaps are opcode
+//! coverage (`Float*`/`Call*`/`MultiEqual`/etc. -- item 1 below) and the
+//! >8-byte `Load`/`Store` path.
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -86,12 +91,14 @@
 //!    until this landed -- now replays clean) are covered.
 //!    `Float*`/`Call*`/`MultiEqual`/`Extract`/`Insert`/`SegmentOp` are
 //!    larger, later.
-//!    Also close the two documented-but-real correctness gaps in what's
-//!    already implemented: results aren't truncated to the varnode's
-//!    declared bit width, and shift amounts aren't clamped to that width
-//!    before shifting (see `compiler.rs`'s own doc for both), and port
-//!    the >8-byte `Load`/`Store` path (needs a stack-slot allocator this
-//!    backend doesn't have yet -- see `compiler.rs`'s `Load`/`Store` doc).
+//!    **Done**, ahead of this list's original ordering too: the narrow-
+//!    negative-operand sign-extension bug and the shift-amount-clamping
+//!    bug (both were already-documented, already-diagnosed gaps -- see
+//!    `compiler.rs`'s own doc for the fix and for why the *other*
+//!    documented gap, arithmetic truncation, turned out not to be a real
+//!    bug on investigation). Still open: port the >8-byte `Load`/`Store`
+//!    path (needs a stack-slot allocator this backend doesn't have yet --
+//!    see `compiler.rs`'s `Load`/`Store` doc).
 //! 2. **Done.** Intra-instruction relative BRANCH/CBRANCH (the TZCNT-style
 //!    loop construct) is supported -- `compiler.rs` now flattens every
 //!    instruction's ops into one TB-wide list and reuses `crate::jit::

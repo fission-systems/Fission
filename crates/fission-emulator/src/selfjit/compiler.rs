@@ -69,15 +69,27 @@
 //! test, which -- deliberately -- would hang the test process if this
 //! didn't work, not just fail an assertion).
 //!
-//! Known, deliberate simplifications within what *is* implemented (see
-//! inline `TODO(correctness)` comments at each site, not hidden): none of
-//! the arithmetic/shift ops truncate their result to the varnode's
-//! declared bit width (they operate on full 64-bit host registers
-//! regardless of whether the p-code value is logically 8/16/32 bits),
-//! and shift amounts are not clamped to the operand's declared width
-//! before shifting (AArch64's LSLV/LSRV/ASRV mask mod 64 instead, which
-//! only coincides with p-code's own "shift >= width => 0" semantics for
-//! 64-bit operands).
+//! Two more gaps this doc used to flag as open turned out, on
+//! investigation, to be one real bug and one non-bug: arithmetic ops
+//! (`IntAdd`/`IntMult`/etc.) not truncating their full-64-bit-register
+//! result to the varnode's declared width is **not actually observable**
+//! -- every op's result round-trips through real register-space memory
+//! via `store_value` (which only ever writes `out.size` bytes) before the
+//! *next* op's `load_value` re-reads it fresh, so an untruncated
+//! intermediate is harmless (see
+//! `truncation_and_shift_clamp_are_already_correct_for_narrow_widths`'s
+//! own test and doc for the proof, verified by execution not just
+//! reasoning). Shift amounts **were** a real bug, though, and are now
+//! fixed: `IntLeft`/`IntRight`/`IntSRight` explicitly compare the shift
+//! count against the varnode's declared width at runtime and short-
+//! circuit to 0 (or sign-filled, for `IntSRight`) rather than trusting
+//! the host's shift-by-register instruction, which masks the count mod
+//! 64 -- wrong not just for counts >= 64, but for *any* count whose `mod
+//! 64` residue undershoots the declared width (e.g. a 4-byte value
+//! shifted by 74: `74 >= 32` so p-code says 0, but `74 mod 64 == 10 <
+//! 32`, so the naive hardware-masked shift would leave real nonzero bits
+//! inside the 4 bytes actually written back -- the truncation-on-write
+//! argument above only saves shift counts that stay `< 64`).
 //!
 //! A third gap, found and characterized here in an earlier phase, **is
 //! now fixed**: `load_value` always zero-extends a narrower-than-8-byte
@@ -722,14 +734,22 @@ fn compile_op(
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::IntLeft | PcodeOpcode::IntRight | PcodeOpcode::IntSRight => {
-            // TODO(correctness): shifts by an amount >= the varnode's own
-            // declared bit width should produce 0 (IntLeft/IntRight) --
-            // p-code semantics, not a full-64-bit-register semantics.
-            // AArch64's LSLV/LSRV/ASRV instead mask the shift amount mod
-            // 64, so a shift of e.g. 40 on a declared-32-bit value comes
-            // out wrong here. Same class of gap as IntAdd/etc. not
-            // truncating to the varnode's declared width (see this
-            // module's doc) -- flagged, not silently trusted.
+            // p-code semantics: a shift amount >= the varnode's own
+            // declared bit width produces 0 (IntLeft/IntRight) or all
+            // sign-bits (IntSRight) -- not full-64-bit-register semantics.
+            // AArch64/x86-64's own shift-by-register instructions instead
+            // mask the shift amount mod 64, which is wrong not merely for
+            // shift amounts >= 64: a declared-32-bit value shifted by 74
+            // (74 >= 32, so p-code says 0) hardware-wraps to a shift of 10
+            // (74 mod 64), which is *less* than 32 and so leaves real,
+            // nonzero bits inside the 4 bytes `store_value` actually
+            // writes back -- not something the "narrower output gets
+            // truncated on write anyway" argument that makes shift
+            // amounts in `[width, 64)` harmless (see
+            // `truncation_and_shift_clamp_are_already_correct_for_narrow_
+            // widths`) can save. A runtime compare-and-branch against the
+            // varnode's own compile-time-known declared width, not a
+            // trust-the-hardware shortcut.
             let out = require_output(op)?;
             anyhow::ensure!(op.inputs.len() == 2, "{:?} needs 2 inputs", op.opcode);
             // Only the value being shifted needs sign-extension; the
@@ -744,12 +764,35 @@ fn compile_op(
                 load_value(asm, &op.inputs[0], A_VAL);
             }
             load_value(asm, &op.inputs[1], B_VAL);
+            let width_bits = (op.inputs[0].size as u64).saturating_mul(8).min(64);
+            asm.mov_imm64(TMP1, width_bits);
+            asm.cmp_reg(B_VAL, TMP1);
+            // Cond::Cs == unsigned >= (see emit::x86_64::Cond's own doc on
+            // choosing condition codes by meaning): taken (jumps to the
+            // out-of-range arm) exactly when the shift count is >= width.
+            let branch_oob = asm.placeholder();
             match op.opcode {
                 PcodeOpcode::IntLeft => asm.lsl_reg(RESULT, A_VAL, B_VAL),
                 PcodeOpcode::IntRight => asm.lsr_reg(RESULT, A_VAL, B_VAL),
                 PcodeOpcode::IntSRight => asm.asr_reg(RESULT, A_VAL, B_VAL),
                 _ => unreachable!(),
             }
+            let jump_to_end = asm.placeholder();
+            let oob_at = asm.offset();
+            asm.patch_b_cond(branch_oob, Cond::Cs, oob_at);
+            if op.opcode == PcodeOpcode::IntSRight {
+                // Sign-fill: A_VAL is already sign-extended to a true
+                // 64-bit value (`load_value_signed` above), so arithmetic-
+                // shifting it right by 63 (the maximum useful amount)
+                // already produces all-0s or all-1s matching the sign,
+                // without a separate branch on the sign bit itself.
+                asm.mov_imm64(TMP1, 63);
+                asm.asr_reg(RESULT, A_VAL, TMP1);
+            } else {
+                asm.mov_imm64(RESULT, 0);
+            }
+            let end = asm.offset();
+            asm.patch_b(jump_to_end, end);
             store_value(asm, out, RESULT);
         }
         PcodeOpcode::Int2Comp => {
@@ -1357,6 +1400,125 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 48) as i64, -8i32 as i64 / 3, "-8 / 3 signed");
         assert_eq!(read_reg(&mut emu, 56) as i64, -8i32 as i64 % 3, "-8 % 3 signed");
         assert_eq!(read_reg(&mut emu, 64) as i64, (-8i32 >> 1) as i64, "-8 >> 1 arithmetic");
+    }
+
+    /// Regression test proving the module doc's previously-documented
+    /// "results aren't truncated to the varnode's declared width, shift
+    /// amounts aren't clamped" gap is **not actually observable** for any
+    /// declared width < 8 bytes, given this backend's specific
+    /// architecture: every op's result round-trips through real
+    /// register-space memory via `store_value`/`load_value` at *every* op
+    /// boundary (no register caching across ops the way Cranelift has).
+    /// `store_value` only ever writes `out.size` bytes, so an untruncated
+    /// 64-bit intermediate is harmless -- nothing ever reads it back at a
+    /// wider size before that truncating write happens, since every op
+    /// ends with `store_value` before the next op's `load_value` re-reads
+    /// it fresh from memory. Verified by execution, not just this
+    /// reasoning: a 4-byte multiply overflow truncates correctly, and
+    /// shift amounts in `[width, 64)` already come out correct (0 for
+    /// logical shifts, sign-propagated for arithmetic right) purely as a
+    /// side effect of the output width being narrower than the host
+    /// register performing the shift.
+    #[test]
+    fn truncation_and_shift_clamp_are_already_correct_for_narrow_widths() {
+        fn narrow(opcode: PcodeOpcode, out: u64, out_size: u32, a: u64, a_size: u32, b: Varnode) -> PcodeOp {
+            PcodeOp {
+                seq_num: 1,
+                opcode,
+                address: 0x1000,
+                output: Some(reg(out, out_size)),
+                inputs: vec![reg(a, a_size), b],
+                asm_mnemonic: None,
+            }
+        }
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(0, 4)),
+                inputs: vec![imm(-1i64, 4)], // 0xFFFFFFFF unsigned
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(32, 4)),
+                inputs: vec![imm(1, 4)],
+                asm_mnemonic: None,
+            },
+            // 0xFFFFFFFF * 2, truncated to 4 bytes -> 0xFFFFFFFE
+            narrow(PcodeOpcode::IntMult, 8, 4, 0, 4, imm(2, 4)),
+            // 1u32 << 40 (40 >= 32-bit width) -> 0
+            narrow(PcodeOpcode::IntLeft, 16, 4, 32, 4, imm(40, 4)),
+            // -1i32 (0xFFFFFFFF) >> 40 arithmetic (40 >= width) -> sign
+            // propagates forever -> stays -1 (0xFFFFFFFF)
+            narrow(PcodeOpcode::IntSRight, 24, 4, 0, 4, imm(40, 4)),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 8) as u32, 0xFFFFFFFE, "0xFFFFFFFF * 2 truncated to 4 bytes");
+        assert_eq!(read_reg(&mut emu, 16) as u32, 0, "1u32 << 40 (>= width) is 0");
+        assert_eq!(
+            read_reg(&mut emu, 24) as u32,
+            0xFFFFFFFF,
+            "-1i32 >> 40 arithmetic (>= width) stays -1"
+        );
+    }
+
+    /// Regression test for a real gap the truncation-on-write trick
+    /// (proven above) can't paper over: `IntLeft`/`IntRight`/`IntSRight`
+    /// now explicitly compare the shift count against the varnode's own
+    /// declared width at runtime (compile-time-known width, runtime-known
+    /// count) rather than trusting the host's shift-by-register
+    /// instruction, which masks the count mod 64. Two shapes are both
+    /// real bugs without this: a shift by exactly 64/128 on a *full*
+    /// 8-byte value (hardware masks to a no-op, `1 << 64` would wrongly
+    /// stay `1`) and, more subtly, a shift by e.g. 74 on a *narrower*
+    /// 4-byte value (`74 >= 32` so p-code says 0, but `74 mod 64 == 10 <
+    /// 32`, so the hardware-masked shift-by-10 leaves real nonzero bits
+    /// inside the 4 bytes actually written back -- the "narrower output
+    /// gets truncated on write anyway" argument only saves shift amounts
+    /// that stay `< 64`, not ones that wrap all the way back below the
+    /// declared width).
+    #[test]
+    fn shift_amounts_past_declared_width_are_clamped_correctly() {
+        fn binop_imm_shift(opcode: PcodeOpcode, out: u64, out_size: u32, a: u64, a_size: u32, shift: i64) -> PcodeOp {
+            PcodeOp {
+                seq_num: 1,
+                opcode,
+                address: 0x1000,
+                output: Some(reg(out, out_size)),
+                inputs: vec![reg(a, a_size), imm(shift, 8)],
+                asm_mnemonic: None,
+            }
+        }
+        let ops = vec![
+            copy_const(0, 1),
+            copy_const(8, -1i64),
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(40, 4)),
+                inputs: vec![imm(1, 4)],
+                asm_mnemonic: None,
+            },
+            // Full 8-byte width, shift by exactly 64 (hardware's own
+            // mod-64 masking would otherwise turn this into a no-op).
+            binop_imm_shift(PcodeOpcode::IntLeft, 16, 8, 0, 8, 64),
+            binop_imm_shift(PcodeOpcode::IntRight, 24, 8, 0, 8, 64),
+            binop_imm_shift(PcodeOpcode::IntSRight, 32, 8, 8, 8, 64),
+            // Narrow 4-byte width, shift by 74 -- 74 >= 32 (p-code: 0),
+            // but 74 mod 64 == 10 < 32, so a naive hardware-masked shift
+            // leaves real nonzero bits inside the 4 written-back bytes.
+            binop_imm_shift(PcodeOpcode::IntLeft, 48, 4, 40, 4, 74),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), 0, "1 << 64 (full width) is 0");
+        assert_eq!(read_reg(&mut emu, 24), 0, "1 >> 64 (full width) is 0");
+        assert_eq!(read_reg(&mut emu, 32), u64::MAX, "-1 >> 64 arithmetic stays -1 (sign-filled)");
+        assert_eq!(read_reg(&mut emu, 48) as u32, 0, "1u32 << 74 (74 mod 64 == 10 < 32) is still 0");
     }
 
     /// `IntLessEqual` (unsigned <=) and `IntSLessEqual` (signed <=), plus

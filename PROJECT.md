@@ -4781,3 +4781,55 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     `fission-emulator` nextest 95/102 (+1, same 7 pre-existing unrelated
     failures), full workspace nextest 2178/2185 (+1, zero regressions),
     full workspace build clean, `golden_corpus_check.py check` clean.
+- **`selfjit`: truncation/shift-clamp gap resolved -- one confirmed as
+  never a real bug, one fixed for real, 2026-07-23.** Continuing down the
+  remaining-gap list from the "still short of replacing Cranelift"
+  question. Before touching any code, verified empirically (via
+  purpose-built probe tests, not just re-reading the old doc comment's
+  reasoning) whether the two halves of this module's own documented
+  "results aren't truncated, shift amounts aren't clamped" gap were
+  actually observable bugs.
+  - **Half 1 (arithmetic truncation): confirmed NOT a real bug.**
+    `store_value` only ever writes `out.size` bytes, and this backend has
+    no register caching across ops (every op's result round-trips through
+    real register-space memory via `store_value`/`load_value` at *every*
+    op boundary, unlike Cranelift's SSA values that can stay live across
+    many ops) -- so an untruncated 64-bit intermediate is provably
+    harmless: nothing ever reads it back at a wider size before the
+    truncating write happens. Verified with a real test (4-byte multiply
+    overflow, and shifts by an amount in `[width, 64)`), not just
+    reasoning: all already came out correct. The doc comment was flagging
+    a real theoretical property of the codegen that turns out not to
+    matter given this specific architecture -- corrected to explain why,
+    not just deleted.
+  - **Half 2 (shift-amount clamping): confirmed a REAL bug, and a more
+    general one than the old doc entry described.** The doc had only
+    flagged "shift amounts >= 64" as the failure mode (AArch64/x86-64's
+    own shift-by-register instructions mask the count mod 64). Testing
+    revealed the actual failure condition is broader: *any* shift count
+    whose `mod 64` residue undershoots the varnode's declared width is
+    wrong, not just counts >= 64 -- e.g. a 4-byte value shifted by 74:
+    p-code says `74 >= 32` so the result should be 0, but `74 mod 64 ==
+    10`, which is *less than* 32, so the hardware-masked shift-by-10
+    leaves real nonzero bits inside the very 4 bytes `store_value`
+    actually writes back. The "truncation-on-write saves us" argument
+    from Half 1 only holds for shift counts that stay `< 64`; it does not
+    generalize to counts that wrap back below the declared width.
+  - **Fix**: `IntLeft`/`IntRight`/`IntSRight` now explicitly compare the
+    shift count against the varnode's own declared width (compile-time-
+    known from `size`) at runtime via `cmp_reg` + a deferred conditional
+    branch (the same if/else idiom the comparison ops already use), and
+    short-circuit to `0` (or, for `IntSRight`, a sign-filled `-1`/`0` via
+    `ASR by 63` on the already-sign-extended value -- no separate branch
+    on the sign bit needed) rather than trusting the host shift
+    instruction at all when the count is out of range.
+  - Two new regression tests: one proving Half 1 is genuinely correct
+    today (not "TODO, assumed fine"), one covering Half 2's fix across
+    both failure shapes (exact multiples of 64 on a full-width value, and
+    the more subtle `74 mod 64 < 32` narrow-width undershoot case).
+  - Validated on both host backends: `selfjit::*` 24/24 (aarch64, +2) and
+    30/30 (x86-64 via Rosetta, +2), `fission-emulator` nextest 97/104
+    (+2, same 7 pre-existing unrelated failures), full workspace nextest
+    2180/2187 (+2, zero regressions), full workspace build clean,
+    `golden_corpus_check.py check` clean, differential harness re-run
+    clean (unchanged `matched=8`, `diverged=[]`).
