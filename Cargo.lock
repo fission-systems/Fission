@@ -2729,6 +2729,7 @@ dependencies = [
  "fission-loader",
  "fission-midend-core",
  "fission-midend-dir",
+ "fission-sleigh",
  "fission-solver",
  "fission-static",
  "serde_json",

@@ -15,7 +15,7 @@ pub use arch::{ArchInfo, Endianness};
 pub use os::{OsEnvironment, HleResult, WindowsEnv, LinuxEnv, BareMetalEnv};
 pub use pcode::state::MachineState;
 pub use pcode::eval::Evaluator;
-pub use core::Emulator;
+pub use core::{Emulator, RunOutcome};
 pub use snapshot::EmulatorSnapshot;
 pub use metrics::{BudgetReport, EmulatorMetrics, SandboxMetricsReport};
 pub use srd::{

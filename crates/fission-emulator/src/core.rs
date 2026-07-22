@@ -898,16 +898,37 @@ impl Emulator {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        self.run_inner(None)?;
+        Ok(())
+    }
+
+    /// Like [`Self::run`], but also stops the moment `self.pc == stop_pc` --
+    /// e.g. the sentinel return address a caller wrote to the link
+    /// register/stack before jumping into a function, to drive "call just
+    /// this one function" without reimplementing `run`'s HLE-trap/signal/TTD
+    /// handling in a parallel loop (a called function may legitimately
+    /// trigger the HLE-trap path itself, e.g. an internal `memcpy`/`malloc`
+    /// call).
+    pub fn run_until_pc(&mut self, stop_pc: u64) -> Result<RunOutcome> {
+        self.run_inner(Some(stop_pc))
+    }
+
+    fn run_inner(&mut self, stop_pc: Option<u64>) -> Result<RunOutcome> {
         tracing::info!("Sandbox execution started at PC=0x{:X}", self.pc);
         self.halt_requested = false;
         self.chain_depth = 0;
-        loop {
+        let outcome = loop {
             if IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::warn!("Execution interrupted by Ctrl+C (SIGINT). Halting safely.");
-                break;
+                break RunOutcome::Interrupted;
+            }
+            if let Some(target) = stop_pc {
+                if self.pc == target {
+                    break RunOutcome::Returned;
+                }
             }
             if self.halt_requested {
-                break;
+                break RunOutcome::Halted;
             }
             if self.sym_stop_requested {
                 tracing::debug!(
@@ -915,13 +936,13 @@ impl Emulator {
                     self.pc,
                     self.sym_events.len()
                 );
-                break;
+                break RunOutcome::SymGate;
             }
 
             if let Some(limit) = self.max_inst {
                 if self.inst_count >= limit {
                     tracing::warn!("Instruction limit ({}) reached. Halting.", limit);
-                    break;
+                    break RunOutcome::HitBudget;
                 }
             }
 
@@ -947,7 +968,7 @@ impl Emulator {
                 match result {
                     HleResult::Halt(_) => {
                         self.halt_requested = true;
-                        break;
+                        break RunOutcome::ProcessExited;
                     }
                     HleResult::Continue => {
                         self.simulate_return()?;
@@ -960,15 +981,15 @@ impl Emulator {
             }
 
             if !self.run_instruction()? {
-                break;
+                break RunOutcome::LoopExit;
             }
 
             // ── Pending Linux signals (between TBs) ───────────────────────────
             if !self.process_pending_signals()? {
-                break;
+                break RunOutcome::LoopExit;
             }
             if self.halt_requested {
-                break;
+                break RunOutcome::Halted;
             }
 
             // TTD: record a snapshot every N instructions.
@@ -1003,7 +1024,7 @@ impl Emulator {
                 self.state.trace_shadow_writes.clear();
                 tracing::trace!("TTD: recorded step {} at PC=0x{:X}", self.inst_count, self.pc);
             }
-        }
+        };
         if self.ttd.is_recording() {
             let stats = self.ttd.stats();
             tracing::info!(
@@ -1017,14 +1038,13 @@ impl Emulator {
         self.metrics.reg_cache_hits = self.state.reg_cache_hits;
         self.metrics.reg_cache_misses = self.state.reg_cache_misses;
         if self.metrics.exit_reason.is_none() {
-            self.metrics.exit_reason = Some(if self.halt_requested {
-                "halt".into()
-            } else if self.sym_stop_requested {
-                "sym_gate".into()
-            } else if self.max_inst.is_some_and(|m| self.inst_count >= m) {
-                "max_inst".into()
-            } else {
-                "loop_exit".into()
+            self.metrics.exit_reason = Some(match outcome {
+                RunOutcome::Halted | RunOutcome::ProcessExited => "halt".into(),
+                RunOutcome::SymGate => "sym_gate".into(),
+                RunOutcome::HitBudget => "max_inst".into(),
+                RunOutcome::Returned => "returned".into(),
+                RunOutcome::Interrupted => "interrupted".into(),
+                RunOutcome::LoopExit => "loop_exit".into(),
             });
         }
         tracing::info!(
@@ -1033,6 +1053,32 @@ impl Emulator {
             self.inst_count
         );
         tracing::info!("Emulator metrics: {}", self.metrics.summary_line());
-        Ok(())
+        Ok(outcome)
     }
+}
+
+/// Why [`Emulator::run_inner`] (and therefore [`Emulator::run`]/
+/// [`Emulator::run_until_pc`]) stopped -- distinct, reported outcomes so a
+/// caller (e.g. `fission-verify`'s "call one function" driver) never has to
+/// guess or silently coerce a non-`Returned` stop into a pass/fail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOutcome {
+    /// `stop_pc` (from [`Emulator::run_until_pc`]) was reached.
+    Returned,
+    /// `halt_requested` was set (explicit halt request, e.g. `exit`/`abort`
+    /// HLE reaching a terminal state that isn't itself `ProcessExited`).
+    Halted,
+    /// The concolic/symbolic exploration gate requested a stop.
+    SymGate,
+    /// `max_inst` instruction budget was reached.
+    HitBudget,
+    /// An HLE call resulted in `HleResult::Halt` (e.g. the process called
+    /// `exit`/`_exit`/`abort`) -- the callee terminated the whole process
+    /// rather than returning normally.
+    ProcessExited,
+    /// `run_instruction`/signal processing returned `false` (no more code,
+    /// or a fatal signal) -- the pre-existing `run()` "loop_exit" case.
+    LoopExit,
+    /// `Ctrl+C` (SIGINT) was observed.
+    Interrupted,
 }

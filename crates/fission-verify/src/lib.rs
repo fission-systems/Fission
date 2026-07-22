@@ -26,10 +26,14 @@
 
 pub mod decompile;
 pub mod diff;
+pub mod emu_driver;
 pub mod eval;
+pub mod ground_truth;
 pub mod report;
 
 pub use decompile::{DecompileError, DirHirPair, decompile_one};
 pub use diff::{default_samples, diff_dir_hir};
+pub use emu_driver::{CallOutcome, EmulatorHarness};
 pub use eval::{interpret_dir, interpret_hir};
+pub use ground_truth::check_ground_truth;
 pub use report::{Divergence, UnsupportedReason, VerifyOutcome};

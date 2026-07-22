@@ -34,11 +34,49 @@
 //! have a side effect, which holds given general `Call` is unsupported (the
 //! only source of a visible side effect in this AST).
 
+use fission_midend_core::ir::NirType;
+
 /// A single scalar value: the raw two's-complement bit pattern, meaningful
 /// in its low declared-type-width bits -- every value entering or leaving
 /// an interpreter's environment is normalized to its declared type
 /// immediately, so callers never need to re-mask.
 pub type Value = i64;
+
+/// `ty`'s declared bit width, clamped to `[1, 64]` (this interpreter's
+/// values are always plain `i64`s). Shared by both `dir::`/`hir::` and by
+/// [`crate::ground_truth`], which needs the same width to mask a real
+/// emulator register value for a fair comparison against an interpreted
+/// result.
+pub fn width_of(ty: &NirType) -> u32 {
+    match ty {
+        NirType::Bool => 1,
+        NirType::Int { bits, .. } => *bits,
+        NirType::Ptr(_) => 64,
+        // Not reachable for any supported expression (Aggregate/Float
+        // carriers are all rejected before evaluation reaches here); fall
+        // back to full width rather than panicking if one slips through.
+        NirType::Aggregate { .. } | NirType::Float { .. } | NirType::Unknown => 64,
+    }
+}
+
+pub fn is_signed(ty: &NirType) -> bool {
+    matches!(ty, NirType::Int { signed: true, .. })
+}
+
+/// Mask `raw` to `ty`'s declared width, sign-extending if `ty` is signed.
+pub fn normalize(raw: i64, ty: &NirType) -> i64 {
+    let bits = width_of(ty).clamp(1, 64);
+    if bits >= 64 {
+        return raw;
+    }
+    let mask = (1i64 << bits) - 1;
+    let v = raw & mask;
+    if is_signed(ty) && (v & (1i64 << (bits - 1))) != 0 {
+        v | !mask
+    } else {
+        v
+    }
+}
 
 /// Generates one interpreter module for a `Stmt`/`Expr`/`LValue`/`BinaryOp`/
 /// `UnaryOp`/`Binding`/`Function` family (either all `Dir*`, imported from
@@ -92,40 +130,7 @@ macro_rules! define_interp {
                 }
             }
 
-            fn width_of(ty: &NirType) -> u32 {
-                match ty {
-                    NirType::Bool => 1,
-                    NirType::Int { bits, .. } => *bits,
-                    NirType::Ptr(_) => 64,
-                    // Not reachable for any supported expression
-                    // (Aggregate/Float carriers are all rejected before
-                    // evaluation reaches here); fall back to full width
-                    // rather than panicking if one slips through.
-                    NirType::Aggregate { .. } | NirType::Float { .. } | NirType::Unknown => 64,
-                }
-            }
-
-            fn is_signed(ty: &NirType) -> bool {
-                matches!(ty, NirType::Int { signed: true, .. })
-            }
-
-            /// Mask `raw` to `ty`'s declared width, sign-extending if `ty`
-            /// is signed. Every value stored in [`Env`] or returned from
-            /// `eval_expr` has already been normalized -- callers never
-            /// need to re-mask.
-            fn normalize(raw: i64, ty: &NirType) -> i64 {
-                let bits = width_of(ty).clamp(1, 64);
-                if bits >= 64 {
-                    return raw;
-                }
-                let mask = (1i64 << bits) - 1;
-                let v = raw & mask;
-                if is_signed(ty) && (v & (1i64 << (bits - 1))) != 0 {
-                    v | !mask
-                } else {
-                    v
-                }
-            }
+            use super::{is_signed, normalize, width_of};
 
             /// `raw`'s low `bits` bits, as an unsigned value -- used for
             /// unsigned comparisons/shifts/division, where a signed `i64`
