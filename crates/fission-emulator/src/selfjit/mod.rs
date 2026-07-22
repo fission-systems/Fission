@@ -65,15 +65,25 @@
 //!   register allocator or an instruction scheduler.
 //!
 //! Concretely, the remaining work (roughly the recommended order):
-//! 1. Add the ~45 missing `PcodeOpcode` variants to `compiler.rs`'s match
-//!    (integer arithmetic/shifts/comparisons and zero/sign extension are
-//!    now covered; `IntCarry`/`IntSCarry`/`IntSBorrow`,
-//!    `Piece`/`SubPiece`/`PtrAdd`/`PtrSub`/`PopCount`/`LzCount` are next
-//!    most load-bearing; `Float*`/`Call*`/`MultiEqual` are larger, later).
+//! 1. Add the ~43 missing `PcodeOpcode` variants to `compiler.rs`'s match
+//!    (integer arithmetic/shifts/comparisons, zero/sign extension, and
+//!    `Load`/`Store` -- narrow, ≤8-byte path only -- are now covered).
+//!    **`IntCarry`/`IntSCarry`/`IntSBorrow`/`PopCount` are next, and are
+//!    higher-priority than this list originally had them**: confirmed via
+//!    `selfjit::differential` (item 4, done early -- see below) that
+//!    x86-64 SLEIGH's own lowering of `CMP` unconditionally emits all
+//!    four as flag-register side effects alongside *any* comparison, even
+//!    when the actual branch only reads one flag -- so they're closer to
+//!    a hard prerequisite for covering any real x86 comparison/branch
+//!    sequence than an independent, deferrable opcode group.
+//!    `Piece`/`SubPiece`/`PtrAdd`/`PtrSub`/`LzCount` remain the next tier
+//!    after that; `Float*`/`Call*`/`MultiEqual` are larger, later.
 //!    Also close the two documented-but-real correctness gaps in what's
 //!    already implemented: results aren't truncated to the varnode's
 //!    declared bit width, and shift amounts aren't clamped to that width
-//!    before shifting (see `compiler.rs`'s own doc for both).
+//!    before shifting (see `compiler.rs`'s own doc for both), and port
+//!    the >8-byte `Load`/`Store` path (needs a stack-slot allocator this
+//!    backend doesn't have yet -- see `compiler.rs`'s `Load`/`Store` doc).
 //! 2. Support intra-instruction relative BRANCH/CBRANCH (the TZCNT-style
 //!    loop construct) -- `compiler.rs` currently refuses to compile any TB
 //!    containing one, matching `crate::jit::compiler::remap_relative_
@@ -81,15 +91,25 @@
 //! 3. Implement `emit::x86_64` (this session's own dev machine is Apple
 //!    Silicon, so it could not be built *and verified* here -- see that
 //!    module's doc for encoding references).
-//! 4. Differential-test `SelfJitCompiler` against `JitCompiler` on the
-//!    same real corpus binaries this session used throughout (run the
-//!    same translation blocks through both backends, diff final guest
-//!    state) before ever considering flipping the default.
+//! 4. **Started** (`selfjit::differential`, `#[cfg(test)]`-only): captures
+//!    real, SLEIGH-decoded translation blocks from a real binary (via
+//!    `Emulator::collect_translation_block`) and replays each one both
+//!    backends can run through `JitCompiler` (trusted pathfinder for real,
+//!    data-dependent control flow) and `SelfJitCompiler` independently,
+//!    diffing final register state -- zero divergences found so far. Not
+//!    "done": only exercises whatever opcode subset is currently
+//!    implemented (which is exactly why item 1 above was refined the way
+//!    it was), doesn't yet cross-check memory-space bytes beyond
+//!    registers, and hasn't been run at real scale across the corpus.
+//!    Re-run (and extend) it after every future opcode addition, not just
+//!    once at the end, before ever considering flipping the default.
 //! 5. Only then: migrate to copy-and-patch stencils for performance parity,
 //!    and retire the `cranelift-*` dependencies from `Cargo.toml`.
 
 pub mod codebuf;
 pub mod compiler;
+#[cfg(test)]
+pub(crate) mod differential;
 pub mod emit;
 
 pub use compiler::SelfJitCompiler;

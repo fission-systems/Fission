@@ -4284,3 +4284,79 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     (160/160); `fission_cli verify clamp --tier all` now reports
     `Equivalent` on all three tiers (was `Diverged` on ground-truth only,
     before this fix).
+- **First steps toward removing the Cranelift dependency: `selfjit`
+  `Load`/`Store` + a differential-testing harness, 2026-07-22.** User's
+  explicit direction after the JIT fix above. `crates/fission-emulator/
+  src/selfjit/` is a self-written AArch64 JIT scaffold whose own doc
+  already states replacing Cranelift as the end goal, not wired in
+  anywhere (`core.rs:292` always constructs `jit::JitCompiler`). Planned
+  via `EnterPlanMode`/`ExitPlanMode` (plan preserved at `.claude/plans/
+  quirky-coalescing-lemur.md`), as a concretely-scoped first milestone
+  toward the scaffold's own existing 5-step roadmap, not the whole thing.
+  - **Why `Load`/`Store` first, ahead of the roadmap's own literal step
+    1**: confirmed by reading `selfjit/compiler.rs`'s `compile_op` match
+    directly that `Load`/`Store` were completely unimplemented and not
+    even mentioned in the existing roadmap's priority list -- yet
+    virtually every real-world function does at least one pointer
+    dereference, making this the actual blocker to compiling *any*
+    representative real function, more load-bearing than what the
+    roadmap listed first.
+  - **Part 1 -- `Load`/`Store` (narrow, ≤8-byte path)**: mechanical,
+    confirmed by reading `crate::jit::compiler`'s (Cranelift, the active
+    backend) own arms first. Resolves the space-id input at compile time;
+    routes the address operand through the existing `load_value` into a
+    callee-saved register (`A_VAL`) *before* setting up the `jit_read_
+    space`/`jit_write_space` call's own arguments -- `load_value` may
+    itself `blr` into a nested callback call, which the ABI permits to
+    clobber caller-saved registers, so the address needs a slot that
+    survives that (the exact lesson this file's own pre-existing `A_VAL`/
+    `B_VAL` doc comment already documents from an earlier bug). Wide
+    (`>8`-byte) `Load`/`Store` returns a descriptive `Err` rather than
+    silently truncating -- this hand-rolled backend has no stack-slot
+    allocator yet; porting Cranelift's wide-path shape safely is real,
+    separate follow-up work. New tests: a round trip through a *computed*
+    (not compile-time-constant) address, and a wide-value test proving
+    both opcodes fail loudly rather than corrupt data.
+  - **Part 2 -- `selfjit::differential`** (`#[cfg(test)]`-only): the
+    scaffold's own roadmap item 4, started now rather than deferred to
+    "later" -- deliberately, since a computed-address memory op
+    (endianness, space-id resolution, self-modifying-code interaction) is
+    exactly the class of bug that slips past hand-built synthetic unit
+    tests (this session's own signed-comparison JIT bug had zero
+    synthetic coverage and was only found by testing against a real
+    binary). Captures real, SLEIGH-decoded translation blocks from a real
+    binary via a newly-`pub(crate)` `Emulator::collect_translation_block`,
+    treats `JitCompiler` (Cranelift) as the trusted pathfinder for real,
+    data-dependent control flow (no calling-convention/argument injection
+    needed -- a pure backend-A-vs-backend-B differential check doesn't
+    need semantically meaningful inputs, only that both backends compute
+    the *same* thing from whatever's actually there), and replays every
+    TB whose opcodes `SelfJitCompiler` currently supports independently
+    against a state-synced second `Emulator`, diffing final register
+    bytes. TBs using an unsupported opcode are skipped and reported, not
+    failed.
+  - **Real, non-obvious finding the harness surfaced almost immediately**:
+    running it against `checksum` (this session's own corpus,
+    `control_flow_gcc_O0.exe`, a real `Load`-in-a-loop function) found
+    **zero** matchable TBs -- not because `Load`/`IntSLess`/`CBranch`
+    themselves are unsupported, but because x86-64 SLEIGH's own lowering
+    of `CMP` unconditionally emits `IntCarry`/`IntSCarry`/`IntSBorrow`/
+    `PopCount` as flag-register side effects alongside *any* comparison,
+    even when the actual branch only reads one flag. The existing roadmap
+    listed those four as merely "next most load-bearing" (after `Piece`/
+    `SubPiece`/`PtrAdd`/`PtrSub`); this run demonstrates they're closer to
+    a hard prerequisite for covering *any* real x86 comparison/branch
+    sequence. Updated `selfjit/mod.rs`'s own roadmap doc with this finding
+    (re-prioritizing item 1) rather than letting it live only in a test's
+    doc comment.
+  - Zero divergences found on everything the harness *could* run (a
+    straight-line real-ELF-entry-point smoke test got `matched=1`,
+    `skipped=9`, no divergence). Left the (currently thin) match count as
+    an honest signal rather than engineering a more favorable-looking demo
+    -- the finding above is the real value of this pass, not a coverage
+    percentage.
+  - Validated: 13/13 `selfjit::*` tests (2 new `Load`/`Store`, 2 new
+    differential), `fission-emulator` suite 86/93 (added 5 net tests; same
+    7 pre-existing unrelated failures throughout), full workspace build
+    clean. `selfjit` is still not wired in anywhere live, so blast radius
+    to existing behavior is structurally zero.

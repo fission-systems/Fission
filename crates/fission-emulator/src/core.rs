@@ -716,7 +716,13 @@ impl Emulator {
     // ── Execution ─────────────────────────────────────────────────────────────
 
     /// Collect a multi-instruction TB starting at `self.pc`.
-    fn collect_translation_block(&mut self) -> Result<Vec<crate::jit::compiler::GuestInsn>> {
+    ///
+    /// `pub(crate)`, not private: `selfjit`'s differential-testing harness
+    /// (`selfjit::differential`) calls this directly to capture real,
+    /// decoded `GuestInsn` sequences from a real corpus binary to replay
+    /// through both JIT backends, rather than only ever exercising
+    /// `SelfJitCompiler` against hand-built synthetic p-code.
+    pub(crate) fn collect_translation_block(&mut self) -> Result<Vec<crate::jit::compiler::GuestInsn>> {
         use crate::jit::compiler::GuestInsn;
         use fission_pcode::ir::PcodeOpcode;
 
