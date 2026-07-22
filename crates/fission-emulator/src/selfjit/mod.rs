@@ -37,25 +37,29 @@
 //!
 //! `crate::jit::compiler` (Cranelift) covers effectively the full
 //! `PcodeOpcode` surface and all host register allocation. `selfjit::
-//! compiler` covers ~50 opcodes now (integer/boolean/comparison/pointer,
-//! all 18 `Float*` ops, `Extract`/`Insert` -- see that module's own doc
-//! for the exact list) and no register allocation (every operand
-//! round-trips through a host callback call -- correct, but slow) -- but,
-//! as of this phase, *does* support intra-instruction relative-branch
-//! loops (item 2 below) and *both* AArch64 and x86-64 host backends
-//! (`emit::x86_64` is a real, verified implementation now, not the stub
-//! it started as -- see `emit::mod`'s own doc for how it was verified
-//! without x86-64 silicon, via Rosetta 2). The narrow-negative-operand
-//! sign-extension bug (`IntSLess`/`IntSLessEqual`/`IntSDiv`/`IntSRem`/
-//! `IntSRight`) and the shift-amount-clamping bug are also fixed now
-//! (`load_value_signed`, and the runtime width-compare in `IntLeft`/
-//! `IntRight`/`IntSRight` -- see `compiler.rs`'s own doc for both; the
-//! *other* half of that same old doc entry, arithmetic results not being
-//! truncated to declared width, turned out on investigation not to be a
-//! real bug at all, given this backend's memory-round-trip architecture --
-//! see that doc for the proof). The remaining real gaps are `Call*`/
-//! `MultiEqual`/`SegmentOp` (item 1 below) and the >8-byte `Load`/`Store`
-//! path.
+//! compiler` covers ~56 opcodes now (integer/boolean/comparison/pointer,
+//! all 18 `Float*` ops, `Extract`/`Insert`, `Call`/`CallInd`/`BranchInd`/
+//! `Return`/`MultiEqual`/`Indirect` -- see that module's own doc for the
+//! exact list) and no register allocation (every operand round-trips
+//! through a host callback call -- correct, but slow) -- but, as of this
+//! phase, *does* support intra-instruction relative-branch loops (item 2
+//! below) and *both* AArch64 and x86-64 host backends (`emit::x86_64` is
+//! a real, verified implementation now, not the stub it started as -- see
+//! `emit::mod`'s own doc for how it was verified without x86-64 silicon,
+//! via Rosetta 2). The narrow-negative-operand sign-extension bug
+//! (`IntSLess`/`IntSLessEqual`/`IntSDiv`/`IntSRem`/`IntSRight`) and the
+//! shift-amount-clamping bug are also fixed now (`load_value_signed`, and
+//! the runtime width-compare in `IntLeft`/`IntRight`/`IntSRight` -- see
+//! `compiler.rs`'s own doc for both; the *other* half of that same old
+//! doc entry, arithmetic results not being truncated to declared width,
+//! turned out on investigation not to be a real bug at all, given this
+//! backend's memory-round-trip architecture -- see that doc for the
+//! proof). As of this phase, `selfjit::differential`'s two existing real-
+//! corpus fixtures both replay with **zero unsupported-opcode skips** --
+//! every TB either backend reaches from those entry points now matches
+//! cleanly. The remaining real gaps are `CallOther`/`SegmentOp` (item 1
+//! below, `CallOther` needing a stack-slot allocator) and the >8-byte
+//! `Load`/`Store` path (the same allocator gap).
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a
@@ -99,8 +103,22 @@
 //!    established. **Also done**: `Extract`/`Insert` (bit-slice
 //!    extraction/insertion), mechanical ports of `crate::jit::compiler`'s
 //!    own arms mirroring the shift+mask shape `Piece`/`SubPiece` already
-//!    established here. `Call*`/`MultiEqual`/`SegmentOp` are still not
-//!    implemented, larger/later.
+//!    established here; and `Call`/`CallInd`/`BranchInd`/`Return`/
+//!    `MultiEqual`/`Indirect` (all far simpler than they first looked --
+//!    `Call`'s target is always a resolved absolute address, never an
+//!    intra-instruction relative delta, so it needs no `remap_relative_
+//!    branches` involvement at all, just the same "compute an address,
+//!    end the compiled function there" shape `Branch`'s absolute case
+//!    already had; `MultiEqual`/`Indirect` are plain passthroughs even in
+//!    Cranelift's own arm, since this is raw, non-SSA-optimized p-code,
+//!    not a real phi-merge). Landing these unblocked every remaining skip
+//!    in both of `selfjit::differential`'s real-corpus fixtures --
+//!    `Call` alone took the ELF-entry-point walk from `matched=8,
+//!    skipped=2` to `matched=10, skipped=0`. `CallOther`/`SegmentOp` are
+//!    still not implemented -- `CallOther` specifically needs a real
+//!    stack-slot allocator (its host callback takes a `*const u64`
+//!    argument buffer), the same gap blocking `Load`/`Store`'s >8-byte
+//!    path below.
 //!    **Done**, ahead of this list's original ordering too: the narrow-
 //!    negative-operand sign-extension bug and the shift-amount-clamping
 //!    bug (both were already-documented, already-diagnosed gaps -- see

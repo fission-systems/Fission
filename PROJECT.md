@@ -4895,3 +4895,50 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     (+1, same 7 pre-existing unrelated failures), full workspace nextest
     2184/2191 (+1, zero regressions), full workspace build clean,
     `golden_corpus_check.py check` clean.
+- **`selfjit`: `Call`/`CallInd`/`BranchInd`/`Return`/`MultiEqual`/
+  `Indirect` implemented -- both real-corpus differential fixtures now
+  replay with zero unsupported-opcode skips, 2026-07-23.** Continuing
+  opcode coverage. These turned out far simpler than their names
+  suggested: `Call`'s destination is always a resolved absolute address
+  (never an intra-instruction relative delta the way `Branch`/`CBranch`'s
+  can be), so it needed no `remap_relative_branches` involvement at all --
+  just the same "compute an address, end the compiled function there"
+  shape `Branch`'s absolute-address case already had.
+  `CallInd`/`BranchInd`/`Return` share one arm (load the target from a
+  varnode instead of encoding it directly, then the same end-the-function
+  shape). `MultiEqual`/`Indirect` are plain passthroughs even in
+  Cranelift's own arm -- this is raw, non-SSA-optimized p-code, not a
+  real phi-merge needing multiple live predecessors resolved.
+  `CallOther` (Ghidra's generic HLE/pseudo-op mechanism -- syscalls,
+  segment-register reads) is explicitly *not* attempted here: its host
+  callback needs a real `*const u64` argument buffer, which needs a
+  stack-slot allocator this backend doesn't have -- the same gap already
+  tracked for `Load`/`Store`'s >8-byte path, worth doing once rather than
+  twice.
+  - New regression tests: `Call`/`Return` checked by bypassing
+    `compile_and_run`'s own hardcoded "returns to the natural fallthrough
+    PC" assertion (these two, unlike every other op this file compiles,
+    legitimately end the TB at a *different* address) and checking the
+    real target directly; `MultiEqual` checked as a plain passthrough.
+  - **Real, immediate payoff from `selfjit_supports` picking these up**:
+    re-ran the differential harness against both existing real-corpus
+    fixtures. The ELF-entry-point walk went from `matched=8,
+    skipped_unsupported=2` (both skips were `Call`) to `matched=10,
+    skipped_unsupported=0` -- every reachable TB now matches. The
+    `checksum` loop fixture went from `matched=2, skipped=1` (`Return`)
+    to `matched=3, skipped=0`. Both fixtures are now **fully clean** with
+    no remaining opcode-coverage gaps at all -- a real milestone for this
+    differential-testing effort, not just an incremental opcode count.
+    Also caught and fixed a genuinely stale test artifact along the way:
+    `selfjit_matches_cranelift_on_real_checksum_loop`'s own assertion
+    (`skipped_unsupported_opcode > 0`) had been left unchanged since
+    *before* `IntCarry`/`PopCount` landed several phases ago -- it was
+    already asserting the wrong thing even before today's change, just
+    hadn't been exercised because `Return` kept the skip count nonzero by
+    coincidence. Rewrote the doc comment and assertion to reflect the
+    now-fully-clean state honestly.
+  - Validated on both host backends: `selfjit::*` 30/30 (aarch64, +2) and
+    36/36 (x86-64 via Rosetta, +2), `fission-emulator` nextest 103/110
+    (+2, same 7 pre-existing unrelated failures), full workspace nextest
+    2186/2193 (+2, zero regressions), full workspace build clean,
+    `golden_corpus_check.py check` clean.

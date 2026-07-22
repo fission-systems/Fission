@@ -113,7 +113,13 @@ fn selfjit_supports<'a>(ops: impl IntoIterator<Item = &'a fission_pcode::ir::Pco
         | PcodeOpcode::FloatInt2Float
         | PcodeOpcode::FloatFloat2Float
         | PcodeOpcode::Extract
-        | PcodeOpcode::Insert => true,
+        | PcodeOpcode::Insert
+        | PcodeOpcode::Call
+        | PcodeOpcode::CallInd
+        | PcodeOpcode::BranchInd
+        | PcodeOpcode::Return
+        | PcodeOpcode::MultiEqual
+        | PcodeOpcode::Indirect => true,
         // Load/Store: implemented, but only the <=8-byte path (see
         // `selfjit/compiler.rs`'s wide-path gap note).
         PcodeOpcode::Load => op.output.as_ref().is_none_or(|o| o.size <= 8),
@@ -367,23 +373,18 @@ mod tests {
     /// `checksum` (`control_flow_gcc_O0.exe`, this session's own corpus)
     /// does `*(uchar *)(local_10 + param_1)` inside a loop -- a real
     /// `Load` with a genuinely *computed* address, plus a real back-edge.
-    /// A genuine, non-obvious finding from running this against real
-    /// SLEIGH-decoded x86-64 p-code (not hand-built synthetic ops): every
-    /// TB here containing a `cmp`/comparison-driven branch is skipped,
-    /// with `matched == 0` -- **not** because `Load`/`IntSLess`/`CBranch`
-    /// themselves are unsupported (they are supported), but because
-    /// x86-64 SLEIGH's own lowering of `CMP` unconditionally emits
-    /// `IntCarry`/`IntSCarry`/`IntSBorrow`/`PopCount` p-code ops as flag-
-    /// register side effects alongside the comparison, even when the
-    /// actual branch instruction (`jc`/`jz`/...) only reads one flag.
-    /// `selfjit/mod.rs`'s existing roadmap lists those four as merely
-    /// "next most load-bearing" (after `Piece`/`SubPiece`/`PtrAdd`/
-    /// `PtrSub`); this run demonstrates they're closer to a hard
-    /// prerequisite for covering *any* real x86 comparison, not an
-    /// independent, deferrable opcode group -- exactly the kind of thing
-    /// this differential harness exists to surface. Run with
-    /// `FISSION_DIFF_DEBUG=1` to see the exact unsupported-opcode list
-    /// per skipped TB.
+    /// Originally found (much earlier in this multi-phase effort) that
+    /// every TB here containing a `cmp`/comparison-driven branch was
+    /// skipped entirely, `matched == 0` -- not because `Load`/`IntSLess`/
+    /// `CBranch` themselves were unsupported, but because x86-64 SLEIGH's
+    /// own lowering of `CMP` unconditionally emits `IntCarry`/`IntSCarry`/
+    /// `IntSBorrow`/`PopCount` as flag-register side effects alongside the
+    /// comparison, even when the actual branch only reads one flag --
+    /// exactly the kind of gap this differential harness exists to
+    /// surface. Those four (and, later, `Return`, the last opcode this
+    /// specific TB walk needed) are all implemented now: every reachable
+    /// TB matches cleanly. Run with `FISSION_DIFF_DEBUG=1` to see the
+    /// per-TB opcode/byte-level detail if this ever regresses.
     #[test]
     fn selfjit_matches_cranelift_on_real_checksum_loop() {
         let path = corpus_binary("control_flow_gcc_O0.exe");
@@ -403,15 +404,9 @@ mod tests {
             "SelfJitCompiler diverged from Cranelift on checksum's real Load/loop: {:?}",
             report.diverged
         );
-        // Not `matched > 0` (see doc comment above) -- every real TB here
-        // needs IntCarry/IntSCarry/IntSBorrow/PopCount too, none of which
-        // this milestone implements. `is_clean()` (no divergence on
-        // whatever *did* run) plus a nonzero skip count is the real,
-        // honest signal this test can give today.
         assert!(
-            report.skipped_unsupported_opcode > 0,
-            "expected at least one TB to hit the known IntCarry/IntSCarry/IntSBorrow/PopCount \
-             flag-computation gap"
+            report.matched > 0,
+            "expected at least one TB both backends could run and agree on"
         );
     }
 }

@@ -42,13 +42,14 @@
 //! `BoolAnd`, `BoolOr`, `BoolXor`, `BoolNegate`, `IntEqual`,
 //! `IntNotEqual`, `IntSLess`, `IntLess`, `IntSLessEqual`, `IntLessEqual`,
 //! `IntCarry`, `IntSCarry`, `IntSBorrow`, `PopCount`, `PtrAdd`, `Piece`,
-//! `SubPiece`, `LzCount`, `Extract`, `Insert`, all 8 `Float*` binops (`FloatAdd`/`Sub`/`Mult`/
-//! `Div`/`Equal`/`NotEqual`/`Less`/`LessEqual`) and all 10 `Float*` unops
-//! (`FloatNeg`/`Abs`/`Sqrt`/`Nan`/`Ceil`/`Floor`/`Round`/`Trunc`/
-//! `Int2Float`/`Float2Float`) -- routed through the exact same pure
-//! `jit_float_binop`/`jit_float_unop` host callbacks `crate::jit::
-//! compiler` (Cranelift) already uses, since this file has no native
-//! SIMD/FP emitter primitives of its own,
+//! `SubPiece`, `LzCount`, `Extract`, `Insert`, `Call`, `CallInd`,
+//! `BranchInd`, `Return`, `MultiEqual`, `Indirect`, all 8 `Float*` binops
+//! (`FloatAdd`/`Sub`/`Mult`/`Div`/`Equal`/`NotEqual`/`Less`/`LessEqual`)
+//! and all 10 `Float*` unops (`FloatNeg`/`Abs`/`Sqrt`/`Nan`/`Ceil`/
+//! `Floor`/`Round`/`Trunc`/`Int2Float`/`Float2Float`) -- routed through
+//! the exact same pure `jit_float_binop`/`jit_float_unop` host callbacks
+//! `crate::jit::compiler` (Cranelift) already uses, since this file has
+//! no native SIMD/FP emitter primitives of its own,
 //! `Load`, `Store` (computed-address memory access -- **≤8 bytes only**,
 //! see below), and `Branch`/`CBranch`, including both shapes: a
 //! cross-instruction jump to a real guest address (ends the compiled
@@ -122,8 +123,12 @@
 //! safely is real, separate follow-up work rather than something to rush
 //! alongside the ≤8-byte path.
 //!
-//! Not implemented at all (of ~70 `PcodeOpcode` variants): the remaining
-//! ones -- `Call`/`CallInd`/`CallOther`, `MultiEqual`, `SegmentOp`.
+//! Not implemented at all (of ~70 `PcodeOpcode` variants): `CallOther`
+//! (Ghidra's generic HLE/pseudo-op mechanism, e.g. syscalls, segment-
+//! register reads -- needs a real stack-slot allocator to marshal
+//! variadic arguments into a `*const u64` buffer for the host callback,
+//! which this backend doesn't have yet, tied to the same gap blocking
+//! `Load`/`Store`'s >8-byte path) and `SegmentOp`.
 //! `compile_translation_block` returns a descriptive
 //! `Err` for any of these rather than emitting wrong code -- matching this
 //! session's own repeated finding (the 8 missing `FLOAT_*` decompiler
@@ -1180,6 +1185,46 @@ fn compile_op(
                 let not_taken_at = asm.offset();
                 asm.patch_b_cond(taken, Cond::Ne, taken_at);
                 asm.patch_b(not_taken_label, not_taken_at);
+            }
+        }
+        // Direct CALL: the destination varnode *is* the code address
+        // (constant_val if is_constant, else offset), not a memory load
+        // -- unlike Branch/CBranch, a CALL target is always a resolved
+        // absolute address (a real function, never an intra-instruction
+        // relative delta), so there's no `remap_relative_branches`
+        // resolution to check for here. Ends the compiled function the
+        // same way an absolute Branch does -- matches `crate::jit::
+        // compiler`'s own `Call` arm exactly.
+        PcodeOpcode::Call => {
+            anyhow::ensure!(!op.inputs.is_empty(), "Call needs a target input");
+            let dest = &op.inputs[0];
+            let addr = if dest.is_constant {
+                dest.constant_val as u64
+            } else {
+                dest.offset
+            };
+            asm.mov_imm64(RET, addr);
+            epilogue_return(asm, RET);
+        }
+        // CALLIND/BRANCHIND/RETURN all load their target from a varnode
+        // (register/memory) rather than encoding it directly -- matches
+        // `crate::jit::compiler`'s own combined arm for these three.
+        PcodeOpcode::CallInd | PcodeOpcode::BranchInd | PcodeOpcode::Return => {
+            anyhow::ensure!(!op.inputs.is_empty(), "{:?} needs a target input", op.opcode);
+            load_value(asm, &op.inputs[0], RET);
+            epilogue_return(asm, RET);
+        }
+        // MULTIEQUAL/INDIRECT: matches `crate::jit::compiler`'s own arm,
+        // a plain passthrough (this is raw, non-SSA-optimized p-code, not
+        // a real phi-merge needing multiple live predecessors resolved --
+        // both backends just forward `inputs[0]` to the output when
+        // present).
+        PcodeOpcode::MultiEqual | PcodeOpcode::Indirect => {
+            if let Some(out) = op.output.as_ref() {
+                if !op.inputs.is_empty() {
+                    load_value(asm, &op.inputs[0], RESULT);
+                    store_value(asm, out, RESULT);
+                }
             }
         }
         other => bail!(
@@ -2240,6 +2285,79 @@ mod tests {
         assert_eq!(read_reg(&mut emu, 8) as u16, 0x5566, "Extract(offset=16, 2 bytes)");
         assert_eq!(read_reg(&mut emu, 16) as u16, 0x7788, "Extract(no offset, 2 bytes)");
         assert_eq!(read_reg(&mut emu, 32), 0xFFFFFFFFFFFFABFF, "Insert(pos=8, size=8)");
+    }
+
+    /// `Call` (direct, absolute address encoded as a genuine constant) and
+    /// `Return` (target loaded from a register, sharing `CallInd`/
+    /// `BranchInd`'s code path) both end the compiled TB at their target
+    /// address -- unlike every other test in this file, these don't
+    /// return to the natural fallthrough PC, so this bypasses
+    /// `compile_and_run`'s own hardcoded `next_pc == 0x1004` assertion
+    /// and checks the real target directly.
+    #[test]
+    fn call_and_return_end_the_tb_at_the_target_address() {
+        let call_ops = vec![PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Call,
+            address: 0x1000,
+            output: None,
+            inputs: vec![imm(0x2000, 8)],
+            asm_mnemonic: None,
+        }];
+        let insns = [GuestInsn { pc: 0x1000, len: 4, ops: call_ops }];
+        let mut compiler = SelfJitCompiler::new().expect("selfjit backend available");
+        let func_ptr = compiler
+            .compile_translation_block(&insns, 4)
+            .expect("compile");
+        let mut emu = make_emu();
+        let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+            unsafe { std::mem::transmute(func_ptr) };
+        assert_eq!(f(&mut emu as *mut _), 0x2000, "Call ends the TB at its target address");
+
+        let return_ops = vec![
+            copy_const(0, 0x3000),
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Return,
+                address: 0x1000,
+                output: None,
+                inputs: vec![reg(0, 8)],
+                asm_mnemonic: None,
+            },
+        ];
+        let insns2 = [GuestInsn { pc: 0x1000, len: 4, ops: return_ops }];
+        let mut compiler2 = SelfJitCompiler::new().expect("selfjit backend available");
+        let func_ptr2 = compiler2
+            .compile_translation_block(&insns2, 4)
+            .expect("compile");
+        let mut emu2 = make_emu();
+        let f2: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+            unsafe { std::mem::transmute(func_ptr2) };
+        assert_eq!(
+            f2(&mut emu2 as *mut _),
+            0x3000,
+            "Return ends the TB at its loaded target address"
+        );
+    }
+
+    /// `MultiEqual`/`Indirect`: a plain passthrough (raw, non-SSA p-code
+    /// here, not a real phi-merge) -- forwards `inputs[0]` to the output
+    /// unchanged.
+    #[test]
+    fn multiequal_forwards_its_first_input() {
+        let ops = vec![
+            copy_const(0, 42),
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::MultiEqual,
+                address: 0x1000,
+                output: Some(reg(8, 8)),
+                inputs: vec![reg(0, 8)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 8), 42);
     }
 }
 
