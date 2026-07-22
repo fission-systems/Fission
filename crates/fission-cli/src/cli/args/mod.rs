@@ -48,6 +48,8 @@ pub enum ParsedInvocation {
     Debug(DebugArgs),
     /// Sandbox (emulator) execution
     Sandbox(SandboxArgs),
+    /// Solver- and emulator-backed DIR/HIR correctness verification
+    Verify(VerifyArgs),
     /// AI chat / authentication subcommand.
     Ai(AiInvocation),
 }
@@ -152,8 +154,53 @@ enum CliCommand {
     Debug(DebugArgs),
     /// Sandbox (emulator) execution
     Sandbox(SandboxArgs),
+    /// Solver- and emulator-backed DIR/HIR correctness verification
+    Verify(VerifyArgs),
     /// AI chat session and authentication (Codex OAuth / OpenAI / Ollama)
     Ai(AiArgs),
+}
+
+// ── Verify subcommand types ────────────────────────────────────────────────
+
+/// Which verification tier(s) to run -- see `fission-verify`'s crate doc.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum VerifyTierArg {
+    /// Concrete DIR-vs-HIR diffing (no solver, no emulator).
+    Concrete,
+    /// Emulator-grounded ground truth (real machine code as oracle).
+    GroundTruth,
+    /// Solver-backed symbolic DIR/HIR equivalence (loop-free only).
+    Symbolic,
+    /// All three tiers.
+    All,
+}
+
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+pub struct VerifyArgs {
+    /// Path to the binary to verify
+    #[arg(value_name = "BINARY")]
+    pub binary: PathBuf,
+
+    /// Function address (hex, e.g. 0x140001530)
+    #[arg(long, value_parser = parse_hex_address, required = true)]
+    pub addr: u64,
+
+    /// Function name (used for decompilation; cosmetic if it doesn't match
+    /// the binary's own symbol)
+    #[arg(long, default_value = "")]
+    pub name: String,
+
+    /// Which verification tier(s) to run
+    #[arg(long, value_enum, default_value = "all")]
+    pub tier: VerifyTierArg,
+
+    /// Instruction budget for the ground-truth emulator tier
+    #[arg(long, default_value_t = 1_000_000)]
+    pub max_inst: u64,
+
+    /// Emit the result as JSON instead of human-readable text
+    #[arg(long)]
+    pub json: bool,
 }
 
 // ── Sandbox subcommand types ──────────────────────────────────────────────────
@@ -648,6 +695,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "resources",
     "script",
     "sandbox",
+    "verify",
     "debug",
     "ai",
 ];
@@ -917,6 +965,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     return ParsedInvocation::Ai(inv);
                 }
                 CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
+                CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };
@@ -954,6 +1003,7 @@ mod tests {
             ParsedInvocation::Debug(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Ai(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -967,6 +1017,7 @@ mod tests {
             ParsedInvocation::Debug(_) => panic!("legacy parser cannot emit debug"),
             ParsedInvocation::Ai(_) => panic!("legacy parser cannot emit AI"),
             ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
+            ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
         }
     }
 

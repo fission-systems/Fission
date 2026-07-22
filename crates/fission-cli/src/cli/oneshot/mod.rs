@@ -129,6 +129,7 @@ fn run() -> Result<()> {
             rt.block_on(crate::cli::ai::run_ai(inv))
         }
         ParsedInvocation::Sandbox(args) => run_sandbox(args),
+        ParsedInvocation::Verify(args) => run_verify(args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }
@@ -159,6 +160,90 @@ fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
         return Err(error.context(format!("span trace:\n{span_trace}")));
     }
     Ok(())
+}
+
+/// Heavy, opt-in "deep verify" over `fission-verify`: concrete DIR/HIR
+/// diffing, emulator-grounded ground truth, and solver-backed symbolic
+/// equivalence. Distinct from `scripts/quality/dir_hir_check.py`, which
+/// stays the fast, cheap, no-solver/no-emulator structural heuristic run
+/// routinely across the whole corpus -- this command spins up a real
+/// emulator and/or solver per function and is meant for targeted
+/// investigation, not a per-commit gate.
+fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
+    use crate::cli::args::VerifyTierArg;
+
+    let mut logging_options =
+        fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
+    logging_options.level = "warn".to_string();
+    fission_core::logging::init_with_options(logging_options);
+
+    let binary = LoadedBinary::from_file(&args.binary)
+        .with_context(|| format!("failed to read binary at {}", args.binary.display()))?;
+    let facts = fission_static::analysis::decomp::facts::FactStore::from_binary(&binary);
+    let func = fission_loader::loader::FunctionInfo {
+        name: args.name.clone(),
+        address: args.addr,
+        ..Default::default()
+    };
+
+    let pair = fission_verify::decompile_one(&binary, &facts, &func)
+        .with_context(|| format!("failed to decompile function at 0x{:x}", args.addr))?;
+
+    let run_concrete = matches!(args.tier, VerifyTierArg::Concrete | VerifyTierArg::All);
+    let run_ground_truth = matches!(args.tier, VerifyTierArg::GroundTruth | VerifyTierArg::All);
+    let run_symbolic = matches!(args.tier, VerifyTierArg::Symbolic | VerifyTierArg::All);
+
+    let mut out = serde_json::Map::new();
+
+    if run_concrete {
+        let samples = fission_verify::default_samples(pair.hir.params.len());
+        let outcome = fission_verify::diff_dir_hir(&pair.dir, &pair.hir, &samples);
+        report_tier("concrete", &format!("{outcome:?}"), args.json, &mut out);
+    }
+    if run_ground_truth {
+        let samples = fission_verify::default_samples(pair.hir.params.len());
+        match fission_verify::EmulatorHarness::build(&args.binary, Some(args.max_inst)) {
+            Ok(mut harness) => {
+                let outcome = fission_verify::check_ground_truth(
+                    &mut harness,
+                    func.address,
+                    &pair.dir,
+                    &pair.hir,
+                    &samples,
+                );
+                report_tier("ground_truth", &format!("{outcome:?}"), args.json, &mut out);
+            }
+            Err(err) => {
+                report_tier("ground_truth", &format!("EmulatorSetupFailed({err})"), args.json, &mut out);
+            }
+        }
+    }
+    if run_symbolic {
+        let outcome = fission_verify::check_symbolic_equivalence(&pair.dir, &pair.hir);
+        let desc = match outcome {
+            fission_verify::symbolic::SymbolicOutcome::Equivalent => "Equivalent (proved, Unsat)".to_string(),
+            fission_verify::symbolic::SymbolicOutcome::Diverged(cx) => {
+                format!("Diverged (solver counterexample args={:?})", cx.args)
+            }
+            fission_verify::symbolic::SymbolicOutcome::Unsupported(reason) => {
+                format!("Unsupported({reason})")
+            }
+        };
+        report_tier("symbolic", &desc, args.json, &mut out);
+    }
+
+    if args.json {
+        println!("{}", serde_json::Value::Object(out));
+    }
+    Ok(())
+}
+
+fn report_tier(tier: &str, desc: &str, json: bool, out: &mut serde_json::Map<String, serde_json::Value>) {
+    if json {
+        out.insert(tier.to_string(), serde_json::Value::String(desc.to_string()));
+    } else {
+        println!("{tier}: {desc}");
+    }
 }
 
 fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {

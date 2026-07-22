@@ -4052,3 +4052,156 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     Python-classifier count fixed earlier this phase), all 6 remaining
     confirmed benign by hand. `cargo test -p fission-pcode presentation`
     32/32 (31 pre-existing + 1 new regression test).
+- **New crate `fission-verify`: solver- and emulator-backed DIR/HIR
+  verification, 2026-07-22.** User's explicit follow-up after the
+  `dir_hir_check.py` work: connect DIR/HIR correctness checking to the
+  *real* `fission-solver` (a from-scratch SAT/SMT-style solver) and the
+  *real* `fission-emulator` (production p-code execution engine), not
+  another hand-rolled toy interpreter like the deleted `fission-dir` crate
+  (whose own doc comment admitted "Phase 2's solver-backed equivalence
+  check is what closes that gap" but never built it). Planned via
+  `EnterPlanMode`/`ExitPlanMode` (approved plan preserved at
+  `.claude/plans/quirky-coalescing-lemur.md`), executed in four
+  incrementally-committed phases.
+  - **Crate placement**: `crates/fission-verify` depends on `fission-core,
+    fission-loader, fission-static, fission-midend-core, fission-midend-dir,
+    fission-decompiler, fission-solver, fission-emulator, fission-sleigh`.
+    Confirmed acyclic before creating it: `fission-solver` has zero
+    `fission-*` deps; `fission-emulator` and `fission-decompiler` don't
+    depend on each other; `fission-cli` already depended on both, so this
+    crate formalizes an existing coupling rather than inventing a new one.
+  - **Phase 0 (scaffolding)**: `decompile_one()` wraps
+    `decompile_with_rust_sleigh_with_facts` + immediate
+    `take_last_dir_snapshot`/`take_last_hir_function_snapshot` (the exact
+    pattern `decomp --dir` already uses) so every tier below consumes the
+    real production decompile output, not a separate path. Shared
+    `VerifyOutcome`/`Divergence`/`UnsupportedReason` report types used by
+    all three tiers.
+  - **Phase 1 (concrete tier, no solver/emulator)**: restored and adapted
+    the deleted `fission-dir` crate's `interp.rs`/`diff.rs`
+    (`git show fdae396d^:crates/fission-dir/src/{interp,diff}.rs`) into
+    `eval.rs`/`diff.rs` -- same `define_interp!`-style macro generating
+    `dir::interpret`/`hir::interpret` from one body so DIR-side/HIR-side
+    logic can't silently drift, same boundary-value cross-product sampling.
+    `width_of`/`is_signed`/`normalize` factored out of the macro to
+    top-level `pub fn`s so later phases could reuse them instead of a third
+    copy. This tier alone doesn't satisfy the ask (still blind to a bug
+    shared by both DIR and HIR) -- it's the baseline the other two build on.
+  - **Phase 2 (emulator-grounded ground truth)**: the genuinely new
+    capability the deleted crate never had -- checks HIR against what the
+    *real machine code* actually computes, not just against DIR.
+    - **One additive change to `fission-emulator`** (`core.rs`): extracted
+      `run()`'s loop body into `run_inner(stop_pc: Option<u64>) ->
+      Result<RunOutcome>`; `run()` is now a thin wrapper (`run_inner(None)`,
+      unchanged behavior/signature), and new `run_until_pc(stop_pc)` reuses
+      the same loop (HLE-trap band, signals, TTD bookkeeping intact)
+      instead of a duplicate one. New exported `RunOutcome` enum
+      (`Returned/Halted/SymGate/HitBudget/ProcessExited/LoopExit/
+      Interrupted`) -- distinct, reported outcomes, nothing coerced into a
+      silent pass/fail. `fission-emulator`'s own suite: 81/88 both before
+      and after (same 7 pre-existing failures).
+    - `EmulatorHarness` (`emu_driver.rs`) builds a real, loaded process
+      image mirroring `fission-cli`'s `sandbox` setup exactly (format-aware
+      loader, `ArchInfo::from_language_id` -- confirmed independent of any
+      decompiler-side `CallingConvention` enum, which nothing in
+      `fission-emulator`/`fission-cli`'s emulator path reads), snapshots the
+      post-image-setup baseline, and drives `run_until_pc` to call one
+      function with concrete args (sentinel return address in the link
+      register or pushed on the stack per the CC) and read back the real
+      return register. Restores the baseline before every call so one
+      sample's global/heap writes can't leak into the next.
+    - `ground_truth.rs` compares that ground truth against both DIR's and
+      HIR's concrete evaluation -- a `dir_eval == hir_eval != emulator`
+      result is now catchable, a class of bug Phase 1 structurally cannot
+      see (both decompiler paths sharing the same wrong answer).
+    - **Real bug found while validating the harness itself**: the initial
+      driver only reserved stack space for the pushed return address, not
+      Win64's mandatory 32-byte "shadow space" between it and the first
+      stack argument (`stack_arg_offset(0) == 0x28` on Win64 vs `0x08` on
+      SysV64/cdecl -- confirmed by reading `Win64Cc`/`SysV64Cc`/`Cdecl32Cc`
+      directly). A callee whose prologue spills register args into that
+      space (as real `-O0` compiled functions with 3+ params do) could
+      write into memory outside the intentionally-reserved frame. Fixed by
+      reserving `stack_arg_offset(0) - ptr_size` extra bytes below the
+      return address slot -- this generalizes correctly to SysV64/cdecl
+      (where the gap is `0`, a no-op) without a Win64 special case.
+    - Proven to have teeth, not just pass trivially: a test hand-corrupts a
+      real decompiled HIR body (always-returns-0) and confirms the real
+      emulator catches the divergence.
+  - **Phase 3 (solver-backed symbolic DIR/HIR equivalence)**: `lower_sym.rs`
+    adds a third `define_lower_sym!` macro instantiation lowering
+    `DirExpr`/`HirExpr` to `fission_solver::ast::SymExpr`, for **loop-free**
+    functions only (acyclic symbolic execution by explicit path
+    enumeration: fork at each `If`, recurse each branch with its own env/
+    path-condition, resolve `Goto`/`Label` exactly like the concrete
+    interpreter since the goto *target* is always static -- only whether it
+    fires is symbolic -- combine every `Return` reached into one closed-form
+    `SymExpr` via a right-fold of `Ite`s). Excludes `Div`/`Mod`/`Sar`
+    (`fission_solver::ast::SymExpr` has no `Sdiv`/`Urem`/`Srem`/`Ashr` yet)
+    and `Switch` (deferred, not rushed -- its break/fallthrough semantics
+    interacting with path forking is a real design decision).
+    - **Confirmed by reading `fission-solver`'s actual AIG bit-blasting
+      (`aig.rs`), not trusting the doc comment**: `SymExpr`'s `size` fields
+      are *bit* counts everywhere real lowering happens (`Const{val,size}`
+      emits exactly `size` bits; `Extract{lsb,size}` slices bits, not
+      bytes), contradicting `Sort::BitVector`'s own doc comment ("size in
+      bytes"). Matched the real behavior throughout rather than the stale
+      comment -- this would have been a silent, systemic width bug (e.g.
+      treating a 32-bit int as a 4-*bit* value) had the comment been
+      trusted instead of verified.
+    - `symbolic.rs` orchestrates: **one shared `SymExpr::Var` per parameter
+      index** fed into both DIR- and HIR-side lowering (so "same input" is
+      a meaningful assertion -- two independently-minted Vars would make
+      the equivalence check vacuous), asserts
+      `Neq(dir_result, hir_result)`, `Solver::check_sat()`: `Unsat` is a
+      genuine equivalence proof (not "no counterexample found among a few
+      samples"); `Sat` returns a real counterexample via `get_value`.
+    - Demoed against a real corpus function (`clamp`, loop-free): DIR and
+      HIR proved equivalent (`Unsat`), and a hand-corrupted HIR variant
+      proved genuinely different with a real solver-found counterexample.
+  - **CLI entry point**: new `fission_cli verify BINARY --addr ADDR --tier
+    {concrete,ground-truth,symbolic,all}` subcommand (`VerifyArgs` in
+    `cli/args/mod.rs`, handler in `cli/oneshot/mod.rs`, modeled on the
+    existing `sandbox` handler for emulator setup). Required adding
+    `"verify"` to `CANONICAL_SUBCOMMANDS` (`cli/args/mod.rs`) -- without it,
+    the legacy flat-arg parser silently swallowed the subcommand name as if
+    it were the `BINARY` positional, a real bug caught by actually running
+    the new command rather than trusting the exhaustive `match` compiling
+    cleanly. Explicitly a heavy, opt-in "deep verify" tier --
+    `dir_hir_check.py` stays the fast, no-solver/no-emulator tier that runs
+    routinely across the full corpus.
+  - **Real, separate finding surfaced by the ground-truth tier working as
+    designed** (not fixed this session -- out of scope for a DIR/HIR
+    verification plan, and risky to touch without its own dedicated
+    investigation): running `verify --tier ground-truth` against `clamp`
+    showed real, wide divergence from DIR/HIR (which the concrete and
+    symbolic tiers, plus a hand-check, already proved correct and mutually
+    equivalent). Root-caused far enough to characterize precisely: `clamp`
+    with a *negative* second argument (e.g. `clamp(0, -1, 0)`) takes the
+    wrong branch at its first signed comparison (`0 >= -1` evaluates
+    false) when actually executed. Confirmed the stack layout and spilled
+    argument values were correct via direct memory dumps (`[rbp+0x10..
+    0x20]` held exactly the intended `0, 0xFFFFFFFF, 0`), and confirmed
+    `fission-emulator`'s p-code interpreter (`pcode/eval.rs`'s `IntSLess`)
+    correctly sign-extends both operands before comparing -- but confirmed
+    via `core.rs`'s own doc comment ("JIT-only multi-instruction TB path...
+    Compile fail -> hard error (no interpreter)") that the actual execution
+    path is the Cranelift JIT, not that interpreter, meaning the bug (if
+    real) is JIT-specific and unverified against `eval.rs`'s logic. Only
+    manifests with a negative 32-bit *memory* operand in a signed compare
+    -- `count_bits` (unsigned shift/and only) and `clamp` calls with
+    all-non-negative args are unaffected, which is why this session's
+    Phase 2 test suite (built around `count_bits`) stayed green. Flagged
+    here as a concrete, reproducible lead (`clamp @ 0x14000155f` in
+    `control_flow_gcc_O0.exe`, args `(0, -1, 0)`, expected `0`, actual
+    `0xFFFFFFFF`) for a future, dedicated JIT-correctness investigation --
+    not chased further this session to avoid scope creep into core x86 JIT
+    semantics under a plan scoped to DIR/HIR verification plumbing.
+  - Validated: `fission-verify` test suite 10/10 (2 tests per phase,
+    real-corpus-grounded, each phase's "does it actually catch a bug" claim
+    proven by a corrupted-input test, not just a happy-path pass), full
+    `cargo build --workspace` clean, `cargo nextest run --workspace
+    --no-fail-fast` 2163/2170 (same 7 pre-existing unrelated
+    `fission-emulator` failures throughout every phase, zero new
+    regressions), `fission-cli --lib` 45/45, `golden_corpus_check.py`
+    clean (160/160, determinism holds).

@@ -141,7 +141,18 @@ impl EmulatorHarness {
             let sp_reg = self.emu.arch.sp_reg;
             let ptr_size = self.emu.arch.pointer_size as u64;
             let sp = self.emu.read_register_u64(sp_reg)?;
-            let new_sp = sp - ptr_size;
+            // `stack_arg_offset(0) - ptr_size` is the CC's own required gap
+            // between the return address and the first stack-passed arg --
+            // on Win64 that's the mandatory 32-byte "shadow space" the
+            // callee's prologue spills its register args into (`stack_
+            // arg_offset(0) == 0x28`: 8-byte return address + 0x20 shadow
+            // space); SysV64/cdecl have no such gap (`stack_arg_offset(0)
+            // == ptr_size`, so this is 0). Without reserving it, a callee
+            // that spills its register args to their stack home slots (as
+            // `clamp`'s real prologue does) corrupts whatever memory
+            // happens to sit above our minimal stack frame.
+            let shadow_space = self.emu.arch.cc.stack_arg_offset(0).saturating_sub(ptr_size);
+            let new_sp = sp - ptr_size - shadow_space;
             let ram = self.emu.state.ram_space();
             let bytes = SENTINEL_RET.to_le_bytes()[..ptr_size as usize].to_vec();
             self.emu.state.write_space(ram, new_sp, &bytes)?;

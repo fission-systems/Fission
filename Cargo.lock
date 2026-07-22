@@ -2343,6 +2343,7 @@ dependencies = [
  "fission-sleigh",
  "fission-static",
  "fission-tui",
+ "fission-verify",
  "jemallocator",
  "libc",
  "miette",
