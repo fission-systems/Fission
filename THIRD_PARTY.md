@@ -38,6 +38,16 @@ Do **not** copy RetDec logic into production paths to “paper over” semantic 
 
 ---
 
+## Cranelift (reference, version-pinned to the live dependency)
+
+| Item | Location | Upstream | License (summary) | Runtime vs reference |
+|------|-----------|----------|-------------------|----------------------|
+| `cranelift-{codegen,frontend,jit,module,native,entity,bforest,isle,codegen-meta,codegen-shared,control,bitset,srcgen,assembler-x64,assembler-x64-meta}` 0.133.1 sources | [`vendor/cranelift-0.133.1/`](./vendor/cranelift-0.133.1/) | [Cranelift](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift) (part of the `bytecodealliance/wasmtime` repo), copied from the exact crates.io source tree already resolved by `Cargo.lock` | Apache-2.0 WITH LLVM-exception (see each subdirectory's own `LICENSE`) | **Reference-only** — `fission-emulator`'s actual Cranelift dependency still comes from crates.io via `crates/fission-emulator/Cargo.toml` (`cranelift-jit`/`-module`/`-codegen`/`-frontend`/`-native` `= "0.133.1"`) as normal; this tree exists to read Cranelift's own IR/codegen semantics directly while building `fission-emulator::selfjit`, a native JIT scaffold whose explicit end goal (see `selfjit/mod.rs`'s own module doc) is eventually replacing that dependency. Not linked into any build. |
+
+**Update procedure:** if `Cargo.lock` bumps `cranelift-codegen`'s version, re-copy the matching version's source from `~/.cargo/registry/src/index.crates.io-*/cranelift-*-<version>/` (guaranteed to be the exact tree the workspace actually compiles against) rather than a wasmtime git tag -- wasmtime's own release tags use a unified `vN.N.N` scheme that doesn't line up 1:1 with `cranelift-codegen`'s own crates.io version numbers.
+
+---
+
 ## Detect It Easy (signatures)
 
 | Item | Location | Upstream | License (summary) | Runtime vs reference |
