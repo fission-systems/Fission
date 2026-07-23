@@ -18,11 +18,14 @@ use std::sync::Arc;
 /// Result of loading a binary.
 /// `binary` is `Some` on native, `None` on WASM (server holds the binary).
 /// `session_id` is `Some` on WASM (identifies the server-side session).
+use crate::state::BinaryString;
+
 pub struct LoadResult {
     pub binary:     Option<Arc<LoadedBinary>>,
     pub functions:  Vec<FunctionInfo>,
     pub summary:    String,
     pub session_id: Option<String>,
+    pub strings:    Vec<BinaryString>,
 }
 
 /// CFG edge classification for the GUI renderer.
@@ -216,7 +219,62 @@ mod native {
             functions.len(),
             binary.entry_point,
         );
-        Ok(LoadResult { binary: Some(Arc::new(binary)), functions, summary, session_id: None })
+        let strings = extract_strings_blocking(&binary);
+        Ok(LoadResult { binary: Some(Arc::new(binary)), functions, summary, session_id: None, strings })
+    }
+
+    /// Extract printable strings from a loaded binary.
+    ///
+    /// Primary source: `binary.string_map` (already populated by the loader from
+    /// `.rdata`/`.rodata` and string-literal analysis). Falls back to a raw
+    /// ASCII scan if string_map is empty, so something is always shown.
+    pub fn extract_strings_blocking(binary: &LoadedBinary) -> Vec<BinaryString> {
+        use fission_loader::loader::SectionInfo;
+
+        // Helper: find which section a virtual address falls into
+        let section_for = |va: u64| -> String {
+            binary.sections.iter()
+                .find(|s| va >= s.virtual_address && va < s.virtual_address + s.virtual_size)
+                .map(|s| s.name.clone())
+                .unwrap_or_default()
+        };
+
+        if !binary.string_map.is_empty() {
+            // Use loader-extracted string map (VA → content)
+            let mut result: Vec<BinaryString> = binary.string_map.iter()
+                .filter(|(_, v)| v.len() >= 4)
+                .map(|(&va, val)| BinaryString {
+                    offset:  va,
+                    value:   val.clone(),
+                    section: section_for(va),
+                })
+                .collect();
+            result.sort_by_key(|s| s.offset);
+            result
+        } else {
+            // Fallback: raw ASCII scan over file bytes
+            let data = binary.data.as_slice();
+            let mut result = Vec::new();
+            let mut run_start: Option<usize> = None;
+            let mut run = String::new();
+
+            for (i, &b) in data.iter().enumerate() {
+                if b >= 0x20 && b < 0x7f {
+                    if run_start.is_none() { run_start = Some(i); }
+                    run.push(b as char);
+                } else {
+                    if run.len() >= 4 {
+                        let offset = run_start.unwrap() as u64;
+                        let section = section_for(binary.image_base + offset);
+                        result.push(BinaryString { offset, value: run.clone(), section });
+                    }
+                    run.clear();
+                    run_start = None;
+                }
+            }
+            result.truncate(5000); // cap at 5000 to avoid UI overload
+            result
+        }
     }
 
     pub fn decompile_blocking(
@@ -401,6 +459,7 @@ mod wasm_api {
             functions,
             summary:    upload.summary,
             session_id: Some(upload.session_id),
+            strings:    Vec::new(),   // server-side; not yet serialised
         })
     }
 

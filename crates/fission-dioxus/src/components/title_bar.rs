@@ -214,10 +214,12 @@ pub fn TitleBar() -> Element {
                         );
                         s.binary = load.binary.clone();
                         s.functions = load.functions;
+                        s.strings   = load.strings;
                         s.current_function_addr = None;
                         s.decompiled_code = None;
                         s.decompiled_nir = None;
                         s.sidebar_search = String::new();
+                        s.rename_map.clear();
                         s.is_loading_binary = false;
                         s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                         s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));

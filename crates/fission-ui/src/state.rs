@@ -1,6 +1,7 @@
 use crate::engine::{CfgGraphData, XrefRow};
 use dioxus::prelude::*;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 // ── Tab types ───────────────────────────────────────────────────────────────
@@ -33,6 +34,28 @@ pub enum FunctionKind {
     Thunk {
         target: Option<u64>,
     },
+}
+
+// ── Sidebar tab ──────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum SidebarTab {
+    #[default]
+    Functions,
+    Strings,
+}
+
+// ── Binary string ────────────────────────────────────────────────────────────
+
+/// A printable string extracted from the binary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BinaryString {
+    /// File offset of the string start.
+    pub offset:  u64,
+    /// The string value (UTF-8 decoded).
+    pub value:   String,
+    /// Section name if known (e.g. ".rdata", ".rodata").
+    pub section: String,
 }
 
 // ── Log entries ─────────────────────────────────────────────────────────────
@@ -134,8 +157,21 @@ pub struct AppState {
     /// cleared by the sidebar after it has processed it.
     pub sidebar_scroll_target: Option<u64>,
 
-    // ── Sidebar search ───────────────────────────────────────────────────────
-    pub sidebar_search: String,
+    // ── Sidebar ──────────────────────────────────────────────────────────────
+    pub sidebar_search:    String,
+    pub sidebar_tab:       SidebarTab,
+
+    // ── Strings browser ──────────────────────────────────────────────────────
+    pub strings:           Vec<BinaryString>,
+    pub strings_search:    String,
+
+    // ── Rename map ───────────────────────────────────────────────────────────
+    /// User-defined function name overrides: addr → custom name.
+    pub rename_map:        HashMap<u64, String>,
+
+    // ── Find bar (editor Ctrl+F) ─────────────────────────────────────────────
+    pub find_query:        String,
+    pub find_bar_open:     bool,
 
     // ── Command palette ─────────────────────────────────────────────────────
     pub is_palette_open: bool,
@@ -182,6 +218,12 @@ impl AppState {
             nav_cursor: 0,
             sidebar_scroll_target: None,
             sidebar_search: String::new(),
+            sidebar_tab:    SidebarTab::Functions,
+            strings:        Vec::new(),
+            strings_search: String::new(),
+            rename_map:     HashMap::new(),
+            find_query:     String::new(),
+            find_bar_open:  false,
             is_palette_open: false,
             palette_query: String::new(),
             palette_focused: 0,
@@ -218,12 +260,30 @@ impl AppState {
         }
     }
 
+    /// Returns the display name for the current function,
+    /// honouring rename_map if set.
     pub fn current_function_name(&self) -> Option<String> {
         let addr = self.current_function_addr?;
+        // User rename takes priority
+        if let Some(renamed) = self.rename_map.get(&addr) {
+            return Some(renamed.clone());
+        }
         self.functions
             .iter()
             .find(|f| f.address == addr)
             .map(|f| f.name.clone())
+    }
+
+    /// Returns the *original* (FID/loader) name regardless of rename_map.
+    pub fn original_function_name(&self, addr: u64) -> Option<String> {
+        self.functions.iter().find(|f| f.address == addr).map(|f| f.name.clone())
+    }
+
+    /// Returns the display name for a given address (rename_map then loader).
+    pub fn display_name(&self, addr: u64) -> String {
+        self.rename_map.get(&addr).cloned()
+            .or_else(|| self.functions.iter().find(|f| f.address == addr).map(|f| f.name.clone()))
+            .unwrap_or_else(|| format!("sub_{addr:x}"))
     }
 
     pub fn classify_function(info: &fission_loader::loader::FunctionInfo) -> FunctionKind {

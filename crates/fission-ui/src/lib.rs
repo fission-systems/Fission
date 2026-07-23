@@ -5,4 +5,7 @@ pub mod state;
 pub use engine::{
     CfgEdgeData, CfgEdgeKind, CfgGraphData, CfgNodeData, DecompileOutput, LoadResult, XrefRow,
 };
-pub use state::{fuzzy_score, AppState, BottomTab, EditorTab, FunctionKind, LogEntry, LogLevel};
+pub use state::{
+    fuzzy_score, AppState, BinaryString, BottomTab, EditorTab, FunctionKind, LogEntry, LogLevel,
+    SidebarTab,
+};

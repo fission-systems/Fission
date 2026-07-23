@@ -128,6 +128,12 @@ fn App() -> Element {
                         e.prevent_default();
                         state.write().toggle_bottom_panel();
                     }
+                    // Cmd+F — toggle find bar
+                    Key::Character(s) if s == "f" && (mods.meta() || mods.ctrl()) => {
+                        e.prevent_default();
+                        let cur = state.read().find_bar_open;
+                        state.write().find_bar_open = !cur;
+                    }
                     // Cmd+O — open binary
                     Key::Character(s) if s == "o" && (mods.meta() || mods.ctrl()) => {
                         e.prevent_default();
@@ -254,11 +260,13 @@ fn App() -> Element {
                                 s.binary_name           = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
                                 s.binary                = load.binary.clone();
                                 s.functions             = load.functions;
+                                s.strings               = load.strings;
                                 s.current_function_addr = None;
                                 s.decompiled_code       = None;
                                 s.decompiled_nir        = None;
                                 s.current_cfg           = None;
                                 s.sidebar_search        = String::new();
+                                s.rename_map.clear();
                                 s.is_loading_binary     = false;
                                 s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                                 s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
