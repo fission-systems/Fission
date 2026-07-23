@@ -3,7 +3,13 @@
 //! The canonical tracing subscriber is assembled here so CLI, automation, and
 //! worker entrypoints all share the same output, file logging, and span-aware
 //! error context behavior.
+//!
+//! On `wasm32` targets, file-based logging is unavailable (no filesystem / no
+//! symlink support). All public entry-points become no-ops so that WASM builds
+//! of the decompiler core compile without modification.
 
+#[cfg(not(target_arch = "wasm32"))]
+mod native {
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -364,3 +370,47 @@ mod tests {
         assert!(!format!("{trace:?}").is_empty());
     }
 }
+} // end mod native
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::*;
+
+// ── WASM stubs ───────────────────────────────────────────────────────────────
+// On wasm32, tracing-appender / tracing-subscriber are unavailable.
+// Provide no-op versions of the public surface so callers compile unchanged.
+
+#[cfg(target_arch = "wasm32")]
+pub use tracing::Level as LogLevel;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoggingMode { ConsoleOnly, ConsoleAndFile }
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone)]
+pub struct LoggingOptions { pub level: String }
+
+#[cfg(target_arch = "wasm32")]
+impl LoggingOptions {
+    pub fn new(level: impl Into<String>) -> Self { Self { level: level.into() } }
+    pub fn with_mode(self, _mode: LoggingMode) -> Self { self }
+    pub fn with_file(self, _path: impl Into<std::path::PathBuf>) -> Self { self }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn init_with_options(_opts: LoggingOptions) {}
+
+#[cfg(target_arch = "wasm32")]
+pub fn init_logging() {}
+
+#[cfg(target_arch = "wasm32")]
+pub fn capture_span_trace() -> Option<String> { None }
+
+#[cfg(target_arch = "wasm32")]
+pub fn info(msg: &str)  { tracing::info!("{}", msg); }
+#[cfg(target_arch = "wasm32")]
+pub fn warn(msg: &str)  { tracing::warn!("{}", msg); }
+#[cfg(target_arch = "wasm32")]
+pub fn error(msg: &str) { tracing::error!("{}", msg); }
+#[cfg(target_arch = "wasm32")]
+pub fn debug(msg: &str) { tracing::debug!("{}", msg); }
