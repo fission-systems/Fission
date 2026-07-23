@@ -24,9 +24,6 @@ pub fn XrefsView() -> Element {
             return;
         };
         let binary = state.read().binary.clone();
-        let Some(binary) = binary else {
-            return;
-        };
 
         {
             let s = state.read();
@@ -74,9 +71,6 @@ pub fn XrefsView() -> Element {
     // ── Jump helper ──────────────────────────────────────────────────────────
     let mut jump_to = move |addr: u64, hint_name: Option<String>| {
         let binary = state.read().binary.clone();
-        let Some(binary) = binary else {
-            return;
-        };
 
         let (kind, resolved_name) = {
             let s = state.read();

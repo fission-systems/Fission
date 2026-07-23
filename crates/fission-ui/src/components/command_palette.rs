@@ -327,7 +327,6 @@ fn trigger_decompile(
         }
         FunctionKind::Thunk { .. } | FunctionKind::Code => {
             let binary = state.read().binary.clone();
-            let Some(binary) = binary else { return };
             let is_thunk_kind = matches!(kind, FunctionKind::Thunk { .. });
 
             {

@@ -15,13 +15,22 @@ tracing = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
-fission-static = { path = "../fission-static" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Native (desktop) only — pulls in fission-sleigh which requires sleigh specs
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fission-static     = { path = "../fission-static" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-signatures = { path = "../fission-signatures" }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 
+# WASM (web) — lightweight, analysis done server-side via HTTP
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-net = { version = "0.6", features = ["http"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+  "Blob", "File", "FileList", "FileReader", "FilePropertyBag", "FormData"
+] }

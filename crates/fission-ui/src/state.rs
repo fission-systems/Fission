@@ -77,8 +77,14 @@ impl LogEntry {
 pub struct AppState {
     // ── Binary ──────────────────────────────────────────────────────────────
     pub binary_name: Option<String>,
-    pub binary: Option<Arc<LoadedBinary>>,
-    pub functions: Vec<FunctionInfo>,
+    pub binary:      Option<Arc<LoadedBinary>>,
+    pub functions:   Vec<FunctionInfo>,
+
+    // ── Server (WASM mode) ───────────────────────────────────────────────────
+    /// URL of the local fission serve instance (default: http://localhost:7331).
+    /// Only used when running as WASM in the browser.
+    pub server_url:       String,
+    pub server_connected: bool,
 
     // ── Current selection ────────────────────────────────────────────────────
     pub current_function_addr: Option<u64>,
@@ -149,6 +155,8 @@ impl AppState {
             binary_name: None,
             binary: None,
             functions: Vec::new(),
+            server_url: "http://localhost:7331".to_string(),
+            server_connected: false,
             current_function_addr: None,
             current_function_kind: FunctionKind::Code,
             decompiled_code: None,

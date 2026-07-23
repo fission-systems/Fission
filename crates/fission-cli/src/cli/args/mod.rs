@@ -52,6 +52,10 @@ pub enum ParsedInvocation {
     Verify(VerifyArgs),
     /// AI chat / authentication subcommand.
     Ai(AiInvocation),
+    /// Local HTTP API server for fission-web.
+    Serve {
+        port: u16,
+    },
 }
 
 /// The AI subcommand action to perform.
@@ -158,9 +162,19 @@ enum CliCommand {
     Verify(VerifyArgs),
     /// AI chat session and authentication (Codex OAuth / OpenAI / Ollama)
     Ai(AiArgs),
+    /// Start local HTTP API server for fission-web
+    Serve(ServeCliArgs),
 }
 
 // ── Verify subcommand types ────────────────────────────────────────────────
+
+/// Arguments for `fission_cli serve`
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+pub struct ServeCliArgs {
+    /// TCP port to listen on (default: 7331)
+    #[arg(long, short, default_value_t = 7331)]
+    pub port: u16,
+}
 
 /// Which verification tier(s) to run -- see `fission-verify`'s crate doc.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -966,6 +980,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 }
                 CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
+                CliCommand::Serve(s) => return ParsedInvocation::Serve { port: s.port },
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };

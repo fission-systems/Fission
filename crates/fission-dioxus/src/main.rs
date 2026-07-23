@@ -157,7 +157,7 @@ fn App() -> Element {
                                     s.push_log(LogEntry::info(format!("Back -> {name}  @  0x{addr:x}")));
                                 }
                                 spawn(async move {
-                                    engine::run_nav_decompile(state, binary, addr, name).await;
+                                    engine::run_nav_decompile(state, Some(binary), addr, name).await;
                                 });
                             }
                         }
@@ -186,7 +186,7 @@ fn App() -> Element {
                                     s.push_log(LogEntry::info(format!("Forward -> {name}  @  0x{addr:x}")));
                                 }
                                 spawn(async move {
-                                    engine::run_nav_decompile(state, binary, addr, name).await;
+                                    engine::run_nav_decompile(state, Some(binary), addr, name).await;
                                 });
                             }
                         }
@@ -252,7 +252,7 @@ fn App() -> Element {
                                 let fn_count = load.functions.len();
                                 let mut s = state.write();
                                 s.binary_name           = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
-                                s.binary                = Some(std::sync::Arc::clone(&load.binary));
+                                s.binary                = load.binary.clone();
                                 s.functions             = load.functions;
                                 s.current_function_addr = None;
                                 s.decompiled_code       = None;

@@ -130,6 +130,11 @@ fn run() -> Result<()> {
         }
         ParsedInvocation::Sandbox(args) => run_sandbox(args),
         ParsedInvocation::Verify(args) => run_verify(args),
+        ParsedInvocation::Serve { port } => {
+            let rt = tokio::runtime::Runtime::new()
+                .context("failed to create tokio runtime for serve")?;
+            rt.block_on(crate::cli::serve::run_serve(port))
+        }
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }

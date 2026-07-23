@@ -165,7 +165,6 @@ pub fn Sidebar() -> Element {
 
             FunctionKind::Thunk { target } => {
                 let binary = state.read().binary.clone();
-                let Some(binary) = binary else { return };
                 let name = entry.name.clone();
                 let addr = entry.addr;
                 let tgt = target.map(|t| format!("0x{t:x}")).unwrap_or_default();
@@ -182,7 +181,6 @@ pub fn Sidebar() -> Element {
 
             FunctionKind::Code => {
                 let binary = state.read().binary.clone();
-                let Some(binary) = binary else { return };
                 let name = entry.name.clone();
                 let addr = entry.addr;
                 {
@@ -322,7 +320,7 @@ pub fn Sidebar() -> Element {
 
 pub async fn run_decompile(
     mut state: Signal<AppState>,
-    binary: Arc<fission_loader::loader::LoadedBinary>,
+    binary: Option<Arc<fission_loader::loader::LoadedBinary>>,
     addr: u64,
     name: String,
 ) {

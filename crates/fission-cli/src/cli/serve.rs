@@ -1,7 +1,7 @@
 //! `fission serve` — local HTTP API server for fission-web.
 //!
 //! Starts an Axum server on `localhost:<port>` (default 7331) that exposes
-//! a REST API consumed by the fission-web Next.js frontend. All computation
+//! a REST API consumed by the fission-web Next.js / WASM frontend. All computation
 //! runs on the user's machine; the web frontend is purely a UI layer.
 //!
 //! # Endpoints
@@ -17,29 +17,28 @@
 use anyhow::Result;
 use axum::{
     Router,
-    body::Bytes,
     extract::{Multipart, Path, State},
     http::{HeaderValue, Method, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
 };
 use fission_decompiler::{RustSleighDecompileConfig, decompile_with_rust_sleigh_with_facts};
-use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 use fission_static::analysis::xref_index::{
     XrefKind, build_xref_index, resolve_enclosing_function,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
-use tracing::{error, info};
+use tracing::info;
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
 #[derive(Default)]
 struct ServerState {
-    binary:    Option<Arc<LoadedBinary>>,
+    binary:      Option<Arc<LoadedBinary>>,
     binary_name: Option<String>,
 }
 
@@ -49,8 +48,8 @@ type Shared = Arc<RwLock<ServerState>>;
 
 #[derive(Serialize)]
 struct StatusResponse {
-    version: &'static str,
-    binary:  Option<String>,
+    version:  &'static str,
+    binary:   Option<String>,
     fn_count: usize,
 }
 
@@ -119,15 +118,15 @@ async fn handle_upload_binary(
             Json(serde_json::json!({"error": "no file uploaded"}))).into_response();
     };
 
+    let filename_clone = filename.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let path = std::path::Path::new(&filename);
-        fission_loader::loader::load_binary(path, &bytes)
+        LoadedBinary::from_bytes(bytes, filename_clone)
     }).await;
 
     match result {
         Ok(Ok(binary)) => {
             let fn_count = binary.functions.len();
-            let summary  = binary.summary.clone();
+            let summary  = binary.summary().to_string();
             let mut s = st.write().await;
             s.binary_name = Some(filename);
             s.binary      = Some(Arc::new(binary));
@@ -183,15 +182,15 @@ async fn handle_decompile(
         .unwrap_or_else(|| format!("sub_{addr:x}"));
 
     let result = tokio::task::spawn_blocking(move || {
-        let facts = FactStore::build(&binary, false);
-        let cfg   = RustSleighDecompileConfig::default();
-        decompile_with_rust_sleigh_with_facts(&binary, addr, &name, &facts, &cfg)
+        let facts = FactStore::from_binary(&binary);
+        let cfg   = RustSleighDecompileConfig::cli_defaults();
+        decompile_with_rust_sleigh_with_facts(&binary, &facts, addr, &name, &cfg, None, None)
     }).await;
 
     match result {
         Ok(Ok(out)) => Json(DecompileResponse {
-            pseudocode: out.pseudocode,
-            nir:        out.nir,
+            pseudocode: out.code,
+            nir:        out.code_nir,
             fell_back:  out.fell_back,
             reason:     out.fallback_reason,
         }).into_response(),
@@ -232,7 +231,7 @@ async fn handle_xrefs(
             let enclosing = resolve_enclosing_function(&binary.functions, from, 512);
             XrefRow {
                 from_addr: from,
-                to_addr:   Some(r.target.address),
+                to_addr:   r.target.address,
                 kind:      format!("{:?}", r.kind),
                 symbol:    r.target.symbol.clone(),
                 fn_name:   enclosing.and_then(|a| name_map.get(&a).cloned()),
@@ -243,7 +242,7 @@ async fn handle_xrefs(
             .filter(|r| matches!(r.kind, XrefKind::Call | XrefKind::Jump | XrefKind::ConditionalJump))
             .map(|r| XrefRow {
                 from_addr: r.source.address,
-                to_addr:   Some(r.target.address),
+                to_addr:   r.target.address,
                 kind:      format!("{:?}", r.kind),
                 symbol:    r.target.symbol.clone(),
                 fn_name:   r.target.address.and_then(|a| name_map.get(&a).cloned()),
@@ -266,6 +265,7 @@ pub async fn run_serve(port: u16) -> Result<()> {
 
     let cors = CorsLayer::new()
         .allow_origin("http://localhost:3000".parse::<HeaderValue>()?)
+        .allow_origin("http://localhost:8080".parse::<HeaderValue>()?)
         .allow_origin("https://fission-systems.github.io".parse::<HeaderValue>()?)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers(tower_http::cors::Any);
@@ -274,8 +274,8 @@ pub async fn run_serve(port: u16) -> Result<()> {
         .route("/api/status",           get(handle_status))
         .route("/api/binary",           post(handle_upload_binary))
         .route("/api/functions",        get(handle_list_functions))
-        .route("/api/decompile/:addr",  post(handle_decompile))
-        .route("/api/xrefs/:addr",      get(handle_xrefs))
+        .route("/api/decompile/{addr}", post(handle_decompile))
+        .route("/api/xrefs/{addr}",     get(handle_xrefs))
         .with_state(state)
         .layer(cors);
 

@@ -7,6 +7,7 @@ pub mod ai;
 pub mod oneshot;
 pub mod output;
 pub mod resources;
+pub mod serve;
 
 mod args;
 

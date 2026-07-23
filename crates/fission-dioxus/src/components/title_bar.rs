@@ -212,7 +212,7 @@ pub fn TitleBar() -> Element {
                                 .to_string_lossy()
                                 .into_owned(),
                         );
-                        s.binary = Some(Arc::clone(&load.binary));
+                        s.binary = load.binary.clone();
                         s.functions = load.functions;
                         s.current_function_addr = None;
                         s.decompiled_code = None;
@@ -284,7 +284,7 @@ pub fn TitleBar() -> Element {
                                     }
                                     spawn(async move {
                                         crate::components::sidebar::run_decompile(
-                                            state, binary, addr, name
+                                            state, Some(binary), addr, name
                                         ).await;
                                     });
                                 }
@@ -318,7 +318,7 @@ pub fn TitleBar() -> Element {
                                     }
                                     spawn(async move {
                                         crate::components::sidebar::run_decompile(
-                                            state, binary, addr, name
+                                            state, Some(binary), addr, name
                                         ).await;
                                     });
                                 }
