@@ -809,12 +809,13 @@ body {
 
 /* ── 7. Bottom Panel ────────────────────────────────────────────────────── */
 .bottom-panel {
-  height: var(--h-bottom);
+  height: 100%;
   background: var(--sf-1);
   border-top: 1px solid var(--bdr-faint);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .bottom-tabs {
@@ -875,14 +876,23 @@ body {
   background: rgba(255, 85, 102, 0.08);
 }
 
-/* Log content */
+/* Bottom content area — shared by Log, CFG, Xrefs */
 .bottom-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 0;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   font-family: var(--font-code);
   font-size: 11.5px;
-  min-height: 0;
+}
+
+/* Log content needs y-scroll and padding */
+.bottom-content > .log-row,
+.bottom-content > .lvl-info,
+.bottom-content > .lvl-warn,
+.bottom-content > .lvl-error {
+  overflow-y: auto;
 }
 
 .log-row {
@@ -1423,3 +1433,151 @@ body {
 
 /* ── App container focus ring suppression ───────────────────────────────── */
 .app-container:focus { outline: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CFG Viewer
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Editor region fills available vertical space */
+.editor-region {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Bottom resize handle */
+.bottom-resize-handle {
+  height: 5px;
+  flex-shrink: 0;
+  background: transparent;
+  cursor: row-resize;
+  position: relative;
+  z-index: 10;
+  transition: background var(--t-fast) var(--ease-out);
+  user-select: none;
+}
+
+.bottom-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 1px; bottom: 1px;
+  background: transparent;
+  transition: background var(--t-base) var(--ease-out);
+}
+
+.bottom-resize-handle:hover::after,
+.bottom-resize-handle.is-dragging::after {
+  background: var(--accent);
+}
+
+/* CFG outer panel */
+.cfg-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #0d0d14;
+  overflow: hidden;
+}
+
+/* Toolbar */
+.cfg-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--sf-1);
+  border-bottom: 1px solid var(--bdr-faint);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.cfg-stats {
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.cfg-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cfg-btn {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 9px;
+  background: var(--sf-3);
+  border: 1px solid var(--bdr-default);
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+
+.cfg-btn:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+  color: var(--ink-0);
+}
+
+/* Canvas scroll area */
+.cfg-canvas {
+  flex: 1 1 0%;
+  overflow: auto;
+  position: relative;
+  cursor: grab;
+  user-select: none;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(62,78,116,0.06) 0%, transparent 70%),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 23px,
+      rgba(255,255,255,0.02) 24px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 23px,
+      rgba(255,255,255,0.02) 24px
+    );
+  background-color: #0d0d14;
+}
+
+.cfg-canvas:active { cursor: grabbing; }
+
+/* Empty state */
+.cfg-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 6px;
+  color: var(--ink-3);
+}
+
+.cfg-empty-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.cfg-empty-sub {
+  font-size: 12px;
+}
+
+/* Log scroll wrapper inside bottom-content */
+.log-scroll {
+  flex: 1 1 0%;
+  overflow-y: auto;
+  padding: 6px 0;
+  min-height: 0;
+}

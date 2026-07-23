@@ -2440,6 +2440,7 @@ name = "fission-dioxus"
 version = "0.1.6"
 dependencies = [
  "dioxus",
+ "dioxus-html",
  "dioxus-logger",
  "fission-core",
  "fission-decompiler",

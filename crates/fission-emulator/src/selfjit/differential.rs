@@ -502,4 +502,74 @@ mod tests {
             diverged.join("\n")
         );
     }
+
+    /// Deeper real-corpus sweep: walks from each binary's own `main`,
+    /// not its raw entry point -- the gap the sweep above's own doc
+    /// flagged as an honest caveat ("every binary reports `matched=4`,
+    /// all hitting the same shared CRT startup wall, not each family's
+    /// actual logic"). Addresses found via `fission_cli list <binary>
+    /// --json` (the same discovery method the `checksum`-loop fixture
+    /// above already used for one function) and hardcoded here, same as
+    /// that fixture -- not resolved at test-run time via a symbol-lookup
+    /// API, to keep this test's own runtime cost and dependencies fixed
+    /// (no shelling out to the CLI binary, no assuming it's already
+    /// built) matching every other test in this module.
+    #[test]
+    fn selfjit_matches_cranelift_across_golden_corpus_main_functions() {
+        // (binary name, `main`'s address) -- found via `fission_cli list
+        // <binary> --json`, filtering for `"name": "main"`.
+        const MAIN_ADDRS: [(&str, u64); 16] = [
+            ("advanced_patterns_gcc_O0.exe", 0x14000175a),
+            ("advanced_patterns_gcc_O2.exe", 0x1400028c0),
+            ("control_flow_gcc_O0.exe", 0x1400016ac),
+            ("control_flow_gcc_O2.exe", 0x140002830),
+            ("crypto_gcc_O0.exe", 0x1400017ca),
+            ("crypto_gcc_O2.exe", 0x140002950),
+            ("data_structures_gcc_O0.exe", 0x140001756),
+            ("data_structures_gcc_O2.exe", 0x140002860),
+            ("math_gcc_O0.exe", 0x1400018de),
+            ("math_gcc_O2.exe", 0x140002980),
+            ("memory_layouts_gcc_O0.exe", 0x1400016ae),
+            ("memory_layouts_gcc_O2.exe", 0x140002830),
+            ("semantic_stress_gcc_O0.exe", 0x140001928),
+            ("semantic_stress_gcc_O2.exe", 0x1400029a0),
+            ("string_utils_gcc_O0.exe", 0x14000166e),
+            ("string_utils_gcc_O2.exe", 0x1400027e0),
+        ];
+        let mut any_ran = false;
+        let mut diverged = Vec::new();
+        for (name, main_addr) in MAIN_ADDRS {
+            let path = corpus_binary(name);
+            if !path.exists() {
+                eprintln!("skipping {name}: not found at {}", path.display());
+                continue;
+            }
+            match run_differential(&path, main_addr, 15) {
+                Ok(report) => {
+                    any_ran = true;
+                    eprintln!(
+                        "{name} @ main (0x{main_addr:x}): matched={} \
+                         skipped_unsupported={} skipped_errors={:?} diverged={:?}",
+                        report.matched,
+                        report.skipped_unsupported_opcode,
+                        report.skipped_compile_error,
+                        report.diverged
+                    );
+                    if !report.is_clean() {
+                        diverged.push(format!("{name}: {:?}", report.diverged));
+                    }
+                }
+                Err(e) => eprintln!("{name}: run_differential error: {e}"),
+            }
+        }
+        if !any_ran {
+            eprintln!("skipping: no golden corpus binaries found");
+            return;
+        }
+        assert!(
+            diverged.is_empty(),
+            "SelfJitCompiler diverged from Cranelift in real corpus main() functions:\n{}",
+            diverged.join("\n")
+        );
+    }
 }

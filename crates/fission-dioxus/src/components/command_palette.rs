@@ -302,14 +302,15 @@ fn trigger_decompile(
         s.current_function_addr = Some(addr);
         s.current_function_kind = kind.clone();
         s.decompiled_code = None;
-        s.decompiled_nir = None;
+        s.decompiled_nir  = None;
+        s.current_cfg     = None;
     }
 
     match kind {
         FunctionKind::Import { library } => {
             let lib_str = library.as_deref().unwrap_or("unknown");
             let text = format!(
-                "/* Import stub — no decompilable body.\n\
+                "/* Import stub \u{2014} no decompilable body.\n\
                  *\n\
                  *  Symbol  : {name}\n\
                  *  Address : 0x{addr:016x}\n\
@@ -339,30 +340,8 @@ fn trigger_decompile(
                 }
             }
 
-            spawn(async move {
-                let result: Result<DecompileOutput, String> =
-                    tokio::task::spawn_blocking(move || {
-                        decompile_blocking(&binary, addr, &name)
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(format!("Task join error: {e}")));
-
-                match result {
-                    Ok(out) => {
-                        let bytes = out.code.len();
-                        let mut s = state.write();
-                        s.decompiled_code = Some(out.code);
-                        s.decompiled_nir = out.code_nir;
-                        s.is_decompiling = false;
-                        s.push_log(LogEntry::info(format!("Done ({bytes} bytes)")));
-                    }
-                    Err(e) => {
-                        let mut s = state.write();
-                        s.is_decompiling = false;
-                        s.push_log(LogEntry::error(format!("Decompile failed: {e}")));
-                    }
-                }
-            });
+            // Use the shared helper from sidebar so CFG is also stored
+            spawn(crate::components::sidebar::run_decompile(state, binary, addr, name));
         }
     }
 }

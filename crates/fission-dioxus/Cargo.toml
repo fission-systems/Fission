@@ -7,6 +7,7 @@ description = "Pure Rust desktop GUI for Fission using Dioxus"
 
 [dependencies]
 dioxus = { version = "0.6", features = ["desktop"] }
+dioxus-html = { version = "0.6" }
 dioxus-logger = "0.6"
 tracing = "0.1"
 tokio = { version = "1.0", features = ["full"] }

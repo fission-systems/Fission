@@ -286,9 +286,10 @@ pub fn Sidebar() -> Element {
     }
 }
 
+
 // ── Shared async decompile helper ────────────────────────────────────────────
 
-async fn run_decompile(
+pub(crate) async fn run_decompile(
     mut state: Signal<AppState>,
     binary: Arc<fission_loader::loader::LoadedBinary>,
     addr: u64,
@@ -301,25 +302,31 @@ async fn run_decompile(
 
     match result {
         Ok(out) => {
-            let bytes = out.code.len();
-            let fell  = out.fell_back;
+            let bytes  = out.code.len();
+            let fell   = out.fell_back;
             let reason = out.fallback_reason.clone();
+            let has_cfg = out.cfg.is_some();
             let mut s = state.write();
             s.decompiled_code = Some(out.code);
             s.decompiled_nir  = out.code_nir;
+            s.current_cfg     = out.cfg;
             s.is_decompiling  = false;
             if fell {
                 s.push_log(LogEntry::warn(format!(
-                    "Fell back — {}",
+                    "Fell back \u{2014} {}",
                     reason.as_deref().unwrap_or("unknown")
                 )));
             } else {
                 s.push_log(LogEntry::info(format!("Complete  ({bytes} bytes)")));
             }
+            if has_cfg {
+                s.push_log(LogEntry::info("CFG captured \u{2014} view in the CFG tab.".to_string()));
+            }
         }
         Err(e) => {
             let mut s = state.write();
             s.is_decompiling = false;
+            s.current_cfg    = None;
             s.push_log(LogEntry::error(format!("Decompile failed: {e}")));
         }
     }
