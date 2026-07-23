@@ -1,4 +1,4 @@
-use crate::engine::{DecompileOutput, LoadResult, load_binary_blocking};
+use crate::engine::{DecompileOutput, LoadResult, batch_decompile_one, load_binary_blocking};
 use crate::state::{LogEntry, use_app_state};
 use dioxus::prelude::*;
 use std::sync::Arc;
@@ -46,6 +46,74 @@ fn svg_folder() -> Element {
 #[component]
 pub fn TitleBar() -> Element {
     let mut state = use_app_state();
+
+    // ── Batch decompile coroutine ─────────────────────────────────────────────
+    // Messages: () = start a batch run (cancel is toggled via state.batch_cancel).
+    let batch_tx: Coroutine<()> = use_coroutine(move |mut rx: UnboundedReceiver<()>| async move {
+        use futures_util::stream::StreamExt;
+        while (rx.next().await).is_some() {
+            // Collect snapshot of functions + binary at start time
+            let (binary, functions) = {
+                let s = state.read();
+                (s.binary.clone(), s.functions.clone())
+            };
+            let Some(binary) = binary else { continue; };
+            if functions.is_empty() { continue; }
+
+            let total = functions.len();
+            {
+                let mut s = state.write();
+                s.is_batch_running = true;
+                s.batch_done       = 0;
+                s.batch_total      = total;
+                s.batch_cancel     = false;
+                s.push_log(LogEntry::info(format!("Batch decompile started: {total} functions")));
+            }
+
+            let mut ok_count  = 0usize;
+            let mut err_count = 0usize;
+            let mut fb_count  = 0usize;
+
+            for fi in &functions {
+                // Check cancellation flag before each item
+                if state.read().batch_cancel {
+                    state.write().push_log(LogEntry::warn("Batch decompile cancelled."));
+                    break;
+                }
+
+                let bin_clone  = Arc::clone(&binary);
+                let addr       = fi.address;
+                let name_clone = fi.name.clone();
+
+                // Decompile on a blocking thread so the event loop stays live
+                let result = tokio::task::spawn_blocking(move || {
+                    batch_decompile_one(&bin_clone, addr, &name_clone)
+                }).await;
+
+                match result {
+                    Ok(r) => {
+                        if r.ok {
+                            ok_count += 1;
+                            if r.fell_back { fb_count += 1; }
+                        } else {
+                            err_count += 1;
+                        }
+                    }
+                    Err(_) => { err_count += 1; }
+                }
+
+                state.write().batch_done += 1;
+            }
+
+            {
+                let mut s = state.write();
+                s.is_batch_running = false;
+                s.push_log(LogEntry::info(format!(
+                    "Batch complete: {ok_count} ok  {fb_count} fallback  {err_count} error  / {total} total"
+                )));
+            }
+        }
+    });
 
     let open_binary = move |_| {
         {
@@ -184,8 +252,44 @@ pub fn TitleBar() -> Element {
                 div { class: "menu-item",
                     div { class: "menu-trigger", "Analysis" }
                     div { class: "dropdown",
-                        div { class: "dropdown-item disabled",
-                            div { class: "dropdown-item-label", "Analyse All Functions" }
+                        {
+                            let has_binary = state.read().binary.is_some();
+                            let is_running = state.read().is_batch_running;
+                            let batch_done_val  = state.read().batch_done;
+                            let batch_total_val = state.read().batch_total;
+                            let item_cls = if !has_binary || is_running {
+                                "dropdown-item disabled"
+                            } else {
+                                "dropdown-item"
+                            };
+                            rsx! {
+                                div {
+                                    class: "{item_cls}",
+                                    onclick: move |_| {
+                                        if state.read().binary.is_some() && !state.read().is_batch_running {
+                                            batch_tx.send(());
+                                        }
+                                    },
+                                    div { class: "dropdown-item-label",
+                                        if is_running {
+                                            span { "{batch_done_val} / {batch_total_val}  decompiled" }
+                                        } else {
+                                            span { "Analyse All Functions" }
+                                        }
+                                    }
+                                }
+                                if is_running {
+                                    div {
+                                        class: "dropdown-item",
+                                        onclick: move |_| {
+                                            state.write().batch_cancel = true;
+                                        },
+                                        div { class: "dropdown-item-label batch-cancel",
+                                            span { "Cancel Batch" }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         div { class: "dropdown-item disabled",
                             div { class: "dropdown-item-label", "Run FID Signatures" }

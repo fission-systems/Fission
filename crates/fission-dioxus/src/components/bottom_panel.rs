@@ -1,6 +1,7 @@
 //! Bottom panel — tabbed area with Output log, CFG viewer, and Xrefs.
 
 use crate::components::cfg_view::CfgView;
+use crate::components::xrefs_view::XrefsView;
 use crate::state::{BottomTab, LogLevel, use_app_state};
 use dioxus::prelude::*;
 
@@ -67,12 +68,7 @@ pub fn BottomPanel() -> Element {
                         }
                     }
                     BottomTab::Cfg   => rsx! { CfgView {} },
-                    BottomTab::Xrefs => rsx! {
-                        div { class: "cfg-empty",
-                            span { class: "cfg-empty-title", "Xrefs" }
-                            span { class: "cfg-empty-sub", "Cross-reference viewer \u{2014} coming soon." }
-                        }
-                    },
+                    BottomTab::Xrefs => rsx! { XrefsView {} },
                 }
             }
         }

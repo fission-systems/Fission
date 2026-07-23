@@ -267,3 +267,107 @@ pub fn decompile_blocking(
         cfg,
     })
 }
+
+// ── Batch decompile ──────────────────────────────────────────────────────────
+
+/// Minimal result for a single function in a batch run.
+#[derive(Debug, Clone)]
+pub struct BatchResult {
+    pub addr:    u64,
+    pub name:    String,
+    pub ok:      bool,
+    pub fell_back: bool,
+    pub error:   Option<String>,
+}
+
+/// Decompile one function and return a compact summary (no code stored).
+/// Used by the Analyse All Functions worker.
+pub fn batch_decompile_one(binary: &Arc<LoadedBinary>, addr: u64, name: &str) -> BatchResult {
+    match decompile_blocking(binary, addr, name) {
+        Ok(out) => BatchResult {
+            addr,
+            name: name.to_string(),
+            ok: true,
+            fell_back: out.fell_back,
+            error: out.fallback_reason,
+        },
+        Err(e) => BatchResult {
+            addr,
+            name: name.to_string(),
+            ok: false,
+            fell_back: false,
+            error: Some(e),
+        },
+    }
+}
+
+// ── Xrefs ────────────────────────────────────────────────────────────────────
+
+/// Lightweight GUI representation of a cross-reference entry.
+#[derive(Debug, Clone)]
+pub struct XrefRow {
+    pub from_addr:     u64,
+    pub to_addr:       Option<u64>,
+    pub kind:          String,   // "Call", "Jump", "DataRead", etc.
+    pub symbol:        Option<String>,
+    pub fn_name:       Option<String>,
+}
+
+/// Extract caller/callee xrefs for a specific function address.
+/// Returns (callers: Vec<XrefRow>, callees: Vec<XrefRow>).
+pub fn xrefs_for_function_blocking(
+    binary: &Arc<LoadedBinary>,
+    fn_addr: u64,
+) -> (Vec<XrefRow>, Vec<XrefRow>) {
+    use fission_static::analysis::xref_index::{build_xref_index, resolve_enclosing_function, XrefKind};
+
+    let index = build_xref_index(binary.as_ref(), false);
+
+    // Build a quick name lookup
+    let name_map: std::collections::HashMap<u64, String> = binary
+        .functions
+        .iter()
+        .map(|f| (f.address, f.name.clone()))
+        .collect();
+
+    // refs_to_address: things that CALL INTO fn_addr (callers)
+    let callers: Vec<XrefRow> = index
+        .refs_to_address(fn_addr)
+        .iter()
+        .map(|r| {
+            let from = r.source.address;
+            let enclosing = resolve_enclosing_function(&binary.functions, from, 512);
+            XrefRow {
+                from_addr: from,
+                to_addr:   r.target.address,
+                kind:      format!("{:?}", r.kind),
+                symbol:    r.target.symbol.clone(),
+                fn_name:   enclosing.and_then(|a| name_map.get(&a).cloned()),
+            }
+        })
+        .collect();
+
+    // refs_from_address: things that this function CALLS OUT TO (callees)
+    let callees: Vec<XrefRow> = index
+        .refs_from_address(fn_addr)
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.kind,
+                XrefKind::Call | XrefKind::Jump | XrefKind::ConditionalJump
+            )
+        })
+        .map(|r| {
+            let to = r.target.address;
+            XrefRow {
+                from_addr: r.source.address,
+                to_addr:   to,
+                kind:      format!("{:?}", r.kind),
+                symbol:    r.target.symbol.clone(),
+                fn_name:   to.and_then(|a| name_map.get(&a).cloned()),
+            }
+        })
+        .collect();
+
+    (callers, callees)
+}

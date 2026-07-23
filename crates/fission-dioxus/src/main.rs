@@ -55,10 +55,11 @@ fn App() -> Element {
     // ── Status bar derivations ───────────────────────────────────────────────
     let (indicator_cls, status_text) = {
         let s = state.read();
-        if s.is_loading_binary   { ("status-indicator busy",     "Loading") }
-        else if s.is_decompiling { ("status-indicator busy",     "Decompiling") }
-        else if s.binary.is_some() { ("status-indicator ready",  "Ready") }
-        else                     { ("status-indicator inactive", "Idle") }
+        if s.is_loading_binary        { ("status-indicator busy",     "Loading") }
+        else if s.is_decompiling      { ("status-indicator busy",     "Decompiling") }
+        else if s.is_batch_running    { ("status-indicator batch",    "Analysing") }
+        else if s.binary.is_some()    { ("status-indicator ready",    "Ready") }
+        else                          { ("status-indicator inactive", "Idle") }
     };
 
     let arch_seg = {
@@ -82,6 +83,11 @@ fn App() -> Element {
     let bh              = *bottom_h.read();
     let sidebar_visible = state.read().sidebar_visible;
     let panel_visible   = state.read().bottom_panel_visible;
+
+    let is_batch     = state.read().is_batch_running;
+    let batch_done   = state.read().batch_done;
+    let batch_total  = state.read().batch_total;
+    let batch_pct    = if batch_total > 0 { batch_done * 100 / batch_total } else { 0 };
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLE }
@@ -266,6 +272,15 @@ fn App() -> Element {
                 }
                 if let Some(func) = fn_seg {
                     div { class: "status-segment", "{func}" }
+                }
+                // Batch progress
+                if is_batch {
+                    div { class: "status-segment batch-progress",
+                        div { class: "batch-bar-outer",
+                            div { class: "batch-bar-fill", style: "width: {batch_pct}%;" }
+                        }
+                        span { "{batch_done} / {batch_total}" }
+                    }
                 }
                 if state.read().binary.is_some() {
                     div { class: "status-segment status-right",

@@ -1,4 +1,4 @@
-use crate::engine::CfgGraphData;
+use crate::engine::{CfgGraphData, XrefRow};
 use dioxus::prelude::*;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::path::PathBuf;
@@ -67,6 +67,11 @@ pub struct AppState {
     pub decompiled_nir:  Option<String>,
     pub current_cfg:     Option<CfgGraphData>,
 
+    // ── Xrefs ────────────────────────────────────────────────────────────────
+    pub current_xref_callers: Vec<XrefRow>,
+    pub current_xref_callees: Vec<XrefRow>,
+    pub is_loading_xrefs:     bool,
+
     // ── Editor / panel state ─────────────────────────────────────────────────
     pub active_tab:        EditorTab,
     pub active_bottom_tab: BottomTab,
@@ -82,6 +87,13 @@ pub struct AppState {
     // ── Async guards ────────────────────────────────────────────────────────
     pub is_loading_binary: bool,
     pub is_decompiling:    bool,
+
+    // ── Batch decompile ──────────────────────────────────────────────────────
+    pub is_batch_running: bool,
+    pub batch_done:       usize,
+    pub batch_total:      usize,
+    /// Set to true by the UI to request cancellation of the running batch.
+    pub batch_cancel:     bool,
 
     // ── Sidebar search ───────────────────────────────────────────────────────
     pub sidebar_search: String,
@@ -110,11 +122,18 @@ impl AppState {
             decompiled_code:      None,
             decompiled_nir:       None,
             current_cfg:          None,
+            current_xref_callers: Vec::new(),
+            current_xref_callees: Vec::new(),
+            is_loading_xrefs:     false,
             active_tab:           EditorTab::Pseudocode,
             active_bottom_tab:    BottomTab::Logs,
             log_entries:          Vec::new(),
             is_loading_binary:    false,
             is_decompiling:       false,
+            is_batch_running:     false,
+            batch_done:           0,
+            batch_total:          0,
+            batch_cancel:         false,
             sidebar_search:       String::new(),
             is_palette_open:      false,
             palette_query:        String::new(),
