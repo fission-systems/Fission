@@ -16,17 +16,17 @@ use components::sidebar::Sidebar;
 use components::title_bar::TitleBar;
 use state::{init_app_state, LogEntry};
 
-const STYLE: Asset = asset!("assets/style.css");
+const STYLE: Asset = asset!("/assets/style.css");
 
 fn main() {
     dioxus_logger::init(Level::INFO).expect("failed to init logger");
 
     let cfg = dioxus::desktop::Config::new()
         .with_window(
-            dioxus::desktop::tao::window::WindowBuilder::new()
+            dioxus::desktop::WindowBuilder::new()
                 .with_title("Fission")
-                .with_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(1440.0_f64, 900.0_f64))
-                .with_min_inner_size(dioxus::desktop::tao::dpi::LogicalSize::new(900.0_f64, 600.0_f64)),
+                .with_inner_size(dioxus::desktop::LogicalSize::new(1440.0_f64, 900.0_f64))
+                .with_min_inner_size(dioxus::desktop::LogicalSize::new(900.0_f64, 600.0_f64)),
         )
         .with_custom_head(
             concat!(
@@ -232,47 +232,44 @@ fn App() -> Element {
             ondragover: move |e| { e.prevent_default(); },
             ondrop: move |e| {
                 e.prevent_default();
-                // Dioxus desktop exposes file paths through the drag event
-                if let Some(files) = e.files() {
-                    let paths = files.files();
-                    if let Some(path_str) = paths.first() {
-                        let path = std::path::PathBuf::from(path_str);
-                        {
-                            let mut s = state.write();
-                            s.is_loading_binary = true;
-                            s.push_log(LogEntry::info(format!("Loading {}", path.display())));
-                        }
-                        spawn(async move {
-                            let path_clone = path.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                                engine::load_binary_blocking(&path_clone)
-                            }).await.unwrap_or_else(|e| Err(format!("Join error: {e}")));
-
-                            match result {
-                                Ok(load) => {
-                                    let summary   = load.summary.clone();
-                                    let fn_count  = load.functions.len();
-                                    let mut s = state.write();
-                                    s.binary_name   = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
-                                    s.binary               = Some(std::sync::Arc::clone(&load.binary));
-                                    s.functions            = load.functions;
-                                    s.current_function_addr = None;
-                                    s.decompiled_code      = None;
-                                    s.decompiled_nir       = None;
-                                    s.current_cfg          = None;
-                                    s.sidebar_search       = String::new();
-                                    s.is_loading_binary    = false;
-                                    s.push_log(LogEntry::info(format!("Loaded \u{2014} {summary}")));
-                                    s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
-                                }
-                                Err(e) => {
-                                    let mut s = state.write();
-                                    s.is_loading_binary = false;
-                                    s.push_log(LogEntry::error(format!("Load failed: {e}")));
-                                }
-                            }
-                        });
+                // Dioxus 0.7: e.files() returns Vec<FileData> directly
+                let file_list = e.files();
+                if let Some(file_data) = file_list.first() {
+                    let path = file_data.path();
+                    {
+                        let mut s = state.write();
+                        s.is_loading_binary = true;
+                        s.push_log(LogEntry::info(format!("Loading {}", path.display())));
                     }
+                    spawn(async move {
+                        let path_clone = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            engine::load_binary_blocking(&path_clone)
+                        }).await.unwrap_or_else(|e| Err(format!("Join error: {e}")));
+                        match result {
+                            Ok(load) => {
+                                let summary  = load.summary.clone();
+                                let fn_count = load.functions.len();
+                                let mut s = state.write();
+                                s.binary_name           = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
+                                s.binary                = Some(std::sync::Arc::clone(&load.binary));
+                                s.functions             = load.functions;
+                                s.current_function_addr = None;
+                                s.decompiled_code       = None;
+                                s.decompiled_nir        = None;
+                                s.current_cfg           = None;
+                                s.sidebar_search        = String::new();
+                                s.is_loading_binary     = false;
+                                s.push_log(LogEntry::info(format!("Loaded — {summary}")));
+                                s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                            }
+                            Err(e) => {
+                                let mut s = state.write();
+                                s.is_loading_binary = false;
+                                s.push_log(LogEntry::error(format!("Load failed: {e}")));
+                            }
+                        }
+                    });
                 }
             },
 

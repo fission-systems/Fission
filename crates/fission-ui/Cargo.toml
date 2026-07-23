@@ -10,7 +10,7 @@ name = "fission_ui"
 crate-type = ["rlib"]
 
 [dependencies]
-dioxus = { version = "0.6" }
+dioxus = { version = "0.7" }
 tracing = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 fission-core = { path = "../fission-core" }

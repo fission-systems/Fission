@@ -354,5 +354,5 @@ pub fn init_app_state() {
     state.push_log(LogEntry::info(
         "Open a binary via File → Open Binary…  or drag and drop a file.",
     ));
-    provide_context(Signal::new(state));
+    use_context_provider(|| Signal::new(state));
 }

@@ -307,7 +307,7 @@ pub fn Sidebar() -> Element {
                         // Bottom spacer
                         if spacer_bot > 0.0 {
                             li {
-                                key: "spacer-bot",
+                                key: "{spacer_bot}",
                                 style: "height: {spacer_bot}px; padding: 0; pointer-events: none;",
                             }
                         }
