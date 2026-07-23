@@ -2,7 +2,7 @@
 
 use crate::components::cfg_view::CfgView;
 use crate::components::xrefs_view::XrefsView;
-use crate::state::{BottomTab, LogLevel, use_app_state};
+use crate::state::{use_app_state, BottomTab, LogLevel};
 use dioxus::prelude::*;
 
 #[component]
@@ -11,7 +11,11 @@ pub fn BottomPanel() -> Element {
     let active_tab = state.read().active_bottom_tab.clone();
 
     let tab_cls = |t: &BottomTab| -> &'static str {
-        if *t == active_tab { "bottom-tab is-active" } else { "bottom-tab" }
+        if *t == active_tab {
+            "bottom-tab is-active"
+        } else {
+            "bottom-tab"
+        }
     };
 
     rsx! {

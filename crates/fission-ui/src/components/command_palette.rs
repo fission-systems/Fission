@@ -7,8 +7,7 @@
 //!  - Arrow keys move focus; Enter selects; Escape closes.
 //!  - Clicking a result or the backdrop also dismisses.
 
-use crate::engine::{DecompileOutput, decompile_blocking};
-use crate::state::{AppState, FunctionKind, LogEntry, use_app_state};
+use crate::state::{use_app_state, AppState, FunctionKind, LogEntry};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
@@ -71,24 +70,27 @@ pub fn CommandPalette() -> Element {
         return rsx! {};
     }
 
-    let query   = state.read().palette_query.clone();
+    let query = state.read().palette_query.clone();
     let focused = state.read().palette_focused;
 
     // Build fuzzy-ranked results — wrap in Arc so both the key-handler
     // closure and the render loop can own a reference without a move conflict.
     let results: std::sync::Arc<Vec<(i32, String, u64, bool, bool, Option<String>, Option<u64>)>> = {
         let s = state.read();
-        let v = s.palette_results(18)
+        let v = s
+            .palette_results(18)
             .into_iter()
-            .map(|(score, f)| (
-                score,
-                f.name.clone(),
-                f.address,
-                f.is_import,
-                f.is_thunk_like,
-                f.external_library.clone(),
-                f.thunk_target,
-            ))
+            .map(|(score, f)| {
+                (
+                    score,
+                    f.name.clone(),
+                    f.address,
+                    f.is_import,
+                    f.is_thunk_like,
+                    f.external_library.clone(),
+                    f.thunk_target,
+                )
+            })
             .collect();
         std::sync::Arc::new(v)
     };
@@ -97,38 +99,36 @@ pub fn CommandPalette() -> Element {
 
     // ── Keyboard handler (on the palette card) ───────────────────────────────
     let results_key = std::sync::Arc::clone(&results);
-    let mut handle_key = move |e: Event<KeyboardData>| {
-        match e.key() {
-            Key::Escape => {
-                let mut s = state.write();
-                s.is_palette_open = false;
-                s.palette_query.clear();
-                s.palette_focused = 0;
-            }
-            Key::ArrowDown => {
-                let mut s = state.write();
-                let max = result_count.saturating_sub(1);
-                s.palette_focused = (s.palette_focused + 1).min(max);
-            }
-            Key::ArrowUp => {
-                let mut s = state.write();
-                s.palette_focused = s.palette_focused.saturating_sub(1);
-            }
-            Key::Enter => {
-                if let Some((_, name, addr, is_import, is_thunk, lib, target)) =
-                    results_key.get(focused).cloned()
-                {
-                    {
-                        let mut s = state.write();
-                        s.is_palette_open = false;
-                        s.palette_query.clear();
-                        s.palette_focused = 0;
-                    }
-                    trigger_decompile(state, addr, name, is_import, is_thunk, lib, target);
-                }
-            }
-            _ => {}
+    let mut handle_key = move |e: Event<KeyboardData>| match e.key() {
+        Key::Escape => {
+            let mut s = state.write();
+            s.is_palette_open = false;
+            s.palette_query.clear();
+            s.palette_focused = 0;
         }
+        Key::ArrowDown => {
+            let mut s = state.write();
+            let max = result_count.saturating_sub(1);
+            s.palette_focused = (s.palette_focused + 1).min(max);
+        }
+        Key::ArrowUp => {
+            let mut s = state.write();
+            s.palette_focused = s.palette_focused.saturating_sub(1);
+        }
+        Key::Enter => {
+            if let Some((_, name, addr, is_import, is_thunk, lib, target)) =
+                results_key.get(focused).cloned()
+            {
+                {
+                    let mut s = state.write();
+                    s.is_palette_open = false;
+                    s.palette_query.clear();
+                    s.palette_focused = 0;
+                }
+                trigger_decompile(state, addr, name, is_import, is_thunk, lib, target);
+            }
+        }
+        _ => {}
     };
 
     rsx! {
@@ -290,9 +290,13 @@ fn trigger_decompile(
     thunk_target: Option<u64>,
 ) {
     let kind = if is_import && !is_thunk {
-        FunctionKind::Import { library: library.clone() }
+        FunctionKind::Import {
+            library: library.clone(),
+        }
     } else if is_thunk {
-        FunctionKind::Thunk { target: thunk_target }
+        FunctionKind::Thunk {
+            target: thunk_target,
+        }
     } else {
         FunctionKind::Code
     };
@@ -302,8 +306,8 @@ fn trigger_decompile(
         s.current_function_addr = Some(addr);
         s.current_function_kind = kind.clone();
         s.decompiled_code = None;
-        s.decompiled_nir  = None;
-        s.current_cfg     = None;
+        s.decompiled_nir = None;
+        s.current_cfg = None;
     }
 
     match kind {
@@ -334,14 +338,14 @@ fn trigger_decompile(
                         "Decompiling import thunk: {name} @ 0x{addr:x}"
                     )));
                 } else {
-                    s.push_log(LogEntry::info(format!(
-                        "Decompiling {name} @ 0x{addr:x}"
-                    )));
+                    s.push_log(LogEntry::info(format!("Decompiling {name} @ 0x{addr:x}")));
                 }
             }
 
             // Use the shared helper from sidebar so CFG is also stored
-            spawn(crate::components::sidebar::run_decompile(state, binary, addr, name));
+            spawn(crate::components::sidebar::run_decompile(
+                state, binary, addr, name,
+            ));
         }
     }
 }

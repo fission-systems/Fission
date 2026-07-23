@@ -14,7 +14,7 @@ use components::command_palette::CommandPalette;
 use components::editor::Editor;
 use components::sidebar::Sidebar;
 use components::title_bar::TitleBar;
-use state::{LogEntry, init_app_state};
+use state::{init_app_state, LogEntry};
 
 const STYLE: Asset = asset!("assets/style.css");
 
@@ -46,29 +46,37 @@ fn App() -> Element {
     let mut state = state::use_app_state();
 
     // ── Layout state (local to App) ──────────────────────────────────────────
-    let mut sidebar_width      = use_signal(|| 264.0_f64);
-    let mut is_sidebar_resize  = use_signal(|| false);
-    let mut bottom_h           = use_signal(|| 180.0_f64);
-    let mut is_bottom_resize   = use_signal(|| false);
-    let mut bottom_resize_y    = use_signal(|| 0.0_f64);
+    let mut sidebar_width = use_signal(|| 264.0_f64);
+    let mut is_sidebar_resize = use_signal(|| false);
+    let mut bottom_h = use_signal(|| 180.0_f64);
+    let mut is_bottom_resize = use_signal(|| false);
+    let mut bottom_resize_y = use_signal(|| 0.0_f64);
 
     // ── Status bar derivations ───────────────────────────────────────────────
     let (indicator_cls, status_text) = {
         let s = state.read();
-        if s.is_loading_binary        { ("status-indicator busy",     "Loading") }
-        else if s.is_decompiling      { ("status-indicator busy",     "Decompiling") }
-        else if s.is_batch_running    { ("status-indicator batch",    "Analysing") }
-        else if s.binary.is_some()    { ("status-indicator ready",    "Ready") }
-        else                          { ("status-indicator inactive", "Idle") }
+        if s.is_loading_binary {
+            ("status-indicator busy", "Loading")
+        } else if s.is_decompiling {
+            ("status-indicator busy", "Decompiling")
+        } else if s.is_batch_running {
+            ("status-indicator batch", "Analysing")
+        } else if s.binary.is_some() {
+            ("status-indicator ready", "Ready")
+        } else {
+            ("status-indicator inactive", "Idle")
+        }
     };
 
     let arch_seg = {
         let s = state.read();
-        s.binary.as_ref().map(|b| format!(
-            "{} \u{00B7} {}",
-            if b.is_64bit { "x86-64" } else { "x86" },
-            b.format,
-        ))
+        s.binary.as_ref().map(|b| {
+            format!(
+                "{} \u{00B7} {}",
+                if b.is_64bit { "x86-64" } else { "x86" },
+                b.format,
+            )
+        })
     };
 
     let fn_seg = {
@@ -79,15 +87,19 @@ fn App() -> Element {
         })
     };
 
-    let sw              = *sidebar_width.read();
-    let bh              = *bottom_h.read();
+    let sw = *sidebar_width.read();
+    let bh = *bottom_h.read();
     let sidebar_visible = state.read().sidebar_visible;
-    let panel_visible   = state.read().bottom_panel_visible;
+    let panel_visible = state.read().bottom_panel_visible;
 
-    let is_batch     = state.read().is_batch_running;
-    let batch_done   = state.read().batch_done;
-    let batch_total  = state.read().batch_total;
-    let batch_pct    = if batch_total > 0 { batch_done * 100 / batch_total } else { 0 };
+    let is_batch = state.read().is_batch_running;
+    let batch_done = state.read().batch_done;
+    let batch_total = state.read().batch_total;
+    let batch_pct = if batch_total > 0 {
+        batch_done * 100 / batch_total
+    } else {
+        0
+    };
 
     rsx! {
         document::Link { rel: "stylesheet", href: STYLE }
@@ -231,8 +243,9 @@ fn App() -> Element {
                             s.push_log(LogEntry::info(format!("Loading {}", path.display())));
                         }
                         spawn(async move {
-                            let result = tokio::task::spawn_blocking(move || {
-                                engine::load_binary_blocking(&path)
+                            let path_clone = path.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                                engine::load_binary_blocking(&path_clone)
                             }).await.unwrap_or_else(|e| Err(format!("Join error: {e}")));
 
                             match result {
@@ -240,9 +253,7 @@ fn App() -> Element {
                                     let summary   = load.summary.clone();
                                     let fn_count  = load.functions.len();
                                     let mut s = state.write();
-                                    s.loaded_binary_path   = Some(std::path::PathBuf::from(
-                                        load.binary.format.clone()
-                                    ));
+                                    s.binary_name   = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
                                     s.binary               = Some(std::sync::Arc::clone(&load.binary));
                                     s.functions            = load.functions;
                                     s.current_function_addr = None;

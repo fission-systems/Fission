@@ -1,5 +1,5 @@
-use crate::engine::{DecompileOutput, LoadResult, batch_decompile_one, load_binary_blocking};
-use crate::state::{LogEntry, use_app_state};
+use crate::engine::{batch_decompile_one, load_binary_blocking, DecompileOutput, LoadResult};
+use crate::state::{use_app_state, LogEntry};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
@@ -67,7 +67,6 @@ fn svg_nav_forward() -> Element {
     }
 }
 
-
 #[component]
 pub fn TitleBar() -> Element {
     let mut state = use_app_state();
@@ -82,49 +81,62 @@ pub fn TitleBar() -> Element {
                 let s = state.read();
                 (s.binary.clone(), s.functions.clone())
             };
-            let Some(binary) = binary else { continue; };
-            if functions.is_empty() { continue; }
+            let Some(binary) = binary else {
+                continue;
+            };
+            if functions.is_empty() {
+                continue;
+            }
 
             let total = functions.len();
             {
                 let mut s = state.write();
                 s.is_batch_running = true;
-                s.batch_done       = 0;
-                s.batch_total      = total;
-                s.batch_cancel     = false;
-                s.push_log(LogEntry::info(format!("Batch decompile started: {total} functions")));
+                s.batch_done = 0;
+                s.batch_total = total;
+                s.batch_cancel = false;
+                s.push_log(LogEntry::info(format!(
+                    "Batch decompile started: {total} functions"
+                )));
             }
 
-            let mut ok_count  = 0usize;
+            let mut ok_count = 0usize;
             let mut err_count = 0usize;
-            let mut fb_count  = 0usize;
+            let mut fb_count = 0usize;
 
             for fi in &functions {
                 // Check cancellation flag before each item
                 if state.read().batch_cancel {
-                    state.write().push_log(LogEntry::warn("Batch decompile cancelled."));
+                    state
+                        .write()
+                        .push_log(LogEntry::warn("Batch decompile cancelled."));
                     break;
                 }
 
-                let bin_clone  = Arc::clone(&binary);
-                let addr       = fi.address;
+                let bin_clone = Arc::clone(&binary);
+                let addr = fi.address;
                 let name_clone = fi.name.clone();
 
                 // Decompile on a blocking thread so the event loop stays live
                 let result = tokio::task::spawn_blocking(move || {
                     batch_decompile_one(&bin_clone, addr, &name_clone)
-                }).await;
+                })
+                .await;
 
                 match result {
                     Ok(r) => {
                         if r.ok {
                             ok_count += 1;
-                            if r.fell_back { fb_count += 1; }
+                            if r.fell_back {
+                                fb_count += 1;
+                            }
                         } else {
                             err_count += 1;
                         }
                     }
-                    Err(_) => { err_count += 1; }
+                    Err(_) => {
+                        err_count += 1;
+                    }
                 }
 
                 state.write().batch_done += 1;
@@ -178,10 +190,13 @@ pub fn TitleBar() -> Element {
             };
 
             let display = path.display().to_string();
-            state.write().push_log(LogEntry::info(format!("Loading {display}")));
+            state
+                .write()
+                .push_log(LogEntry::info(format!("Loading {display}")));
 
+            let path_clone = path.clone();
             let result: Result<LoadResult, String> =
-                tokio::task::spawn_blocking(move || load_binary_blocking(&path))
+                tokio::task::spawn_blocking(move || load_binary_blocking(&path_clone))
                     .await
                     .unwrap_or_else(|e| Err(format!("Task join error: {e}")));
 
@@ -191,8 +206,12 @@ pub fn TitleBar() -> Element {
                     let fn_count = load.functions.len();
                     {
                         let mut s = state.write();
-                        s.loaded_binary_path =
-                            Some(std::path::PathBuf::from(&display));
+                        s.binary_name = Some(
+                            path.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned(),
+                        );
                         s.binary = Some(Arc::clone(&load.binary));
                         s.functions = load.functions;
                         s.current_function_addr = None;
@@ -201,9 +220,7 @@ pub fn TitleBar() -> Element {
                         s.sidebar_search = String::new();
                         s.is_loading_binary = false;
                         s.push_log(LogEntry::info(format!("Loaded — {summary}")));
-                        s.push_log(LogEntry::info(format!(
-                            "{fn_count} functions discovered."
-                        )));
+                        s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
                     }
                 }
                 Err(e) => {
@@ -217,15 +234,17 @@ pub fn TitleBar() -> Element {
 
     let binary_name = {
         let s = state.read();
-        s.loaded_binary_path
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().to_string())
+        s.binary_name.clone()
+    };
+
+    let title_text = match binary_name.as_deref() {
+        Some(name) => format!("Fission — {}", name),
+        None => "Fission".to_string(),
     };
 
     let is_loading = state.read().is_loading_binary;
 
-    let can_back    = state.read().can_nav_back();
+    let can_back = state.read().can_nav_back();
     let can_forward = state.read().can_nav_forward();
 
     rsx! {

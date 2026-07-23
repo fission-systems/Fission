@@ -1,4 +1,4 @@
-use crate::state::{EditorTab, FunctionKind, use_app_state};
+use crate::state::{use_app_state, EditorTab, FunctionKind};
 use dioxus::prelude::*;
 
 // ── SVG icons ────────────────────────────────────────────────────────────────
@@ -43,27 +43,42 @@ fn svg_hex() -> Element {
 // One Dark Pro token colours via .tok-* CSS classes.
 
 const C_KEYWORDS: &[&str] = &[
-    "int", "long", "char", "void", "short", "unsigned", "signed",
-    "float", "double", "bool",
-    "struct", "union", "enum", "typedef",
-    "return", "if", "else", "while", "for", "do",
-    "break", "continue", "switch", "case", "default",
-    "goto", "sizeof", "const", "static", "extern",
+    "int", "long", "char", "void", "short", "unsigned", "signed", "float", "double", "bool",
+    "struct", "union", "enum", "typedef", "return", "if", "else", "while", "for", "do", "break",
+    "continue", "switch", "case", "default", "goto", "sizeof", "const", "static", "extern",
     "register", "volatile", "inline", "auto",
 ];
 
 const C_TYPES: &[&str] = &[
-    "uint8_t", "uint16_t", "uint32_t", "uint64_t",
-    "int8_t", "int16_t", "int32_t", "int64_t",
-    "size_t", "ssize_t", "ptrdiff_t", "uintptr_t", "intptr_t",
-    "NULL", "true", "false",
-    "BOOL", "DWORD", "WORD", "BYTE", "HANDLE", "LPVOID", "LPCSTR",
+    "uint8_t",
+    "uint16_t",
+    "uint32_t",
+    "uint64_t",
+    "int8_t",
+    "int16_t",
+    "int32_t",
+    "int64_t",
+    "size_t",
+    "ssize_t",
+    "ptrdiff_t",
+    "uintptr_t",
+    "intptr_t",
+    "NULL",
+    "true",
+    "false",
+    "BOOL",
+    "DWORD",
+    "WORD",
+    "BYTE",
+    "HANDLE",
+    "LPVOID",
+    "LPCSTR",
 ];
 
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Tokenise a single line and emit HTML spans.
@@ -225,21 +240,27 @@ fn hex_dump(data: &[u8], limit: usize) -> String {
             .iter()
             .enumerate()
             .map(|(j, b)| {
-                if j == 8 { format!(" {:02x}", b) } else { format!("{:02x} ", b) }
+                if j == 8 {
+                    format!(" {:02x}", b)
+                } else {
+                    format!("{:02x} ", b)
+                }
             })
             .collect();
         let ascii: String = chunk
             .iter()
             .map(|&b| {
-                if b.is_ascii_graphic() || b == b' ' { b as char } else { '.' }
+                if b.is_ascii_graphic() || b == b' ' {
+                    b as char
+                } else {
+                    '.'
+                }
             })
             .collect();
         out.push_str(&format!("{offset:08x}  {hex:<49}  {ascii}\n"));
     }
     if data.len() == limit {
-        out.push_str(&format!(
-            "\n[output truncated at {limit} bytes]\n"
-        ));
+        out.push_str(&format!("\n[output truncated at {limit} bytes]\n"));
     }
     out
 }
@@ -250,21 +271,25 @@ fn hex_dump(data: &[u8], limit: usize) -> String {
 pub fn Editor() -> Element {
     let mut state = use_app_state();
 
-    let active_tab     = state.read().active_tab.clone();
+    let active_tab = state.read().active_tab.clone();
     let is_decompiling = state.read().is_decompiling;
-    let fn_name        = state.read().current_function_name();
-    let fn_kind        = state.read().current_function_kind.clone();
+    let fn_name = state.read().current_function_name();
+    let fn_kind = state.read().current_function_kind.clone();
 
     // Kind banner (shown in tab bar next to breadcrumb)
     let kind_badge: Option<(&'static str, &'static str)> = match &fn_kind {
         FunctionKind::Import { .. } => Some(("kind-badge-imp", "IMPORT STUB")),
-        FunctionKind::Thunk { .. }  => Some(("kind-badge-thunk", "THUNK")),
-        FunctionKind::Code          => None,
+        FunctionKind::Thunk { .. } => Some(("kind-badge-thunk", "THUNK")),
+        FunctionKind::Code => None,
     };
 
     // Tab class helper
     let tab_cls = |tab: &EditorTab| -> &'static str {
-        if *tab == active_tab { "tab is-active" } else { "tab" }
+        if *tab == active_tab {
+            "tab is-active"
+        } else {
+            "tab"
+        }
     };
 
     // Build editor body

@@ -11,10 +11,10 @@ use crate::state::use_app_state;
 use dioxus::prelude::*;
 
 // ── Layout constants ─────────────────────────────────────────────────────────
-const NODE_W:     f64 = 160.0;
-const LAYER_GAP:  f64 = 80.0;
-const NODE_GAP:   f64 = 36.0;
-const SVG_PAD:    f64 = 32.0;
+const NODE_W: f64 = 160.0;
+const LAYER_GAP: f64 = 80.0;
+const NODE_GAP: f64 = 36.0;
+const SVG_PAD: f64 = 32.0;
 const NODE_H_BASE: f64 = 44.0;
 const NODE_H_PER_OP: f64 = 4.0;
 const NODE_H_MAX: f64 = 80.0;
@@ -26,14 +26,26 @@ fn node_h(n: &CfgNodeData) -> f64 {
 
 // ── Layout ───────────────────────────────────────────────────────────────────
 #[derive(Clone)]
-struct LNode { idx: usize, layer: usize, x: f64, y: f64, h: f64 }
+struct LNode {
+    idx: usize,
+    layer: usize,
+    x: f64,
+    y: f64,
+    h: f64,
+}
 
 fn compute_layout(cfg: &CfgGraphData) -> Vec<LNode> {
     let n = cfg.nodes.len();
-    if n == 0 { return vec![]; }
+    if n == 0 {
+        return vec![];
+    }
 
     let back_set: std::collections::HashSet<(usize, usize)> = cfg
-        .edges.iter().filter(|e| e.is_back).map(|e| (e.from, e.to)).collect();
+        .edges
+        .iter()
+        .filter(|e| e.is_back)
+        .map(|e| (e.from, e.to))
+        .collect();
 
     // 1. BFS layer assignment (ignore back edges)
     let mut layer = vec![usize::MAX; n];
@@ -51,21 +63,39 @@ fn compute_layout(cfg: &CfgGraphData) -> Vec<LNode> {
             }
         }
     }
-    for l in layer.iter_mut() { if *l == usize::MAX { *l = n; } }
+    for l in layer.iter_mut() {
+        if *l == usize::MAX {
+            *l = n;
+        }
+    }
     let max_layer = *layer.iter().max().unwrap_or(&0);
 
     // 2. Group by layer
     let mut groups: Vec<Vec<usize>> = vec![vec![]; max_layer + 1];
     for (i, &l) in layer.iter().enumerate() {
-        if l <= max_layer { groups[l].push(i); }
+        if l <= max_layer {
+            groups[l].push(i);
+        }
     }
 
     // 3. Barycenter crossing reduction — snapshot adjacency to avoid borrow conflict
     let fwd_adj: Vec<Vec<usize>> = (0..n)
-        .map(|u| cfg.edges.iter().filter(|e| !e.is_back && e.from == u).map(|e| e.to).collect())
+        .map(|u| {
+            cfg.edges
+                .iter()
+                .filter(|e| !e.is_back && e.from == u)
+                .map(|e| e.to)
+                .collect()
+        })
         .collect();
     let rev_adj: Vec<Vec<usize>> = (0..n)
-        .map(|v| cfg.edges.iter().filter(|e| !e.is_back && e.to == v).map(|e| e.from).collect())
+        .map(|v| {
+            cfg.edges
+                .iter()
+                .filter(|e| !e.is_back && e.to == v)
+                .map(|e| e.from)
+                .collect()
+        })
         .collect();
 
     for _ in 0..2 {
@@ -76,11 +106,19 @@ fn compute_layout(cfg: &CfgGraphData) -> Vec<LNode> {
                 prev.iter().enumerate().map(|(i, &v)| (v, i)).collect();
             groups[l].sort_by(|&a, &b| {
                 let bc = |u: usize| -> f64 {
-                    let ps: Vec<f64> = rev_adj[u].iter()
-                        .filter_map(|p| prev_pos.get(p).map(|&i| i as f64)).collect();
-                    if ps.is_empty() { u as f64 } else { ps.iter().sum::<f64>() / ps.len() as f64 }
+                    let ps: Vec<f64> = rev_adj[u]
+                        .iter()
+                        .filter_map(|p| prev_pos.get(p).map(|&i| i as f64))
+                        .collect();
+                    if ps.is_empty() {
+                        u as f64
+                    } else {
+                        ps.iter().sum::<f64>() / ps.len() as f64
+                    }
                 };
-                bc(a).partial_cmp(&bc(b)).unwrap_or(std::cmp::Ordering::Equal)
+                bc(a)
+                    .partial_cmp(&bc(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
         }
         // bottom-up
@@ -91,11 +129,19 @@ fn compute_layout(cfg: &CfgGraphData) -> Vec<LNode> {
                     next.iter().enumerate().map(|(i, &v)| (v, i)).collect();
                 groups[l].sort_by(|&a, &b| {
                     let bc = |u: usize| -> f64 {
-                        let ps: Vec<f64> = fwd_adj[u].iter()
-                            .filter_map(|s| next_pos.get(s).map(|&i| i as f64)).collect();
-                        if ps.is_empty() { u as f64 } else { ps.iter().sum::<f64>() / ps.len() as f64 }
+                        let ps: Vec<f64> = fwd_adj[u]
+                            .iter()
+                            .filter_map(|s| next_pos.get(s).map(|&i| i as f64))
+                            .collect();
+                        if ps.is_empty() {
+                            u as f64
+                        } else {
+                            ps.iter().sum::<f64>() / ps.len() as f64
+                        }
                     };
-                    bc(a).partial_cmp(&bc(b)).unwrap_or(std::cmp::Ordering::Equal)
+                    bc(a)
+                        .partial_cmp(&bc(b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 });
             }
         }
@@ -106,11 +152,23 @@ fn compute_layout(cfg: &CfgGraphData) -> Vec<LNode> {
     let mut y_acc = SVG_PAD;
     for l in 0..=max_layer {
         layer_y[l] = y_acc;
-        let max_h = groups[l].iter().map(|&i| node_h(&cfg.nodes[i])).fold(NODE_H_BASE, f64::max);
+        let max_h = groups[l]
+            .iter()
+            .map(|&i| node_h(&cfg.nodes[i]))
+            .fold(NODE_H_BASE, f64::max);
         y_acc += max_h + LAYER_GAP;
     }
 
-    let mut result = vec![LNode { idx: 0, layer: 0, x: 0.0, y: 0.0, h: NODE_H_BASE }; n];
+    let mut result = vec![
+        LNode {
+            idx: 0,
+            layer: 0,
+            x: 0.0,
+            y: 0.0,
+            h: NODE_H_BASE
+        };
+        n
+    ];
     for (l, group) in groups.iter().enumerate() {
         for (pos, &idx) in group.iter().enumerate() {
             result[idx] = LNode {
@@ -141,9 +199,12 @@ fn render_svg(cfg: &CfgGraphData) -> String {
     // Defs: arrow markers
     out.push_str("<defs>");
     for (id, col) in [
-        ("ag", "#8d97a5"), ("ag2", "#6b7785"),
-        ("ag_t", "#4ec97b"), ("ag_f", "#f47067"),
-        ("ag_r", "#c099ff"), ("ag_i", "#ffb347"),
+        ("ag", "#8d97a5"),
+        ("ag2", "#6b7785"),
+        ("ag_t", "#4ec97b"),
+        ("ag_f", "#f47067"),
+        ("ag_r", "#c099ff"),
+        ("ag_i", "#ffb347"),
     ] {
         out.push_str(&format!(
             "<marker id=\"{id}\" markerWidth=\"7\" markerHeight=\"6\" refX=\"6\" refY=\"3\" orient=\"auto\"><polygon points=\"0 0,7 3,0 6\" fill=\"{col}\" opacity=\"0.85\"/></marker>"
@@ -152,23 +213,33 @@ fn render_svg(cfg: &CfgGraphData) -> String {
     out.push_str("</defs>");
 
     // Background
-    out.push_str(&format!("<rect width=\"{max_x:.0}\" height=\"{max_y:.0}\" fill=\"#0d0d14\" rx=\"0\"/>"));
+    out.push_str(&format!(
+        "<rect width=\"{max_x:.0}\" height=\"{max_y:.0}\" fill=\"#0d0d14\" rx=\"0\"/>"
+    ));
 
     // ── Edges ─────────────────────────────────────────────────────────────
     for edge in &cfg.edges {
-        let Some(from) = layout.get(edge.from) else { continue };
-        let Some(to)   = layout.get(edge.to)   else { continue };
-
-        let (stroke, marker, label) = match &edge.kind {
-            CfgEdgeKind::ConditionalTrue  => ("#4ec97b", "ag_t", "T"),
-            CfgEdgeKind::ConditionalFalse => ("#f47067", "ag_f", "F"),
-            CfgEdgeKind::Unconditional    => ("#8d97a5", "ag",   ""),
-            CfgEdgeKind::Fallthrough      => ("#6b7785", "ag2",  ""),
-            CfgEdgeKind::Return           => ("#c099ff", "ag_r", "ret"),
-            CfgEdgeKind::Indirect         => ("#ffb347", "ag_i", "ind"),
+        let Some(from) = layout.get(edge.from) else {
+            continue;
+        };
+        let Some(to) = layout.get(edge.to) else {
+            continue;
         };
 
-        let dash = if edge.is_back { " stroke-dasharray=\"5,3\"" } else { "" };
+        let (stroke, marker, label) = match &edge.kind {
+            CfgEdgeKind::ConditionalTrue => ("#4ec97b", "ag_t", "T"),
+            CfgEdgeKind::ConditionalFalse => ("#f47067", "ag_f", "F"),
+            CfgEdgeKind::Unconditional => ("#8d97a5", "ag", ""),
+            CfgEdgeKind::Fallthrough => ("#6b7785", "ag2", ""),
+            CfgEdgeKind::Return => ("#c099ff", "ag_r", "ret"),
+            CfgEdgeKind::Indirect => ("#ffb347", "ag_i", "ind"),
+        };
+
+        let dash = if edge.is_back {
+            " stroke-dasharray=\"5,3\""
+        } else {
+            ""
+        };
 
         if edge.is_back {
             let x1 = from.x + NODE_W;
@@ -271,11 +342,11 @@ pub fn CfgView() -> Element {
         };
     };
 
-    let mut scale    = use_signal(|| 1.0_f64);
+    let mut scale = use_signal(|| 1.0_f64);
     let mut offset_x = use_signal(|| 0.0_f64);
     let mut offset_y = use_signal(|| 0.0_f64);
-    let mut panning  = use_signal(|| false);
-    let mut pan_xy   = use_signal(|| (0.0_f64, 0.0_f64));
+    let mut panning = use_signal(|| false);
+    let mut pan_xy = use_signal(|| (0.0_f64, 0.0_f64));
 
     let stats = format!(
         "{} blocks  \u{00B7}  {} edges  \u{00B7}  cyclomatic {}",

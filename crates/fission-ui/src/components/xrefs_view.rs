@@ -4,8 +4,8 @@
 //! triggers auto-decompile, and switches the bottom panel to Output.
 
 use crate::components::sidebar::run_decompile;
-use crate::engine::{XrefRow, xrefs_for_function_blocking};
-use crate::state::{BottomTab, FunctionKind, LogEntry, use_app_state};
+use crate::engine::XrefRow;
+use crate::state::{use_app_state, BottomTab, FunctionKind, LogEntry};
 use dioxus::prelude::*;
 
 #[component]
@@ -20,13 +20,19 @@ pub fn XrefsView() -> Element {
     // Load on mount (or when fn_addr changes)
     let load_addr = fn_addr;
     use_effect(move || {
-        let Some(addr) = load_addr else { return; };
+        let Some(addr) = load_addr else {
+            return;
+        };
         let binary = state.read().binary.clone();
-        let Some(binary) = binary else { return; };
+        let Some(binary) = binary else {
+            return;
+        };
 
         {
             let s = state.read();
-            if s.is_loading_xrefs { return; }
+            if s.is_loading_xrefs {
+                return;
+            }
         }
         {
             let mut s = state.write();
@@ -36,28 +42,15 @@ pub fn XrefsView() -> Element {
         }
 
         spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                xrefs_for_function_blocking(&binary, addr)
-            }).await;
+            let (callers, callees) = crate::engine::run_xrefs(binary, addr).await;
 
-            match result {
-                Ok((callers, callees)) => {
-                    let nc = callers.len();
-                    let nk = callees.len();
-                    let mut s = state.write();
-                    s.current_xref_callers = callers;
-                    s.current_xref_callees = callees;
-                    s.is_loading_xrefs = false;
-                    s.push_log(LogEntry::info(format!(
-                        "Xrefs: {nc} callers, {nk} callees"
-                    )));
-                }
-                Err(e) => {
-                    let mut s = state.write();
-                    s.is_loading_xrefs = false;
-                    s.push_log(LogEntry::error(format!("Xref error: {e}")));
-                }
-            }
+            let nc = callers.len();
+            let nk = callees.len();
+            let mut s = state.write();
+            s.current_xref_callers = callers;
+            s.current_xref_callees = callees;
+            s.is_loading_xrefs = false;
+            s.push_log(LogEntry::info(format!("Xrefs: {nc} callers, {nk} callees")));
         });
     });
 
@@ -81,15 +74,21 @@ pub fn XrefsView() -> Element {
     // ── Jump helper ──────────────────────────────────────────────────────────
     let mut jump_to = move |addr: u64, hint_name: Option<String>| {
         let binary = state.read().binary.clone();
-        let Some(binary) = binary else { return; };
+        let Some(binary) = binary else {
+            return;
+        };
 
         let (kind, resolved_name) = {
             let s = state.read();
             if let Some(fi) = s.functions.iter().find(|f| f.address == addr) {
                 let k = if fi.is_import && !fi.is_thunk_like {
-                    FunctionKind::Import { library: fi.external_library.clone() }
+                    FunctionKind::Import {
+                        library: fi.external_library.clone(),
+                    }
                 } else if fi.is_thunk_like {
-                    FunctionKind::Thunk { target: fi.thunk_target }
+                    FunctionKind::Thunk {
+                        target: fi.thunk_target,
+                    }
                 } else {
                     FunctionKind::Code
                 };
@@ -105,12 +104,12 @@ pub fn XrefsView() -> Element {
             s.current_function_addr = Some(addr);
             s.current_function_kind = kind;
             s.decompiled_code = None;
-            s.decompiled_nir  = None;
-            s.current_cfg     = None;
+            s.decompiled_nir = None;
+            s.current_cfg = None;
             s.current_xref_callers.clear();
             s.current_xref_callees.clear();
             s.is_loading_xrefs = false;
-            s.is_decompiling  = true;
+            s.is_decompiling = true;
             s.navigate_to(addr);
             s.active_bottom_tab = BottomTab::Logs;
             s.push_log(LogEntry::info(format!(

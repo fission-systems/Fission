@@ -1,22 +1,27 @@
 [package]
-name = "fission-dioxus"
+name = "fission-ui"
 version = "0.1.6"
 edition = "2021"
 license = "AGPL-3.0-or-later"
-description = "Pure Rust desktop GUI for Fission using Dioxus"
+description = "Shared Dioxus UI components for Fission (desktop + web)"
+
+[lib]
+name = "fission_ui"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-dioxus = { version = "0.6", features = ["desktop"] }
-dioxus-html = { version = "0.6" }
-dioxus-logger = "0.6"
+dioxus = { version = "0.6" }
 tracing = "0.1"
-tokio = { version = "1.0", features = ["full"] }
-rfd = "0.14"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-signatures = { path = "../fission-signatures" }
-fission-ui = { path = "../fission-ui" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"

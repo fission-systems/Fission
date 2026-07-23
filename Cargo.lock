@@ -2447,6 +2447,7 @@ dependencies = [
  "fission-loader",
  "fission-signatures",
  "fission-static",
+ "fission-ui",
  "futures-util",
  "rfd",
  "tokio",
@@ -2758,6 +2759,23 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "fission-ui"
+version = "0.1.6"
+dependencies = [
+ "dioxus",
+ "fission-core",
+ "fission-decompiler",
+ "fission-loader",
+ "fission-signatures",
+ "fission-static",
+ "futures-util",
+ "tokio",
+ "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

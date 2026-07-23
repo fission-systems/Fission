@@ -3,15 +3,15 @@
 //!   • Virtual scroll — only renders the visible window of items
 //!   • Import / Thunk classification before decompile
 
-use crate::engine::{DecompileOutput, decompile_blocking};
-use crate::state::{AppState, FunctionKind, LogEntry, use_app_state};
+use crate::engine::DecompileOutput;
+use crate::state::{use_app_state, AppState, FunctionKind, LogEntry};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
 // ── Layout constants ─────────────────────────────────────────────────────────
-const ITEM_H:        f64   = 32.0;  // must match .function-item CSS height
-const VISIBLE_H:     f64   = 680.0; // pessimistic list-area height
-const OVERSCAN:      usize = 4;     // extra items rendered above/below viewport
+const ITEM_H: f64 = 32.0; // must match .function-item CSS height
+const VISIBLE_H: f64 = 680.0; // pessimistic list-area height
+const OVERSCAN: usize = 4; // extra items rendered above/below viewport
 
 // ── SVGs ─────────────────────────────────────────────────────────────────────
 fn svg_search() -> Element {
@@ -44,13 +44,13 @@ fn svg_binary() -> Element {
 // ── Entry snapshot ───────────────────────────────────────────────────────────
 #[derive(Clone, PartialEq)]
 struct FnEntry {
-    addr:     u64,
-    name:     String,
-    is_imp:   bool,
-    is_exp:   bool,
+    addr: u64,
+    name: String,
+    is_imp: bool,
+    is_exp: bool,
     is_thunk: bool,
-    lib:      Option<String>,
-    thunk_t:  Option<u64>,
+    lib: Option<String>,
+    thunk_t: Option<u64>,
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -70,13 +70,13 @@ pub fn Sidebar() -> Element {
                     || format!("{:x}", f.address).contains(&q)
             })
             .map(|f| FnEntry {
-                addr:     f.address,
-                name:     f.name.clone(),
-                is_imp:   f.is_import,
-                is_exp:   f.is_export,
+                addr: f.address,
+                name: f.name.clone(),
+                is_imp: f.is_import,
+                is_exp: f.is_export,
                 is_thunk: f.is_thunk_like,
-                lib:      f.external_library.clone(),
-                thunk_t:  f.thunk_target,
+                lib: f.external_library.clone(),
+                thunk_t: f.thunk_target,
             })
             .collect()
     });
@@ -88,13 +88,14 @@ pub fn Sidebar() -> Element {
     // the target item is within the visible window.
     use_effect(move || {
         let target = state.read().sidebar_scroll_target;
-        let Some(addr) = target else { return; };
+        let Some(addr) = target else {
+            return;
+        };
         // Find the index of the target in the filtered list
         let idx = filtered.read().iter().position(|e| e.addr == addr);
         if let Some(idx) = idx {
             // Scroll so the item is roughly centred in the visible area
-            let desired_top = (idx as f64 * ITEM_H - VISIBLE_H / 2.0 + ITEM_H / 2.0)
-                .max(0.0);
+            let desired_top = (idx as f64 * ITEM_H - VISIBLE_H / 2.0 + ITEM_H / 2.0).max(0.0);
             *scroll_top.write() = desired_top;
         }
         // Acknowledge the scroll request
@@ -102,21 +103,29 @@ pub fn Sidebar() -> Element {
     });
 
     // Derive visible slice from scroll position
-    let total   = filtered.read().len();
-    let start   = ((*scroll_top.read() / ITEM_H) as usize).saturating_sub(OVERSCAN);
+    let total = filtered.read().len();
+    let start = ((*scroll_top.read() / ITEM_H) as usize).saturating_sub(OVERSCAN);
     let visible = (VISIBLE_H / ITEM_H).ceil() as usize + OVERSCAN * 2;
-    let end     = (start + visible).min(total);
+    let end = (start + visible).min(total);
 
-    let total_h      = total as f64 * ITEM_H;
-    let offset_top   = start as f64 * ITEM_H;
-    let spacer_bot   = if end < total { (total - end) as f64 * ITEM_H } else { 0.0 };
+    let total_h = total as f64 * ITEM_H;
+    let offset_top = start as f64 * ITEM_H;
+    let spacer_bot = if end < total {
+        (total - end) as f64 * ITEM_H
+    } else {
+        0.0
+    };
 
     // ── Decompile on click ───────────────────────────────────────────────────
     let mut on_select = move |entry: FnEntry| {
         let kind = if entry.is_imp && !entry.is_thunk {
-            FunctionKind::Import { library: entry.lib.clone() }
+            FunctionKind::Import {
+                library: entry.lib.clone(),
+            }
         } else if entry.is_thunk {
-            FunctionKind::Thunk { target: entry.thunk_t }
+            FunctionKind::Thunk {
+                target: entry.thunk_t,
+            }
         } else {
             FunctionKind::Code
         };
@@ -126,12 +135,12 @@ pub fn Sidebar() -> Element {
             s.current_function_addr = Some(entry.addr);
             s.current_function_kind = kind.clone();
             s.decompiled_code = None;
-            s.decompiled_nir  = None;
-            s.current_cfg     = None;
+            s.decompiled_nir = None;
+            s.current_cfg = None;
             s.current_xref_callers.clear();
             s.current_xref_callees.clear();
             s.is_loading_xrefs = false;
-            s.navigate_to(entry.addr);  // push to nav history
+            s.navigate_to(entry.addr); // push to nav history
         }
 
         match kind {
@@ -149,16 +158,17 @@ pub fn Sidebar() -> Element {
                 let mut s = state.write();
                 s.decompiled_code = Some(stub);
                 s.push_log(LogEntry::info(format!(
-                    "Import stub: {}  (from {lib_str})", entry.name
+                    "Import stub: {}  (from {lib_str})",
+                    entry.name
                 )));
             }
 
             FunctionKind::Thunk { target } => {
                 let binary = state.read().binary.clone();
                 let Some(binary) = binary else { return };
-                let name   = entry.name.clone();
-                let addr   = entry.addr;
-                let tgt    = target.map(|t| format!("0x{t:x}")).unwrap_or_default();
+                let name = entry.name.clone();
+                let addr = entry.addr;
+                let tgt = target.map(|t| format!("0x{t:x}")).unwrap_or_default();
                 {
                     let mut s = state.write();
                     s.is_decompiling = true;
@@ -186,11 +196,11 @@ pub fn Sidebar() -> Element {
     };
 
     // ── Read once for rendering ───────────────────────────────────────────────
-    let has_binary   = state.read().binary.is_some();
-    let is_loading   = state.read().is_loading_binary;
-    let fn_count     = total;
-    let search_val   = state.read().sidebar_search.clone();
-    let selected     = state.read().current_function_addr;
+    let has_binary = state.read().binary.is_some();
+    let is_loading = state.read().is_loading_binary;
+    let fn_count = total;
+    let search_val = state.read().sidebar_search.clone();
+    let selected = state.read().current_function_addr;
 
     rsx! {
         div { class: "sidebar",
@@ -308,31 +318,28 @@ pub fn Sidebar() -> Element {
     }
 }
 
-
 // ── Shared async decompile helper ────────────────────────────────────────────
 
-pub(crate) async fn run_decompile(
+pub async fn run_decompile(
     mut state: Signal<AppState>,
     binary: Arc<fission_loader::loader::LoadedBinary>,
     addr: u64,
     name: String,
 ) {
     let result: Result<DecompileOutput, String> =
-        tokio::task::spawn_blocking(move || decompile_blocking(&binary, addr, &name))
-            .await
-            .unwrap_or_else(|e| Err(format!("Task join error: {e}")));
+        crate::engine::run_decompile(binary, addr, name).await;
 
     match result {
         Ok(out) => {
-            let bytes  = out.code.len();
-            let fell   = out.fell_back;
+            let bytes = out.code.len();
+            let fell = out.fell_back;
             let reason = out.fallback_reason.clone();
             let has_cfg = out.cfg.is_some();
             let mut s = state.write();
             s.decompiled_code = Some(out.code);
-            s.decompiled_nir  = out.code_nir;
-            s.current_cfg     = out.cfg;
-            s.is_decompiling  = false;
+            s.decompiled_nir = out.code_nir;
+            s.current_cfg = out.cfg;
+            s.is_decompiling = false;
             if fell {
                 s.push_log(LogEntry::warn(format!(
                     "Fell back \u{2014} {}",
@@ -342,13 +349,15 @@ pub(crate) async fn run_decompile(
                 s.push_log(LogEntry::info(format!("Complete  ({bytes} bytes)")));
             }
             if has_cfg {
-                s.push_log(LogEntry::info("CFG captured \u{2014} view in the CFG tab.".to_string()));
+                s.push_log(LogEntry::info(
+                    "CFG captured \u{2014} view in the CFG tab.".to_string(),
+                ));
             }
         }
         Err(e) => {
             let mut s = state.write();
             s.is_decompiling = false;
-            s.current_cfg    = None;
+            s.current_cfg = None;
             s.push_log(LogEntry::error(format!("Decompile failed: {e}")));
         }
     }
