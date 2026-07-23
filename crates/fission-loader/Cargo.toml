@@ -21,7 +21,7 @@ tracing = "0.1"
 regex = "1.12"
 blake3 = "1.5"
 rkyv = { version = "0.7", features = ["validation"] }
-bytecheck = "0.6"
+bytecheck = "0.8"
 rustc-demangle = "0.1"
 cpp_demangle = "0.4"
 msvc-demangler = "0.9"
