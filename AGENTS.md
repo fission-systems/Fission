@@ -45,6 +45,7 @@ Fission/
 - `crates/fission-automation/AGENTS.md`
 - `crates/fission-cli/AGENTS.md`
 - `crates/fission-loader/AGENTS.md`
+- `crates/fission-dioxus/AGENTS.md`
 
 Read the nearest child file before editing those areas.
 
