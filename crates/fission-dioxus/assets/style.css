@@ -1706,3 +1706,49 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Navigation Back/Forward buttons ────────────────────────────────────── */
+.nav-arrows {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 10px;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.nav-btn:hover {
+  background: var(--surface-2);
+  color: var(--ink-1);
+}
+
+.nav-btn.disabled {
+  opacity: 0.28;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Clickable xrefs rows */
+.xrefs-row-clickable {
+  cursor: pointer;
+}
+
+.xrefs-row-clickable:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-1));
+}
+
+.xrefs-row-clickable .xrefs-name {
+  color: var(--accent);
+}

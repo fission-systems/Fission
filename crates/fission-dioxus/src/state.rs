@@ -95,6 +95,14 @@ pub struct AppState {
     /// Set to true by the UI to request cancellation of the running batch.
     pub batch_cancel:     bool,
 
+    // ── Navigation history ────────────────────────────────────────────────────
+    /// Addresses visited in order; new entries truncate forward history.
+    pub nav_history: Vec<u64>,
+    pub nav_cursor:  usize,  // index into nav_history pointing to current
+    /// Set to Some(addr) to request the sidebar to scroll that item into view;
+    /// cleared by the sidebar after it has processed it.
+    pub sidebar_scroll_target: Option<u64>,
+
     // ── Sidebar search ───────────────────────────────────────────────────────
     pub sidebar_search: String,
 
@@ -134,6 +142,9 @@ impl AppState {
             batch_done:           0,
             batch_total:          0,
             batch_cancel:         false,
+            nav_history:          Vec::new(),
+            nav_cursor:           0,
+            sidebar_scroll_target: None,
             sidebar_search:       String::new(),
             is_palette_open:      false,
             palette_query:        String::new(),
@@ -206,6 +217,53 @@ impl AppState {
     /// Toggle bottom panel visibility.
     pub fn toggle_bottom_panel(&mut self) {
         self.bottom_panel_visible = !self.bottom_panel_visible;
+    }
+
+    /// Push a new navigation address, truncating any forward history.
+    /// No-op if addr is the same as the current entry.
+    pub fn navigate_to(&mut self, addr: u64) {
+        if self.nav_history.get(self.nav_cursor) == Some(&addr) {
+            // Already at this address
+            return;
+        }
+        // Truncate forward history
+        if !self.nav_history.is_empty() {
+            self.nav_history.truncate(self.nav_cursor + 1);
+        }
+        self.nav_history.push(addr);
+        if self.nav_history.len() > 50 {
+            self.nav_history.remove(0);
+        }
+        self.nav_cursor = self.nav_history.len().saturating_sub(1);
+        self.sidebar_scroll_target = Some(addr);
+    }
+
+    /// Navigate backward; returns the target address if available.
+    pub fn nav_back(&mut self) -> Option<u64> {
+        if self.nav_cursor == 0 { return None; }
+        self.nav_cursor -= 1;
+        let addr = self.nav_history[self.nav_cursor];
+        self.sidebar_scroll_target = Some(addr);
+        Some(addr)
+    }
+
+    /// Navigate forward; returns the target address if available.
+    pub fn nav_forward(&mut self) -> Option<u64> {
+        if self.nav_cursor + 1 >= self.nav_history.len() { return None; }
+        self.nav_cursor += 1;
+        let addr = self.nav_history[self.nav_cursor];
+        self.sidebar_scroll_target = Some(addr);
+        Some(addr)
+    }
+
+    /// Whether backward navigation is possible.
+    pub fn can_nav_back(&self) -> bool {
+        self.nav_cursor > 0 && !self.nav_history.is_empty()
+    }
+
+    /// Whether forward navigation is possible.
+    pub fn can_nav_forward(&self) -> bool {
+        self.nav_cursor + 1 < self.nav_history.len()
     }
 }
 

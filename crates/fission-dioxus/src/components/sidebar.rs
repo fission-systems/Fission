@@ -84,6 +84,23 @@ pub fn Sidebar() -> Element {
     // ── Virtual scroll state ─────────────────────────────────────────────────
     let mut scroll_top: Signal<f64> = use_signal(|| 0.0);
 
+    // When sidebar_scroll_target changes, adjust virtual scroll position so
+    // the target item is within the visible window.
+    use_effect(move || {
+        let target = state.read().sidebar_scroll_target;
+        let Some(addr) = target else { return; };
+        // Find the index of the target in the filtered list
+        let idx = filtered.read().iter().position(|e| e.addr == addr);
+        if let Some(idx) = idx {
+            // Scroll so the item is roughly centred in the visible area
+            let desired_top = (idx as f64 * ITEM_H - VISIBLE_H / 2.0 + ITEM_H / 2.0)
+                .max(0.0);
+            *scroll_top.write() = desired_top;
+        }
+        // Acknowledge the scroll request
+        state.write().sidebar_scroll_target = None;
+    });
+
     // Derive visible slice from scroll position
     let total   = filtered.read().len();
     let start   = ((*scroll_top.read() / ITEM_H) as usize).saturating_sub(OVERSCAN);
@@ -110,6 +127,11 @@ pub fn Sidebar() -> Element {
             s.current_function_kind = kind.clone();
             s.decompiled_code = None;
             s.decompiled_nir  = None;
+            s.current_cfg     = None;
+            s.current_xref_callers.clear();
+            s.current_xref_callees.clear();
+            s.is_loading_xrefs = false;
+            s.navigate_to(entry.addr);  // push to nav history
         }
 
         match kind {

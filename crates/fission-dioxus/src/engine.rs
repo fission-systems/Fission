@@ -371,3 +371,16 @@ pub fn xrefs_for_function_blocking(
 
     (callers, callees)
 }
+
+// ── Navigation decompile helper ──────────────────────────────────────────────
+
+/// Thin wrapper used by keyboard nav shortcuts in main.rs.
+/// Delegates to `sidebar::run_decompile` (the canonical decompile path).
+pub async fn run_nav_decompile(
+    state: dioxus::prelude::Signal<crate::state::AppState>,
+    binary: Arc<LoadedBinary>,
+    addr: u64,
+    name: String,
+) {
+    crate::components::sidebar::run_decompile(state, binary, addr, name).await;
+}

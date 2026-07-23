@@ -119,8 +119,65 @@ fn App() -> Element {
                     // Cmd+O — open binary
                     Key::Character(s) if s == "o" && (mods.meta() || mods.ctrl()) => {
                         e.prevent_default();
-                        // Signal title_bar to open — use a flag in state
                         state.write().push_log(LogEntry::info("Use File \u{2192} Open Binary\u{2026} (Cmd O is handled by the menu)".to_string()));
+                    }
+                    // Cmd+[ — navigate back
+                    Key::Character(s) if s == "[" && (mods.meta() || mods.ctrl()) => {
+                        e.prevent_default();
+                        let addr = state.write().nav_back();
+                        if let Some(addr) = addr {
+                            let binary = state.read().binary.clone();
+                            let name = state.read().functions.iter()
+                                .find(|f| f.address == addr)
+                                .map(|f| f.name.clone())
+                                .unwrap_or_else(|| format!("sub_{addr:x}"));
+                            if let Some(binary) = binary {
+                                {
+                                    let mut s = state.write();
+                                    s.current_function_addr = Some(addr);
+                                    s.decompiled_code = None;
+                                    s.decompiled_nir  = None;
+                                    s.current_cfg     = None;
+                                    s.current_xref_callers.clear();
+                                    s.current_xref_callees.clear();
+                                    s.is_loading_xrefs = false;
+                                    s.is_decompiling  = true;
+                                    s.push_log(LogEntry::info(format!("Back -> {name}  @  0x{addr:x}")));
+                                }
+                                spawn(async move {
+                                    engine::run_nav_decompile(state, binary, addr, name).await;
+                                });
+                            }
+                        }
+                    }
+                    // Cmd+] — navigate forward
+                    Key::Character(s) if s == "]" && (mods.meta() || mods.ctrl()) => {
+                        e.prevent_default();
+                        let addr = state.write().nav_forward();
+                        if let Some(addr) = addr {
+                            let binary = state.read().binary.clone();
+                            let name = state.read().functions.iter()
+                                .find(|f| f.address == addr)
+                                .map(|f| f.name.clone())
+                                .unwrap_or_else(|| format!("sub_{addr:x}"));
+                            if let Some(binary) = binary {
+                                {
+                                    let mut s = state.write();
+                                    s.current_function_addr = Some(addr);
+                                    s.decompiled_code = None;
+                                    s.decompiled_nir  = None;
+                                    s.current_cfg     = None;
+                                    s.current_xref_callers.clear();
+                                    s.current_xref_callees.clear();
+                                    s.is_loading_xrefs = false;
+                                    s.is_decompiling  = true;
+                                    s.push_log(LogEntry::info(format!("Forward -> {name}  @  0x{addr:x}")));
+                                }
+                                spawn(async move {
+                                    engine::run_nav_decompile(state, binary, addr, name).await;
+                                });
+                            }
+                        }
                     }
                     // Escape — close palette
                     Key::Escape => {

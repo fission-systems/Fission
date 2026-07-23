@@ -41,7 +41,32 @@ fn svg_folder() -> Element {
     }
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+fn svg_nav_back() -> Element {
+    rsx! {
+        svg {
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "14", height: "14",
+            view_box: "0 0 16 16",
+            fill: "none", stroke: "currentColor",
+            stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round",
+            polyline { points: "10 3 5 8 10 13" }
+        }
+    }
+}
+
+fn svg_nav_forward() -> Element {
+    rsx! {
+        svg {
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "14", height: "14",
+            view_box: "0 0 16 16",
+            fill: "none", stroke: "currentColor",
+            stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round",
+            polyline { points: "6 3 11 8 6 13" }
+        }
+    }
+}
+
 
 #[component]
 pub fn TitleBar() -> Element {
@@ -200,14 +225,89 @@ pub fn TitleBar() -> Element {
 
     let is_loading = state.read().is_loading_binary;
 
+    let can_back    = state.read().can_nav_back();
+    let can_forward = state.read().can_nav_forward();
+
     rsx! {
         div { class: "title-bar",
-            // ── Logo ──────────────────────────────────────────────────────
+            // ── Logo + nav arrows ─────────────────────────────────────────
             div { class: "title-logo",
                 div { class: "logo-mark",
                     {svg_fission_mark()}
                 }
                 span { class: "logo-wordmark", "Fission" }
+
+                // Back / Forward navigation buttons
+                div { class: "nav-arrows",
+                    button {
+                        class: if can_back { "nav-btn" } else { "nav-btn disabled" },
+                        title: "Go Back  (Cmd [)",
+                        onclick: move |_| {
+                            let addr = state.write().nav_back();
+                            if let Some(addr) = addr {
+                                let binary = state.read().binary.clone();
+                                let name = state.read().functions.iter()
+                                    .find(|f| f.address == addr)
+                                    .map(|f| f.name.clone())
+                                    .unwrap_or_else(|| format!("sub_{addr:x}"));
+                                if let Some(binary) = binary {
+                                    {
+                                        let mut s = state.write();
+                                        s.current_function_addr = Some(addr);
+                                        s.decompiled_code = None;
+                                        s.decompiled_nir  = None;
+                                        s.current_cfg     = None;
+                                        s.current_xref_callers.clear();
+                                        s.current_xref_callees.clear();
+                                        s.is_loading_xrefs = false;
+                                        s.is_decompiling  = true;
+                                        s.push_log(LogEntry::info(format!("Back -> {name}  @  0x{addr:x}")));
+                                    }
+                                    spawn(async move {
+                                        crate::components::sidebar::run_decompile(
+                                            state, binary, addr, name
+                                        ).await;
+                                    });
+                                }
+                            }
+                        },
+                        {svg_nav_back()}
+                    }
+                    button {
+                        class: if can_forward { "nav-btn" } else { "nav-btn disabled" },
+                        title: "Go Forward  (Cmd ])",
+                        onclick: move |_| {
+                            let addr = state.write().nav_forward();
+                            if let Some(addr) = addr {
+                                let binary = state.read().binary.clone();
+                                let name = state.read().functions.iter()
+                                    .find(|f| f.address == addr)
+                                    .map(|f| f.name.clone())
+                                    .unwrap_or_else(|| format!("sub_{addr:x}"));
+                                if let Some(binary) = binary {
+                                    {
+                                        let mut s = state.write();
+                                        s.current_function_addr = Some(addr);
+                                        s.decompiled_code = None;
+                                        s.decompiled_nir  = None;
+                                        s.current_cfg     = None;
+                                        s.current_xref_callers.clear();
+                                        s.current_xref_callees.clear();
+                                        s.is_loading_xrefs = false;
+                                        s.is_decompiling  = true;
+                                        s.push_log(LogEntry::info(format!("Forward -> {name}  @  0x{addr:x}")));
+                                    }
+                                    spawn(async move {
+                                        crate::components::sidebar::run_decompile(
+                                            state, binary, addr, name
+                                        ).await;
+                                    });
+                                }
+                            }
+                        },
+                        {svg_nav_forward()}
+                    }
+                }
             }
 
             // ── Menu bar ──────────────────────────────────────────────────
@@ -237,11 +337,15 @@ pub fn TitleBar() -> Element {
                 div { class: "menu-item",
                     div { class: "menu-trigger", "View" }
                     div { class: "dropdown",
-                        div { class: "dropdown-item disabled",
+                        div {
+                            class: "dropdown-item",
+                            onclick: move |_| state.write().toggle_sidebar(),
                             div { class: "dropdown-item-label", "Toggle Sidebar" }
                             span { class: "dropdown-item-kbd", "Cmd B" }
                         }
-                        div { class: "dropdown-item disabled",
+                        div {
+                            class: "dropdown-item",
+                            onclick: move |_| state.write().toggle_bottom_panel(),
                             div { class: "dropdown-item-label", "Toggle Log Panel" }
                             span { class: "dropdown-item-kbd", "Cmd J" }
                         }

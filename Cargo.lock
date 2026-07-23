@@ -2447,6 +2447,7 @@ dependencies = [
  "fission-loader",
  "fission-signatures",
  "fission-static",
+ "futures-util",
  "rfd",
  "tokio",
  "tracing",

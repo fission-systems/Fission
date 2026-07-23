@@ -1,10 +1,11 @@
 //! Xrefs viewer — shows callers and callees of the selected function.
 //!
-//! Xref data is loaded on-demand the first time the Xrefs tab is shown
-//! after a function is selected, using `spawn_blocking`.
+//! Clicking a row navigates to the target function: updates selection,
+//! triggers auto-decompile, and switches the bottom panel to Output.
 
+use crate::components::sidebar::run_decompile;
 use crate::engine::{XrefRow, xrefs_for_function_blocking};
-use crate::state::{LogEntry, use_app_state};
+use crate::state::{BottomTab, FunctionKind, LogEntry, use_app_state};
 use dioxus::prelude::*;
 
 #[component]
@@ -23,7 +24,6 @@ pub fn XrefsView() -> Element {
         let binary = state.read().binary.clone();
         let Some(binary) = binary else { return; };
 
-        // Only load if not already loading and no data yet
         {
             let s = state.read();
             if s.is_loading_xrefs { return; }
@@ -78,6 +78,52 @@ pub fn XrefsView() -> Element {
         };
     }
 
+    // ── Jump helper ──────────────────────────────────────────────────────────
+    let mut jump_to = move |addr: u64, hint_name: Option<String>| {
+        let binary = state.read().binary.clone();
+        let Some(binary) = binary else { return; };
+
+        let (kind, resolved_name) = {
+            let s = state.read();
+            if let Some(fi) = s.functions.iter().find(|f| f.address == addr) {
+                let k = if fi.is_import && !fi.is_thunk_like {
+                    FunctionKind::Import { library: fi.external_library.clone() }
+                } else if fi.is_thunk_like {
+                    FunctionKind::Thunk { target: fi.thunk_target }
+                } else {
+                    FunctionKind::Code
+                };
+                (k, fi.name.clone())
+            } else {
+                let fallback = hint_name.unwrap_or_else(|| format!("sub_{addr:x}"));
+                (FunctionKind::Code, fallback)
+            }
+        };
+
+        {
+            let mut s = state.write();
+            s.current_function_addr = Some(addr);
+            s.current_function_kind = kind;
+            s.decompiled_code = None;
+            s.decompiled_nir  = None;
+            s.current_cfg     = None;
+            s.current_xref_callers.clear();
+            s.current_xref_callees.clear();
+            s.is_loading_xrefs = false;
+            s.is_decompiling  = true;
+            s.navigate_to(addr);
+            s.active_bottom_tab = BottomTab::Logs;
+            s.push_log(LogEntry::info(format!(
+                "Jumped to {resolved_name}  @  0x{addr:x}"
+            )));
+        }
+
+        let name_for_task = resolved_name;
+        spawn(async move {
+            run_decompile(state, binary, addr, name_for_task).await;
+        });
+    };
+
     rsx! {
         div { class: "xrefs-panel",
             // ── Callers ────────────────────────────────────────────────────
@@ -91,12 +137,18 @@ pub fn XrefsView() -> Element {
                 } else {
                     for (i, row) in callers.iter().enumerate() {
                         {
-                            let label = row.fn_name.as_deref().unwrap_or("unknown");
+                            let label = row.fn_name.clone()
+                                .unwrap_or_else(|| format!("sub_{:x}", row.from_addr));
                             let addr_str = format!("0x{:x}", row.from_addr);
-                            let kind = row.kind.as_str();
+                            let kind_str = row.kind.as_str();
+                            let jump_addr = row.from_addr;
+                            let jump_name = row.fn_name.clone();
                             rsx! {
-                                div { class: "xrefs-row", key: "{i}",
-                                    span { class: "xrefs-kind", "{kind}" }
+                                div {
+                                    class: "xrefs-row xrefs-row-clickable",
+                                    key: "{i}",
+                                    onclick: move |_| jump_to(jump_addr, jump_name.clone()),
+                                    span { class: "xrefs-kind", "{kind_str}" }
                                     span { class: "xrefs-addr", "{addr_str}" }
                                     span { class: "xrefs-name", "{label}" }
                                 }
@@ -118,14 +170,28 @@ pub fn XrefsView() -> Element {
                         {
                             let label = row.fn_name.as_deref()
                                 .or(row.symbol.as_deref())
-                                .unwrap_or("unknown");
+                                .map(str::to_string)
+                                .unwrap_or_else(|| "unknown".to_string());
                             let addr_str = row.to_addr
                                 .map(|a| format!("0x{:x}", a))
                                 .unwrap_or_else(|| "indirect".to_string());
-                            let kind = row.kind.as_str();
+                            let kind_str = row.kind.as_str();
+                            let jump_addr = row.to_addr;
+                            let jump_name = row.fn_name.clone().or(row.symbol.clone());
                             rsx! {
-                                div { class: "xrefs-row", key: "{i}",
-                                    span { class: "xrefs-kind", "{kind}" }
+                                div {
+                                    class: if jump_addr.is_some() {
+                                        "xrefs-row xrefs-row-clickable"
+                                    } else {
+                                        "xrefs-row"
+                                    },
+                                    key: "{i}",
+                                    onclick: move |_| {
+                                        if let Some(a) = jump_addr {
+                                            jump_to(a, jump_name.clone());
+                                        }
+                                    },
+                                    span { class: "xrefs-kind", "{kind_str}" }
                                     span { class: "xrefs-addr", "{addr_str}" }
                                     span { class: "xrefs-name", "{label}" }
                                 }
