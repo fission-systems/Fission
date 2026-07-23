@@ -1,0 +1,28 @@
+# Fission Sleigh — Build Resource Configuration
+#
+# This file declares compile-time resource dependencies for the fission-sleigh
+# crate. build.rs reads this config to locate resources before compilation.
+#
+# Resolution order (highest → lowest priority):
+#   1. env_var  — set explicitly (CI / cross-build / fission-web)
+#   2. workspace_relative — standard Fission monorepo layout
+#   3. Hard failure with a helpful error message
+#
+# Runtime resources (*.sla files) are NOT configured here.
+# See: src/compiler/discovery.rs → FISSION_SLEIGH_SPEC_DIR
+
+[resources.language_manifest]
+description      = "Ghidra language registry JSON — embedded at compile time"
+
+# Environment variable that sets the *sleigh-specs/* root directory.
+# Reuses the same variable as the runtime discovery path for consistency.
+# Value should be the path to the directory containing ghidra_language_manifest.json.
+env_var          = "FISSION_SLEIGH_SPEC_DIR"
+
+# Path within the env_var directory to the manifest file.
+env_subpath      = "ghidra_language_manifest.json"
+
+# Fallback: path relative to the Cargo workspace root (standard repo layout).
+# The workspace root is detected by walking up from CARGO_MANIFEST_DIR until
+# a Cargo.lock is found.
+workspace_relative = "utils/sleigh-specs/ghidra_language_manifest.json"

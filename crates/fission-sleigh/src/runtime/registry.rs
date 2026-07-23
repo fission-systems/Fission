@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::compiler::{EntrySpec, GhidraLanguageManifest, GhidraLanguageManifestEntry};
 use crate::runtime::{RuntimeEndian, RuntimeFrontendStatus};
 
+// Path resolved by build.rs — see build.toml for the resolution priority chain.
+// Override at build time by setting FISSION_SLEIGH_SPEC_DIR to the sleigh-specs/ dir.
 const GHIDRA_LANGUAGE_MANIFEST_JSON: &str =
-    include_str!("../../../../utils/sleigh-specs/ghidra_language_manifest.json");
+    include_str!(env!("FISSION_MANIFEST_JSON"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuntimeSupportLevel {
