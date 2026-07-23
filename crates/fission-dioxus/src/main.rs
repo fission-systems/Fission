@@ -157,7 +157,7 @@ fn App() -> Element {
                                     s.push_log(LogEntry::info(format!("Back -> {name}  @  0x{addr:x}")));
                                 }
                                 spawn(async move {
-                                    engine::run_nav_decompile(state, Some(binary), addr, name).await;
+                                    engine::run_nav_decompile(state, Some(binary), None, addr, name).await;
                                 });
                             }
                         }
@@ -186,7 +186,7 @@ fn App() -> Element {
                                     s.push_log(LogEntry::info(format!("Forward -> {name}  @  0x{addr:x}")));
                                 }
                                 spawn(async move {
-                                    engine::run_nav_decompile(state, Some(binary), addr, name).await;
+                                    engine::run_nav_decompile(state, Some(binary), None, addr, name).await;
                                 });
                             }
                         }

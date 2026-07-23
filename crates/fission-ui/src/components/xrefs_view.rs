@@ -23,13 +23,12 @@ pub fn XrefsView() -> Element {
         let Some(addr) = load_addr else {
             return;
         };
-        let binary = state.read().binary.clone();
+        let binary  = state.read().binary.clone();
+        let session = state.read().server_session_id.clone();
 
         {
             let s = state.read();
-            if s.is_loading_xrefs {
-                return;
-            }
+            if s.is_loading_xrefs { return; }
         }
         {
             let mut s = state.write();
@@ -39,7 +38,7 @@ pub fn XrefsView() -> Element {
         }
 
         spawn(async move {
-            let (callers, callees) = crate::engine::run_xrefs(binary, addr).await;
+            let (callers, callees) = crate::engine::run_xrefs(binary, session, addr).await;
 
             let nc = callers.len();
             let nk = callees.len();
@@ -112,8 +111,9 @@ pub fn XrefsView() -> Element {
         }
 
         let name_for_task = resolved_name;
+        let session = state.read().server_session_id.clone();
         spawn(async move {
-            run_decompile(state, binary, addr, name_for_task).await;
+            run_decompile(state, binary, session, addr, name_for_task).await;
         });
     };
 

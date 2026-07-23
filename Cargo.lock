@@ -2545,7 +2545,6 @@ name = "fission-cli"
 version = "0.1.6"
 dependencies = [
  "anyhow",
- "axum",
  "clap",
  "ctrlc",
  "fission-ai",
@@ -2556,6 +2555,7 @@ dependencies = [
  "fission-emulator",
  "fission-loader",
  "fission-script",
+ "fission-serve",
  "fission-sleigh",
  "fission-static",
  "fission-tui",
@@ -2568,7 +2568,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower-http",
  "tracing",
 ]
 
@@ -2829,6 +2828,25 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fission-serve"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "fission-decompiler",
+ "fission-loader",
+ "fission-static",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -8354,6 +8372,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

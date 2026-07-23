@@ -342,8 +342,9 @@ fn trigger_decompile(
             }
 
             // Use the shared helper from sidebar so CFG is also stored
+            let session = state.read().server_session_id.clone();
             spawn(crate::components::sidebar::run_decompile(
-                state, binary, addr, name,
+                state, binary, session, addr, name,
             ));
         }
     }

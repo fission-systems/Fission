@@ -176,19 +176,22 @@ pub fn Sidebar() -> Element {
                          (IAT target: {tgt})"
                     )));
                 }
-                spawn(async move { run_decompile(state, binary, addr, name).await });
+                let binary    = state.read().binary.clone();
+                let session   = state.read().server_session_id.clone();
+                spawn(async move { run_decompile(state, binary, session, addr, name).await });
             }
 
             FunctionKind::Code => {
                 let binary = state.read().binary.clone();
                 let name = entry.name.clone();
                 let addr = entry.addr;
+                let session = state.read().server_session_id.clone();
                 {
                     let mut s = state.write();
                     s.is_decompiling = true;
                     s.push_log(LogEntry::info(format!("Decompiling {name}  @  0x{addr:x}")));
                 }
-                spawn(async move { run_decompile(state, binary, addr, name).await });
+                spawn(async move { run_decompile(state, binary, session, addr, name).await });
             }
         }
     };
@@ -321,11 +324,12 @@ pub fn Sidebar() -> Element {
 pub async fn run_decompile(
     mut state: Signal<AppState>,
     binary: Option<Arc<fission_loader::loader::LoadedBinary>>,
+    session_id: Option<String>,
     addr: u64,
     name: String,
 ) {
     let result: Result<DecompileOutput, String> =
-        crate::engine::run_decompile(binary, addr, name).await;
+        crate::engine::run_decompile(binary, session_id, addr, name).await;
 
     match result {
         Ok(out) => {

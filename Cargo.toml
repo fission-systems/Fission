@@ -24,6 +24,7 @@ members = [
     "crates/fission-solver",
     "crates/fission-verify",
     "crates/fission-ui",
+    "crates/fission-serve",
     # fission-dioxus — Pure Rust desktop GUI (Dioxus); to be added when ready
 ]
 

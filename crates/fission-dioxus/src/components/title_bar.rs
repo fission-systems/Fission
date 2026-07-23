@@ -284,7 +284,7 @@ pub fn TitleBar() -> Element {
                                     }
                                     spawn(async move {
                                         crate::components::sidebar::run_decompile(
-                                            state, Some(binary), addr, name
+                                            state, Some(binary), None, addr, name
                                         ).await;
                                     });
                                 }
@@ -318,7 +318,7 @@ pub fn TitleBar() -> Element {
                                     }
                                     spawn(async move {
                                         crate::components::sidebar::run_decompile(
-                                            state, Some(binary), addr, name
+                                            state, Some(binary), None, addr, name
                                         ).await;
                                     });
                                 }

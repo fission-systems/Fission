@@ -55,6 +55,7 @@ pub enum ParsedInvocation {
     /// Local HTTP API server for fission-web.
     Serve {
         port: u16,
+        host: String,
     },
 }
 
@@ -171,9 +172,13 @@ enum CliCommand {
 /// Arguments for `fission_cli serve`
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
 pub struct ServeCliArgs {
-    /// TCP port to listen on (default: 7331)
+    /// TCP port to listen on
     #[arg(long, short, default_value_t = 7331)]
     pub port: u16,
+
+    /// IP address to bind (use 0.0.0.0 to accept remote connections)
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
 }
 
 /// Which verification tier(s) to run -- see `fission-verify`'s crate doc.
@@ -980,7 +985,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 }
                 CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
-                CliCommand::Serve(s) => return ParsedInvocation::Serve { port: s.port },
+                CliCommand::Serve(s) => return ParsedInvocation::Serve { port: s.port, host: s.host },
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };

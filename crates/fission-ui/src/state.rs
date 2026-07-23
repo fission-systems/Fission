@@ -81,10 +81,13 @@ pub struct AppState {
     pub functions:   Vec<FunctionInfo>,
 
     // ── Server (WASM mode) ───────────────────────────────────────────────────
-    /// URL of the local fission serve instance (default: http://localhost:7331).
+    /// URL of the fission-serve instance (default: http://localhost:7331).
     /// Only used when running as WASM in the browser.
-    pub server_url:       String,
-    pub server_connected: bool,
+    pub server_url:        String,
+    pub server_connected:  bool,
+    /// Session token returned by POST /api/binary.
+    /// All subsequent WASM API calls include this in the path.
+    pub server_session_id: Option<String>,
 
     // ── Current selection ────────────────────────────────────────────────────
     pub current_function_addr: Option<u64>,
@@ -155,8 +158,9 @@ impl AppState {
             binary_name: None,
             binary: None,
             functions: Vec::new(),
-            server_url: "http://localhost:7331".to_string(),
-            server_connected: false,
+            server_url:        "http://localhost:7331".to_string(),
+            server_connected:  false,
+            server_session_id: None,
             current_function_addr: None,
             current_function_kind: FunctionKind::Code,
             decompiled_code: None,

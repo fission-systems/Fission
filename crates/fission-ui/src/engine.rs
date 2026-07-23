@@ -17,10 +17,12 @@ use std::sync::Arc;
 
 /// Result of loading a binary.
 /// `binary` is `Some` on native, `None` on WASM (server holds the binary).
+/// `session_id` is `Some` on WASM (identifies the server-side session).
 pub struct LoadResult {
-    pub binary:    Option<Arc<LoadedBinary>>,
-    pub functions: Vec<FunctionInfo>,
-    pub summary:   String,
+    pub binary:     Option<Arc<LoadedBinary>>,
+    pub functions:  Vec<FunctionInfo>,
+    pub summary:    String,
+    pub session_id: Option<String>,
 }
 
 /// CFG edge classification for the GUI renderer.
@@ -214,7 +216,7 @@ mod native {
             functions.len(),
             binary.entry_point,
         );
-        Ok(LoadResult { binary: Some(Arc::new(binary)), functions, summary })
+        Ok(LoadResult { binary: Some(Arc::new(binary)), functions, summary, session_id: None })
     }
 
     pub fn decompile_blocking(
@@ -313,8 +315,9 @@ mod wasm_api {
 
     #[derive(Deserialize)]
     struct ApiUploadResponse {
-        fn_count: usize,
-        summary:  String,
+        session_id: String,   // UUID from fission-serve
+        fn_count:   usize,
+        summary:    String,
     }
 
     #[derive(Deserialize)]
@@ -375,8 +378,8 @@ mod wasm_api {
         let upload: ApiUploadResponse = resp.json().await
             .map_err(|e| format!("Parse upload response: {e:?}"))?;
 
-        // Now fetch function list
-        let fn_resp = Request::get(&format!("{base}/api/functions"))
+        // Fetch function list scoped to this session
+        let fn_resp = Request::get(&format!("{base}/api/functions/{}", upload.session_id))
             .send().await
             .map_err(|e| format!("Functions fetch failed: {e:?}"))?;
 
@@ -394,19 +397,22 @@ mod wasm_api {
         }).collect();
 
         Ok(LoadResult {
-            binary: None,   // server holds the binary
+            binary:     None,   // server holds the binary
             functions,
-            summary: upload.summary,
+            summary:    upload.summary,
+            session_id: Some(upload.session_id),
         })
     }
 
     pub async fn run_decompile(
         _binary: Option<Arc<LoadedBinary>>,   // unused on WASM
+        session_id: Option<String>,
         addr: u64,
         _name: String,
     ) -> Result<DecompileOutput, String> {
         let base = get_server_url();
-        let resp = Request::post(&format!("{base}/api/decompile/{addr:x}"))
+        let sid = session_id.ok_or("no active session — upload a binary first")?;
+        let resp = Request::post(&format!("{base}/api/decompile/{sid}/{addr:x}"))
             .send().await
             .map_err(|e| format!("Decompile request failed: {e}"))?;
         if !resp.ok() {
@@ -423,10 +429,12 @@ mod wasm_api {
 
     pub async fn run_xrefs(
         _binary: Option<Arc<LoadedBinary>>,
+        session_id: Option<String>,
         fn_addr: u64,
     ) -> (Vec<XrefRow>, Vec<XrefRow>) {
         let base = get_server_url();
-        let resp = Request::get(&format!("{base}/api/xrefs/{fn_addr:x}"))
+        let Some(sid) = session_id else { return (vec![], vec![]); };
+        let resp = Request::get(&format!("{base}/api/xrefs/{sid}/{fn_addr:x}"))
             .send().await;
         match resp {
             Ok(r) if r.ok() => {
@@ -465,6 +473,7 @@ pub async fn run_load(data: Vec<u8>, name: String) -> Result<LoadResult, String>
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn run_decompile(
     binary: Option<Arc<LoadedBinary>>,
+    _session_id: Option<String>,
     addr: u64,
     name: String,
 ) -> Result<DecompileOutput, String> {
@@ -477,15 +486,17 @@ pub async fn run_decompile(
 #[cfg(target_arch = "wasm32")]
 pub async fn run_decompile(
     binary: Option<Arc<LoadedBinary>>,
+    session_id: Option<String>,
     addr: u64,
     name: String,
 ) -> Result<DecompileOutput, String> {
-    wasm_api::run_decompile(binary, addr, name).await
+    wasm_api::run_decompile(binary, session_id, addr, name).await
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn run_xrefs(
     binary: Option<Arc<LoadedBinary>>,
+    _session_id: Option<String>,
     fn_addr: u64,
 ) -> (Vec<XrefRow>, Vec<XrefRow>) {
     let Some(bin) = binary else { return (vec![], vec![]); };
@@ -497,9 +508,10 @@ pub async fn run_xrefs(
 #[cfg(target_arch = "wasm32")]
 pub async fn run_xrefs(
     binary: Option<Arc<LoadedBinary>>,
+    session_id: Option<String>,
     fn_addr: u64,
 ) -> (Vec<XrefRow>, Vec<XrefRow>) {
-    wasm_api::run_xrefs(binary, fn_addr).await
+    wasm_api::run_xrefs(binary, session_id, fn_addr).await
 }
 
 /// Thin helper for keyboard nav — delegates to sidebar's decompile path.
@@ -507,18 +519,20 @@ pub async fn run_xrefs(
 pub async fn run_nav_decompile(
     state: dioxus::prelude::Signal<crate::state::AppState>,
     binary: Option<Arc<LoadedBinary>>,
+    session_id: Option<String>,
     addr: u64,
     name: String,
 ) {
-    crate::components::sidebar::run_decompile(state, binary, addr, name).await;
+    crate::components::sidebar::run_decompile(state, binary, session_id, addr, name).await;
 }
 
 #[cfg(target_arch = "wasm32")]
 pub async fn run_nav_decompile(
     state: dioxus::prelude::Signal<crate::state::AppState>,
     _binary: Option<Arc<LoadedBinary>>,
+    session_id: Option<String>,
     addr: u64,
     name: String,
 ) {
-    crate::components::sidebar::run_decompile(state, None, addr, name).await;
+    crate::components::sidebar::run_decompile(state, None, session_id, addr, name).await;
 }

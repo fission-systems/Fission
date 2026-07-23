@@ -47,8 +47,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 mimalloc = { version = "0.1", optional = true }
 jemallocator = { version = "0.5", optional = true }
 ctrlc = "3.5.2"
-axum = { version = "0.8", features = ["multipart"] }
-tower-http = { version = "0.6", features = ["cors"] }
+fission-serve = { path = "../fission-serve" }
 
 [[bin]]
 name = "fission_cli"
