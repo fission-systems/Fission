@@ -202,7 +202,7 @@ pub struct BatchResult {
 mod native {
     use super::*;
     use fission_decompiler::{RustSleighDecompileConfig, decompile_with_rust_sleigh_with_facts};
-    use fission_static::analysis::decomp::facts::FactStore;
+    pub use fission_static::analysis::decomp::facts::FactStore;
     use fission_static::analysis::xref_index::{
         XrefKind, build_xref_index, resolve_enclosing_function,
     };
@@ -319,20 +319,47 @@ mod native {
         (callers, callees)
     }
 
-    pub fn batch_decompile_one(binary: &Arc<LoadedBinary>, addr: u64, name: &str) -> BatchResult {
-        match decompile_blocking(binary, addr, name) {
+    pub fn build_facts_blocking(binary: &LoadedBinary) -> FactStore {
+        FactStore::from_binary(binary)
+    }
+
+    pub fn decompile_blocking_with_facts(
+        binary: &LoadedBinary, facts: &FactStore, addr: u64, name: &str,
+    ) -> Result<DecompileOutput, String> {
+        let mut config = RustSleighDecompileConfig::cli_defaults();
+        config.nir_timeout_ms = Some(10_000);
+        let result = decompile_with_rust_sleigh_with_facts(
+            binary, facts, addr, name, &config, None, None,
+        ).map_err(|e| e.to_string())?;
+        let cfg = CfgGraphData::from_evidence(&result.evidence);
+        Ok(DecompileOutput {
+            code: result.code, code_nir: result.code_nir,
+            fell_back: result.fell_back, fallback_reason: result.fallback_reason, cfg,
+        })
+    }
+
+    pub fn batch_decompile_one_with_facts(
+        binary: &LoadedBinary, facts: &FactStore, addr: u64, name: &str,
+    ) -> BatchResult {
+        match decompile_blocking_with_facts(binary, facts, addr, name) {
             Ok(out) => BatchResult { addr, name: name.to_string(), ok: true,
                                      fell_back: out.fell_back, error: out.fallback_reason },
             Err(e)  => BatchResult { addr, name: name.to_string(), ok: false,
                                      fell_back: false, error: Some(e) },
         }
     }
+
+    pub fn batch_decompile_one(binary: &Arc<LoadedBinary>, addr: u64, name: &str) -> BatchResult {
+        let facts = build_facts_blocking(binary.as_ref());
+        batch_decompile_one_with_facts(binary.as_ref(), &facts, addr, name)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{
-    batch_decompile_one, decompile_blocking, load_binary_from_bytes_blocking,
-    xrefs_for_function_blocking,
+    batch_decompile_one, batch_decompile_one_with_facts, build_facts_blocking,
+    decompile_blocking, decompile_blocking_with_facts, load_binary_from_bytes_blocking,
+    xrefs_for_function_blocking, FactStore,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

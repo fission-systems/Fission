@@ -1,4 +1,7 @@
-use crate::engine::{batch_decompile_one, load_binary_blocking, DecompileOutput, LoadResult};
+use crate::engine::{
+    batch_decompile_one, batch_decompile_one_with_facts, build_facts_blocking,
+    load_binary_blocking, DecompileOutput, LoadResult,
+};
 use crate::state::{use_app_state, LogEntry};
 use dioxus::prelude::*;
 use std::sync::Arc;
@@ -96,9 +99,24 @@ pub fn TitleBar() -> Element {
                 s.batch_total = total;
                 s.batch_cancel = false;
                 s.push_log(LogEntry::info(format!(
-                    "Batch decompile started: {total} functions"
+                    "Batch decompile started: {total} functions (prebuilding facts…)"
                 )));
             }
+
+            // Prebuild FactStore ONCE so we don't rebuild static facts for every function
+            let bin_for_facts = Arc::clone(&binary);
+            let facts = tokio::task::spawn_blocking(move || {
+                Arc::new(build_facts_blocking(bin_for_facts.as_ref()))
+            })
+            .await;
+
+            let Ok(facts) = facts else {
+                state.write().is_batch_running = false;
+                state.write().push_log(LogEntry::error("Failed to build static facts for batch."));
+                continue;
+            };
+
+            state.write().push_log(LogEntry::info("Static facts built. Running decompile pipeline…"));
 
             let mut ok_count = 0usize;
             let mut err_count = 0usize;
@@ -114,12 +132,13 @@ pub fn TitleBar() -> Element {
                 }
 
                 let bin_clone = Arc::clone(&binary);
+                let facts_clone = Arc::clone(&facts);
                 let addr = fi.address;
                 let name_clone = fi.name.clone();
 
                 // Decompile on a blocking thread so the event loop stays live
                 let result = tokio::task::spawn_blocking(move || {
-                    batch_decompile_one(&bin_clone, addr, &name_clone)
+                    batch_decompile_one_with_facts(&bin_clone, &facts_clone, addr, &name_clone)
                 })
                 .await;
 
