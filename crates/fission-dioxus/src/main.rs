@@ -29,12 +29,13 @@ fn main() {
                 .with_min_inner_size(dioxus::desktop::LogicalSize::new(900.0_f64, 600.0_f64)),
         )
         .with_custom_head(
-            concat!(
-                r#"<link rel="preconnect" href="https://fonts.googleapis.com">"#,
-                r#"<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>"#,
-                r#"<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">"#,
+            format!(
+                r#"<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>{}</style>"#,
+                include_str!("../assets/style.css")
             )
-            .to_string(),
         );
 
     LaunchBuilder::desktop().with_cfg(cfg).launch(App);

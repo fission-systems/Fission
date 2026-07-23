@@ -1,0 +1,13 @@
+[application]
+name = "fission-dioxus"
+default_platform = "desktop"
+out_dir = "dist"
+
+[web.app]
+title = "Fission"
+
+[web.watcher]
+reload_html = true
+
+[desktop]
+out_dir = "dist"

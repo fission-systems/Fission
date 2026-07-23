@@ -54,3 +54,13 @@ strip = false
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
