@@ -26,7 +26,7 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unicode-width = "0.2"
-pulldown-cmark = { version = "0.12", default-features = false }
+pulldown-cmark = { version = "0.13", default-features = false }
 dirs = "6"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 chrono = "0.4.45"
