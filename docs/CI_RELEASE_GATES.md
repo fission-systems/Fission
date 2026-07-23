@@ -79,11 +79,11 @@ Official benchmark bake (after release assets exist):
 
 ```bash
 # Preferred: bake GHCR then auto-chain official Benchmark & Deploy
-gh workflow run "Publish Images" --repo sjkim1127/fission-benchmark \
+gh workflow run "Publish Images" --repo fission-systems/fission-benchmark \
   -f services=fission -f fission_version=v0.1.4
 
 # Or repository_dispatch (Publish Images only; chains benchmark itself):
-gh api repos/sjkim1127/fission-benchmark/dispatches --input - <<'EOF'
+gh api repos/fission-systems/fission-benchmark/dispatches --input - <<'EOF'
 {
   "event_type": "fission-release",
   "client_payload": { "fission_version": "v0.1.4" }

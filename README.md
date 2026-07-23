@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/sjkim1127/Fission/main/image/logo-github.png" alt="Fission - reverse engineering workspace" width="760" />
 
-[![CI](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml/badge.svg)](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml)
+[![CI](https://github.com/fission-systems/Fission/actions/workflows/ci.yml/badge.svg)](https://github.com/fission-systems/Fission/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
@@ -73,7 +73,7 @@ Fission should be treated as a system with strict ownership boundaries. If a sem
 ### Clone
 
 ```bash
-git clone https://github.com/sjkim1127/Fission.git
+git clone https://github.com/fission-systems/Fission.git
 cd Fission
 ```
 
@@ -95,7 +95,7 @@ The Rust workspace can build without every large resource, but real decompilatio
 ```bash
 mkdir -p utils
 curl -L --fail --show-error \
-  "https://github.com/sjkim1127/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
+  "https://github.com/fission-systems/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
   -o /tmp/fission-utils.tar.gz
 tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1
 ```
@@ -402,7 +402,7 @@ Fission keeps large or operationally specific data out of git and ships it as a 
 ```bash
 mkdir -p utils
 curl -L --fail --show-error \
-  "https://github.com/sjkim1127/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
+  "https://github.com/fission-systems/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
   -o /tmp/fission-utils.tar.gz
 tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1
 fission_cli resources status
@@ -952,7 +952,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```bash
 mkdir -p utils
 curl -L --fail --show-error \
-  "https://github.com/sjkim1127/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
+  "https://github.com/fission-systems/Fission/releases/download/assets-v1/fission-utils.tar.gz" \
   -o /tmp/fission-utils.tar.gz
 tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1
 fission_cli resources status

@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Fission Dev Team"]
 license = "AGPL-3.0-or-later"
 description = "Interactive TUI chat interface for Fission AI"
-repository = "https://github.com/sjkim1127/Fission"
+repository = "https://github.com/fission-systems/Fission"
 
 [[bin]]
 name = "fission_tui"

@@ -187,7 +187,7 @@ Do **not** auto-tag every `main` push. See [`docs/CI_RELEASE_GATES.md`](../docs/
 ```text
 Actions → "Release Tag (CI green)" → tag=v0.2.0 ref=main
 # → verifies L0+L1, runs L2 E2E, pushes tag → CD builds
-# → Release page: https://github.com/sjkim1127/Fission/releases
+# → Release page: https://github.com/fission-systems/Fission/releases
 # → Write release notes (web UI)
 ```
 
@@ -355,7 +355,7 @@ gh run view RUN_ID --log
 ## 💡 Feedback & Improvements
 
 Suggestions for CI/CD pipeline improvements:
-1. [Create GitHub Issue](https://github.com/sjkim1127/Fission/issues)
+1. [Create GitHub Issue](https://github.com/fission-systems/Fission/issues)
 2. Label: `infrastructure`, `ci-cd`
 3. Update this guide alongside changes
 

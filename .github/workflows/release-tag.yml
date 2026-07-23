@@ -197,13 +197,13 @@ jobs:
           if [[ -z "${GH_TOKEN:-}" ]]; then
             echo "FISSION_BENCHMARK_DISPATCH_TOKEN not set — skip auto benchmark."
             echo "Operator commands after CD assets are live:"
-            echo "  gh workflow run \"Publish Images\" --repo sjkim1127/fission-benchmark \\"
+            echo "  gh workflow run \"Publish Images\" --repo fission-systems/fission-benchmark \\"
             echo "    -f services=fission -f fission_version=${TAG}"
             echo "  # Publish Images chains official Benchmark & Deploy via gh CLI."
             exit 0
           fi
           echo "Dispatching fission-benchmark Publish Images for ${TAG}"
           gh workflow run "Publish Images" \
-            --repo sjkim1127/fission-benchmark \
+            --repo fission-systems/fission-benchmark \
             -f "services=fission" \
             -f "fission_version=${TAG}"

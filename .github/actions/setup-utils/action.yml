@@ -22,7 +22,7 @@ runs:
         echo "Cache miss — downloading fission-utils.tar.gz from release ${{ inputs.assets_tag }}"
         mkdir -p utils
         curl -L --fail --show-error \
-          "https://github.com/sjkim1127/Fission/releases/download/${{ inputs.assets_tag }}/fission-utils.tar.gz" \
+          "https://github.com/fission-systems/Fission/releases/download/${{ inputs.assets_tag }}/fission-utils.tar.gz" \
           -o /tmp/fission-utils.tar.gz
         echo "Unpacking..."
         tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1

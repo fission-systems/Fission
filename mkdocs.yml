@@ -1,7 +1,7 @@
 site_name: Fission
 site_description: A cross-platform, Rust-powered reverse engineering and decompilation framework.
 site_url: https://sjkim1127.github.io/Fission/
-repo_url: https://github.com/sjkim1127/Fission
+repo_url: https://github.com/fission-systems/Fission
 repo_name: sjkim1127/Fission
 
 theme:

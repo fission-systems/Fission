@@ -156,7 +156,7 @@ cargo install cargo-audit  # Security audits
 ### Clone and Build
 
 ```bash
-git clone https://github.com/sjkim1127/Fission.git
+git clone https://github.com/fission-systems/Fission.git
 cd Fission
 
 # Build Fission
