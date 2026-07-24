@@ -463,6 +463,82 @@ pub fn Sidebar() -> Element {
 
 // ── Shared async decompile helper ────────────────────────────────────────────
 
+/// Native path: reads cached_facts from AppState, uses decompile_blocking_with_facts,
+/// and stores the (re-)used FactStore back into AppState for future calls.
+/// First call: builds FactStore once (seconds). Subsequent calls: reuse (milliseconds).
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn run_decompile(
+    mut state: Signal<AppState>,
+    binary: Option<Arc<fission_loader::loader::LoadedBinary>>,
+    _session_id: Option<String>,
+    addr: u64,
+    name: String,
+) {
+    use crate::engine::{build_facts_blocking, decompile_blocking_with_facts, FactStore};
+
+    // Grab the cached FactStore (cheap Arc clone) before acquiring write lock
+    let cached_facts = state.read().cached_facts.clone();
+
+    let Some(binary) = binary else {
+        state.write().is_decompiling = false;
+        state.write().push_log(LogEntry::error("No binary loaded"));
+        return;
+    };
+
+    let name_clone = name.clone();
+    let result: Result<(crate::engine::DecompileOutput, Arc<FactStore>), String> =
+        tokio::task::spawn_blocking(move || {
+            let facts: Arc<FactStore> = cached_facts.unwrap_or_else(|| {
+                // First call: build FactStore from binary (expensive, once)
+                Arc::new(build_facts_blocking(binary.as_ref()))
+            });
+            let out = decompile_blocking_with_facts(
+                binary.as_ref(), &facts, addr, &name_clone,
+            )?;
+            Ok((out, facts))
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+
+    match result {
+        Ok((out, facts)) => {
+            let bytes   = out.code.len();
+            let fell    = out.fell_back;
+            let reason  = out.fallback_reason.clone();
+            let has_cfg = out.cfg.is_some();
+            let mut s   = state.write();
+            s.decompiled_code = Some(out.code);
+            s.decompiled_nir  = out.code_nir;
+            s.current_cfg     = out.cfg;
+            s.is_decompiling  = false;
+            // Store the FactStore for subsequent calls (O(1) Arc clone)
+            s.cached_facts    = Some(facts);
+            if fell {
+                s.push_log(LogEntry::warn(format!(
+                    "Fell back \u{2014} {}",
+                    reason.as_deref().unwrap_or("unknown")
+                )));
+            } else {
+                s.push_log(LogEntry::info(format!("Complete  ({bytes} bytes)")));
+            }
+            if has_cfg {
+                s.push_log(LogEntry::info(
+                    "CFG captured \u{2014} view in the CFG tab.".to_string(),
+                ));
+            }
+        }
+        Err(e) => {
+            let mut s = state.write();
+            s.is_decompiling = false;
+            s.current_cfg = None;
+            s.push_log(LogEntry::error(format!("Decompile failed: {e}")));
+        }
+    }
+}
+
+/// WASM path: delegates to HTTP server, no local FactStore cache.
+#[cfg(target_arch = "wasm32")]
 pub async fn run_decompile(
     mut state: Signal<AppState>,
     binary: Option<Arc<fission_loader::loader::LoadedBinary>>,
@@ -470,20 +546,20 @@ pub async fn run_decompile(
     addr: u64,
     name: String,
 ) {
-    let result: Result<DecompileOutput, String> =
+    let result: Result<crate::engine::DecompileOutput, String> =
         crate::engine::run_decompile(binary, session_id, addr, name).await;
 
     match result {
         Ok(out) => {
-            let bytes = out.code.len();
-            let fell = out.fell_back;
-            let reason = out.fallback_reason.clone();
+            let bytes   = out.code.len();
+            let fell    = out.fell_back;
+            let reason  = out.fallback_reason.clone();
             let has_cfg = out.cfg.is_some();
-            let mut s = state.write();
+            let mut s   = state.write();
             s.decompiled_code = Some(out.code);
-            s.decompiled_nir = out.code_nir;
-            s.current_cfg = out.cfg;
-            s.is_decompiling = false;
+            s.decompiled_nir  = out.code_nir;
+            s.current_cfg     = out.cfg;
+            s.is_decompiling  = false;
             if fell {
                 s.push_log(LogEntry::warn(format!(
                     "Fell back \u{2014} {}",

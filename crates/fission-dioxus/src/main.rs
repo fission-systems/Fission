@@ -268,6 +268,8 @@ fn App() -> Element {
                                 s.current_cfg           = None;
                                 s.sidebar_search        = String::new();
                                 s.rename_map.clear();
+                                // Invalidate FactStore cache — new binary needs fresh analysis
+                                s.cached_facts          = None;
                                 s.is_loading_binary     = false;
                                 s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                                 s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));

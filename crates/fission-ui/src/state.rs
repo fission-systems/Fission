@@ -177,6 +177,12 @@ pub struct AppState {
     pub is_palette_open: bool,
     pub palette_query: String,
     pub palette_focused: usize,
+
+    // ── Decompile cache (native only) ────────────────────────────────────────
+    /// Pre-built FactStore for the current binary. Populated on load, reused
+    /// per decompile call to avoid rebuilding on every function click.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub cached_facts: Option<Arc<crate::engine::FactStore>>,
 }
 
 impl Default for AppState {
@@ -227,6 +233,8 @@ impl AppState {
             is_palette_open: false,
             palette_query: String::new(),
             palette_focused: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            cached_facts: None,
         }
     }
 
