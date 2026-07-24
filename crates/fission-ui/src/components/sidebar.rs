@@ -117,9 +117,14 @@ pub fn Sidebar() -> Element {
         // Close any open rename
         rename_addr.set(None);
 
-        let kind = if entry.is_imp && !entry.is_thunk {
+        // Import thunks (is_imp=true, is_thunk=true) are IAT stubs — JMP [IAT].
+        // They produce self-recursive pseudocode if decompiled, so treat them
+        // exactly like plain imports: show the stub comment, skip decompile.
+        let kind = if entry.is_imp {
+            // Covers both pure imports (is_thunk=false) and import thunks (is_thunk=true)
             FunctionKind::Import { library: entry.lib.clone() }
         } else if entry.is_thunk {
+            // Non-import thunks (e.g. vtable thunks, tail-call thunks) — still try to decompile
             FunctionKind::Thunk { target: entry.thunk_t }
         } else {
             FunctionKind::Code
@@ -140,21 +145,37 @@ pub fn Sidebar() -> Element {
 
         match kind {
             FunctionKind::Import { library } => {
-                let lib_str = library.as_deref().unwrap_or("unknown");
+                let lib_str   = library.as_deref().unwrap_or("unknown");
+                let thunk_t   = entry.thunk_t;
+                let is_thunk  = entry.is_thunk;
+                let kind_tag  = if is_thunk { "Import thunk (IAT stub)" } else { "Import stub" };
+                let thunk_line = thunk_t
+                    .map(|t| format!("\n *  IAT target: 0x{t:x}"))
+                    .unwrap_or_default();
                 let stub = format!(
-                    "/* Import stub — no decompilable body.\n\
+                    "/* {kind_tag} — no decompilable body.\n\
                      *\n\
                      *  Symbol  : {}\n\
                      *  Address : 0x{:016x}\n\
-                     *  Library : {lib_str}\n\
+                     *  Library : {lib_str}{thunk_line}\n\
+                     *\n\
+                     *  This is a JMP [IAT] thunk. The real implementation\n\
+                     *  lives in the imported DLL, not in this binary.\n\
                      */",
                     entry.name, entry.addr,
                 );
                 let mut s = state.write();
                 s.decompiled_code = Some(stub);
-                s.push_log(LogEntry::info(format!(
-                    "Import stub: {}  (from {lib_str})", entry.name
-                )));
+                if is_thunk {
+                    let tgt_str = thunk_t.map(|t| format!(" → 0x{t:x}")).unwrap_or_default();
+                    s.push_log(LogEntry::info(format!(
+                        "Import thunk: {}{tgt_str}  (from {lib_str})", entry.name
+                    )));
+                } else {
+                    s.push_log(LogEntry::info(format!(
+                        "Import stub: {}  (from {lib_str})", entry.name
+                    )));
+                }
             }
             FunctionKind::Thunk { target } => {
                 let name = entry.name.clone();
