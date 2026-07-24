@@ -4,17 +4,17 @@ use dioxus::prelude::*;
 // ── Find-bar match highlight helper ─────────────────────────────────────────
 
 /// Wrap occurrences of `needle` in `<mark class="find-match">…</mark>`.
-/// Input is already HTML-escaped code, so we search on the raw string.
-/// Returns the string unchanged if needle is empty.
-fn apply_find_highlights(html: &str, needle: &str) -> String {
+/// Returns `(highlighted_html, match_count)`.
+fn apply_find_highlights(html: &str, needle: &str) -> (String, usize) {
     if needle.is_empty() {
-        return html.to_string();
+        return (html.to_string(), 0);
     }
     let lower_html = html.to_lowercase();
     let lower_needle = needle.to_lowercase();
     let nlen = lower_needle.len();
     let mut out = String::with_capacity(html.len() + 64);
     let mut pos = 0;
+    let mut count = 0usize;
     while let Some(idx) = lower_html[pos..].find(&lower_needle) {
         let abs = pos + idx;
         out.push_str(&html[pos..abs]);
@@ -22,9 +22,10 @@ fn apply_find_highlights(html: &str, needle: &str) -> String {
         out.push_str(&html[abs..abs + nlen]);
         out.push_str("</mark>");
         pos = abs + nlen;
+        count += 1;
     }
     out.push_str(&html[pos..]);
-    out
+    (out, count)
 }
 
 // ── SVG icons ────────────────────────────────────────────────────────────────
@@ -219,6 +220,12 @@ fn highlight_line(line: &str) -> String {
 
             if cls.is_empty() {
                 out.push_str(&html_escape(tok));
+            } else if cls == "tok-addr" {
+                // tok-addr: emit data-addr so JS-free Dioxus onClick can read it
+                let addr_hex = &tok[4..]; // strip "sub_"
+                out.push_str(&format!("<span class=\"{cls}\" data-addr=\"{addr_hex}\">"));
+                out.push_str(&html_escape(tok));
+                out.push_str("</span>");
             } else {
                 out.push_str(&format!("<span class=\"{cls}\">"));
                 out.push_str(&html_escape(tok));
@@ -306,7 +313,6 @@ pub fn Editor() -> Element {
     let find_open     = state.read().find_bar_open;
     let find_query    = state.read().find_query.clone();
 
-    // Kind badge
     let kind_badge: Option<(&'static str, &'static str)> = match &fn_kind {
         FunctionKind::Import { .. } => Some(("kind-badge-imp",   "IMPORT STUB")),
         FunctionKind::Thunk { .. }  => Some(("kind-badge-thunk", "THUNK")),
@@ -342,7 +348,7 @@ pub fn Editor() -> Element {
                     } else {
                         let (gutter, raw_highlighted) = render_with_lines(&code);
                         // Apply find-bar highlights on top of syntax highlighting
-                        let highlighted = apply_find_highlights(&raw_highlighted, &find_query);
+                        let (highlighted, _match_count) = apply_find_highlights(&raw_highlighted, &find_query);
                         rsx! {
                             if is_thunk {
                                 div { class: "kind-notice kind-notice-thunk",
@@ -393,13 +399,11 @@ pub fn Editor() -> Element {
             }
             EditorTab::Hex => {
                 // Prefer the current function's byte range; fall back to file header.
-                let dump = {
+                let hex_info: Option<(u64, u64, String)> = {
                     let s = state.read();
                     if let (Some(binary), Some(fn_addr)) = (&s.binary, s.current_function_addr) {
-                        // Find function in the list to get its size
                         let fn_info = s.functions.iter().find(|f| f.address == fn_addr);
                         if let Some(fi) = fn_info {
-                            // Convert VA to file offset via sections
                             let maybe_fo = binary.sections.iter().find_map(|sec| {
                                 if fn_addr >= sec.virtual_address
                                     && fn_addr < sec.virtual_address + sec.virtual_size
@@ -415,30 +419,36 @@ pub fn Editor() -> Element {
                                 let sz = if fi.size > 0 { fi.size as usize } else { 256 };
                                 let end = (fo + sz).min(binary.data.as_slice().len());
                                 if fo < binary.data.as_slice().len() {
-                                    Some((fn_addr, hex_dump(&binary.data.as_slice()[fo..end], sz)))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
+                                    Some((fn_addr, sz as u64, hex_dump(&binary.data.as_slice()[fo..end], sz)))
+                                } else { None }
+                            } else { None }
+                        } else { None }
+                    } else { None }
                     .or_else(|| {
-                        s.binary.as_ref().map(|b| (0u64, hex_dump(b.data.as_slice(), 4096)))
+                        s.binary.as_ref().map(|b| (0u64, 4096u64, hex_dump(b.data.as_slice(), 4096)))
                     })
                 };
-                if let Some((_base_va, hex)) = dump {
+                if let Some((base_va, sz_bytes, hex)) = hex_info {
                     let line_count = hex.lines().count();
                     let gutter_str: String = (1..=line_count)
                         .map(|n| n.to_string())
                         .collect::<Vec<_>>()
                         .join("\n");
+                    let fn_label = {
+                        let s = state.read();
+                        if let Some(addr) = s.current_function_addr {
+                            let name = s.display_name(addr);
+                            if base_va == 0 && s.current_function_addr.is_none() {
+                                format!("File header  |  {sz_bytes} bytes")
+                            } else {
+                                format!("{name}  |  VA 0x{base_va:x}  |  {sz_bytes} bytes")
+                            }
+                        } else {
+                            format!("File header  |  {sz_bytes} bytes")
+                        }
+                    };
                     rsx! {
+                        div { class: "hex-info-banner", "{fn_label}" }
                         div { class: "code-layout hex-layout",
                             pre {
                                 class: "line-gutter",
@@ -523,8 +533,19 @@ pub fn Editor() -> Element {
                         },
                     }
                     if !find_query.is_empty() {
-                        span { class: "find-bar-hint",
-                            "Escape to close"
+                        // Compute match count for display
+                        {
+                            let code_for_count = state.read().editor_code().map(str::to_string);
+                            let count = if let Some(code) = code_for_count {
+                                let (_, raw) = render_with_lines(&code);
+                                let (_, n) = apply_find_highlights(&raw, &find_query);
+                                n
+                            } else { 0 };
+                            rsx! {
+                                span { class: "find-match-count",
+                                    if count == 0 { "No matches" } else { "{count} matches" }
+                                }
+                            }
                         }
                     }
                     button {

@@ -11,11 +11,7 @@ pub fn BottomPanel() -> Element {
     let active_tab = state.read().active_bottom_tab.clone();
 
     let tab_cls = |t: &BottomTab| -> &'static str {
-        if *t == active_tab {
-            "bottom-tab is-active"
-        } else {
-            "bottom-tab"
-        }
+        if *t == active_tab { "bottom-tab is-active" } else { "bottom-tab" }
     };
 
     rsx! {
@@ -38,10 +34,13 @@ pub fn BottomPanel() -> Element {
                     "Xrefs"
                 }
                 div { class: "tab-spacer" }
-                div {
-                    class: "tab-action",
-                    onclick: move |_| state.write().log_entries.clear(),
-                    "Clear"
+                // Clear is only meaningful for Logs tab
+                if active_tab == BottomTab::Logs {
+                    div {
+                        class: "tab-action",
+                        onclick: move |_| state.write().log_entries.clear(),
+                        "Clear"
+                    }
                 }
             }
 
@@ -68,6 +67,8 @@ pub fn BottomPanel() -> Element {
                                         }
                                     }
                                 }
+                                // Anchor div: CSS scroll-snap scrolls here automatically
+                                div { id: "log-bottom", class: "log-scroll-anchor" }
                             }
                         }
                     }
