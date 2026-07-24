@@ -257,22 +257,46 @@ fn App() -> Element {
                             Ok(load) => {
                                 let summary  = load.summary.clone();
                                 let fn_count = load.functions.len();
-                                let mut s = state.write();
-                                s.binary_name           = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
-                                s.binary                = load.binary.clone();
-                                s.functions             = load.functions;
-                                s.strings               = load.strings;
-                                s.current_function_addr = None;
-                                s.decompiled_code       = None;
-                                s.decompiled_nir        = None;
-                                s.current_cfg           = None;
-                                s.sidebar_search        = String::new();
-                                s.rename_map.clear();
-                                // Invalidate FactStore cache — new binary needs fresh analysis
-                                s.cached_facts          = None;
-                                s.is_loading_binary     = false;
-                                s.push_log(LogEntry::info(format!("Loaded — {summary}")));
-                                s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                                let binary_arc = load.binary.clone();
+                                {
+                                    let mut s = state.write();
+                                    s.binary_name           = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
+                                    s.binary                = load.binary.clone();
+                                    s.functions             = load.functions;
+                                    s.strings               = load.strings;
+                                    s.current_function_addr = None;
+                                    s.decompiled_code       = None;
+                                    s.decompiled_nir        = None;
+                                    s.current_cfg           = None;
+                                    s.sidebar_search        = String::new();
+                                    s.rename_map.clear();
+                                    // Invalidate FactStore cache — new binary needs fresh analysis
+                                    s.cached_facts          = None;
+                                    s.is_loading_binary     = false;
+                                    s.push_log(LogEntry::info(format!("Loaded — {summary}")));
+                                    s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                                }
+                                // ── Eager FactStore preload ────────────────────
+                                // Build FactStore in background immediately after
+                                // load so the first function click is instant.
+                                if let Some(bin) = binary_arc {
+                                    let mut state2 = state;
+                                    spawn(async move {
+                                        let facts = tokio::task::spawn_blocking(move || {
+                                            engine::build_facts_blocking(bin.as_ref())
+                                        })
+                                        .await;
+                                        if let Ok(f) = facts {
+                                            let mut s = state2.write();
+                                            if s.cached_facts.is_none() {
+                                                s.cached_facts = Some(std::sync::Arc::new(f));
+                                                s.push_log(LogEntry::info(
+                                                    "Analysis ready — first decompile will be instant.".to_string(),
+                                                ));
+                                            }
+                                        }
+                                    });
+                                }
                             }
                             Err(e) => {
                                 let mut s = state.write();

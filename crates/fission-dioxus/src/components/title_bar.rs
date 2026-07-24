@@ -223,6 +223,8 @@ pub fn TitleBar() -> Element {
                 Ok(load) => {
                     let summary = load.summary.clone();
                     let fn_count = load.functions.len();
+                    // Grab Arc<LoadedBinary> before taking the write lock
+                    let binary_arc = load.binary.clone();
                     {
                         let mut s = state.write();
                         s.binary_name = Some(
@@ -244,6 +246,29 @@ pub fn TitleBar() -> Element {
                         s.is_loading_binary = false;
                         s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                         s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                    }
+                    // ── Eager FactStore preload ────────────────────────────────
+                    // Build FactStore in background immediately after load so
+                    // the first function click does not stall.
+                    if let Some(bin) = binary_arc {
+                        let mut state2 = state;
+                        spawn(async move {
+                            let facts = tokio::task::spawn_blocking(move || {
+                                fission_ui::engine::build_facts_blocking(bin.as_ref())
+                            })
+                            .await;
+                            if let Ok(f) = facts {
+                                let mut s = state2.write();
+                                // Only store if no one else already wrote a cache
+                                // (e.g. user clicked a function during the build)
+                                if s.cached_facts.is_none() {
+                                    s.cached_facts = Some(std::sync::Arc::new(f));
+                                    s.push_log(LogEntry::info(
+                                        "Analysis ready — first decompile will be instant.".to_string(),
+                                    ));
+                                }
+                            }
+                        });
                     }
                 }
                 Err(e) => {
