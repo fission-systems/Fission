@@ -901,3 +901,59 @@ mark.find-match { background: rgba(255,210,80,0.25); color: inherit; border-radi
 }
 
 .batch-cancel { color: var(--err) !important; }
+
+/* ─── TITLE BAR NAV BUTTONS ─── */
+.nav-arrows {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+  border: 1px solid transparent;
+}
+
+.nav-btn:hover {
+  color: var(--ink-0);
+  background: var(--sf-5);
+  border-color: var(--bdr-default);
+}
+
+.nav-btn.disabled {
+  color: var(--ink-4);
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ─── FIND BAR INPUT (alias for .find-input) ─── */
+.find-bar-input {
+  flex: 1;
+  background: var(--sf-5);
+  border: 1px solid var(--bdr-default);
+  border-radius: var(--radius-sm);
+  color: var(--ink-0);
+  font-family: var(--font-code);
+  font-size: 12px;
+  padding: 4px 10px;
+  outline: none;
+  transition: border-color var(--t-base), box-shadow var(--t-base);
+  caret-color: var(--accent);
+  min-width: 0;
+}
+.find-bar-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+.find-bar-input::placeholder { color: var(--ink-4); }
+.find-bar-label { font-size: 11px; color: var(--ink-3); font-weight: 500; white-space: nowrap; flex-shrink: 0; }
+
+/* ─── BREADCRUMB ROOT ─── */
+.breadcrumb-root { font-size: 12px; color: var(--ink-3); font-weight: 500; }

@@ -135,10 +135,78 @@ fn App() -> Element {
                         let cur = state.read().find_bar_open;
                         state.write().find_bar_open = !cur;
                     }
-                    // Cmd+O — open binary
+                    // Cmd+O — open binary (trigger the same file dialog as the menu)
                     Key::Character(s) if s == "o" && (mods.meta() || mods.ctrl()) => {
                         e.prevent_default();
-                        state.write().push_log(LogEntry::info("Use File \u{2192} Open Binary\u{2026} (Cmd O is handled by the menu)".to_string()));
+                        if !state.read().is_loading_binary {
+                            let mut state2 = state;
+                            spawn(async move {
+                                use rfd::AsyncFileDialog;
+                                let file = AsyncFileDialog::new()
+                                    .set_title("Open Binary")
+                                    .add_filter("Binary", &["exe", "dll", "so", "elf", "bin", "*"])
+                                    .pick_file()
+                                    .await;
+                                if let Some(file) = file {
+                                    let path = file.path().to_path_buf();
+                                    {
+                                        let mut s = state2.write();
+                                        s.is_loading_binary = true;
+                                        s.push_log(LogEntry::info(format!("Loading {}", path.display())));
+                                    }
+                                    let result = tokio::task::spawn_blocking(move || {
+                                        engine::load_binary_blocking(&path)
+                                    }).await.unwrap_or_else(|e| Err(format!("Join error: {e}")));
+                                    match result {
+                                        Ok(load) => {
+                                            let summary  = load.summary.clone();
+                                            let fn_count = load.functions.len();
+                                            let binary_arc = load.binary.clone();
+                                            let name = file.file_name();
+                                            {
+                                                let mut s = state2.write();
+                                                s.binary_name           = Some(name.clone());
+                                                s.binary                = load.binary.clone();
+                                                s.functions             = load.functions;
+                                                s.strings               = load.strings;
+                                                s.current_function_addr = None;
+                                                s.decompiled_code       = None;
+                                                s.decompiled_nir        = None;
+                                                s.current_cfg           = None;
+                                                s.sidebar_search        = String::new();
+                                                s.rename_map.clear();
+                                                s.cached_facts          = None;
+                                                s.is_loading_binary     = false;
+                                                s.push_log(LogEntry::info(format!("Loaded — {summary}")));
+                                                s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                                            }
+                                            if let Some(bin) = binary_arc {
+                                                let mut state3 = state2;
+                                                spawn(async move {
+                                                    let facts = tokio::task::spawn_blocking(move || {
+                                                        engine::build_facts_blocking(bin.as_ref())
+                                                    }).await;
+                                                    if let Ok(f) = facts {
+                                                        let mut s = state3.write();
+                                                        if s.cached_facts.is_none() {
+                                                            s.cached_facts = Some(std::sync::Arc::new(f));
+                                                            s.push_log(LogEntry::info(
+                                                                "Analysis ready — first decompile will be instant.".to_string(),
+                                                            ));
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                        Err(e) => {
+                                            let mut s = state2.write();
+                                            s.is_loading_binary = false;
+                                            s.push_log(LogEntry::error(format!("Load failed: {e}")));
+                                        }
+                                    }
+                                }
+                            });
+                        }
                     }
                     // Cmd+[ — navigate back
                     Key::Character(s) if s == "[" && (mods.meta() || mods.ctrl()) => {

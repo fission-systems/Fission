@@ -516,9 +516,8 @@ pub fn Editor() -> Element {
             // ── Find bar (Cmd+F / Ctrl+F) ─────────────────────────────────
             if find_open {
                 div { class: "find-bar",
-                    span { class: "find-bar-label", "Find" }
                     input {
-                        class: "find-bar-input",
+                        class: "find-input",
                         r#type: "text",
                         placeholder: "Search in file…",
                         value: "{find_query}",
@@ -532,19 +531,16 @@ pub fn Editor() -> Element {
                             }
                         },
                     }
-                    if !find_query.is_empty() {
-                        // Compute match count for display
-                        {
-                            let code_for_count = state.read().editor_code().map(str::to_string);
-                            let count = if let Some(code) = code_for_count {
-                                let (_, raw) = render_with_lines(&code);
-                                let (_, n) = apply_find_highlights(&raw, &find_query);
-                                n
-                            } else { 0 };
-                            rsx! {
-                                span { class: "find-match-count",
-                                    if count == 0 { "No matches" } else { "{count} matches" }
-                                }
+                    {
+                        let code_for_count = state.read().editor_code().map(str::to_string);
+                        let count = if let Some(code) = &code_for_count {
+                            let (_, raw) = render_with_lines(code);
+                            let (_, n) = apply_find_highlights(&raw, &find_query);
+                            n
+                        } else { 0 };
+                        rsx! {
+                            span { class: "find-match-count",
+                                if find_query.is_empty() { "" } else if count == 0 { "No matches" } else { "{count} matches" }
                             }
                         }
                     }
@@ -555,7 +551,7 @@ pub fn Editor() -> Element {
                             s.find_bar_open = false;
                             s.find_query.clear();
                         },
-                        "x"
+                        "×"
                     }
                 }
             }

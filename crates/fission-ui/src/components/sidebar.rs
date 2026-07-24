@@ -240,13 +240,13 @@ pub fn Sidebar() -> Element {
     rsx! {
         div { class: "sidebar",
             // ── Tab switcher ────────────────────────────────────────────────
-            div { class: "sidebar-tab-bar",
+            div { class: "sidebar-tabs",
                 div {
                     class: if active_tab == crate::state::SidebarTab::Functions { "sidebar-tab is-active" } else { "sidebar-tab" },
                     onclick: move |_| state.write().sidebar_tab = crate::state::SidebarTab::Functions,
                     "Functions"
                     if has_binary {
-                        span { class: "sidebar-tab-badge", "{fn_count}" }
+                        span { class: "sidebar-tab-count", "{fn_count}" }
                     }
                 }
                 div {
@@ -254,7 +254,7 @@ pub fn Sidebar() -> Element {
                     onclick: move |_| state.write().sidebar_tab = crate::state::SidebarTab::Strings,
                     "Strings"
                     if has_binary {
-                        span { class: "sidebar-tab-badge", "{str_total}" }
+                        span { class: "sidebar-tab-count", "{str_total}" }
                     }
                 }
             }
@@ -429,7 +429,7 @@ pub fn Sidebar() -> Element {
                         }
                     } else {
                         ul {
-                            class: "function-list strings-list",
+                            class: "str-list",
                             onwheel: move |e| {
                                 let delta = e.delta().strip_units().y;
                                 let mut st = str_scroll_top.write();
@@ -450,7 +450,7 @@ pub fn Sidebar() -> Element {
                                     rsx! {
                                         li {
                                             key: "{va}",
-                                            class: "function-item string-item",
+                                            class: "str-item",
                                             onclick: move |_| {
                                                 // Switch to Hex tab and (future) scroll to offset
                                                 let mut s = state.write();
@@ -458,8 +458,8 @@ pub fn Sidebar() -> Element {
                                             },
                                             div { class: "fn-type-dot is-code" }
                                             div { class: "fn-info",
-                                                div { class: "fn-name str-val", title: "{val}", "{val_disp}" }
-                                                div { class: "fn-addr",
+                                                div { class: "str-value", title: "{val}", "{val_disp}" }
+                                                div { class: "str-meta",
                                                     if !section.is_empty() {
                                                         span { class: "str-section", "{section}  " }
                                                     }
