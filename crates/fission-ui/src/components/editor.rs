@@ -506,6 +506,40 @@ pub fn Editor() -> Element {
                         "Hex"
                     }
                 }
+
+                div { class: "tab-actions",
+                    if matches!(active_tab, EditorTab::Pseudocode | EditorTab::Nir) {
+                        if state.read().editor_code().is_some() && !is_decompiling {
+                            button {
+                                class: "tab-action-btn",
+                                title: "Copy pseudocode to clipboard",
+                                onclick: move |_| {
+                                    let code = state.read().editor_code().map(str::to_string);
+                                    if let Some(code) = code {
+                                        #[cfg(not(target_arch = "wasm32"))]
+                                        {
+                                            if let Ok(mut ctx) = arboard::Clipboard::new() {
+                                                let _ = ctx.set_text(&code);
+                                            }
+                                        }
+                                        state.write().push_log(crate::state::LogEntry::info("Pseudocode copied to clipboard."));
+                                    }
+                                },
+                                svg {
+                                    xmlns: "http://www.w3.org/2000/svg",
+                                    width: "13", height: "13",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "1.8",
+                                    stroke_linecap: "round",
+                                    rect { x: "9", y: "9", width: "13", height: "13", rx: "2" }
+                                    path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // ── Body ──────────────────────────────────────────────────────

@@ -58,9 +58,20 @@ pub fn BottomPanel() -> Element {
                                             LogLevel::Warn  => ("log-row lvl-warn",  "WARN"),
                                             LogLevel::Error => ("log-row lvl-error", "ERROR"),
                                         };
+                                        let ts_str = if entry.timestamp > 0 {
+                                            let h = (entry.timestamp / 3600) % 24;
+                                            let m = (entry.timestamp / 60) % 60;
+                                            let s = entry.timestamp % 60;
+                                            format!("{h:02}:{m:02}:{s:02}")
+                                        } else {
+                                            String::new()
+                                        };
                                         rsx! {
                                             div { class: "{row_cls}", key: "{i}",
                                                 div { class: "log-dot" }
+                                                if !ts_str.is_empty() {
+                                                    span { class: "log-ts", "{ts_str}" }
+                                                }
                                                 span { class: "log-level", "{level_str}" }
                                                 span { class: "log-msg",   "{entry.message}" }
                                             }

@@ -36,6 +36,17 @@ pub enum FunctionKind {
     },
 }
 
+// ── Sidebar kind filter ────────────────────────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum SidebarKindFilter {
+    #[default]
+    All,
+    Code,
+    Export,
+    Import,
+}
+
 // ── Sidebar tab ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -71,25 +82,43 @@ pub enum LogLevel {
 pub struct LogEntry {
     pub level: LogLevel,
     pub message: String,
+    /// Unix timestamp in seconds (for display as "HH:MM:SS" in the log panel).
+    /// Populated with `std::time::SystemTime::now()` on native; 0 on WASM.
+    pub timestamp: u64,
 }
 
 impl LogEntry {
+    fn now_ts() -> u64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        }
+        #[cfg(target_arch = "wasm32")]
+        { 0 }
+    }
+
     pub fn info(msg: impl Into<String>) -> Self {
         Self {
             level: LogLevel::Info,
             message: msg.into(),
+            timestamp: Self::now_ts(),
         }
     }
     pub fn warn(msg: impl Into<String>) -> Self {
         Self {
             level: LogLevel::Warn,
             message: msg.into(),
+            timestamp: Self::now_ts(),
         }
     }
     pub fn error(msg: impl Into<String>) -> Self {
         Self {
             level: LogLevel::Error,
             message: msg.into(),
+            timestamp: Self::now_ts(),
         }
     }
 }
@@ -160,6 +189,7 @@ pub struct AppState {
     // ── Sidebar ──────────────────────────────────────────────────────────────
     pub sidebar_search:    String,
     pub sidebar_tab:       SidebarTab,
+    pub sidebar_kind_filter: SidebarKindFilter,
 
     // ── Strings browser ──────────────────────────────────────────────────────
     pub strings:           Vec<BinaryString>,
@@ -225,6 +255,7 @@ impl AppState {
             sidebar_scroll_target: None,
             sidebar_search: String::new(),
             sidebar_tab:    SidebarTab::Functions,
+            sidebar_kind_filter: SidebarKindFilter::All,
             strings:        Vec::new(),
             strings_search: String::new(),
             rename_map:     HashMap::new(),

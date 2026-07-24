@@ -4,7 +4,7 @@
 //!   • Import / Thunk classification before decompile
 
 use crate::engine::DecompileOutput;
-use crate::state::{use_app_state, AppState, FunctionKind, LogEntry};
+use crate::state::{use_app_state, AppState, FunctionKind, LogEntry, SidebarKindFilter};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
@@ -62,12 +62,22 @@ pub fn Sidebar() -> Element {
     let filtered: Memo<Vec<FnEntry>> = use_memo(move || {
         let s = state.read();
         let q = s.sidebar_search.to_lowercase();
+        let kf = s.sidebar_kind_filter.clone();
         s.functions
             .iter()
             .filter(|f| {
-                q.is_empty()
+                // Kind filter
+                let kind_ok = match &kf {
+                    SidebarKindFilter::All => true,
+                    SidebarKindFilter::Code => !f.is_import && !f.is_thunk_like && !f.is_export,
+                    SidebarKindFilter::Export => f.is_export,
+                    SidebarKindFilter::Import => f.is_import || f.is_thunk_like,
+                };
+                // Search filter
+                let q_ok = q.is_empty()
                     || f.name.to_lowercase().contains(&q)
-                    || format!("{:x}", f.address).contains(&q)
+                    || format!("{:x}", f.address).contains(&q);
+                kind_ok && q_ok
             })
             .map(|f| FnEntry {
                 addr: f.address,
@@ -260,6 +270,31 @@ pub fn Sidebar() -> Element {
             }
 
             // ── Search bar (shared, changes query target by tab) ─────────────
+            if has_binary && active_tab == crate::state::SidebarTab::Functions {
+                {
+                    let kf = state.read().sidebar_kind_filter.clone();
+                    let chip = |label: &'static str, filter: SidebarKindFilter| -> Element {
+                        let active = kf == filter;
+                        let cls = if active { "kind-chip is-active" } else { "kind-chip" };
+                        rsx! {
+                            button {
+                                class: "{cls}",
+                                onclick: move |_| state.write().sidebar_kind_filter = filter.clone(),
+                                "{label}"
+                            }
+                        }
+                    };
+                    rsx! {
+                        div { class: "kind-filter-bar",
+                            {chip("All", SidebarKindFilter::All)}
+                            {chip("Code", SidebarKindFilter::Code)}
+                            {chip("Exp", SidebarKindFilter::Export)}
+                            {chip("Imp", SidebarKindFilter::Import)}
+                        }
+                    }
+                }
+            }
+
             if has_binary {
                 div { class: "sidebar-search",
                     div { class: "search-wrap",
@@ -300,7 +335,7 @@ pub fn Sidebar() -> Element {
                     div { class: "sidebar-state",
                         div { class: "state-icon", {svg_binary()} }
                         span { class: "state-title", "No binary loaded" }
-                        span { class: "state-sub", "Open a binary to begin" }
+                        span { class: "state-sub", "Drag & drop a binary here, or use File \u{2192} Open Binary\u{2026}" }
                     }
                 } else if active_tab == crate::state::SidebarTab::Functions {
                     // ── Functions tab ──────────────────────────────────────────
