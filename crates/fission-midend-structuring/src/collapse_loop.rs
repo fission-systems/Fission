@@ -7,10 +7,20 @@ use crate::cfg_analysis::select_bad_edge;
 use crate::host::StructuringHost;
 use fission_midend_core::ir::MlilPreviewError;
 
-/// Env gate for the collapse-loop structuring path.
+/// Collapse-loop virtualization (TraceDAG / FAS unstructured edge pick).
+///
+/// Default **on** (Ghidra always runs block structure collapse with likely-gotos).
+/// Disable with `FISSION_COLLAPSE_LOOP=0` for debugging.
 pub fn collapse_loop_admission_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("FISSION_COLLAPSE_LOOP").is_some())
+    *ENABLED.get_or_init(|| {
+        match std::env::var("FISSION_COLLAPSE_LOOP") {
+            Ok(v) if matches!(v.as_str(), "0" | "false" | "off" | "no") => false,
+            Ok(_) => true,
+            // Unset → enabled (principled default; was opt-in heuristic before).
+            Err(_) => true,
+        }
+    })
 }
 
 /// Virtualize one irreducible back-edge selected by `select_bad_edge`.

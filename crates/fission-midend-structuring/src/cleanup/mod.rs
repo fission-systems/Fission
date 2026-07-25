@@ -16,10 +16,9 @@ pub use goto::eliminate_redundant_gotos;
 pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<DirStmt>) -> Vec<DirStmt> {
     body = eliminate_redundant_gotos(body);
     body = dedupe_structured_region_entry_labels(body);
-    // Multi-emit residual: the same CFG block header (and sometimes a whole
-    // loop body) can be lowered more than once. Drop post-infloop residual
-    // while labels are still intact, then strip later Label(L) definitions so
-    // C does not see `redefinition of label`.
+    // Secondary multi-emit guard (belt-and-suspenders after exclusive emission
+    // + TraceDAG virtualization). Prefer graph-native contracts; these only
+    // fire when residual still re-hosts absorbed labels.
     body = strip_post_total_infloop_label_residuals(body);
     body = strip_duplicate_label_definitions(body);
     body = cleanup_redundant_labels_protecting(body, protected);
