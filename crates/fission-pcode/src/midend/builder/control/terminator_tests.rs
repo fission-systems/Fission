@@ -1204,3 +1204,122 @@ fn arm32_big_endian_pair_return_composes_r0_high_r1_low() {
 
     assert!(code.contains("return 1234605616436508552;"), "{code}");
 }
+
+/// Match-path early RET after a loop-carried primary return register update:
+/// RET p-code input is the return *address* (stack), not EAX. The index lives
+/// in EAX from a predecessor block. Must not emit bare `return;`.
+#[test]
+fn x64_stack_target_ret_recovers_live_primary_return_from_pred_def() {
+    let rax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x00,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let eax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x00,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rsp = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_addr = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x900,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let constant = |value, size| Varnode::constant(value, size);
+    // Block 0: EAX = 7; fallthrough to block 1
+    // Block 1: load ret addr from [RSP]; RETURN ret_addr  (stack-target RET)
+    let pcode = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1400_1000,
+                successors: vec![0x1400_1010],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1400_1000,
+                        output: Some(eax.clone()),
+                        inputs: vec![constant(7, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1400_1004,
+                        output: None,
+                        inputs: vec![constant(0x1400_1010, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1400_1010,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x1400_1010,
+                        output: Some(ret_addr.clone()),
+                        inputs: vec![constant(0, 8), rsp],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1400_1014,
+                        output: None,
+                        inputs: vec![ret_addr],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let options = preview_options_with_cspec(MlilPreviewOptions {
+        pe_x64_only: true,
+        is_64bit: true,
+        is_big_endian: false,
+        pointer_size: 8,
+        format: "PE64".to_string(),
+        image_base: 0x1400_0000,
+        sections: vec![(0x1400_1000, 0x1400_2000)],
+        region_linearize_structuring: false,
+        force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        global_names: Default::default(),
+        global_sizes: Default::default(),
+        relocation_names: Default::default(),
+        calling_convention: CallingConvention::WindowsX64,
+        ..Default::default()
+    });
+    let code = render_mlil_preview(&pcode, "found_index_ret", 0x1400_1000, &options)
+        .expect("preview render");
+    assert!(
+        code.contains("return 7;") || code.contains("return eax;") || code.contains("return rax;"),
+        "expected value-bearing return, got:\n{code}"
+    );
+    assert!(
+        !code
+            .lines()
+            .any(|line| line.trim() == "return;"),
+        "bare return must not appear when primary return reg is live:\n{code}"
+    );
+    let _ = rax; // silence if unused under some recovery paths
+}

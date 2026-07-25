@@ -1254,11 +1254,17 @@ pub fn prune_unused_dead_local_bindings(func: &mut DirFunction) -> bool {
         .collect::<HashSet<_>>();
     let mut changed = false;
     func.locals.retain(|binding| {
+        // LHS assigns do not count as "uses" in `count_uses_in_stmt_list`, so a
+        // write-only stack home (`local_18 = param_3`) would previously drop its
+        // binding while leaving the assign — undeclared identifier / compile_error
+        // (`matrix_multiply`-class). Keep the binding whenever the name is still
+        // defined in the body.
         let keep = !is_dead_local_clobber_name(&binding.name)
             || param_names.contains(binding.name.as_str())
             || binding.name.starts_with("slot_")
             || matches!(binding.ty, NirType::Aggregate { .. })
             || count_uses_in_stmt_list(&func.body, &binding.name) > 0
+            || stmt_list_defines_var(&func.body, &binding.name)
             || binding
                 .initializer
                 .as_ref()
@@ -1267,6 +1273,46 @@ pub fn prune_unused_dead_local_bindings(func: &mut DirFunction) -> bool {
         keep
     });
     changed
+}
+
+/// True when `name` appears as a plain variable assignment target anywhere in
+/// `stmts` (definition site, not a use).
+fn stmt_list_defines_var(stmts: &[DirStmt], name: &str) -> bool {
+    stmts.iter().any(|stmt| stmt_defines_var(stmt, name))
+}
+
+fn stmt_defines_var(stmt: &DirStmt, name: &str) -> bool {
+    match stmt {
+        DirStmt::Assign {
+            lhs: DirLValue::Var(lhs_name),
+            ..
+        } => lhs_name == name,
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. } => stmt_list_defines_var(body, name),
+        DirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => stmt_list_defines_var(then_body, name) || stmt_list_defines_var(else_body, name),
+        DirStmt::For {
+            init,
+            update,
+            body,
+            ..
+        } => {
+            init.as_ref().is_some_and(|s| stmt_defines_var(s, name))
+                || update.as_ref().is_some_and(|s| stmt_defines_var(s, name))
+                || stmt_list_defines_var(body, name)
+        }
+        DirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|c| stmt_list_defines_var(&c.body, name))
+                || stmt_list_defines_var(default, name)
+        }
+        _ => false,
+    }
 }
 
 fn is_rescue_candidate_name(name: &str) -> bool {

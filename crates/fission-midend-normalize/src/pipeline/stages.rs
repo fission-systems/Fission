@@ -754,4 +754,13 @@ pub fn run_stage_cleanup(func: &mut DirFunction, diag: bool, perf: bool) {
     run_pass_logged(func, "prune_unused_temp_after_cdq", perf, |f| {
         prune_unused_temp_bindings(f) | prune_unused_dead_local_bindings(f)
     });
+    // Final prune can leave body names without bindings if an earlier pass
+    // introduced names after the previous rescue; re-rescue so compile_error
+    // undeclared identifiers cannot survive the pipeline end.
+    run_pass_logged(
+        func,
+        "rescue_undeclared_bindings_final",
+        perf,
+        rescue_undeclared_bindings,
+    );
 }

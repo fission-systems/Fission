@@ -1985,3 +1985,54 @@ fn rescue_undeclared_bindings_declares_stack_local_names() {
         func.locals
     );
 }
+
+#[test]
+fn prune_unused_dead_local_bindings_keeps_write_only_stack_homes() {
+    // `local_18 = param_3` with no RHS uses must not drop the binding while the
+    // assign remains (matrix_multiply-class undeclared identifier).
+    let mut func = DirFunction {
+        name: "f".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![DirBinding {
+            name: "param_3".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false,
+            })),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(2)),
+            initializer: None,
+        }],
+        locals: vec![DirBinding {
+            name: "local_18".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false,
+            })),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-0x18)),
+            initializer: None,
+        }],
+        body: vec![
+            DirStmt::Assign {
+                lhs: DirLValue::Var("local_18".to_string()),
+                rhs: DirExpr::Var("param_3".to_string()),
+            },
+            DirStmt::Return(Some(DirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            ))),
+        ],
+        ..Default::default()
+    };
+    // May or may not report changed=true if other filters apply; binding must remain.
+    let _ = prune_unused_dead_local_bindings(&mut func);
+    assert!(
+        func.locals.iter().any(|b| b.name == "local_18"),
+        "write-only local_18 must stay declared: {:?}",
+        func.locals
+    );
+}

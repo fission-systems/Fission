@@ -696,6 +696,16 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    /// True when any p-code block defines the ABI primary return register
+    /// before its terminator (including loop-carried index updates). Used to
+    /// distinguish void-like functions from value-returning ones when RET's
+    /// p-code input is only the return address on the stack.
+    fn function_has_primary_return_def(&self) -> bool {
+        (0..self.pcode.blocks.len()).any(|block_idx| {
+            self.block_has_primary_return_def_before_terminator(block_idx)
+        })
+    }
+
     fn side_effect_consumes_primary_return_register_before(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -1087,8 +1097,18 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(input) = block.ops[term_idx].inputs.last()
             && self.return_input_is_control_target(input)
         {
+            // Stack/return-address RET input is control-only. Prefer the live
+            // ABI primary return register when this function ever defines that
+            // register (loop index / found-path early RET). Only emit bare
+            // `return` when there is no function-wide primary-return evidence
+            // (void-like). Previously `!return_join_has_primary_return_evidence`
+            // alone forced bare return on match-path blocks whose predecessors
+            // end in CBranch without a local EAX/RAX def, dropping a live
+            // loop-carried return index (`linear_search`-class).
             if self.return_input_is_stack_target(input)
                 && !self.return_join_has_primary_return_evidence(idx)
+                && !self.block_has_primary_return_def_before_terminator(idx)
+                && !self.function_has_primary_return_def()
             {
                 return Ok(None);
             }
@@ -1101,6 +1121,20 @@ impl<'a> PreviewBuilder<'a> {
             return self
                 .lower_wrapped_varnode(input, &mut HashSet::default())
                 .map(Some);
+        }
+        // Last resort: control-target RET with no pred map / side-effect gate
+        // still recovers the live ABI return register when the function wrote it.
+        if self.uses_primary_return_registers()
+            && self.function_has_primary_return_def()
+            && let Some(expr) = self.live_primary_return_register_expr(block, term_idx)?
+        {
+            if preview_builder_diag_enabled() {
+                eprintln!(
+                    "[DIAG] return recovery: block={} path=function_wide_live_primary expr={:?}",
+                    idx, expr
+                );
+            }
+            return Ok(Some(expr));
         }
         if self.uses_primary_return_registers()
             && self
