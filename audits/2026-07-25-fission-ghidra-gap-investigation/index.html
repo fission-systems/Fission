@@ -1846,7 +1846,7 @@
 </tr>
 <tr>
 <td><code>matrix_multiply</code></td>
-<td>Undeclared-local class improved; post-<code>1ea1a26f</code> residual was <strong>missing <code>c[]</code> store (Index DSE)</strong> + <strong>float→uint type loss</strong>. Local decomp after fix: <code>float *</code> params, float accum/<code>*=</code>, <code>local_18[i]=sum</code> restored. <strong>Docker remeasure still required</strong> for quality claim.</td>
+<td>Undeclared-local class improved; post-<code>1ea1a26f</code> residual was <strong>missing <code>c[]</code> store (Index DSE)</strong> + <strong>float→uint type loss</strong>. <strong><code>3ca1a786</code> focused remeasure:</strong> <strong>clang -O0 sem=1.0 (5/5)</strong> (was compile_error/sem=0); gcc -O0 sem=0.20 (1/5 assertion_fail); other variants still compile_error/adapter. Store+float recovery is a measured clang-O0 quality win; residual structure/return on other opts open.</td>
 </tr>
 </tbody>
 </table>
