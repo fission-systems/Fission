@@ -1479,6 +1479,12 @@ Implement / finish <strong>graph-native collapse</strong>: once a region is sele
 TraceDAG-style <strong>unstructured edge selection</strong> when no SESE shape fits.</p>
 <p>Owner: <code>fission-midend-structuring</code> (<code>sese_driver</code> + <code>blockaction</code>-class logic).<br />
 Ghidra refs: <code>blockaction.hh</code> (<code>CollapseStructure</code>, <code>TraceDAG</code>, <code>LoopBody</code>).</p>
+<p><strong>Landed (partial, 2026-07-25):</strong> exclusive emission contract in<br />
+<code>lower_loop_body_subgraph</code> (<code>consumed_blocks</code> tombstone for <code>[idx, skip_to)</code>) and<br />
+<code>reconstruct_sese_final_body</code> / <code>active_child_map</code> retain (drop nested keys absorbed by<br />
+outer region; residual path skips tombstoned indices). Not full TraceDAG yet; residual<br />
+label-strip cleanup remains as belt-and-suspenders until multi-emit is impossible by<br />
+construction everywhere.</p>
 <h3 id="p0-heritage-cover-value-identity">P0 — Heritage / Cover (value identity)<a class="headerlink" href="#p0-heritage-cover-value-identity" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
