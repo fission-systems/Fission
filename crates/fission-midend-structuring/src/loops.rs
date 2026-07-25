@@ -1028,6 +1028,10 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
 
         let mut result_stmts: Vec<DirStmt> = Vec::new();
         let mut emitted_labels: HashSet<u64> = HashSet::default();
+        // Graph-native exclusive emission (Ghidra CollapseStructure invariant):
+        // each body_set block index is lowered at most once. Nested structured
+        // regions tombstone `[idx, skip_to)` so residual walk cannot re-emit.
+        let mut consumed_blocks: HashSet<usize> = HashSet::default();
         // Addresses within body_set that must have a label emitted regardless of `targeted`.
         // Pre-populated by scanning:
         //   (a) terminator_cache for already-lowered terminators, and
@@ -1064,8 +1068,21 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
             body_set.contains(&skip_to) || break_indices.contains(&skip_to)
         };
 
+        // Tombstone every body_set member in the half-open index range [from, to).
+        let tombstone_range = |from: usize, to: usize, consumed: &mut HashSet<usize>| {
+            for &bi in body_set.iter() {
+                if bi >= from && bi < to {
+                    consumed.insert(bi);
+                }
+            }
+        };
+
         while pos < sorted_body.len() {
             let idx = sorted_body[pos];
+            if consumed_blocks.contains(&idx) {
+                pos += 1;
+                continue;
+            }
 
             // --- Attempt structured reducers, but only accept if skip_to stays within bounds ---
             macro_rules! try_reducer {
@@ -1077,15 +1094,26 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                             && host.accept_structured_region(idx, skip_to, &targeted)
                         {
                             result_stmts.push(stmt);
-                            // Advance pos to the block at skip_to (or end if skip_to is an exit)
+                            // Exclusive emission: region owns body_set ∩ [idx, skip_to).
                             if break_indices.contains(&skip_to) {
-                                // The structured region consumed everything up to the break exit.
+                                for &bi in body_set.iter() {
+                                    if bi >= idx {
+                                        consumed_blocks.insert(bi);
+                                    }
+                                }
                                 return Ok(Some(result_stmts));
                             }
+                            tombstone_range(idx, skip_to, &mut consumed_blocks);
+                            consumed_blocks.insert(idx);
                             pos = sorted_body
                                 .iter()
                                 .position(|&i| i == skip_to)
                                 .unwrap_or(sorted_body.len());
+                            while pos < sorted_body.len()
+                                && consumed_blocks.contains(&sorted_body[pos])
+                            {
+                                pos += 1;
+                            }
                             continue;
                         }
                     }
@@ -1102,6 +1130,8 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
             try_reducer!(try_lower_if(host, idx));
 
             // --- Fallback: emit block with loop-context-aware terminator ---
+            // Residual emission still exclusive: one emit per block index.
+            consumed_blocks.insert(idx);
             let block_key = host.block_target_key(idx);
             if (idx == start_idx
                 || targeted.contains(&block_key)

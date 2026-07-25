@@ -125,6 +125,13 @@ TraceDAG-style **unstructured edge selection** when no SESE shape fits.
 Owner: `fission-midend-structuring` (`sese_driver` + `blockaction`-class logic).  
 Ghidra refs: `blockaction.hh` (`CollapseStructure`, `TraceDAG`, `LoopBody`).
 
+**Landed (partial, 2026-07-25):** exclusive emission contract in  
+`lower_loop_body_subgraph` (`consumed_blocks` tombstone for `[idx, skip_to)`) and  
+`reconstruct_sese_final_body` / `active_child_map` retain (drop nested keys absorbed by  
+outer region; residual path skips tombstoned indices). Not full TraceDAG yet; residual  
+label-strip cleanup remains as belt-and-suspenders until multi-emit is impossible by  
+construction everywhere.
+
 ### P0 — Heritage / Cover (value identity)
 
 | Missing piece | Ghidra | Fission | Symptom |

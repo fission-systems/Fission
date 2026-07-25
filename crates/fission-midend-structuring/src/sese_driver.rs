@@ -309,6 +309,10 @@ pub fn build_sese_region_body(
                 }
                 let proof = best.node.proof.clone().expect("structured region proof");
                 host.record_selected_region(&best.node);
+                // Exclusive emission (CollapseStructure-style): outer region
+                // absorbs [idx, skip_to). Drop nested map entries that would
+                // re-surface the same blocks in final reconstruction.
+                active_child_map.retain(|&k, _| k < idx || k >= skip_to);
                 active_child_map.insert(idx, (best.node.statements, skip_to, proof));
                 progress = true;
                 break;
@@ -353,6 +357,9 @@ pub fn build_sese_region_body(
                     emitted_labels = temp_emitted_labels;
                     let dummy_proof =
                         RegionProof::structured(RegionKind::Sequence, idx, skip_to, None);
+                    if skip_to > idx {
+                        active_child_map.retain(|&k, _| k < idx || k >= skip_to);
+                    }
                     active_child_map.insert(idx, (recovered_body, skip_to, dummy_proof));
                     progress = true;
                     break;
@@ -404,6 +411,14 @@ pub fn reconstruct_sese_final_body(
 
     let mut graph = StructureGraph::default();
     let mut emitted_labels: HashSet<u64> = HashSet::default();
+    // Block indices owned by an already-surfaced structured region [start, skip_to).
+    // Residual basic emission must not re-lower these (multi-emit / duplicate labels).
+    let mut tombstoned: HashSet<usize> = HashSet::default();
+    for (&start, (_, skip_to, _)) in active_child_map.iter() {
+        for bi in start..*skip_to {
+            tombstoned.insert(bi);
+        }
+    }
     let mut previous_node_id = None;
 
         let mut idx = entry;
@@ -443,6 +458,10 @@ pub fn reconstruct_sese_final_body(
                 }
                 previous_node_id = Some(node_id);
                 let next_idx = *child_exit;
+                // Region owns [idx, next_idx); reinforce tombstone.
+                for bi in idx..next_idx.max(idx + 1) {
+                    tombstoned.insert(bi);
+                }
                 if next_idx <= idx {
                     if diag {
                         eprintln!(
@@ -457,11 +476,25 @@ pub fn reconstruct_sese_final_body(
                 continue;
             }
 
+            // Residual path: never re-emit a block owned by a structured region.
+            if tombstoned.contains(&idx) {
+                if diag {
+                    eprintln!(
+                        "[DIAG] final reconstruction: skip tombstoned residual block idx={} key=0x{:x}",
+                        idx, block_key
+                    );
+                }
+                idx += 1;
+                continue;
+            }
+
             let mut node_body = Vec::new();
             let mut explicit_edge_surface = false;
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 node_body.push(DirStmt::Label(block_label(block_key)));
             }
+            // Residual emit also exclusive for this index.
+            tombstoned.insert(idx);
             node_body.extend(host.lower_block_stmts(idx)?);
             match host.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => node_body.push(DirStmt::Return(expr)),
