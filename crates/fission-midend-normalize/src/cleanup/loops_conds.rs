@@ -1190,11 +1190,13 @@ fn is_self_increment_assign(name: &str, rhs: &DirExpr) -> bool {
 }
 
 /// `goto L` whose label was dropped (common after match-path return rewrites
-/// leave a continue-edge label unreferenced) → `continue` when nested in a
-/// loop. Outside loops the goto is left alone for other repair passes.
+/// leave a continue-edge label unreferenced) → loop-continue when nested in a
+/// loop. If the loop bound-check form `if (bound <= i) break;` is present,
+/// inject `i++` before `continue` so the orphan edge matches the usual
+/// search-loop continue (skip-to-increment) rather than spinning forever.
 pub fn rewrite_orphan_loop_gotos_to_continue(stmts: &mut Vec<DirStmt>) -> bool {
     let defined = collect_defined_labels(stmts);
-    rewrite_orphan_loop_gotos_to_continue_rec(stmts, &defined, false)
+    rewrite_orphan_loop_gotos_to_continue_rec(stmts, &defined, false, None)
 }
 
 fn collect_defined_labels(stmts: &[DirStmt]) -> HashSet<String> {
@@ -1256,41 +1258,58 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
     stmts: &mut Vec<DirStmt>,
     defined: &HashSet<String>,
     in_loop: bool,
+    loop_index: Option<&str>,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
             DirStmt::Goto(label) if in_loop && !defined.contains(label) => {
-                *stmt = DirStmt::Continue;
+                *stmt = orphan_loop_continue_stmt(loop_index);
                 changed = true;
             }
             DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
-                changed |= rewrite_orphan_loop_gotos_to_continue_rec(body, defined, true);
+                let idx = detect_bound_break_loop_index(body);
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(
+                    body,
+                    defined,
+                    true,
+                    idx.as_deref().or(loop_index),
+                );
             }
             DirStmt::For {
                 init, update, body, ..
             } => {
+                let idx = detect_bound_break_loop_index(body);
+                let idx_ref = idx.as_deref().or(loop_index);
                 if let Some(init) = init {
-                    changed |= rewrite_orphan_loop_gotos_to_continue_in_stmt(init, defined, in_loop);
+                    changed |= rewrite_orphan_loop_gotos_to_continue_in_stmt(
+                        init, defined, in_loop, loop_index,
+                    );
                 }
                 if let Some(update) = update {
-                    changed |=
-                        rewrite_orphan_loop_gotos_to_continue_in_stmt(update, defined, true);
+                    changed |= rewrite_orphan_loop_gotos_to_continue_in_stmt(
+                        update, defined, true, idx_ref,
+                    );
                 }
-                changed |= rewrite_orphan_loop_gotos_to_continue_rec(body, defined, true);
+                changed |=
+                    rewrite_orphan_loop_gotos_to_continue_rec(body, defined, true, idx_ref);
             }
             DirStmt::Block(body) => {
-                changed |= rewrite_orphan_loop_gotos_to_continue_rec(body, defined, in_loop);
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(
+                    body, defined, in_loop, loop_index,
+                );
             }
             DirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |=
-                    rewrite_orphan_loop_gotos_to_continue_rec(then_body, defined, in_loop);
-                changed |=
-                    rewrite_orphan_loop_gotos_to_continue_rec(else_body, defined, in_loop);
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(
+                    then_body, defined, in_loop, loop_index,
+                );
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(
+                    else_body, defined, in_loop, loop_index,
+                );
             }
             DirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
@@ -1298,10 +1317,12 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
                         &mut case.body,
                         defined,
                         in_loop,
+                        loop_index,
                     );
                 }
-                changed |=
-                    rewrite_orphan_loop_gotos_to_continue_rec(default, defined, in_loop);
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(
+                    default, defined, in_loop, loop_index,
+                );
             }
             _ => {}
         }
@@ -1313,15 +1334,82 @@ fn rewrite_orphan_loop_gotos_to_continue_in_stmt(
     stmt: &mut DirStmt,
     defined: &HashSet<String>,
     in_loop: bool,
+    loop_index: Option<&str>,
 ) -> bool {
     match stmt {
         DirStmt::Block(body) => {
-            rewrite_orphan_loop_gotos_to_continue_rec(body, defined, in_loop)
+            rewrite_orphan_loop_gotos_to_continue_rec(body, defined, in_loop, loop_index)
         }
         DirStmt::Goto(label) if in_loop && !defined.contains(label) => {
-            *stmt = DirStmt::Continue;
+            *stmt = orphan_loop_continue_stmt(loop_index);
             true
         }
         _ => false,
+    }
+}
+
+fn orphan_loop_continue_stmt(loop_index: Option<&str>) -> DirStmt {
+    if let Some(idx) = loop_index {
+        DirStmt::Block(vec![
+            DirStmt::Assign {
+                lhs: DirLValue::Var(idx.to_string()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Add,
+                    lhs: Box::new(DirExpr::Var(idx.to_string())),
+                    rhs: Box::new(DirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 64,
+                            signed: true,
+                        },
+                    )),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                },
+            },
+            DirStmt::Continue,
+        ])
+    } else {
+        DirStmt::Continue
+    }
+}
+
+/// Recognize `if (bound <= i) break;` / `if (i >= bound) break;` at the head
+/// of a search-loop body and return the induction variable name.
+fn detect_bound_break_loop_index(body: &[DirStmt]) -> Option<String> {
+    let DirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = body.first()?
+    else {
+        return None;
+    };
+    if !else_body.is_empty() || !matches!(then_body.as_slice(), [DirStmt::Break]) {
+        return None;
+    }
+    let DirExpr::Binary { op, lhs, rhs, .. } = cond else {
+        return None;
+    };
+    match op {
+        DirBinaryOp::Le | DirBinaryOp::Lt => {
+            // bound <= i  or  bound < i
+            match (lhs.as_ref(), rhs.as_ref()) {
+                (_, DirExpr::Var(idx)) => Some(idx.clone()),
+                (DirExpr::Var(idx), _) => Some(idx.clone()),
+                _ => None,
+            }
+        }
+        DirBinaryOp::Ge | DirBinaryOp::Gt => {
+            // i >= bound  or  i > bound
+            match (lhs.as_ref(), rhs.as_ref()) {
+                (DirExpr::Var(idx), _) => Some(idx.clone()),
+                (_, DirExpr::Var(idx)) => Some(idx.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }

@@ -516,6 +516,16 @@ fn rewrite_orphan_loop_gotos_to_continue_rewrites_missing_label() {
         cond: DirExpr::Const(1, int(32)),
         body: vec![
             DirStmt::If {
+                cond: DirExpr::Binary {
+                    op: DirBinaryOp::Le,
+                    lhs: Box::new(DirExpr::Var("n".to_string())),
+                    rhs: Box::new(DirExpr::Var("i".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![DirStmt::Break],
+                else_body: Vec::new(),
+            },
+            DirStmt::If {
                 cond: DirExpr::Var("miss".to_string()),
                 then_body: vec![DirStmt::Goto("missing_continue".to_string())],
                 else_body: Vec::new(),
@@ -527,13 +537,26 @@ fn rewrite_orphan_loop_gotos_to_continue_rewrites_missing_label() {
     let DirStmt::While { body, .. } = &stmts[0] else {
         panic!("expected while");
     };
-    assert!(matches!(
-        &body[0],
-        DirStmt::If {
-            then_body,
-            ..
-        } if matches!(then_body.as_slice(), [DirStmt::Continue])
-    ));
+    // Orphan goto becomes `i++; continue` (search-loop continue edge).
+    assert!(
+        matches!(
+            &body[1],
+            DirStmt::If {
+                then_body,
+                ..
+            } if matches!(
+                then_body.as_slice(),
+                [
+                    DirStmt::Block(inner)
+                ] if matches!(
+                    inner.as_slice(),
+                    [DirStmt::Assign { .. }, DirStmt::Continue]
+                )
+            ) || matches!(then_body.as_slice(), [DirStmt::Continue])
+        ),
+        "expected continue (with optional i++), got {:?}",
+        body[1]
+    );
 }
 
 #[test]
