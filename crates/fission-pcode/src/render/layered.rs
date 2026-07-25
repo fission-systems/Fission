@@ -11,7 +11,7 @@ use super::{
     NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_type,
 };
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub(crate) fn render_hir_function_with_global_decls(
     hir: &HirFunction,
@@ -96,17 +96,15 @@ fn render_hir_function_with_profile(
     profile: PrintProfile,
 ) -> String {
     let decls = collect_referenced_global_decls(hir, options);
-    let aggregate_typedefs = collect_referenced_aggregate_type_sizes(hir, decls.values());
+    let aggregate_typedefs = collect_referenced_aggregate_typedefs(hir, decls.values());
     let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(hir);
     if decls.is_empty() && aggregate_typedefs.is_empty() && opaque_pcodeop_stubs.is_empty() {
         return print_hir_function_with_profile(hir, Some(&options.global_names), profile);
     }
 
     let mut rendered = String::new();
-    for size in aggregate_typedefs {
-        rendered.push_str(&format!(
-            "typedef struct fission_agg{size} {{ unsigned char bytes[{size}]; }} fission_agg{size};\n"
-        ));
+    for (size, fields) in aggregate_typedefs {
+        rendered.push_str(&render_aggregate_typedef(size, &fields));
     }
     for (target, return_ty) in opaque_pcodeop_stubs {
         rendered.push_str(&render_opaque_pcodeop_stub(&target, &return_ty));
@@ -316,60 +314,89 @@ fn opaque_pcodeop_default_return(return_ty: &NirType) -> String {
     }
 }
 
-fn collect_referenced_aggregate_type_sizes<'a>(
+/// size → (offset → (field_name, field_ty)). Fields are merged across all
+/// references so `Index`/`FieldAccess` recovery can emit named members that
+/// compile (not just `unsigned char bytes[N]` placeholders).
+fn collect_referenced_aggregate_typedefs<'a>(
     hir: &'a HirFunction,
     global_decl_types: impl IntoIterator<Item = &'a NirType>,
-) -> BTreeSet<u32> {
-    let mut sizes = BTreeSet::new();
-    collect_aggregate_sizes_from_type(&hir.return_type, &mut sizes);
+) -> BTreeMap<u32, BTreeMap<u32, (String, NirType)>> {
+    let mut aggs: BTreeMap<u32, BTreeMap<u32, (String, NirType)>> = BTreeMap::new();
+    collect_aggregate_typedefs_from_type(&hir.return_type, &mut aggs);
     for binding in hir.params.iter().chain(hir.locals.iter()) {
-        collect_aggregate_sizes_from_type(&binding.ty, &mut sizes);
+        collect_aggregate_typedefs_from_type(&binding.ty, &mut aggs);
     }
     for ty in global_decl_types {
-        collect_aggregate_sizes_from_type(ty, &mut sizes);
+        collect_aggregate_typedefs_from_type(ty, &mut aggs);
     }
-    collect_aggregate_sizes_from_stmts(&hir.body, &mut sizes);
-    sizes
+    collect_aggregate_typedefs_from_stmts(&hir.body, &mut aggs);
+    aggs
 }
 
-fn collect_aggregate_sizes_from_type(ty: &NirType, sizes: &mut BTreeSet<u32>) {
+fn merge_aggregate_fields(
+    aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
+    size: u32,
+    fields: &[(u32, String, NirType)],
+) {
+    let entry = aggs.entry(size).or_default();
+    for (offset, name, ty) in fields {
+        entry
+            .entry(*offset)
+            .or_insert_with(|| (name.clone(), ty.clone()));
+    }
+}
+
+fn collect_aggregate_typedefs_from_type(
+    ty: &NirType,
+    aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
+) {
     match ty {
-        NirType::Ptr(inner) => collect_aggregate_sizes_from_type(inner, sizes),
-        NirType::Aggregate { size, .. } => {
-            sizes.insert(*size);
+        NirType::Ptr(inner) => collect_aggregate_typedefs_from_type(inner, aggs),
+        NirType::Aggregate { size, fields } => {
+            let mapped: Vec<(u32, String, NirType)> = fields
+                .iter()
+                .map(|f| (f.offset, f.name.clone(), f.ty.clone()))
+                .collect();
+            merge_aggregate_fields(aggs, *size, &mapped);
         }
         NirType::Unknown | NirType::Bool | NirType::Int { .. } | NirType::Float { .. } => {}
     }
 }
 
-fn collect_aggregate_sizes_from_stmts(stmts: &[HirStmt], sizes: &mut BTreeSet<u32>) {
+fn collect_aggregate_typedefs_from_stmts(
+    stmts: &[HirStmt],
+    aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
+) {
     for stmt in stmts {
-        collect_aggregate_sizes_from_stmt(stmt, sizes);
+        collect_aggregate_typedefs_from_stmt(stmt, aggs);
     }
 }
 
-fn collect_aggregate_sizes_from_stmt(stmt: &HirStmt, sizes: &mut BTreeSet<u32>) {
+fn collect_aggregate_typedefs_from_stmt(
+    stmt: &HirStmt,
+    aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
+) {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
-            collect_aggregate_sizes_from_lvalue(lhs, sizes);
-            collect_aggregate_sizes_from_expr(rhs, sizes);
+            collect_aggregate_typedefs_from_lvalue(lhs, aggs);
+            collect_aggregate_typedefs_from_expr(rhs, aggs);
         }
         HirStmt::VaStart { va_list, .. }
         | HirStmt::Expr(va_list)
         | HirStmt::Return(Some(va_list)) => {
-            collect_aggregate_sizes_from_expr(va_list, sizes);
+            collect_aggregate_typedefs_from_expr(va_list, aggs);
         }
         HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            collect_aggregate_sizes_from_stmts(body, sizes);
+            collect_aggregate_typedefs_from_stmts(body, aggs);
         }
         HirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            collect_aggregate_sizes_from_expr(cond, sizes);
-            collect_aggregate_sizes_from_stmts(then_body, sizes);
-            collect_aggregate_sizes_from_stmts(else_body, sizes);
+            collect_aggregate_typedefs_from_expr(cond, aggs);
+            collect_aggregate_typedefs_from_stmts(then_body, aggs);
+            collect_aggregate_typedefs_from_stmts(else_body, aggs);
         }
         HirStmt::For {
             init,
@@ -378,26 +405,26 @@ fn collect_aggregate_sizes_from_stmt(stmt: &HirStmt, sizes: &mut BTreeSet<u32>) 
             body,
         } => {
             if let Some(init) = init {
-                collect_aggregate_sizes_from_stmt(init, sizes);
+                collect_aggregate_typedefs_from_stmt(init, aggs);
             }
             if let Some(cond) = cond {
-                collect_aggregate_sizes_from_expr(cond, sizes);
+                collect_aggregate_typedefs_from_expr(cond, aggs);
             }
             if let Some(update) = update {
-                collect_aggregate_sizes_from_stmt(update, sizes);
+                collect_aggregate_typedefs_from_stmt(update, aggs);
             }
-            collect_aggregate_sizes_from_stmts(body, sizes);
+            collect_aggregate_typedefs_from_stmts(body, aggs);
         }
         HirStmt::Switch {
             expr,
             cases,
             default,
         } => {
-            collect_aggregate_sizes_from_expr(expr, sizes);
+            collect_aggregate_typedefs_from_expr(expr, aggs);
             for case in cases {
-                collect_aggregate_sizes_from_stmts(&case.body, sizes);
+                collect_aggregate_typedefs_from_stmts(&case.body, aggs);
             }
-            collect_aggregate_sizes_from_stmts(default, sizes);
+            collect_aggregate_typedefs_from_stmts(default, aggs);
         }
         HirStmt::Label(_)
         | HirStmt::Goto(_)
@@ -407,62 +434,74 @@ fn collect_aggregate_sizes_from_stmt(stmt: &HirStmt, sizes: &mut BTreeSet<u32>) 
     }
 }
 
-fn collect_aggregate_sizes_from_lvalue(lhs: &HirLValue, sizes: &mut BTreeSet<u32>) {
+fn collect_aggregate_typedefs_from_lvalue(
+    lhs: &HirLValue,
+    aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
+) {
     match lhs {
         HirLValue::Var(_) => {}
         HirLValue::Deref { ptr, ty } => {
-            collect_aggregate_sizes_from_type(ty, sizes);
-            collect_aggregate_sizes_from_expr(ptr, sizes);
+            collect_aggregate_typedefs_from_type(ty, aggs);
+            collect_aggregate_typedefs_from_expr(ptr, aggs);
         }
         HirLValue::Index {
             base,
             index,
             elem_ty,
         } => {
-            collect_aggregate_sizes_from_type(elem_ty, sizes);
-            collect_aggregate_sizes_from_expr(base, sizes);
-            collect_aggregate_sizes_from_expr(index, sizes);
+            collect_aggregate_typedefs_from_type(elem_ty, aggs);
+            collect_aggregate_typedefs_from_expr(base, aggs);
+            collect_aggregate_typedefs_from_expr(index, aggs);
         }
-        HirLValue::FieldAccess { base, ty, .. } => {
-            collect_aggregate_sizes_from_type(ty, sizes);
-            collect_aggregate_sizes_from_expr(base, sizes);
+        HirLValue::FieldAccess {
+            base,
+            field_name,
+            offset,
+            ty,
+        } => {
+            collect_aggregate_typedefs_from_type(ty, aggs);
+            collect_field_access_into_aggregate(base, field_name, *offset, ty, aggs);
+            collect_aggregate_typedefs_from_expr(base, aggs);
         }
     }
 }
 
-fn collect_aggregate_sizes_from_expr(expr: &HirExpr, sizes: &mut BTreeSet<u32>) {
+fn collect_aggregate_typedefs_from_expr(
+    expr: &HirExpr,
+    aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
+) {
     match expr {
         HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
         HirExpr::Cast { ty, expr }
         | HirExpr::Unary { ty, expr, .. }
         | HirExpr::Load { ty, ptr: expr } => {
-            collect_aggregate_sizes_from_type(ty, sizes);
-            collect_aggregate_sizes_from_expr(expr, sizes);
+            collect_aggregate_typedefs_from_type(ty, aggs);
+            collect_aggregate_typedefs_from_expr(expr, aggs);
         }
         HirExpr::Binary { lhs, rhs, ty, .. } => {
-            collect_aggregate_sizes_from_type(ty, sizes);
-            collect_aggregate_sizes_from_expr(lhs, sizes);
-            collect_aggregate_sizes_from_expr(rhs, sizes);
+            collect_aggregate_typedefs_from_type(ty, aggs);
+            collect_aggregate_typedefs_from_expr(lhs, aggs);
+            collect_aggregate_typedefs_from_expr(rhs, aggs);
         }
         HirExpr::Call { args, ty, .. } => {
-            collect_aggregate_sizes_from_type(ty, sizes);
+            collect_aggregate_typedefs_from_type(ty, aggs);
             for arg in args {
-                collect_aggregate_sizes_from_expr(arg, sizes);
+                collect_aggregate_typedefs_from_expr(arg, aggs);
             }
         }
-        HirExpr::PtrOffset { base, .. } => collect_aggregate_sizes_from_expr(base, sizes),
+        HirExpr::PtrOffset { base, .. } => collect_aggregate_typedefs_from_expr(base, aggs),
         HirExpr::Index {
             base,
             index,
             elem_ty,
         } => {
-            collect_aggregate_sizes_from_type(elem_ty, sizes);
-            collect_aggregate_sizes_from_expr(base, sizes);
-            collect_aggregate_sizes_from_expr(index, sizes);
+            collect_aggregate_typedefs_from_type(elem_ty, aggs);
+            collect_aggregate_typedefs_from_expr(base, aggs);
+            collect_aggregate_typedefs_from_expr(index, aggs);
         }
         HirExpr::AggregateCopy { src, size } => {
-            sizes.insert(*size);
-            collect_aggregate_sizes_from_expr(src, sizes);
+            merge_aggregate_fields(aggs, *size, &[]);
+            collect_aggregate_typedefs_from_expr(src, aggs);
         }
         HirExpr::Select {
             cond,
@@ -470,16 +509,113 @@ fn collect_aggregate_sizes_from_expr(expr: &HirExpr, sizes: &mut BTreeSet<u32>) 
             else_expr,
             ty,
         } => {
-            collect_aggregate_sizes_from_type(ty, sizes);
-            collect_aggregate_sizes_from_expr(cond, sizes);
-            collect_aggregate_sizes_from_expr(then_expr, sizes);
-            collect_aggregate_sizes_from_expr(else_expr, sizes);
+            collect_aggregate_typedefs_from_type(ty, aggs);
+            collect_aggregate_typedefs_from_expr(cond, aggs);
+            collect_aggregate_typedefs_from_expr(then_expr, aggs);
+            collect_aggregate_typedefs_from_expr(else_expr, aggs);
         }
-        HirExpr::FieldAccess { base, ty, .. } => {
-            collect_aggregate_sizes_from_type(ty, sizes);
-            collect_aggregate_sizes_from_expr(base, sizes);
+        HirExpr::FieldAccess {
+            base,
+            field_name,
+            offset,
+            ty,
+        } => {
+            collect_aggregate_typedefs_from_type(ty, aggs);
+            collect_field_access_into_aggregate(base, field_name, *offset, ty, aggs);
+            collect_aggregate_typedefs_from_expr(base, aggs);
         }
     }
+}
+
+/// When `base[i].field` is recovered, attach `field` to the Index element
+/// aggregate so the typedef has a real member (not only `bytes[N]`).
+fn collect_field_access_into_aggregate(
+    base: &HirExpr,
+    field_name: &str,
+    offset: u32,
+    field_ty: &NirType,
+    aggs: &mut BTreeMap<u32, BTreeMap<u32, (String, NirType)>>,
+) {
+    let size = match base {
+        HirExpr::Index {
+            elem_ty: NirType::Aggregate { size, fields },
+            ..
+        } => {
+            let mapped: Vec<(u32, String, NirType)> = fields
+                .iter()
+                .map(|f| (f.offset, f.name.clone(), f.ty.clone()))
+                .collect();
+            merge_aggregate_fields(aggs, *size, &mapped);
+            Some(*size)
+        }
+        HirExpr::Var(_) | HirExpr::AddressOfGlobal(_) => {
+            // Size unknown from var alone; skip (binding type collection covers it).
+            None
+        }
+        _ => None,
+    };
+    if let Some(size) = size {
+        merge_aggregate_fields(
+            aggs,
+            size,
+            &[(offset, field_name.to_string(), field_ty.clone())],
+        );
+    }
+}
+
+fn nir_type_byte_size(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } | NirType::Float { bits } if *bits > 0 && bits % 8 == 0 => {
+            Some(bits / 8)
+        }
+        NirType::Ptr(_) => Some(8),
+        NirType::Aggregate { size, .. } => Some(*size),
+        _ => None,
+    }
+}
+
+fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>) -> String {
+    if fields.is_empty() {
+        return format!(
+            "typedef struct fission_agg{size} {{ unsigned char bytes[{size}]; }} fission_agg{size};\n"
+        );
+    }
+    let mut members = String::new();
+    let mut cursor = 0u32;
+    for (offset, (name, ty)) in fields {
+        if *offset > cursor {
+            members.push_str(&format!(
+                "    unsigned char _pad_{cursor}[{}];\n",
+                offset - cursor
+            ));
+            cursor = *offset;
+        } else if *offset < cursor {
+            // Overlapping/out-of-order residual — still emit the named field.
+        }
+        let fty = print_type(ty);
+        let fsize = nir_type_byte_size(ty).unwrap_or(1);
+        // Sanitize field names that might not be valid C identifiers.
+        let fname = if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        {
+            name.clone()
+        } else {
+            format!("field_{offset:x}")
+        };
+        members.push_str(&format!("    {fty} {fname};\n"));
+        cursor = cursor.max(*offset + fsize);
+    }
+    if cursor < size {
+        members.push_str(&format!(
+            "    unsigned char _pad_{cursor}[{}];\n",
+            size - cursor
+        ));
+    }
+    format!("typedef struct fission_agg{size} {{\n{members}}} fission_agg{size};\n")
 }
 
 fn collect_referenced_global_decls(
@@ -1093,6 +1229,73 @@ mod global_decl_tests {
             "{rendered}"
         );
         assert!(rendered.contains("fission_agg16 * param_1"), "{rendered}");
+    }
+
+    #[test]
+    fn render_hir_emits_named_fields_for_recovered_aggregate() {
+        use crate::midend::StructField;
+        let hir = HirFunction {
+            name: "pair_user".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                })),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            return_type: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+            body: vec![HirStmt::Return(Some(HirExpr::FieldAccess {
+                base: Box::new(HirExpr::Index {
+                    base: Box::new(HirExpr::Var("param_1".to_string())),
+                    index: Box::new(HirExpr::Const(
+                        0,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    elem_ty: NirType::Aggregate {
+                        size: 8,
+                        fields: vec![StructField {
+                            offset: 0,
+                            name: "field_0".to_string(),
+                            ty: NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        }],
+                    },
+                }),
+                field_name: "field_0".to_string(),
+                offset: 0,
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            }))],
+            ..HirFunction::default()
+        };
+        let rendered =
+            render_hir_function_with_global_decls(&hir, &preview_options_with_global("unused"));
+        assert!(
+            rendered.contains("uint field_0;"),
+            "typedef must declare field_0:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("field_0"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("unsigned char bytes[8]"),
+            "named-field aggregates should not use bytes-only placeholder:\n{rendered}"
+        );
     }
 
     #[test]

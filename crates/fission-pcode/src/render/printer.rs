@@ -401,9 +401,18 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
         } => {
             let inner = print_expr_prec(base, 0, depth + 1);
             let index = print_expr_prec(index, 0, depth + 1);
-            match base.as_ref() {
-                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
-                _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+            // Always cast when the element type is a recovered aggregate so
+            // `base[i].field_0` compiles even if `base` is still declared as
+            // `uint *` / `int *` in the binding list.
+            if matches!(elem_ty, NirType::Aggregate { .. }) {
+                format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
+            } else {
+                match base.as_ref() {
+                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                        format!("{name}[{index}]")
+                    }
+                    _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+                }
             }
         }
         HirLValue::FieldAccess {
@@ -551,9 +560,15 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
         } => {
             let inner = print_expr_prec(base, 0, depth + 1);
             let index = print_expr_prec(index, 0, depth + 1);
-            let text = match base.as_ref() {
-                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
-                _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+            let text = if matches!(elem_ty, NirType::Aggregate { .. }) {
+                format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
+            } else {
+                match base.as_ref() {
+                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                        format!("{name}[{index}]")
+                    }
+                    _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+                }
             };
             (text, 120)
         }
@@ -1027,9 +1042,15 @@ fn print_expr_prec_ctx(
         } => {
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let index = print_expr_prec_ctx(index, 0, depth + 1, ctx);
-            let text = match base.as_ref() {
-                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
-                _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+            let text = if matches!(elem_ty, NirType::Aggregate { .. }) {
+                format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
+            } else {
+                match base.as_ref() {
+                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                        format!("{name}[{index}]")
+                    }
+                    _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+                }
             };
             (text, 120)
         }
@@ -1108,9 +1129,15 @@ fn print_lvalue_ctx(lhs: &HirLValue, depth: usize, ctx: &PrintCtx<'_>) -> String
         } => {
             let inner = print_expr_prec_ctx(base, 0, depth + 1, ctx);
             let index = print_expr_prec_ctx(index, 0, depth + 1, ctx);
-            match base.as_ref() {
-                HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => format!("{name}[{index}]"),
-                _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+            if matches!(elem_ty, NirType::Aggregate { .. }) {
+                format!("(({} *)({inner}))[{index}]", print_type(elem_ty))
+            } else {
+                match base.as_ref() {
+                    HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) => {
+                        format!("{name}[{index}]")
+                    }
+                    _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+                }
             }
         }
     }
