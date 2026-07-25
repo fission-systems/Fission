@@ -1,0 +1,1548 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/adr/0014-dir-product-vs-prestructure-substrate/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>ADR 0014: Dual reconstruction paths — product DIR vs pre-structure substrate - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#adr-0014-dual-reconstruction-paths-product-dir-vs-pre-structure-substrate" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ADR 0014: Dual reconstruction paths — product DIR vs pre-structure substrate
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.1.5/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Context">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-code-substrate-shipped-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Code substrate (shipped today)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-product-concept-exploratory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Product concept (exploratory)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decision">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-vocabulary-split-binding-for-new-docs-and-designs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Vocabulary split (binding for new docs and designs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-semantic-foundation-p-code-isomorphic-ir-not-nir-print" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Semantic foundation: p-code-isomorphic IR (not NIR print)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-dual-path-product-shape-accepted-intent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Dual-path product shape (accepted intent)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-shared-structuring-substrate-foundation-cfg-facts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Shared structuring substrate: foundation CFG facts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-rename-policy-for-the-code-substrate-planned-not-blocking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Rename policy for the code substrate (planned, not blocking)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-owner-boundaries-relative-to-existing-adrs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Owner boundaries (relative to existing ADRs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="adr-0014-dual-reconstruction-paths-product-dir-vs-pre-structure-substrate">ADR 0014: Dual reconstruction paths — product DIR vs pre-structure substrate<a class="headerlink" href="#adr-0014-dual-reconstruction-paths-product-dir-vs-pre-structure-substrate" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> Accepted<br />
+<strong>Last verified:</strong> 2026-07-25</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>The token <strong>DIR</strong> is overloaded in Fission.</p>
+<h3 id="a-code-substrate-shipped-today">A. Code substrate (shipped today)<a class="headerlink" href="#a-code-substrate-shipped-today" title="Permanent link">&para;</a></h3>
+<p><code>fission-midend-dir</code> owns <strong>pre-structuring</strong> midend types (<code>DirStmt</code> /
+<code>DirExpr</code> / <code>DirFunction</code>), the DIR-typed action pipeline, DIR VSA, and pure
+DIR helpers. Pipeline shape:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>p-code → builder raise → Dir* (flat goto/label AST)
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>       → normalize
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>       → structure (CFG-to-AST on Dir*)
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>       → HirFunction
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>       → dual-layer print (NIR / HIR profiles; ADR 0011)
+</span></code></pre></div>
+<p>In this layout, “DIR” is <strong>not</strong> a sibling product of HIR. It is the
+<strong>static intermediate</strong> consumed by normalize/structuring, then converted to
+<code>HirFunction</code> (<code>dir_stmts_to_hir_stmts</code>). ADR 0012 describes this substrate as
+the pre-structuring counterpart to <code>fission-midend-core</code>’s HIR types.</p>
+<h3 id="b-product-concept-exploratory">B. Product concept (exploratory)<a class="headerlink" href="#b-product-concept-exploratory" title="Permanent link">&para;</a></h3>
+<p>A separate design thread treats DIR as an <strong>independent reconstruction
+strategy</strong> beside HIR, both rooted in the same low-level semantic IR:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Machine code
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    → Low-level semantic IR (foundation; see §2)
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>         ├── HIR path: fast static reconstruction
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>         └── DIR path: slower, execution- / constraint-validated reconstruction
+</span></code></pre></div>
+<p>In that model:</p>
+<ul>
+<li>DIR is <strong>not</strong> a layer above HIR (<code>print-NIR → HIR → DIR</code> is wrong).</li>
+<li>HIR asks: <em>what is the most readable reconstruction under static analysis?</em></li>
+<li>DIR asks: <em>what readable reconstruction can we validate against the original
+  low-level behavior (emulator, traces, solver)?</em></li>
+<li>Full functional proof is not required; outputs carry an <strong>assurance band</strong>
+  (e.g. Proven / Conditionally Proven / Path Validated / Trace Validated /
+  Unverified) plus assumptions (path budget, external calls, timeouts).</li>
+</ul>
+<p>Using one name for both A and B causes design and review failures:</p>
+<ul>
+<li>“Structure on DIR” is read as “structure on the product path” when code means
+  “structure on the flat pre-HIR AST”.</li>
+<li>“DIR is not above HIR” is true for B and false for A’s current pipeline.</li>
+<li>Emulator / selfjit / solver work gets mis-owned under midend-dir crates that
+  only hold static AST helpers.</li>
+</ul>
+<p>A second overload is <strong>NIR</strong>: dual-layer <strong>print profile</strong> (ADR 0011), historical
+midend module name, and informal “low-level IR” in product writing. Emulator and
+selfjit today step <strong><code>PcodeOp</code> / <code>PcodeOpcode</code></strong>, not <code>Dir*</code> / <code>HirFunction</code> /
+print-NIR text. Hybrid decompile+emu+solver designs must not treat those as
+interchangeable.</p>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<h3 id="1-vocabulary-split-binding-for-new-docs-and-designs">1. Vocabulary split (binding for new docs and designs)<a class="headerlink" href="#1-vocabulary-split-binding-for-new-docs-and-designs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Role</th>
+<th>Layer</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Semantic foundation</strong></td>
+<td>Executable, fidelity-first ops after lift — <strong>p-code</strong>, or a view <strong>isomorphic</strong> to p-code (same op meaning, sizes, spaces, control)</td>
+<td>Foundation</td>
+<td>Shipped as <code>PcodeOp</code> / <code>PcodeFunction</code></td>
+</tr>
+<tr>
+<td><strong>Pre-structure IR</strong></td>
+<td>Flat raised AST used by static normalize + structure (<code>Dir*</code> types today)</td>
+<td>Static pipeline intermediate</td>
+<td>Shipped under the name <code>Dir*</code></td>
+</tr>
+<tr>
+<td><strong>HIR product</strong></td>
+<td>Fast static high-level reconstruction + dual-layer print (ADR 0011)</td>
+<td>Default decompile product</td>
+<td>Shipped</td>
+</tr>
+<tr>
+<td><strong>NIR print profile</strong></td>
+<td>Mechanical C <strong>text</strong> from the structured tree (<code>PrintProfile::Nir</code>)</td>
+<td>Presentation / oracle <strong>string</strong></td>
+<td>Shipped; <strong>not</strong> the foundation</td>
+</tr>
+<tr>
+<td><strong>Validated reconstruction product</strong> (concept name: <strong>DIR product</strong>)</td>
+<td>Optional path: candidate high-level form + behavioral checks + assurance metadata</td>
+<td>Sibling of HIR product, not a post-HIR polish stage</td>
+<td>Exploratory; not a shipped public contract yet</td>
+</tr>
+</tbody>
+</table>
+<p>Rules:</p>
+<ol>
+<li>New architecture text must not use bare “DIR” without saying <strong>substrate</strong>
+   (<code>Dir*</code> / pre-structure IR) or <strong>product</strong> (validated reconstruction).</li>
+<li>The DIR <strong>product</strong> must not be described as <code>NIR → HIR → DIR</code> or as a
+   presentation pass over HIR. It shares the <strong>semantic foundation</strong> with HIR
+   and may <strong>reuse HIR candidates</strong> as inputs to validation, but HIR is not its
+   semantic oracle, and <strong>NIR print text is not its oracle either</strong>.</li>
+<li>Until a rename lands, <strong>code identifiers</strong> (<code>DirStmt</code>, <code>fission-midend-dir</code>,
+   <code>DirFunction</code>) continue to mean <strong>pre-structure IR only</strong>. Do not overload
+   those types with assurance metadata or emulator coupling “because the product
+   is also called DIR”.</li>
+<li>Bare “NIR” in new dual-path / hybrid docs is forbidden unless qualified:
+   <strong>foundation</strong> (only if p-code-isomorphic — prefer saying <strong>p-code</strong>),
+   <strong>print profile</strong>, or <strong>legacy midend name</strong>. Default: say <strong>p-code</strong> for the
+   shared executable IR.</li>
+</ol>
+<h3 id="2-semantic-foundation-p-code-isomorphic-ir-not-nir-print">2. Semantic foundation: p-code-isomorphic IR (not NIR print)<a class="headerlink" href="#2-semantic-foundation-p-code-isomorphic-ir-not-nir-print" title="Permanent link">&para;</a></h3>
+<p>Decompiler, emulator, and solver form one hybrid system only if they share a
+<strong>single executable semantic foundation</strong>. In Fission that foundation is:</p>
+<blockquote>
+<p><strong>p-code</strong> (<code>PcodeOp</code> / <code>PcodeOpcode</code> / varnode spaces), or a derived IR that
+is <strong>operationally isomorphic</strong> to p-code (same observable step semantics).</p>
+</blockquote>
+<p><strong>Isomorphic NIR (allowed as API/name only):</strong> a normalized or SSA-shaped view
+may be called “NIR” in product language <strong>if and only if</strong>:</p>
+<ol>
+<li>op set and meaning match p-code (or a documented, tested refinement),</li>
+<li>emulator (or a proven lowerer to p-code) can <strong>execute</strong> that view,</li>
+<li>solver interprets the <strong>same</strong> op/memory/ABI model,</li>
+<li>DIR-product equivalence compares observations against <strong>that</strong> foundation,
+   not against HIR/print-NIR strings alone.</li>
+</ol>
+<p><strong>Not the foundation (forbidden as sole shared IR for hybrid validation):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Why insufficient alone</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pre-structure <code>Dir*</code></td>
+<td>Already raised; materialize choices blur lift vs structure bugs</td>
+</tr>
+<tr>
+<td><code>HirFunction</code></td>
+<td>Static product; presentation and recovery policy embedded</td>
+</tr>
+<tr>
+<td>NIR <strong>print</strong> text (<code>PrintProfile::Nir</code>)</td>
+<td>String surface; not an execution IR (ADR 0011 oracle is for <strong>quality ranking of decompile text</strong>, not emu step semantics)</td>
+</tr>
+<tr>
+<td>HIR <strong>print</strong> text</td>
+<td>Readability surface only</td>
+</tr>
+</tbody>
+</table>
+<p>Shipped reality (normative for ownership):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>        ┌── emulator / selfjit   (step / JIT PcodeOp)
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>p-code ─┼── solver experiments   (same op / BV / memory model)
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        └── decompiler builder   (raise → pre-structure → structure → HIR)
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>                  ↑
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>         DIR product: candidates may come from static path;
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>         behavioral check is against foundation observations
+</span></code></pre></div>
+<p><strong>“Share NIR instead of p-code”</strong> is therefore:</p>
+<ul>
+<li><strong>OK</strong> only when “NIR” means a p-code-isomorphic foundation view (§2 conditions);</li>
+<li><strong>Not OK</strong> when “NIR” means print profile, <code>Dir*</code>, or HIR.</li>
+</ul>
+<p>Prefer documenting the foundation as <strong>p-code</strong> to match <code>fission-emulator</code> and
+<code>fission-pcode</code> today; do not invent a second executable IR without a parity
+contract and tests against p-code.</p>
+<h3 id="3-dual-path-product-shape-accepted-intent">3. Dual-path product shape (accepted intent)<a class="headerlink" href="#3-dual-path-product-shape-accepted-intent" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Semantic foundation (p-code or p-code-isomorphic view)
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    ├── Static path     → (pre-structure IR) → structure → HIR product
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    │                        └→ dual-layer print (NIR / HIR profiles)
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    └── Validated path  → candidates (+ optional static HIR) → execute / symbolic
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>                          check vs foundation → DIR product + assurance
+</span></code></pre></div>
+<ul>
+<li><strong>HIR</strong> remains the default, scalable decompile surface.</li>
+<li><strong>DIR product</strong> is selective (regions, critical functions, research lane),
+  not a mandatory whole-binary replacement for HIR.</li>
+<li>Decompiler, emulator, and solver improve as <strong>shared consumers of the
+  foundation</strong>, not as a stack where only HIR or print-NIR is trusted.</li>
+</ul>
+<h3 id="4-shared-structuring-substrate-foundation-cfg-facts">4. Shared structuring substrate: foundation CFG facts<a class="headerlink" href="#4-shared-structuring-substrate-foundation-cfg-facts" title="Permanent link">&para;</a></h3>
+<p>For both products, <strong>control-structure candidate generation</strong> should be owned
+from <strong>foundation CFG facts</strong> (p-code basic blocks, BRANCH/CBRANCH edges,
+dominance, post-dominance, SCC / SESE), not from a late HIR-only rewrite.</p>
+<table>
+<thead>
+<tr>
+<th>Shared</th>
+<th>Diverges by path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lift / p-code meaning</td>
+<td>Accept policy (static vs validated)</td>
+</tr>
+<tr>
+<td>CFG / region candidate discovery</td>
+<td>Assurance attachment and failure bands</td>
+</tr>
+<tr>
+<td>Optional block/region expression raise</td>
+<td>Whole-function proof ambition</td>
+</tr>
+<tr>
+<td>Small equivalence helpers (arith, cond)</td>
+<td>Default on vs opt-in expensive checks</td>
+</tr>
+</tbody>
+</table>
+<p>Explicit non-goals of this ADR:</p>
+<ul>
+<li>Replacing the shipped static pipeline overnight.</li>
+<li>Implementing full translation validation for arbitrary binaries.</li>
+<li>Forking two complete structuring codebases; prefer <strong>one candidate core</strong>,
+  two accept/assurance policies.</li>
+<li>Binding production decompile quality claims to DIR-product experiments without
+  ADR 0006 measurement.</li>
+<li>Replacing p-code execution with print-NIR or HIR interpretation as the hybrid
+  oracle.</li>
+</ul>
+<h3 id="5-rename-policy-for-the-code-substrate-planned-not-blocking">5. Rename policy for the code substrate (planned, not blocking)<a class="headerlink" href="#5-rename-policy-for-the-code-substrate-planned-not-blocking" title="Permanent link">&para;</a></h3>
+<p>The long-term goal is to stop calling pre-structure IR “DIR” in product docs.</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Now</td>
+<td>Docs/ADRs use <strong>pre-structure IR</strong> / <code>Dir*</code> for substrate; <strong>DIR product</strong> for the validated path; <strong>p-code</strong> for foundation</td>
+</tr>
+<tr>
+<td>Next</td>
+<td>Prefer new APIs and comments that say pre-structure / flat IR; avoid expanding <code>Dir*</code> semantics toward validation</td>
+</tr>
+<tr>
+<td>Later (optional mechanical rename)</td>
+<td><code>Dir*</code> → e.g. <code>Flat*</code> / <code>PreHir*</code> / <code>GotoIr*</code>, crate <code>fission-midend-dir</code> → name matching pre-structure role; free the token <strong>DIR</strong> for the validated product — only with a dedicated migration PR, not drive-by</td>
+</tr>
+</tbody>
+</table>
+<p>This ADR <strong>accepts the dual-path vocabulary, foundation rule, and owner intent</strong>.
+It does <strong>not</strong> require an immediate identifier rename to stay consistent.</p>
+<h3 id="6-owner-boundaries-relative-to-existing-adrs">6. Owner boundaries (relative to existing ADRs)<a class="headerlink" href="#6-owner-boundaries-relative-to-existing-adrs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Owner</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Semantic foundation (lift / p-code meaning)</td>
+<td><code>fission-pcode</code> (+ sleigh)</td>
+<td>ADR 0002 / 0008; hybrid shared IR</td>
+</tr>
+<tr>
+<td>Pre-structure IR types &amp; static normalize helpers</td>
+<td><code>fission-midend-dir</code> / normalize</td>
+<td>Code “DIR” = substrate only</td>
+</tr>
+<tr>
+<td>Static structuring free functions</td>
+<td><code>fission-midend-structuring</code></td>
+<td>Prefer CFG facts from foundation over HIR-only repair</td>
+</tr>
+<tr>
+<td>HIR presentation / dual-layer print (incl. NIR profile)</td>
+<td><code>render</code> + ADR 0011</td>
+<td><strong>Not</strong> foundation; <strong>not</strong> DIR product</td>
+</tr>
+<tr>
+<td>Emulator / selfjit differential</td>
+<td><code>fission-emulator</code></td>
+<td>Executes foundation (<code>PcodeOp</code>); DIR-product oracle</td>
+</tr>
+<tr>
+<td>Constraint / solver experiments</td>
+<td>dedicated solver surface (existing or future)</td>
+<td>Same foundation model; must not silently alter print-NIR oracle text</td>
+</tr>
+<tr>
+<td>DIR-product assurance schema / lane</td>
+<td><strong>TBD</strong> under a future ADR when first public contract ships</td>
+<td>Until then: research / internal only</td>
+</tr>
+</tbody>
+</table>
+<p>ADR 0006 still gates <strong>semantic quality</strong> claims for the static path. DIR-product
+work may land mechanical scaffolding and focused differential tests, but must
+not claim decompiler quality wins without measured evidence.</p>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<p><strong>Positive</strong></p>
+<ul>
+<li>Stops treating “DIR above HIR” and “DIR before HIR” as the same design.</li>
+<li>Aligns dual-path exploration with a single <strong>executable</strong> foundation (p-code).</li>
+<li>Separates print-NIR / HIR oracle text from emu/solver step semantics.</li>
+<li>Gives rename and crate work a stable target language without blocking current
+  static decompile.</li>
+</ul>
+<p><strong>Costs / risks</strong></p>
+<ul>
+<li>Temporary dual meaning of “DIR” in oral discussion until rename or habit
+  settles; mitigate with “substrate” vs “product” every time.</li>
+<li>Temporary dual meaning of “NIR”; mitigate with §1 rule 4 and “p-code” default.</li>
+<li>Risk of smuggling validation logic into <code>DirStmt</code> or normalize “for DIR”;
+  reject in review using §1 rule 3.</li>
+<li>Risk of dual structuring stacks; reject unless a proposal proves the shared
+  candidate core is insufficient.</li>
+<li>Risk of a second “semantic NIR” IR that drifts from p-code; require isomorphism
+  contract + differential tests (§2) before any hybrid path depends on it.</li>
+</ul>
+<p><strong>Follow-ups</strong></p>
+<ol>
+<li>Architecture / PROJECT docs: one diagram with dual paths + foundation =
+   p-code + current static pipeline (pre-structure IR labeled).</li>
+<li>First DIR-product spike design: region-scoped Path/Trace Validated check
+   <strong>against p-code / foundation observations</strong> (no full-function proof).</li>
+<li>Optional rename RFC when <code>Dir*</code> churn cost is justified.</li>
+<li>When a public DIR-product contract exists, add ADR 001x for assurance bands,
+   CLI/API surface, and non-goals (syscalls, concurrency, SMC, etc.).</li>
+</ol>
+<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../0002-fission-pcode-canonical-semantics/">ADR 0002</a> — p-code crate owns
+  shipped semantics</li>
+<li><a href="../0006-decompiler-quality-change-gate/">ADR 0006</a> — measurement gate</li>
+<li><a href="../0008-nir-substrate-and-owner-boundaries/">ADR 0008</a> — substrate vs owners</li>
+<li><a href="../0011-hir-presentation-contract/">ADR 0011</a> — HIR presentation / NIR print ≠
+  executable foundation</li>
+<li><a href="../0012-midend-rename-and-crate-extraction/">ADR 0012</a> — midend crate split;
+  <code>fission-midend-dir</code> as pre-structure substrate</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
