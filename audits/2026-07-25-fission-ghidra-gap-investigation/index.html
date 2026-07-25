@@ -1149,10 +1149,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#recommended-first-implementation-target" class="md-nav__link">
+  <a href="#landed-fixes-2026-07-25-commits-on-main" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended first implementation target
+        Landed fixes (2026-07-25, commits on main)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#focused-remeasure-ee492fb6-vs-ghidra-120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Focused remeasure (ee492fb6 vs Ghidra 12.0)
       
     </span>
   </a>
@@ -1613,7 +1624,13 @@
 <td>2026-07-25 b</td>
 <td><strong><code>c8f9f24a</code></strong> local bundle fp <code>5b24da74…</code> / Fission <strong>0.1.6</strong> + Ghidra <strong>12.0</strong></td>
 <td><code>results/local_gap_c8f9f24a_fission_ghidra.json</code> + <code>run_parity --limit 20</code></td>
-<td><strong>Current-tree product remeasure</strong> (below). Local only — do not promote to latest/Pages.</td>
+<td>Pre-fix product baseline (local diagnostic).</td>
+</tr>
+<tr>
+<td>2026-07-25 c</td>
+<td><strong><code>ee492fb6</code></strong> local <code>0.1.6</code> + Ghidra <strong>12.0</strong></td>
+<td><code>results/local_gap_ee492fb6_focused/*.json</code></td>
+<td>After P0 return/locals + P1 stride/field + found-path break→return. Focused functions only.</td>
 </tr>
 </tbody>
 </table>
@@ -1758,11 +1775,62 @@
 </tbody>
 </table>
 <p><strong>Presentation anchors (both sem=1.0):</strong> <code>checksum</code>, <code>sum_array</code>, <code>mul_ints</code>, <code>add_ints</code> — queue under ADR 0011 / printer, not midend semantic P0.</p>
-<h3 id="recommended-first-implementation-target">Recommended first implementation target<a class="headerlink" href="#recommended-first-implementation-target" title="Permanent link">&para;</a></h3>
-<p><strong>Primary:</strong> <strong>non-void empty <code>return</code></strong> / primary return recovery at match paths (<code>linear_search</code>-class) — mechanical compile_error with clear invariant, multi-row blast radius.<br />
-<strong>Secondary:</strong> <strong>use-before-declare / undeclared stack locals</strong> (<code>matrix_multiply</code> <code>local_18</code>).<br />
-<strong>Tertiary:</strong> struct field layout for pair/kv types (<code>accumulate_pairs</code>, <code>kv_lookup</code>).</p>
-<p>Before any production fix: fill <a href="../../templates/DECOMPILER_CHANGE_PROPOSAL/">DECOMPILER_CHANGE_PROPOSAL</a> (ADR 0006); remeasure the same function/variant after.</p>
+<h3 id="landed-fixes-2026-07-25-commits-on-main">Landed fixes (2026-07-25, commits on <code>main</code>)<a class="headerlink" href="#landed-fixes-2026-07-25-commits-on-main" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Commit</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>446dc4b9</code></td>
+<td>Live primary return on stack-target RET; keep write-only stack locals; ADR 0014</td>
+</tr>
+<tr>
+<td><code>cb94c87a</code></td>
+<td>Wide-stride <code>base[i].field_0</code>; sub-element PtrOffset rescale (+1→+4)</td>
+</tr>
+<tr>
+<td><code>ee492fb6</code></td>
+<td>Found-path <code>result=…; break</code> → <code>return result</code> before sentinel <code>return -1</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="focused-remeasure-ee492fb6-vs-ghidra-120">Focused remeasure (<code>ee492fb6</code> vs Ghidra 12.0)<a class="headerlink" href="#focused-remeasure-ee492fb6-vs-ghidra-120" title="Permanent link">&para;</a></h3>
+<p>Artifacts under <code>fission-benchmark/results/local_gap_ee492fb6_focused/</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Notable Fission movement (selected variants)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>linear_search</code></td>
+<td><strong>gcc -O2/O3/O0, m32-O0: semantic 1.0 (6/6)</strong> — was compile_error / empty return class on O2</td>
+</tr>
+<tr>
+<td><code>find_pair_value</code></td>
+<td><strong>gcc -O0, m32-O0: semantic 1.0 (5/5)</strong>; clang still compile_error</td>
+</tr>
+<tr>
+<td><code>kv_lookup</code></td>
+<td><strong>gcc -O0, m32-O0: semantic 1.0 (6/6)</strong> — was assertion_fail class on m32-O0</td>
+</tr>
+<tr>
+<td><code>accumulate_pairs</code></td>
+<td><strong>gcc O0/O1/O2, m32 O0/O2: semantic 1.0</strong>; clang-O0 still compile_error</td>
+</tr>
+<tr>
+<td><code>matrix_multiply</code></td>
+<td>Undeclared-local class improved; <strong>still mostly compile_error / assert</strong> (float vs int / structure residual)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Not a full-corpus claim</strong> — focused rows only; do not promote to Pages.</p>
 <h2 id="open-risks">Open risks<a class="headerlink" href="#open-risks" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Local docker Fission can lag monorepo — this remeasure used <strong><code>c8f9f24a</code></strong> bake; re-run after further commits.</li>
