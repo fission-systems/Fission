@@ -252,7 +252,7 @@ Artifacts under `fission-benchmark/results/local_gap_ee492fb6_focused/`.
 | `find_pair_value` | **gcc -O0, m32-O0: semantic 1.0 (5/5)**; clang still compile_error |
 | `kv_lookup` | **gcc -O0, m32-O0: semantic 1.0 (6/6)** — was assertion_fail class on m32-O0 |
 | `accumulate_pairs` | **gcc O0/O1/O2, m32 O0/O2: semantic 1.0**; clang-O0 still compile_error |
-| `matrix_multiply` | Undeclared-local class improved; post-`1ea1a26f` residual was **missing `c[]` store (Index DSE)** + **float→uint type loss**. **`3ca1a786` focused remeasure:** **clang -O0 sem=1.0 (5/5)** (was compile_error/sem=0); gcc -O0 sem=0.20 (1/5 assertion_fail); other variants still compile_error/adapter. Store+float recovery is a measured clang-O0 quality win; residual structure/return on other opts open. |
+| `matrix_multiply` | Undeclared-local class improved; post-`1ea1a26f` residual was **missing `c[]` store (Index DSE)** + **float→uint type loss**. **`3ca1a786`:** **clang -O0 sem=1.0 (5/5)**; gcc -O0 sem=0.20. **`a6624943` (midend XMM Aggregate→Float lane, no printer patch):** gcc -O1/O2 no longer `fission_agg16` assign errors; residual is **duplicate label** structuring (`block_*` redefinition). m32 still `float80` undeclared (owner = materialize/normalize x87 float width, **not** printer spelling). |
 
 **Not a full-corpus claim** — focused rows only; do not promote to Pages.
 
