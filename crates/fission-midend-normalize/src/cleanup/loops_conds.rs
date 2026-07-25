@@ -1188,3 +1188,140 @@ fn is_self_increment_assign(name: &str, rhs: &DirExpr) -> bool {
         _ => false,
     }
 }
+
+/// `goto L` whose label was dropped (common after match-path return rewrites
+/// leave a continue-edge label unreferenced) → `continue` when nested in a
+/// loop. Outside loops the goto is left alone for other repair passes.
+pub fn rewrite_orphan_loop_gotos_to_continue(stmts: &mut Vec<DirStmt>) -> bool {
+    let defined = collect_defined_labels(stmts);
+    rewrite_orphan_loop_gotos_to_continue_rec(stmts, &defined, false)
+}
+
+fn collect_defined_labels(stmts: &[DirStmt]) -> HashSet<String> {
+    let mut labels = HashSet::default();
+    collect_defined_labels_in_stmts(stmts, &mut labels);
+    labels
+}
+
+fn collect_defined_labels_in_stmts(stmts: &[DirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            DirStmt::Label(name) => {
+                out.insert(name.clone());
+            }
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. } => collect_defined_labels_in_stmts(body, out),
+            DirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_defined_labels_in_stmt(init, out);
+                }
+                if let Some(update) = update {
+                    collect_defined_labels_in_stmt(update, out);
+                }
+                collect_defined_labels_in_stmts(body, out);
+            }
+            DirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_defined_labels_in_stmts(then_body, out);
+                collect_defined_labels_in_stmts(else_body, out);
+            }
+            DirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_defined_labels_in_stmts(&case.body, out);
+                }
+                collect_defined_labels_in_stmts(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_defined_labels_in_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        DirStmt::Label(name) => {
+            out.insert(name.clone());
+        }
+        DirStmt::Block(body) => collect_defined_labels_in_stmts(body, out),
+        _ => {}
+    }
+}
+
+fn rewrite_orphan_loop_gotos_to_continue_rec(
+    stmts: &mut Vec<DirStmt>,
+    defined: &HashSet<String>,
+    in_loop: bool,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            DirStmt::Goto(label) if in_loop && !defined.contains(label) => {
+                *stmt = DirStmt::Continue;
+                changed = true;
+            }
+            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(body, defined, true);
+            }
+            DirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    changed |= rewrite_orphan_loop_gotos_to_continue_in_stmt(init, defined, in_loop);
+                }
+                if let Some(update) = update {
+                    changed |=
+                        rewrite_orphan_loop_gotos_to_continue_in_stmt(update, defined, true);
+                }
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(body, defined, true);
+            }
+            DirStmt::Block(body) => {
+                changed |= rewrite_orphan_loop_gotos_to_continue_rec(body, defined, in_loop);
+            }
+            DirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |=
+                    rewrite_orphan_loop_gotos_to_continue_rec(then_body, defined, in_loop);
+                changed |=
+                    rewrite_orphan_loop_gotos_to_continue_rec(else_body, defined, in_loop);
+            }
+            DirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    changed |= rewrite_orphan_loop_gotos_to_continue_rec(
+                        &mut case.body,
+                        defined,
+                        in_loop,
+                    );
+                }
+                changed |=
+                    rewrite_orphan_loop_gotos_to_continue_rec(default, defined, in_loop);
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn rewrite_orphan_loop_gotos_to_continue_in_stmt(
+    stmt: &mut DirStmt,
+    defined: &HashSet<String>,
+    in_loop: bool,
+) -> bool {
+    match stmt {
+        DirStmt::Block(body) => {
+            rewrite_orphan_loop_gotos_to_continue_rec(body, defined, in_loop)
+        }
+        DirStmt::Goto(label) if in_loop && !defined.contains(label) => {
+            *stmt = DirStmt::Continue;
+            true
+        }
+        _ => false,
+    }
+}

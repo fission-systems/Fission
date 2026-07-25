@@ -511,6 +511,32 @@ fn collapse_loop_exit_alias_return_rejects_non_alias_expression() {
 }
 
 #[test]
+fn rewrite_orphan_loop_gotos_to_continue_rewrites_missing_label() {
+    let mut stmts = vec![DirStmt::While {
+        cond: DirExpr::Const(1, int(32)),
+        body: vec![
+            DirStmt::If {
+                cond: DirExpr::Var("miss".to_string()),
+                then_body: vec![DirStmt::Goto("missing_continue".to_string())],
+                else_body: Vec::new(),
+            },
+            DirStmt::Return(Some(DirExpr::Var("v".to_string()))),
+        ],
+    }];
+    assert!(rewrite_orphan_loop_gotos_to_continue(&mut stmts));
+    let DirStmt::While { body, .. } = &stmts[0] else {
+        panic!("expected while");
+    };
+    assert!(matches!(
+        &body[0],
+        DirStmt::If {
+            then_body,
+            ..
+        } if matches!(then_body.as_slice(), [DirStmt::Continue])
+    ));
+}
+
+#[test]
 fn rewrite_found_path_break_to_return_promotes_match_path() {
     // while { if (done) break; ... result = value; break; } return -1;
     // → match path becomes return result
