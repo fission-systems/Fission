@@ -3,7 +3,7 @@
 - **Date:** 2026-07-25
 - **Ghidra reference tree:** `vendor/ghidra/ghidra-Ghidra_12.0.4_build` (+ `ghidra_12.0.4_PUBLIC`) — **reference only** ([ADR 0005](../adr/0005-ghidra-reference-boundary.md))
 - **Measurement primary:** `/Users/sjkim1127/fission-benchmark` (official `results/latest.json`, layered parity telemetry)
-- **Related:** [2026-07-10 decompiler problem inventory](2026-07-10-decompiler-problem-inventory.md), [ADR 0014](../adr/0014-dir-product-vs-prestructure-substrate.md), [BENCHMARK_DOCKER.md](../BENCHMARK_DOCKER.md)
+- **Related:** [2026-07-10 decompiler problem inventory](2026-07-10-decompiler-problem-inventory.md), [ADR 0014](../adr/0014-dir-product-vs-prestructure-substrate.md), [BENCHMARK_DOCKER.md](../BENCHMARK_DOCKER.md), **[Ghidra vs Fission unimplemented map](2026-07-25-ghidra-vs-fission-unimplemented.md)** (CollapseStructure / TraceDAG / Heritage gaps — prefer over residual heuristics)
 
 ## Executive summary
 
