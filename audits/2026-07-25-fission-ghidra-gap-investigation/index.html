@@ -1846,7 +1846,7 @@
 </tr>
 <tr>
 <td><code>matrix_multiply</code></td>
-<td>Undeclared-local class improved; <strong>still mostly compile_error / assert</strong> (float vs int / structure residual)</td>
+<td>Undeclared-local class improved; post-<code>1ea1a26f</code> residual was <strong>missing <code>c[]</code> store (Index DSE)</strong> + <strong>float→uint type loss</strong>. Local decomp after fix: <code>float *</code> params, float accum/<code>*=</code>, <code>local_18[i]=sum</code> restored. <strong>Docker remeasure still required</strong> for quality claim.</td>
 </tr>
 </tbody>
 </table>
