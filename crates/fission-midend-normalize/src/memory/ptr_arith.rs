@@ -791,6 +791,9 @@ fn try_recover_ptr_arith(
         }
     }
 
+    // Pointer-typed non-const arithmetic (e.g. `p + i`) is handled elsewhere;
+    // pointer-typed const offsets enter Pattern 2 only when the pointee is
+    // Unknown/Aggregate (byte-oriented) or the base was an explicit byte cast.
     let pointer_typed_const_byte_offset = matches!(ty, NirType::Ptr(_))
         && !from_byte_cast
         && matches!(elem_ty, NirType::Unknown | NirType::Aggregate { .. })
@@ -829,6 +832,18 @@ fn try_recover_ptr_arith(
     }
 
     // Pattern 2: Add(ptr, Const(k)) / Sub(ptr, Const(k)) → PtrOffset.
+    //
+    // `DirExpr::PtrOffset.offset` is always in **bytes** (printer emits
+    // `(uint8_t *)(base) + off`). The RHS const on a typed pointer add may be
+    // either already in bytes (common after raw INT_ADD) or an **element
+    // count** (C `int *p; p + 1`). `recover_const_offset_as_typed_pointer_add`
+    // handles the divisible-byte case. When the const does not divide the
+    // pointee size, treat it as an element index unless the base came from an
+    // explicit byte cast (`(uint8_t *)p + k` must stay byte-scaled).
+    //
+    // Without the element-count path, `*(pairs_i + 1)` for `int *` pair fields
+    // became `PtrOffset(..., 1)` → `(uint8_t *)(...) + 1` (+1 byte) instead of
+    // +sizeof(int), breaking Pair/KV value loads (`accumulate_pairs`-class).
     if let DirExpr::Const(k, _) = rhs_expr {
         let offset = if neg { -k } else { *k };
         if let Some(recovered) = recover_const_offset_as_typed_pointer_add(
@@ -843,17 +858,60 @@ fn try_recover_ptr_arith(
         if from_byte_cast && offset == 0 {
             return Some(typed_ptr_expr.clone());
         }
-        // Only emit PtrOffset when offset != 0 (offset 0 is a no-op).
+        // Byte-cast form `(uint8_t *)p + k` (or Cast-wrapped base + k): k is
+        // usually bytes. When k is a positive sub-element residual on a
+        // multi-byte pointee (e.g. int* pair field index written as +1),
+        // rescale to element*size so PtrOffset stays byte-correct for the
+        // printer.
+        if from_byte_cast {
+            if let Some(elem_size) = type_byte_size(&elem_ty).filter(|&sz| sz > 1) {
+                let elem_size_i = i64::try_from(elem_size).ok()?;
+                let byte_offset = if offset > 0 && offset < elem_size_i {
+                    offset.checked_mul(elem_size_i)?
+                } else {
+                    offset
+                };
+                if byte_offset != 0 {
+                    return Some(DirExpr::PtrOffset {
+                        base: Box::new(typed_ptr_expr.clone()),
+                        offset: byte_offset,
+                    });
+                }
+            } else if offset != 0 {
+                return Some(DirExpr::PtrOffset {
+                    base: Box::new(typed_ptr_expr.clone()),
+                    offset,
+                });
+            }
+            return Some(typed_ptr_expr.clone());
+        }
+        // Pointer-typed adds:
+        // - Unknown/Aggregate pointee: const is a byte offset → PtrOffset
+        // - Concrete multi-byte pointee (int*, etc.): const is already a C
+        //   element count; leave unchanged (avoids double-scale).
+        if matches!(ty, NirType::Ptr(_)) {
+            if matches!(
+                elem_ty,
+                NirType::Unknown | NirType::Aggregate { .. } | NirType::Int { bits: 8, .. }
+            ) {
+                if offset != 0 {
+                    return Some(DirExpr::PtrOffset {
+                        base: Box::new(typed_ptr_expr.clone()),
+                        offset,
+                    });
+                }
+                return Some(typed_ptr_expr.clone());
+            }
+            return None;
+        }
+        // Scalar Int-typed address arithmetic: emit byte PtrOffset.
         if offset != 0 {
             return Some(DirExpr::PtrOffset {
                 base: Box::new(typed_ptr_expr.clone()),
                 offset,
             });
         }
-        // offset == 0: the expression equals ptr — return bare Var.
-        if offset == 0 {
-            return Some(typed_ptr_expr.clone());
-        }
+        return Some(typed_ptr_expr.clone());
     }
 
     // Pattern 3: Add(ptr, non-const-index) → pointer add with stride 1 for byte pointers.
@@ -933,6 +991,31 @@ fn try_recover_index_access(
             base: lhs.clone(),
             index: Box::new(idx_expr),
             elem_ty: access_ty.clone(),
+        })
+    } else if stride > 0
+        && access_size > 0
+        && (stride as u64) > access_size
+        && (stride as u64) % access_size == 0
+    {
+        // Array-of-struct / wide-stride: load of the first field of element i
+        // (`*(T*)(base + i * stride)` with sizeof(T) < stride).
+        let elem_ty = NirType::Aggregate {
+            size: stride as u32,
+            fields: vec![fission_midend_core::ir::StructField {
+                offset: 0,
+                ty: access_ty.clone(),
+                name: "field_0".to_string(),
+            }],
+        };
+        Some(DirExpr::FieldAccess {
+            base: Box::new(DirExpr::Index {
+                base: lhs.clone(),
+                index: Box::new(idx_expr),
+                elem_ty,
+            }),
+            field_name: "field_0".to_string(),
+            offset: 0,
+            ty: access_ty.clone(),
         })
     } else {
         None
@@ -1116,7 +1199,33 @@ fn recover_in_expr(expr: &mut DirExpr, binding_types: &HashMap<String, NirType>)
                 changed |= recover_in_expr(arg, binding_types);
             }
         }
-        DirExpr::PtrOffset { base, .. } => {
+        DirExpr::PtrOffset { base, offset } => {
+            // Fix residual `PtrOffset(+k)` where k is a field *index* mis-scaled
+            // as a sub-element byte offset (Pair/KV `.value` as +1 → +4).
+            if *offset > 0 {
+                if let Some((_, ptr_ty, _)) = typed_pointer_base(base, binding_types) {
+                    if let Some(elem_ty) = pointee_ty(&ptr_ty) {
+                        let scale = match elem_ty {
+                            NirType::Int { .. } | NirType::Float { .. } => {
+                                type_byte_size(elem_ty).filter(|&sz| sz > 1)
+                            }
+                            NirType::Aggregate { fields, .. } => fields
+                                .iter()
+                                .filter_map(|f| type_byte_size(&f.ty))
+                                .find(|&sz| sz > 1)
+                                .or(Some(4)),
+                            _ => None,
+                        };
+                        if let Some(scale) = scale {
+                            let scale_i = i64::try_from(scale).unwrap_or(0);
+                            if scale_i > 0 && *offset < scale_i {
+                                *offset = offset.saturating_mul(scale_i);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
             changed |= recover_in_expr(base, binding_types);
         }
         DirExpr::FieldAccess { base, .. } => {
@@ -2465,6 +2574,119 @@ mod tests {
             );
         } else {
             panic!("expected assignment");
+        }
+    }
+
+    #[test]
+    fn byte_cast_sub_element_const_rescales_to_pointee_size() {
+        // `(uint8_t *)(int *p) + 1` with multi-byte pointee → PtrOffset(+4)
+        // (Pair/KV second-field mis-scale class).
+        let p_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: true,
+        }));
+        let byte_ptr_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let body = vec![DirStmt::Assign {
+            lhs: DirLValue::Var("q".to_owned()),
+            rhs: DirExpr::Binary {
+                op: DirBinaryOp::Add,
+                lhs: Box::new(DirExpr::Cast {
+                    ty: byte_ptr_ty,
+                    expr: Box::new(DirExpr::Var("p".to_owned())),
+                }),
+                rhs: Box::new(DirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            },
+        }];
+        let mut func = make_func(
+            vec![
+                make_binding_with_ty("p", p_ty),
+                make_binding_with_ty(
+                    "q",
+                    NirType::Ptr(Box::new(NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    })),
+                ),
+            ],
+            body,
+        );
+        assert!(super::apply_ptr_arith_recovery_pass(&mut func));
+        match &func.body[0] {
+            DirStmt::Assign {
+                rhs: DirExpr::PtrOffset { offset: 4, .. },
+                ..
+            } => {}
+            other => panic!("expected PtrOffset(+4), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn wide_stride_load_recovers_field0_of_indexed_aggregate() {
+        let p_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: false,
+        }));
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        // Load(*(p + i * 8)) — stride 8, access 4 → pairs[i].field_0 shape
+        let body = vec![DirStmt::Assign {
+            lhs: DirLValue::Var("v".to_owned()),
+            rhs: DirExpr::Load {
+                ptr: Box::new(DirExpr::Binary {
+                    op: DirBinaryOp::Add,
+                    lhs: Box::new(DirExpr::Var("p".to_owned())),
+                    rhs: Box::new(DirExpr::Binary {
+                        op: DirBinaryOp::Mul,
+                        lhs: Box::new(DirExpr::Var("i".to_owned())),
+                        rhs: Box::new(DirExpr::Const(8, u32_ty.clone())),
+                        ty: u32_ty.clone(),
+                    }),
+                    ty: NirType::Unknown,
+                }),
+                ty: u32_ty.clone(),
+            },
+        }];
+        let mut func = make_func(
+            vec![
+                make_binding_with_ty("p", p_ty),
+                make_binding_with_ty("i", u32_ty.clone()),
+                make_binding_with_ty("v", u32_ty),
+            ],
+            body,
+        );
+        assert!(super::apply_ptr_arith_recovery_pass(&mut func));
+        match &func.body[0] {
+            DirStmt::Assign {
+                rhs:
+                    DirExpr::FieldAccess {
+                        field_name,
+                        offset: 0,
+                        base,
+                        ..
+                    },
+                ..
+            } if field_name == "field_0" => {
+                assert!(
+                    matches!(base.as_ref(), DirExpr::Index { .. }),
+                    "expected Index base, got {base:?}"
+                );
+            }
+            other => panic!("expected FieldAccess(field_0) of Index, got {other:?}"),
         }
     }
 }
