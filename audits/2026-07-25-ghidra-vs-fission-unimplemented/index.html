@@ -1,0 +1,1796 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/audits/2026-07-25-ghidra-vs-fission-unimplemented/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Ghidra 12.0.4 vs Fission — unimplemented / partial subsystems - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ghidra-1204-vs-fission-unimplemented-partial-subsystems" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Ghidra 12.0.4 vs Fission — unimplemented / partial subsystems
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.1.5/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-this-doc-and-what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this doc (and what it is not)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-ghidra-architecture-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Ghidra architecture (reference)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Ghidra architecture (reference)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-single-ssa-ish-ir-action-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Single SSA-ish IR + Action pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-fission-architecture-current" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Fission architecture (current)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-unimplemented-weak-vs-ghidra-prioritized" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Unimplemented / weak vs Ghidra (prioritized)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Unimplemented / weak vs Ghidra (prioritized)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#p0-graph-native-structuring-matches-duplicate-label-multi-emit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0 — Graph-native structuring (matches “duplicate label / multi-emit”)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-heritage-cover-value-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0 — Heritage / Cover (value identity)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p1-stack-pointer-flow-prototypes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1 — Stack pointer flow &amp; prototypes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p1-type-recovery-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1 — Type recovery depth
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p2-rule-pool-density" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P2 — Rule pool density
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p2-merge-naming-globals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P2 — Merge / naming / globals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p3-present-but-intentionally-different" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P3 — Present but intentionally different
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-how-recent-residuals-map-no-quality-via-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. How recent residuals map (no “quality via cleanup”)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-recommended-implementation-order-invariant-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Recommended implementation order (invariant-based)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-how-to-use-ghidra-vendor-tree-correctly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. How to use Ghidra vendor tree correctly
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-bottom-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Bottom line
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="ghidra-1204-vs-fission-unimplemented-partial-subsystems">Ghidra 12.0.4 vs Fission — unimplemented / partial subsystems<a class="headerlink" href="#ghidra-1204-vs-fission-unimplemented-partial-subsystems" title="Permanent link">&para;</a></h1>
+<ul>
+<li><strong>Date:</strong> 2026-07-25</li>
+<li><strong>Ghidra tree (reference only):</strong><br />
+<code>vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Decompiler/src/decompile/cpp/</code><br />
+  (<a href="../../adr/0005-ghidra-reference-boundary/">ADR 0005</a> — no runtime dependency, no copy-paste of C++)</li>
+<li><strong>Related:</strong> <a href="../2026-07-25-fission-ghidra-gap-investigation/">gap investigation</a>,<br />
+<a href="../2026-07-10-decompiler-problem-inventory/">problem inventory</a>,<br />
+<a href="../../adr/0008-nir-substrate-and-owner-boundaries/">ADR 0008</a></li>
+</ul>
+<h2 id="why-this-doc-and-what-it-is-not">Why this doc (and what it is not)<a class="headerlink" href="#why-this-doc-and-what-it-is-not" title="Permanent link">&para;</a></h2>
+<p>Recent residual work (Index DSE, XMM Aggregate→Float, <strong>post-infloop multi-emit strip</strong>) can look like<br />
+“heuristic bandages.” That is a fair critique when the <strong>graph-native</strong> algorithm is missing.</p>
+<p>This document answers: <strong>what does Ghidra’s decompiler actually run that Fission does not have as a first-class owner?</strong><br />
+Use it to pick the next <strong>invariant-based</strong> implementation, not another suffix cleanup.</p>
+<p><strong>Not:</strong> “copy Ghidra print style.”<br />
+<strong>Not:</strong> printer patches for semantic gaps.<br />
+<strong>Yes:</strong> cleanroom reimplementation of algorithms under Fission owners.</p>
+<hr />
+<h2 id="1-ghidra-architecture-reference">1. Ghidra architecture (reference)<a class="headerlink" href="#1-ghidra-architecture-reference" title="Permanent link">&para;</a></h2>
+<h3 id="11-single-ssa-ish-ir-action-pipeline">1.1 Single SSA-ish IR + Action pipeline<a class="headerlink" href="#11-single-ssa-ish-ir-action-pipeline" title="Permanent link">&para;</a></h3>
+<p>Ghidra does <strong>not</strong> lower basic blocks to goto-C first and then “structure.”<br />
+It keeps a <strong>Funcdata / p-code graph</strong>, repeatedly applies <strong>Actions</strong> and <strong>Rules</strong>, then<br />
+<strong>structures the control-flow graph in place</strong>, then <strong>merges high variables</strong> and <strong>prints</strong>.</p>
+<p>Root construction: <code>ActionDatabase::universalAction</code> in <code>coreaction.cc</code><br />
+(~5462–5734). The <code>decompile</code> group members include (order matters):</p>
+<table>
+<thead>
+<tr>
+<th>Phase (Ghidra group / action)</th>
+<th>Role (one line)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ActionStart</code> / constbase / <code>ActionDefaultParams</code></td>
+<td>Start, constants, default prototypes</td>
+</tr>
+<tr>
+<td><code>ActionPrototypeTypes</code> / <code>ActionFuncLink</code></td>
+<td>Prototype / call linkage</td>
+</tr>
+<tr>
+<td><strong>mainloop (repeat)</strong></td>
+<td></td>
+</tr>
+<tr>
+<td><code>ActionUnreachable</code></td>
+<td>Drop dead CFG</td>
+</tr>
+<tr>
+<td><strong><code>ActionHeritage</code></strong></td>
+<td><strong>SSA heritage: MULTIEQUAL, address-tied memory, stack</strong></td>
+</tr>
+<tr>
+<td><code>ActionDirectWrite</code> / ActiveParam / ReturnRecovery</td>
+<td>Param &amp; return discovery</td>
+</tr>
+<tr>
+<td><code>ActionRestrictLocal</code> / <strong><code>ActionDeadCode</code></strong></td>
+<td>Dead code with cover discipline</td>
+</tr>
+<tr>
+<td><code>ActionRestructureVarnode</code> / Spacebase / NonzeroMask</td>
+<td>Locals, stack base, masks</td>
+</tr>
+<tr>
+<td><strong><code>ActionInferTypes</code></strong></td>
+<td>Type recovery fixed-point</td>
+</tr>
+<tr>
+<td><strong>oppool1</strong> (~100+ <code>Rule*</code>)</td>
+<td>Algebraic / boolean / float / subvar rewrite</td>
+</tr>
+<tr>
+<td><code>ActionLaneDivide</code></td>
+<td>Vector lane split</td>
+</tr>
+<tr>
+<td>MultiCse / ShadowVar / Deindirect</td>
+<td>CSE / indirect calls</td>
+</tr>
+<tr>
+<td><strong><code>ActionStackPtrFlow</code></strong></td>
+<td><strong>Stack-pointer flow across calls</strong></td>
+</tr>
+<tr>
+<td>RedundBranch / <strong><code>ActionBlockStructure</code></strong></td>
+<td><strong>CFG collapse → structured blocks</strong></td>
+</tr>
+<tr>
+<td>ConstantPtr / oppool2 (PtrArith, Load/Store Varnode)</td>
+<td>Stack slots as vars, ptr arith</td>
+</tr>
+<tr>
+<td>NodeJoin / ConditionalExe</td>
+<td>Join + conditional execution</td>
+</tr>
+<tr>
+<td><strong>after mainloop</strong></td>
+<td></td>
+</tr>
+<tr>
+<td>SwitchNorm / ReturnSplit / ActiveReturn</td>
+<td>Switch normalize, return split</td>
+</tr>
+<tr>
+<td>cleanup pool</td>
+<td>Late cleanup rules</td>
+</tr>
+<tr>
+<td>PreferComplement / <strong>StructureTransform</strong> / NormalizeBranches</td>
+<td>Structure polish</td>
+</tr>
+<tr>
+<td><strong>Merge*</strong> (Required, Copy, Adjacent, Type, …)</td>
+<td><strong>HighVariable merge via Cover</strong></td>
+</tr>
+<tr>
+<td>NameVars / MapGlobals / prototypes</td>
+<td>Naming &amp; globals</td>
+</tr>
+<tr>
+<td>print (<code>printc.cc</code>)</td>
+<td>C emission</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Structuring core (not print):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>File</th>
+<th>Algorithm</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>CollapseStructure</code></strong></td>
+<td><code>blockaction.hh/.cc</code></td>
+<td>Fixed-point <strong>collapse</strong> of CFG components (if/loop/switch shapes) into structured nodes</td>
+</tr>
+<tr>
+<td><strong><code>LoopBody</code></strong></td>
+<td>same</td>
+<td>Tarjan-style loop body: head, tails, exit, containments</td>
+</tr>
+<tr>
+<td><strong><code>TraceDAG</code></strong></td>
+<td>same</td>
+<td>DAG path tracing → <strong>likely unstructured edges (gotos)</strong> when stuck</td>
+</tr>
+<tr>
+<td><strong><code>ActionBlockStructure</code></strong></td>
+<td>same</td>
+<td>Driver action that runs collapse</td>
+</tr>
+<tr>
+<td><strong><code>ActionFinalStructure</code> / StructureTransform</strong></td>
+<td>same</td>
+<td>Final structure transforms</td>
+</tr>
+<tr>
+<td><strong><code>Heritage</code></strong></td>
+<td><code>heritage.hh/.cc</code></td>
+<td>Address-tied SSA / MULTIEQUAL / load-store heritage</td>
+</tr>
+<tr>
+<td><strong><code>Cover</code> / HighVariable merge</strong></td>
+<td><code>cover.hh</code>, merge actions</td>
+<td>Variable identity by <strong>liveness cover</strong>, not name heuristics</td>
+</tr>
+<tr>
+<td><strong><code>Rule*</code> pool</strong></td>
+<td><code>ruleaction.*</code></td>
+<td>Hundreds of local p-code rewrites (float, subvar, div, …)</td>
+</tr>
+</tbody>
+</table>
+<p>Critical property: when Ghidra collapses a loop, <strong>nodes disappear from the residual graph</strong><br />
+(component → single structure node). There is no second linear scan that <strong>re-emits the same basic block</strong> with the same label.</p>
+<hr />
+<h2 id="2-fission-architecture-current">2. Fission architecture (current)<a class="headerlink" href="#2-fission-architecture-current" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>p-code CFG
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  → materialize / incremental heritage (builder)     ≈ partial Heritage
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  → Dir* body (block stmts + terminators + labels)   ⚠ early textual CFG
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  → normalize (many Rule-like passes)                ≈ partial oppool + cleanup
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  → structuring (SESE collapse + linear residual)    ≈ partial BlockStructure
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  → HIR presentation (clone polish)                  ⚠ not Ghidra structure
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  → print                                            ≈ printc orthography only
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Ghidra</th>
+<th>Fission owner today</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SLEIGH / p-code</td>
+<td><code>fission-sleigh</code> + <code>fission-pcode</code></td>
+<td>Strong (parity often ≈Ghidra)</td>
+</tr>
+<tr>
+<td>Heritage (full address-tied SSA)</td>
+<td><code>run_incremental_heritage</code>, <code>apply_memory_heritage</code>, MULTIEQUAL materialize</td>
+<td><strong>Partial</strong> — not full Cover/Heritage fixed-point on Funcdata</td>
+</tr>
+<tr>
+<td>StackPtrFlow</td>
+<td>bits of call_recovery / stack slots</td>
+<td><strong>Partial</strong></td>
+</tr>
+<tr>
+<td>InferTypes + Rule pool</td>
+<td>normalize stages + type_infer / use_type_infer</td>
+<td><strong>Partial</strong> — many Rules missing or weaker</td>
+</tr>
+<tr>
+<td><strong>CollapseStructure + TraceDAG</strong></td>
+<td><code>sese_driver</code>, <code>loops</code>, <code>conditionals</code>, <code>linear_*</code>, <code>graph</code></td>
+<td><strong>Partial</strong> — has collapse <em>rules</em> + SESE; <strong>not</strong> full TraceDAG likely-goto selection or graph-only collapse without multi-emit</td>
+</tr>
+<tr>
+<td>HighVariable / Cover merge</td>
+<td><code>apply_variable_merge_pass</code> + materialize binding keys</td>
+<td><strong>Partial</strong> — cover-based merge incomplete</td>
+</tr>
+<tr>
+<td>LaneDivide (XMM lanes)</td>
+<td>materialize retype Aggregate→Float; no first-class LanedRegister</td>
+<td><strong>Partial / ad-hoc</strong></td>
+</tr>
+<tr>
+<td>StructureTransform / FinalStructure</td>
+<td>structuring cleanup + presentation</td>
+<td><strong>Partial</strong> — presentation may paper over structure</td>
+</tr>
+<tr>
+<td>printc orthography</td>
+<td><code>render/printer</code> + layered typedefs</td>
+<td><strong>OK if IR types right</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-unimplemented-weak-vs-ghidra-prioritized">3. Unimplemented / weak vs Ghidra (prioritized)<a class="headerlink" href="#3-unimplemented-weak-vs-ghidra-prioritized" title="Permanent link">&para;</a></h2>
+<p>Priority = impact on measured residual (matrix_multiply, O1/O2, m32, pair/kv) ×<br />
+how clearly Ghidra has a named algorithm.</p>
+<h3 id="p0-graph-native-structuring-matches-duplicate-label-multi-emit">P0 — Graph-native structuring (matches “duplicate label / multi-emit”)<a class="headerlink" href="#p0-graph-native-structuring-matches-duplicate-label-multi-emit" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Missing piece</th>
+<th>Ghidra</th>
+<th>Fission today</th>
+<th>Why residual looks “heuristic”</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Collapse on BlockGraph only</strong></td>
+<td><code>CollapseStructure::collapseAll</code> mutates graph; residual nodes are never re-scanned as raw blocks</td>
+<td>SESE <code>active_child_map</code> + <strong>final reconstruction still walks residual blocks</strong> and can <strong>lower the same <code>block_key</code> again</strong></td>
+<td><code>strip_post_total_infloop_*</code> / duplicate Label strip <strong>paper over multi-emit</strong> instead of forbidding it</td>
+</tr>
+<tr>
+<td><strong>TraceDAG likely-gotos</strong></td>
+<td>When collapse stuck, <strong>score unstructured edges</strong> once</td>
+<td>Linear recovery / force labels / residual goto</td>
+<td>Gotos appear as byproduct of emission, not of a DAG edge decision</td>
+</tr>
+<tr>
+<td><strong>LoopBody model</strong></td>
+<td>Head + multi-tail + exit edges + containments</td>
+<td>SCC / while/do-while try_lower with admission gates</td>
+<td>Nested O1 loops partially recovered then residual re-emitted</td>
+</tr>
+<tr>
+<td><strong>Irreducible edges as first-class</strong></td>
+<td>mark unstructured, continue</td>
+<td>partial <code>irreducible</code> / virtualize</td>
+<td>Incomplete</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Correct direction (not cleanup heuristics):</strong><br />
+Implement / finish <strong>graph-native collapse</strong>: once a region is selected for <code>[idx, skip_to)</code>,<br />
+<strong>no residual linear path may <code>lower_block_stmts</code> for keys in that range.</strong><br />
+TraceDAG-style <strong>unstructured edge selection</strong> when no SESE shape fits.</p>
+<p>Owner: <code>fission-midend-structuring</code> (<code>sese_driver</code> + <code>blockaction</code>-class logic).<br />
+Ghidra refs: <code>blockaction.hh</code> (<code>CollapseStructure</code>, <code>TraceDAG</code>, <code>LoopBody</code>).</p>
+<h3 id="p0-heritage-cover-value-identity">P0 — Heritage / Cover (value identity)<a class="headerlink" href="#p0-heritage-cover-value-identity" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Missing piece</th>
+<th>Ghidra</th>
+<th>Fission</th>
+<th>Symptom</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Full <strong>Heritage</strong> passes on all spaces</td>
+<td><code>ActionHeritage</code></td>
+<td>Incremental heritage + memory heritage</td>
+<td>Wrong merges, missing stores, param alias order</td>
+</tr>
+<tr>
+<td><strong>Cover</strong>-based HighVariable merge</td>
+<td><code>Cover</code> + merge actions</td>
+<td>Binding names / partial merge</td>
+<td>Distinct values share names; return/join noise</td>
+</tr>
+<tr>
+<td>Stack space as first-class spacebase</td>
+<td>SpacebaseSpace + Load/Store Varnode rules</td>
+<td>stack_slots + ptr_arith</td>
+<td>Undeclared locals, wrong slots</td>
+</tr>
+</tbody>
+</table>
+<p>Owner: materialize + normalize heritage; not printer.</p>
+<h3 id="p1-stack-pointer-flow-prototypes">P1 — Stack pointer flow &amp; prototypes<a class="headerlink" href="#p1-stack-pointer-flow-prototypes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Missing piece</th>
+<th>Ghidra</th>
+<th>Fission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ActionStackPtrFlow</code></td>
+<td>Cross-call SP adjustment</td>
+<td>Partial / ABI tables</td>
+</tr>
+<tr>
+<td><code>ActionDefaultParams</code> / ActiveParam / ReturnRecovery</td>
+<td>Full proto recovery loop</td>
+<td>terminator + call_recovery partial</td>
+</tr>
+<tr>
+<td>FuncLink / deindirect</td>
+<td>Indirect call resolve</td>
+<td>Partial deindirect</td>
+</tr>
+</tbody>
+</table>
+<h3 id="p1-type-recovery-depth">P1 — Type recovery depth<a class="headerlink" href="#p1-type-recovery-depth" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Missing piece</th>
+<th>Ghidra</th>
+<th>Fission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ActionInferTypes</code> fixed-point with RulePtr*</td>
+<td>Strong</td>
+<td>type_infer + use_type_infer partial</td>
+</tr>
+<tr>
+<td><code>RuleFloatCast</code> / <code>RuleSubfloatConvert</code> / floatprecision</td>
+<td>Explicit float precision rules</td>
+<td>Partial float_sign / subfloat; <strong>no full x87 80-bit model</strong></td>
+</tr>
+<tr>
+<td><code>ActionLaneDivide</code></td>
+<td>Explicit SIMD lanes</td>
+<td>XMM full-reg Aggregate vs float lane still fragile</td>
+</tr>
+</tbody>
+</table>
+<p><strong>m32 <code>float80</code>:</strong> Ghidra models float precision through <strong>floatprecision rules + types</strong>, not by printing <code>float80</code>.<br />
+Fission should either recover float32 after x87 promote/demote, or keep extended float with a <strong>typed</strong> IR + standard C orthography — not invent midend-agnostic printer renames as the “fix.”</p>
+<h3 id="p2-rule-pool-density">P2 — Rule pool density<a class="headerlink" href="#p2-rule-pool-density" title="Permanent link">&para;</a></h3>
+<p>Ghidra’s <code>oppool1</code> alone registers <strong>~100 Rule classes</strong> (div, shift, boolean, piece, float, subvar, …).<br />
+Fission normalize has many analogous passes, but:</p>
+<ul>
+<li>not the same fixed-point schedule (mainloop / fullloop / stackstall nesting);</li>
+<li>many Rules have <strong>no equivalent</strong> or only tests-only coverage;</li>
+<li>CPU-specific extra_pool_rules path exists in Ghidra; Fission prefers ISA-agnostic invariants (ADR 0009) — good, but <strong>data-driven rule coverage</strong> still lags.</li>
+</ul>
+<p>Owner: normalize rules, one invariant at a time, measured.</p>
+<h3 id="p2-merge-naming-globals">P2 — Merge / naming / globals<a class="headerlink" href="#p2-merge-naming-globals" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Ghidra</th>
+<th>Fission</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AssignHigh, MergeRequired/Copy/Adjacent/Type, NameVars</td>
+<td>variable_merge, type_hints, global recover</td>
+</tr>
+<tr>
+<td>MapGlobals / DynamicSymbols</td>
+<td>partial globals in render/static</td>
+</tr>
+</tbody>
+</table>
+<h3 id="p3-present-but-intentionally-different">P3 — Present but intentionally different<a class="headerlink" href="#p3-present-but-intentionally-different" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Stance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>printc quirks</td>
+<td>Do <strong>not</strong> clone as success metric (ADR 0011)</td>
+</tr>
+<tr>
+<td>DIR dual path</td>
+<td>Exploratory (ADR 0014); Ghidra has no DIR product</td>
+</tr>
+<tr>
+<td>Emulator/solver validation</td>
+<td>Fission extra; not Ghidra decomp core</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-how-recent-residuals-map-no-quality-via-cleanup">4. How recent residuals map (no “quality via cleanup”)<a class="headerlink" href="#4-how-recent-residuals-map-no-quality-via-cleanup" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Residual</th>
+<th>Bandage (heuristic surface)</th>
+<th>Principled owner gap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Duplicate <code>block_*</code> labels / re-run loop bodies</td>
+<td><code>strip_post_total_infloop_*</code>, strip duplicate labels</td>
+<td><strong>CollapseStructure / no multi-emit residual</strong> (P0 structure)</td>
+</tr>
+<tr>
+<td><code>fission_agg16</code> float accum</td>
+<td>— (fixed midend binding type)</td>
+<td>LaneDivide / float lane typing (P1)</td>
+</tr>
+<tr>
+<td>Index DSE drop of <code>c[i]=</code></td>
+<td>— (fixed MemSSA Index key)</td>
+<td>Alias = partition correctness (heritage/memory model)</td>
+</tr>
+<tr>
+<td>m32 <code>float80</code> compile</td>
+<td>printer <code>long double</code> (rejected)</td>
+<td>floatprecision / demote-to-float32 after x87</td>
+</tr>
+<tr>
+<td>Os undeclared <code>xmm0_db</code></td>
+<td>rescue undeclared names</td>
+<td>Heritage + materialize of all live lanes</td>
+</tr>
+<tr>
+<td>O1/O2 sem=0.2 after structure cleanup</td>
+<td>more cleanup</td>
+<td>Correct loop-carried updates under <strong>graph structure</strong>, not residual text</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-recommended-implementation-order-invariant-based">5. Recommended implementation order (invariant-based)<a class="headerlink" href="#5-recommended-implementation-order-invariant-based" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>P0 Structure emission contract</strong><br />
+   Spec: <em>For each CFG block key K, at most one emission of K’s body into the structured result; consumed range <code>[entry, skip_to)</code> is tombstoned.</em><br />
+   Prove with a unit test that multi-entry nested loops cannot redefine <code>block_LABEL</code>.<br />
+   Align with <code>CollapseStructure</code> + <code>emitted</code> set discipline (Ghidra collapses nodes away).</p>
+</li>
+<li>
+<p><strong>P0 TraceDAG / unstructured edge selection</strong><br />
+   When no SESE shape fits, mark <strong>one</strong> edge unstructured (goto), continue collapse — instead of linear residual multi-emit.</p>
+</li>
+<li>
+<p><strong>P0/P1 Heritage + Cover</strong><br />
+   Strengthen address-tied SSA and merge so bindings match Ghidra HighVariable identity rules.</p>
+</li>
+<li>
+<p><strong>P1 Float precision / lanes</strong><br />
+   x87 80-bit and XMM lanes as typed models (cspec + rules), not print renames.</p>
+</li>
+<li>
+<p><strong>P2 Rule gaps</strong><br />
+   Only when a <strong>measured</strong> row shows a missing rewrite; implement as shared Rule-like pass.</p>
+</li>
+</ol>
+<hr />
+<h2 id="6-how-to-use-ghidra-vendor-tree-correctly">6. How to use Ghidra vendor tree correctly<a class="headerlink" href="#6-how-to-use-ghidra-vendor-tree-correctly" title="Permanent link">&para;</a></h2>
+<p>For each gap:</p>
+<ol>
+<li>Open the <strong>named class</strong> in <code>blockaction</code> / <code>heritage</code> / <code>coreaction</code> / <code>ruleaction</code>.  </li>
+<li>Extract <strong>invariants</strong> (what must be true of the CFG / SSA / types).  </li>
+<li>Implement under the <strong>Fission owner</strong> in the table above.  </li>
+<li>Remeasure (<code>fission-benchmark</code> local docker; no Pages promotion).  </li>
+<li>Do <strong>not</strong> copy C++ or link vendor.</li>
+</ol>
+<hr />
+<h2 id="7-bottom-line">7. Bottom line<a class="headerlink" href="#7-bottom-line" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Vs Ghidra</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lift / raw p-code</td>
+<td>Roughly on par (not the main product gap)</td>
+</tr>
+<tr>
+<td>Heritage / Cover / StackPtr / InferTypes</td>
+<td><strong>Materially incomplete</strong></td>
+</tr>
+<tr>
+<td><strong>Block structure (CollapseStructure + TraceDAG)</strong></td>
+<td><strong>Materially incomplete</strong> — root of multi-emit / goto soup</td>
+</tr>
+<tr>
+<td>Rule density</td>
+<td>Incomplete but growing</td>
+</tr>
+<tr>
+<td>Print orthography</td>
+<td>Fine when IR is right; <strong>not</strong> the semantic owner</td>
+</tr>
+</tbody>
+</table>
+<p>The user’s critique is correct: <strong>post-hoc residual strip is a symptom fix.</strong><br />
+The Ghidra-shaped missing piece for that class of failure is <strong>graph-native structure collapse with exclusive block consumption and TraceDAG unstructured-edge selection</strong>, not more printer or more suffix heuristics.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
