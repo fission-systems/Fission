@@ -252,7 +252,7 @@ Artifacts under `fission-benchmark/results/local_gap_ee492fb6_focused/`.
 | `find_pair_value` | **gcc -O0, m32-O0: semantic 1.0 (5/5)**; clang still compile_error |
 | `kv_lookup` | **gcc -O0, m32-O0: semantic 1.0 (6/6)** — was assertion_fail class on m32-O0 |
 | `accumulate_pairs` | **gcc O0/O1/O2, m32 O0/O2: semantic 1.0**; clang-O0 still compile_error |
-| `matrix_multiply` | Undeclared-local class improved; post-`1ea1a26f` residual was **missing `c[]` store (Index DSE)** + **float→uint type loss**. **`3ca1a786`:** **clang -O0 sem=1.0 (5/5)**; gcc -O0 sem=0.20. **`a6624943` (midend XMM Aggregate→Float lane, no printer patch):** gcc -O1/O2 no longer `fission_agg16` assign errors; residual is **duplicate label** structuring (`block_*` redefinition). m32 still `float80` undeclared (owner = materialize/normalize x87 float width, **not** printer spelling). |
+| `matrix_multiply` | **`3ca1a786`:** clang -O0 **sem=1.0 (5/5)** (Index DSE + float*). **`a6624943`:** XMM Aggregate→Float (midend). **`516a33bc` (structuring multi-emit cleanup):** gcc -O1/O2 move **compile_error → assertion_fail, sem=0.20 (1/5)**; duplicate labels gone. Residual: m32 `float80`, Os undeclared xmm lane, O3 adapter, O0/O1/O2 semantic correctness. |
 
 **Not a full-corpus claim** — focused rows only; do not promote to Pages.
 
