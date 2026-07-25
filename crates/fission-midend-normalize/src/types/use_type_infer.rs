@@ -2044,8 +2044,17 @@ fn merge_constraint(binding: &mut DirBinding, constraint: &UseConstraint) -> boo
     match (&binding.ty, constraint) {
         // Already has a strong type — don't overwrite (except float upgrades).
         (NirType::Float { .. }, _) => false,
-        (NirType::Aggregate { .. }, _) => false,
         (NirType::Bool, _) => false,
+        // Full XMM vector bindings start as Aggregate(16) from PXOR zeroing;
+        // FLOAT_ADD/MULT use evidence upgrades them to a float lane type.
+        (
+            NirType::Aggregate { .. },
+            UseConstraint::Exact(NirType::Float { bits }),
+        ) => {
+            binding.ty = NirType::Float { bits: *bits };
+            true
+        }
+        (NirType::Aggregate { .. }, _) => false,
 
         // Same-width int pointee → float pointee when float ops prove element type.
         // Size-4 loads default to `uint*`; FLOAT_MULT use upgrades to `float*`.

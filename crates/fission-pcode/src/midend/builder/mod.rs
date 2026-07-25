@@ -712,6 +712,21 @@ impl<'a> PreviewBuilder<'a> {
             if preserve_materialization && !existing.preserves_materialization() {
                 updated.origin = Some(NirBindingOrigin::TempPreserved);
             }
+            // Shared XMM hw names: PXOR/zero of the full 16-byte register
+            // materializes first as Aggregate, then FLOAT_ADD/MULT on the low
+            // dword reuses the same name via sla_hw_name fallback. Keep the
+            // float lane type so the accumulator is `float`/`double`, not
+            // `fission_agg16` (which cannot `= 0` or `+= float` in the harness).
+            if matches!(&ty, NirType::Float { .. })
+                && matches!(
+                    &updated.ty,
+                    NirType::Aggregate { .. }
+                        | NirType::Unknown
+                        | NirType::Int { .. }
+                )
+            {
+                updated.ty = ty.clone();
+            }
             updated
         } else {
             DirBinding {
