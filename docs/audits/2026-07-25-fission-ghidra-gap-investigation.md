@@ -178,7 +178,8 @@ python scripts/check_parity_smoke.py results/telemetry/latest.json
 |------|-------------|----------|-------|
 | 2026-07-21 | official release bake | `results/latest.json` | Historical product baseline (core_c_pe, n=216 pairs) |
 | 2026-07-25 a | docker Fission `0.1.4` + Ghidra 12.0 | `run_parity --limit 3` | 15/15 IR match (pre-rebake) |
-| 2026-07-25 b | **`c8f9f24a`** local bundle fp `5b24da74…` / Fission **0.1.6** + Ghidra **12.0** | `results/local_gap_c8f9f24a_fission_ghidra.json` + `run_parity --limit 20` | **Current-tree product remeasure** (below). Local only — do not promote to latest/Pages. |
+| 2026-07-25 b | **`c8f9f24a`** local bundle fp `5b24da74…` / Fission **0.1.6** + Ghidra **12.0** | `results/local_gap_c8f9f24a_fission_ghidra.json` + `run_parity --limit 20` | Pre-fix product baseline (local diagnostic). |
+| 2026-07-25 c | **`ee492fb6`** local `0.1.6` + Ghidra **12.0** | `results/local_gap_ee492fb6_focused/*.json` | After P0 return/locals + P1 stride/field + found-path break→return. Focused functions only. |
 
 ### Current-tree product remeasure (`c8f9f24a`, 2026-07-25)
 
@@ -229,13 +230,27 @@ Pulled from `local_gap_c8f9f24a_fission_ghidra.json` (not for overfitting — in
 
 **Presentation anchors (both sem=1.0):** `checksum`, `sum_array`, `mul_ints`, `add_ints` — queue under ADR 0011 / printer, not midend semantic P0.
 
-### Recommended first implementation target
+### Landed fixes (2026-07-25, commits on `main`)
 
-**Primary:** **non-void empty `return`** / primary return recovery at match paths (`linear_search`-class) — mechanical compile_error with clear invariant, multi-row blast radius.  
-**Secondary:** **use-before-declare / undeclared stack locals** (`matrix_multiply` `local_18`).  
-**Tertiary:** struct field layout for pair/kv types (`accumulate_pairs`, `kv_lookup`).
+| Commit | Change |
+|--------|--------|
+| `446dc4b9` | Live primary return on stack-target RET; keep write-only stack locals; ADR 0014 |
+| `cb94c87a` | Wide-stride `base[i].field_0`; sub-element PtrOffset rescale (+1→+4) |
+| `ee492fb6` | Found-path `result=…; break` → `return result` before sentinel `return -1` |
 
-Before any production fix: fill [DECOMPILER_CHANGE_PROPOSAL](../templates/DECOMPILER_CHANGE_PROPOSAL.md) (ADR 0006); remeasure the same function/variant after.
+### Focused remeasure (`ee492fb6` vs Ghidra 12.0)
+
+Artifacts under `fission-benchmark/results/local_gap_ee492fb6_focused/`.
+
+| Function | Notable Fission movement (selected variants) |
+|----------|-----------------------------------------------|
+| `linear_search` | **gcc -O2/O3/O0, m32-O0: semantic 1.0 (6/6)** — was compile_error / empty return class on O2 |
+| `find_pair_value` | **gcc -O0, m32-O0: semantic 1.0 (5/5)**; clang still compile_error |
+| `kv_lookup` | **gcc -O0, m32-O0: semantic 1.0 (6/6)** — was assertion_fail class on m32-O0 |
+| `accumulate_pairs` | **gcc O0/O1/O2, m32 O0/O2: semantic 1.0**; clang-O0 still compile_error |
+| `matrix_multiply` | Undeclared-local class improved; **still mostly compile_error / assert** (float vs int / structure residual) |
+
+**Not a full-corpus claim** — focused rows only; do not promote to Pages.
 
 ## Open risks
 
