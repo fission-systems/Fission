@@ -1479,12 +1479,17 @@ Implement / finish <strong>graph-native collapse</strong>: once a region is sele
 TraceDAG-style <strong>unstructured edge selection</strong> when no SESE shape fits.</p>
 <p>Owner: <code>fission-midend-structuring</code> (<code>sese_driver</code> + <code>blockaction</code>-class logic).<br />
 Ghidra refs: <code>blockaction.hh</code> (<code>CollapseStructure</code>, <code>TraceDAG</code>, <code>LoopBody</code>).</p>
-<p><strong>Landed (partial, 2026-07-25):</strong> exclusive emission contract in<br />
-<code>lower_loop_body_subgraph</code> (<code>consumed_blocks</code> tombstone for <code>[idx, skip_to)</code>) and<br />
-<code>reconstruct_sese_final_body</code> / <code>active_child_map</code> retain (drop nested keys absorbed by<br />
-outer region; residual path skips tombstoned indices). Not full TraceDAG yet; residual<br />
-label-strip cleanup remains as belt-and-suspenders until multi-emit is impossible by<br />
-construction everywhere.</p>
+<p><strong>Landed (partial, 2026-07-25):</strong></p>
+<ol>
+<li><strong>Exclusive emission</strong> in <code>lower_loop_body_subgraph</code> + SESE reconstruction tombstones.  </li>
+<li><strong>TraceDAG likely-goto:</strong> <code>TraceDag::select_likely_unstructured_edge</code> +<br />
+<code>select_bad_edge</code> prefers TraceDAG scores (Ghidra <code>selectBadEdge</code>); collapse-loop<br />
+   virtualization <strong>default on</strong> (<code>FISSION_COLLAPSE_LOOP=0</code> to disable).  </li>
+<li><strong>Heritage type witness:</strong> memory heritage promotes float-typed stack slots as<br />
+<code>Float</code> (not default uint) when store/load elem type is float. Full Cover still open.  </li>
+<li><strong>residual strip_post_total</strong> remains belt-and-suspenders only after exclusive<br />
+   emission + TraceDAG virtualization.</li>
+</ol>
 <h3 id="p0-heritage-cover-value-identity">P0 — Heritage / Cover (value identity)<a class="headerlink" href="#p0-heritage-cover-value-identity" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
