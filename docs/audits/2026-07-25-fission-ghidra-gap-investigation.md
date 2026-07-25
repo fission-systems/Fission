@@ -181,6 +181,7 @@ python scripts/check_parity_smoke.py results/telemetry/latest.json
 | 2026-07-25 b | **`c8f9f24a`** local bundle fp `5b24da74…` / Fission **0.1.6** + Ghidra **12.0** | `results/local_gap_c8f9f24a_fission_ghidra.json` + `run_parity --limit 20` | Pre-fix product baseline (local diagnostic). |
 | 2026-07-25 c | **`ee492fb6`** local `0.1.6` + Ghidra **12.0** | `results/local_gap_ee492fb6_focused/*.json` | After P0 return/locals + P1 stride/field + found-path break→return. Focused functions only. |
 | 2026-07-25 d | **`912b4347`** local `0.1.6` + Ghidra **12.0** | `results/local_gap_912b4347_focused/*.json` | After named `fission_agg` field typedefs + Aggregate Index cast. |
+| 2026-07-25 e | **`1ea1a26f`** local `0.1.6` | `results/local_gap_1ea1a26f_focused/*.json` | Orphan goto→`i++; continue`; clang Pair/KV compile_error cleared. |
 
 ### Current-tree product remeasure (`c8f9f24a`, 2026-07-25)
 
@@ -239,6 +240,7 @@ Pulled from `local_gap_c8f9f24a_fission_ghidra.json` (not for overfitting — in
 | `cb94c87a` | Wide-stride `base[i].field_0`; sub-element PtrOffset rescale (+1→+4) |
 | `ee492fb6` | Found-path `result=…; break` → `return result` before sentinel `return -1` |
 | `912b4347` | Named fields on `fission_aggN` typedefs; cast Index base for Aggregate elems |
+| `867f4380` / `1ea1a26f` | Orphan loop gotos → `continue` (+ inject `i++` on bound-break search loops) |
 
 ### Focused remeasure (`ee492fb6` vs Ghidra 12.0)
 
