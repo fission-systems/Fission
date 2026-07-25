@@ -221,7 +221,8 @@ fn is_solo_break_or_continue(body: &[DirStmt]) -> Option<bool> {
     }
 }
 
-fn collect_defined_labels(stmts: &[DirStmt]) -> HashSet<String> {
+/// Labels already defined in a structured region body (for exclusive emission).
+pub fn collect_defined_labels(stmts: &[DirStmt]) -> HashSet<String> {
     let mut out = HashSet::default();
     collect_defined_labels_in(stmts, &mut out);
     out

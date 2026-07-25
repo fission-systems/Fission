@@ -369,11 +369,14 @@ pub fn build_sese_region_body(
             idx += 1;
         }
 
+        // Tier 3: CollapseStructure collapseAll step — virtualize one likely
+        // unstructured edge (LoopBody emitLikelyEdges → TraceDAG → FAS) and
+        // retry structured rules. Ghidra never multi-emits; it removes edges.
         if !progress && collapse_loop_admission_enabled() {
             if try_virtualize_one_bad_edge(host, entry, exit)? {
                 if diag {
                     eprintln!(
-                        "[DIAG] build_sese_region_body: virtualized bad edge, continuing collapse loop"
+                        "[DIAG] build_sese_region_body: collapseAll virtualized edge, continuing collapse loop"
                     );
                 }
                 progress = true;
@@ -392,8 +395,14 @@ pub fn promote_guarded_tails(host: &mut impl StructuringHost, body: &mut Vec<Dir
     }
 }
 
-/// Final SESE reconstruction scan: materialize structured child regions and
-/// residual basic/unstructured nodes into a structure graph, then surface HIR.
+/// Final SESE reconstruction: surface the structure graph only.
+///
+/// Graph-only contract (Ghidra `CollapseStructure` invariant):
+/// - Structured regions in `active_child_map` own their `[start, skip_to)` range.
+/// - Labels already present inside any structured region body must never be
+///   re-emitted by residual materialization.
+/// - Residual blocks are only those never absorbed into a structure node and
+///   never already labeled inside one — not a second linear walk of covered CFG.
 pub fn reconstruct_sese_final_body(
     host: &mut impl StructuringHost,
     entry: usize,
@@ -402,7 +411,7 @@ pub fn reconstruct_sese_final_body(
     targeted: &HashSet<u64>,
     diag: bool,
 ) -> Result<Vec<DirStmt>, MlilPreviewError> {
-    use crate::cleanup::child_body_has_entry_label;
+    use crate::cleanup::{child_body_has_entry_label, collect_defined_labels};
     use crate::graph::{StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeKind, surface_structure_graph};
     use crate::helpers::{block_label, recovered_switch_case_values};
     use crate::linear_types::LoweredTerminator;
@@ -414,10 +423,13 @@ pub fn reconstruct_sese_final_body(
     // Block indices owned by an already-surfaced structured region [start, skip_to).
     // Residual basic emission must not re-lower these (multi-emit / duplicate labels).
     let mut tombstoned: HashSet<usize> = HashSet::default();
-    for (&start, (_, skip_to, _)) in active_child_map.iter() {
+    // Labels already defined inside structured region bodies — exclusive surface.
+    let mut structure_defined_labels: HashSet<String> = HashSet::default();
+    for (&start, (child_body, skip_to, _)) in active_child_map.iter() {
         for bi in start..*skip_to {
             tombstoned.insert(bi);
         }
+        structure_defined_labels.extend(collect_defined_labels(child_body));
     }
     let mut previous_node_id = None;
 
@@ -440,8 +452,10 @@ pub fn reconstruct_sese_final_body(
                 if (idx == 0 || targeted.contains(&block_key))
                     && emitted_labels.insert(block_key)
                     && !child_body_has_entry_label(child_body, &header_label)
+                    && !structure_defined_labels.contains(&header_label)
                 {
-                    node_statements.insert(0, DirStmt::Label(header_label));
+                    node_statements.insert(0, DirStmt::Label(header_label.clone()));
+                    structure_defined_labels.insert(header_label);
                 }
 
                 let node = StructureNode {
@@ -476,12 +490,14 @@ pub fn reconstruct_sese_final_body(
                 continue;
             }
 
-            // Residual path: never re-emit a block owned by a structured region.
-            if tombstoned.contains(&idx) {
+            // Graph residual only: never re-emit a block owned by a structured
+            // region (tombstone) or already labeled inside one (exclusive label).
+            let residual_label = block_label(block_key);
+            if tombstoned.contains(&idx) || structure_defined_labels.contains(&residual_label) {
                 if diag {
                     eprintln!(
-                        "[DIAG] final reconstruction: skip tombstoned residual block idx={} key=0x{:x}",
-                        idx, block_key
+                        "[DIAG] final reconstruction: skip graph-owned residual block idx={} key=0x{:x} label={}",
+                        idx, block_key, residual_label
                     );
                 }
                 idx += 1;
@@ -491,9 +507,10 @@ pub fn reconstruct_sese_final_body(
             let mut node_body = Vec::new();
             let mut explicit_edge_surface = false;
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                node_body.push(DirStmt::Label(block_label(block_key)));
+                node_body.push(DirStmt::Label(residual_label.clone()));
+                structure_defined_labels.insert(residual_label);
             }
-            // Residual emit also exclusive for this index.
+            // Residual materialize is exclusive for this index (one graph node).
             tombstoned.insert(idx);
             node_body.extend(host.lower_block_stmts(idx)?);
             match host.lower_block_terminator(idx)? {

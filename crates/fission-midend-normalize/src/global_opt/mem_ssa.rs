@@ -382,7 +382,7 @@ impl Builder {
         // Mark defs whose variable escaped.
         for def in &mut self.defs {
             if let AliasKey::Partition(key) = &def.key {
-                def.may_escape = !key.is_promotable_stack_like();
+                def.may_escape = !key.is_heritage_promotable();
             }
         }
         MemSsa {

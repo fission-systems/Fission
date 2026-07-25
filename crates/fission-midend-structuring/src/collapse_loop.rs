@@ -2,8 +2,14 @@
 //!
 //! Free functions take [`StructuringHost`] so residual driver code can call them
 //! without living as `PreviewBuilder` methods.
+//!
+//! Unstructured edge pick order (Ghidra `CollapseStructure::selectGoto` + FAS):
+//! 1. [`crate::collapse_structure::select_goto`] — LoopBody `emitLikelyEdges`
+//!    then TraceDAG likely-gotos
+//! 2. [`select_bad_edge`] residual — multi-out join / FAS when no loop/DAG candidate
 
 use crate::cfg_analysis::select_bad_edge;
+use crate::collapse_structure::select_goto;
 use crate::host::StructuringHost;
 use fission_midend_core::ir::MlilPreviewError;
 
@@ -23,12 +29,27 @@ pub fn collapse_loop_admission_enabled() -> bool {
     })
 }
 
-/// Virtualize one irreducible back-edge selected by `select_bad_edge`.
+/// Virtualize one unstructured edge for the collapse fixed-point.
+///
+/// Prefers Ghidra-aligned `CollapseStructure::selectGoto` (loop-body likely
+/// exits + TraceDAG). Falls back to FAS / multi-pred join scoring only when
+/// no loop/DAG candidate remains.
 pub fn try_virtualize_one_bad_edge(
     host: &mut impl StructuringHost,
     entry: usize,
     exit: usize,
 ) -> Result<bool, MlilPreviewError> {
+    // 1) CollapseStructure selectGoto: LoopBody emitLikelyEdges + TraceDAG.
+    if let Some((from, to)) = select_goto(
+        entry,
+        exit,
+        host.successors(),
+        host.predecessors(),
+        host.fas_virtual_edges(),
+    ) {
+        return Ok(apply_virtual_goto_edge(host, from, to));
+    }
+    // 2) Residual FAS / multi-out join (no loop/DAG candidate left).
     let Some((from, to)) = select_bad_edge(
         entry,
         exit,

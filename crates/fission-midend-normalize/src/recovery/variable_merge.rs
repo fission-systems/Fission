@@ -1203,6 +1203,10 @@ fn name_priority(name: &str) -> usize {
     if name.starts_with("uVar_dp_") {
         return 0; // lowest priority (dp temp variables)
     }
+    // Heritage SSA versions (memory heritage) participate in Cover-style merge.
+    if name.starts_with("vVar_") {
+        return 1;
+    }
     if name.starts_with("uVar")
         || name.starts_with("iVar")
         || name.starts_with("xVar")

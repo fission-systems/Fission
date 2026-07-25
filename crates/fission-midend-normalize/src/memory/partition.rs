@@ -42,6 +42,13 @@ impl PartitionKey {
             )
         )
     }
+
+    /// Heritage promotable across address-space classes Fission models as
+    /// fixed non-escaping partitions (stack slots + aggregate locals).
+    /// Strided / escaped / heap-like keys stay memory ops (Ghidra space filter).
+    pub fn is_heritage_promotable(&self) -> bool {
+        self.stride.is_none() && self.is_promotable_stack_like()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

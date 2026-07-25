@@ -5,24 +5,24 @@ use crate::{HashMap, HashSet};
 
 /// Incremental Memory Heritage Solver pass (Ghidra `Heritage` partial).
 ///
-/// Promotes eligible stack memory locations (represented by non-escaping PartitionKeys)
-/// to versioned virtual SSA register variables in `func.locals`, replacing all
-/// memory load/store operations on them with direct variable accesses and inserting
+/// Promotes eligible memory locations (non-escaping fixed PartitionKeys across
+/// stack/aggregate spaces) to versioned virtual SSA variables in `func.locals`,
+/// replacing load/store ops with direct variable accesses and inserting
 /// phi-assignments at block merges.
 ///
-/// Cover-like refinement: when stores/loads on a slot carry `NirType::Float`,
-/// versioned vars inherit float type instead of defaulting to unsigned int of
-/// the same width (x87 / SSE stack homes). Full HighVariable `Cover` merge
-/// remains future work.
+/// Type witness: store/load access types per AliasKey (Float > Ptr > Int >
+/// Aggregate) so heritage vars inherit real types rather than default uint.
+/// HighVariable `Cover` merge of resulting `vVar_*` versions is owned by
+/// [`crate::recovery::variable_merge::apply_variable_merge_pass`].
 pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
     let mem_ssa = build_mem_ssa(func);
 
-    // Identify candidate AliasKeys that are promotable stack slots (non-escaping)
+    // All heritage-promotable spaces: fixed non-escaping stack/aggregate partitions.
     let mut promotable_keys = HashSet::default();
     for def in &mem_ssa.defs {
         if !def.may_escape {
             if let AliasKey::Partition(partition) = &def.key {
-                if partition.is_promotable_stack_like() {
+                if partition.is_heritage_promotable() {
                     promotable_keys.insert(def.key.clone());
                 }
             }
@@ -33,8 +33,8 @@ pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
         return false;
     }
 
-    // Cover-like type witness: float store/load elem type per AliasKey.
-    let float_ty_by_key = collect_float_types_for_keys(func, &promotable_keys);
+    // Cover-inspired type witness: prefer most specific access type per key.
+    let access_ty_by_key = collect_access_types_for_keys(func, &promotable_keys);
 
     // Allocate versioned variable names for each def/phi ID of promotable keys
     let mut var_names = HashMap::default(); // maps (AliasKey, id) -> variable name String
@@ -46,10 +46,13 @@ pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
                 continue;
             };
             let size = (partition.offset_interval.1 - partition.offset_interval.0).max(1) as u32;
-            let ty = float_ty_by_key.get(&def.key).cloned().unwrap_or(NirType::Int {
-                bits: size * 8,
-                signed: false,
-            });
+            let ty = access_ty_by_key
+                .get(&def.key)
+                .cloned()
+                .unwrap_or(NirType::Int {
+                    bits: size * 8,
+                    signed: false,
+                });
             let base_name = format!("{}_{}", partition.base_object, partition.offset_interval.0);
             // Replace invalid characters for C identifiers
             let base_name = base_name.replace(['.', ' ', '[', ']', '-', '+', '*', '/'], "_");
@@ -66,10 +69,13 @@ pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
                 continue;
             };
             let size = (partition.offset_interval.1 - partition.offset_interval.0).max(1) as u32;
-            let ty = float_ty_by_key.get(&phi.key).cloned().unwrap_or(NirType::Int {
-                bits: size * 8,
-                signed: false,
-            });
+            let ty = access_ty_by_key
+                .get(&phi.key)
+                .cloned()
+                .unwrap_or(NirType::Int {
+                    bits: size * 8,
+                    signed: false,
+                });
             let base_name = format!("{}_{}", partition.base_object, partition.offset_interval.0);
             let base_name = base_name.replace(['.', ' ', '[', ']', '-', '+', '*', '/'], "_");
             let var_name = format!("vVar_{}_phi{}", base_name, phi.id);
@@ -113,18 +119,38 @@ pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
     true
 }
 
-/// Scan the function for float-typed memory accesses on promotable keys
-/// (Cover-inspired type witness for heritage vars).
-fn collect_float_types_for_keys(
+/// Prefer more specific access types when multiple witnesses exist for one key.
+fn type_specificity_rank(ty: &NirType) -> u8 {
+    match ty {
+        NirType::Float { .. } => 4,
+        NirType::Ptr(_) => 3,
+        NirType::Int { .. } | NirType::Bool => 2,
+        NirType::Aggregate { .. } => 1,
+        NirType::Unknown => 0,
+    }
+}
+
+fn record_access_type(out: &mut HashMap<AliasKey, NirType>, key: AliasKey, ty: &NirType) {
+    match out.get(&key) {
+        Some(existing) if type_specificity_rank(existing) >= type_specificity_rank(ty) => {}
+        _ => {
+            out.insert(key, ty.clone());
+        }
+    }
+}
+
+/// Scan the function for typed memory accesses on promotable keys
+/// (Cover-inspired type witness for heritage vars across all type spaces).
+fn collect_access_types_for_keys(
     func: &DirFunction,
     promotable: &HashSet<AliasKey>,
 ) -> HashMap<AliasKey, NirType> {
     let mut out = HashMap::default();
-    collect_float_types_in_stmts(&func.body, promotable, &mut out);
+    collect_access_types_in_stmts(&func.body, promotable, &mut out);
     out
 }
 
-fn collect_float_types_in_stmts(
+fn collect_access_types_in_stmts(
     stmts: &[DirStmt],
     promotable: &HashSet<AliasKey>,
     out: &mut HashMap<AliasKey, NirType>,
@@ -133,80 +159,84 @@ fn collect_float_types_in_stmts(
         match stmt {
             DirStmt::Assign { lhs, rhs } => {
                 if let DirLValue::Deref { ptr, ty } = lhs {
-                    if matches!(ty, NirType::Float { .. }) {
+                    if !matches!(ty, NirType::Unknown) {
                         let key = alias_key_for_ptr(ptr, nir_byte_size(ty));
                         if promotable.contains(&key) {
-                            out.entry(key).or_insert_with(|| ty.clone());
+                            record_access_type(out, key, ty);
                         }
                     }
                 }
                 if let DirLValue::Index { base, elem_ty, .. } = lhs {
-                    if matches!(elem_ty, NirType::Float { .. }) {
+                    if !matches!(elem_ty, NirType::Unknown) {
                         let key = alias_key_for_ptr(base, nir_byte_size(elem_ty));
                         if promotable.contains(&key) {
-                            out.entry(key).or_insert_with(|| elem_ty.clone());
+                            record_access_type(out, key, elem_ty);
                         }
                     }
                 }
-                collect_float_types_in_expr(rhs, promotable, out);
+                collect_access_types_in_expr(rhs, promotable, out);
             }
             DirStmt::Block(body)
             | DirStmt::While { body, .. }
             | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => collect_float_types_in_stmts(body, promotable, out),
+            | DirStmt::For { body, .. } => collect_access_types_in_stmts(body, promotable, out),
             DirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_float_types_in_stmts(then_body, promotable, out);
-                collect_float_types_in_stmts(else_body, promotable, out);
+                collect_access_types_in_stmts(then_body, promotable, out);
+                collect_access_types_in_stmts(else_body, promotable, out);
             }
             DirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_float_types_in_stmts(&case.body, promotable, out);
+                    collect_access_types_in_stmts(&case.body, promotable, out);
                 }
-                collect_float_types_in_stmts(default, promotable, out);
+                collect_access_types_in_stmts(default, promotable, out);
             }
             DirStmt::Expr(e) | DirStmt::Return(Some(e)) => {
-                collect_float_types_in_expr(e, promotable, out);
+                collect_access_types_in_expr(e, promotable, out);
             }
             _ => {}
         }
     }
 }
 
-fn collect_float_types_in_expr(
+fn collect_access_types_in_expr(
     expr: &DirExpr,
     promotable: &HashSet<AliasKey>,
     out: &mut HashMap<AliasKey, NirType>,
 ) {
     match expr {
-        DirExpr::Load { ptr, ty } if matches!(ty, NirType::Float { .. }) => {
+        DirExpr::Load { ptr, ty } if !matches!(ty, NirType::Unknown) => {
             let key = alias_key_for_ptr(ptr, nir_byte_size(ty));
             if promotable.contains(&key) {
-                out.entry(key).or_insert_with(|| ty.clone());
+                record_access_type(out, key, ty);
             }
-            collect_float_types_in_expr(ptr, promotable, out);
+            collect_access_types_in_expr(ptr, promotable, out);
         }
-        DirExpr::Index { base, elem_ty, index } if matches!(elem_ty, NirType::Float { .. }) => {
+        DirExpr::Index {
+            base,
+            elem_ty,
+            index,
+        } if !matches!(elem_ty, NirType::Unknown) => {
             let key = alias_key_for_ptr(base, nir_byte_size(elem_ty));
             if promotable.contains(&key) {
-                out.entry(key).or_insert_with(|| elem_ty.clone());
+                record_access_type(out, key, elem_ty);
             }
-            collect_float_types_in_expr(base, promotable, out);
-            collect_float_types_in_expr(index, promotable, out);
+            collect_access_types_in_expr(base, promotable, out);
+            collect_access_types_in_expr(index, promotable, out);
         }
         DirExpr::Binary { lhs, rhs, .. } => {
-            collect_float_types_in_expr(lhs, promotable, out);
-            collect_float_types_in_expr(rhs, promotable, out);
+            collect_access_types_in_expr(lhs, promotable, out);
+            collect_access_types_in_expr(rhs, promotable, out);
         }
         DirExpr::Unary { expr, .. }
         | DirExpr::Cast { expr, .. }
         | DirExpr::PtrOffset { base: expr, .. }
         | DirExpr::FieldAccess { base: expr, .. }
         | DirExpr::AggregateCopy { src: expr, .. } => {
-            collect_float_types_in_expr(expr, promotable, out);
+            collect_access_types_in_expr(expr, promotable, out);
         }
         DirExpr::Select {
             cond,
@@ -214,19 +244,19 @@ fn collect_float_types_in_expr(
             else_expr,
             ..
         } => {
-            collect_float_types_in_expr(cond, promotable, out);
-            collect_float_types_in_expr(then_expr, promotable, out);
-            collect_float_types_in_expr(else_expr, promotable, out);
+            collect_access_types_in_expr(cond, promotable, out);
+            collect_access_types_in_expr(then_expr, promotable, out);
+            collect_access_types_in_expr(else_expr, promotable, out);
         }
         DirExpr::Call { args, .. } => {
             for a in args {
-                collect_float_types_in_expr(a, promotable, out);
+                collect_access_types_in_expr(a, promotable, out);
             }
         }
-        DirExpr::Load { ptr, .. } => collect_float_types_in_expr(ptr, promotable, out),
+        DirExpr::Load { ptr, .. } => collect_access_types_in_expr(ptr, promotable, out),
         DirExpr::Index { base, index, .. } => {
-            collect_float_types_in_expr(base, promotable, out);
-            collect_float_types_in_expr(index, promotable, out);
+            collect_access_types_in_expr(base, promotable, out);
+            collect_access_types_in_expr(index, promotable, out);
         }
         _ => {}
     }

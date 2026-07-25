@@ -125,15 +125,21 @@ TraceDAG-style **unstructured edge selection** when no SESE shape fits.
 Owner: `fission-midend-structuring` (`sese_driver` + `blockaction`-class logic).  
 Ghidra refs: `blockaction.hh` (`CollapseStructure`, `TraceDAG`, `LoopBody`).
 
-**Landed (partial, 2026-07-25):**
+**Landed (partial, 2026-07-25 / 2026-07-26):**
 
 1. **Exclusive emission** in `lower_loop_body_subgraph` + SESE reconstruction tombstones.  
 2. **TraceDAG likely-goto:** `TraceDag::select_likely_unstructured_edge` +  
    `select_bad_edge` prefers TraceDAG scores (Ghidra `selectBadEdge`); collapse-loop  
    virtualization **default on** (`FISSION_COLLAPSE_LOOP=0` to disable).  
-3. **Heritage type witness:** memory heritage promotes float-typed stack slots as  
-   `Float` (not default uint) when store/load elem type is float. Full Cover still open.  
-4. **residual strip_post_total** remains belt-and-suspenders only after exclusive  
+3. **CollapseStructure path:** `collapse_structure::{emit_likely_edges_for_loop,  
+   select_goto, collapse_all_virtualize_one}` wired into `try_virtualize_one_bad_edge`  
+   (LoopBody emitLikelyEdges → TraceDAG → FAS residual).  
+4. **Graph-only reconstruct:** residual walk skips tombstoned indices **and** any  
+   block whose label already appears inside a structured region body (no second  
+   linear re-lower of absorbed CFG).  
+5. **Heritage type witness (all type spaces):** memory heritage inherits Float/Ptr/Int  
+   from store/load access types; `vVar_*` eligible for Cover-style variable merge.  
+6. **residual strip_post_total** remains belt-and-suspenders only after exclusive  
    emission + TraceDAG virtualization.
 
 ### P0 — Heritage / Cover (value identity)

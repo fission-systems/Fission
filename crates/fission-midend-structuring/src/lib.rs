@@ -28,6 +28,7 @@ pub mod admission;
 pub mod cfg_analysis;
 pub mod cleanup;
 pub mod collapse_loop;
+pub mod collapse_structure;
 pub mod conditionals;
 pub mod graph;
 pub mod guarded_tail;
@@ -111,6 +112,9 @@ pub use orphan_repair::{find_block_index_by_label, try_repair_orphan_gotos};
 pub use collapse_loop::{
     apply_virtual_goto_edge, collapse_loop_admission_enabled, is_virtual_goto_edge,
     try_virtualize_one_bad_edge,
+};
+pub use collapse_structure::{
+    collapse_all_virtualize_one, collect_likely_gotos, emit_likely_edges_for_loop, select_goto,
 };
 pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule, build_sese_region_body, reconstruct_sese_final_body};
 pub use switch::{
