@@ -1479,14 +1479,20 @@ Implement / finish <strong>graph-native collapse</strong>: once a region is sele
 TraceDAG-style <strong>unstructured edge selection</strong> when no SESE shape fits.</p>
 <p>Owner: <code>fission-midend-structuring</code> (<code>sese_driver</code> + <code>blockaction</code>-class logic).<br />
 Ghidra refs: <code>blockaction.hh</code> (<code>CollapseStructure</code>, <code>TraceDAG</code>, <code>LoopBody</code>).</p>
-<p><strong>Landed (partial, 2026-07-25):</strong></p>
+<p><strong>Landed (partial, 2026-07-25 / 2026-07-26):</strong></p>
 <ol>
 <li><strong>Exclusive emission</strong> in <code>lower_loop_body_subgraph</code> + SESE reconstruction tombstones.  </li>
 <li><strong>TraceDAG likely-goto:</strong> <code>TraceDag::select_likely_unstructured_edge</code> +<br />
 <code>select_bad_edge</code> prefers TraceDAG scores (Ghidra <code>selectBadEdge</code>); collapse-loop<br />
    virtualization <strong>default on</strong> (<code>FISSION_COLLAPSE_LOOP=0</code> to disable).  </li>
-<li><strong>Heritage type witness:</strong> memory heritage promotes float-typed stack slots as<br />
-<code>Float</code> (not default uint) when store/load elem type is float. Full Cover still open.  </li>
+<li><strong>CollapseStructure path:</strong> <code>collapse_structure::{emit_likely_edges_for_loop,  
+   select_goto, collapse_all_virtualize_one}</code> wired into <code>try_virtualize_one_bad_edge</code><br />
+   (LoopBody emitLikelyEdges → TraceDAG → FAS residual).  </li>
+<li><strong>Graph-only reconstruct:</strong> residual walk skips tombstoned indices <strong>and</strong> any<br />
+   block whose label already appears inside a structured region body (no second<br />
+   linear re-lower of absorbed CFG).  </li>
+<li><strong>Heritage type witness (all type spaces):</strong> memory heritage inherits Float/Ptr/Int<br />
+   from store/load access types; <code>vVar_*</code> eligible for Cover-style variable merge.  </li>
 <li><strong>residual strip_post_total</strong> remains belt-and-suspenders only after exclusive<br />
    emission + TraceDAG virtualization.</li>
 </ol>
