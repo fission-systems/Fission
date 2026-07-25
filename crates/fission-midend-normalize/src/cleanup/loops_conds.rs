@@ -1030,3 +1030,161 @@ fn expr_nir_type(expr: &DirExpr) -> Option<NirType> {
         DirExpr::AggregateCopy { .. } => None,
     }
 }
+
+/// Match-path recovery: when a loop is followed by `return SENTINEL` (const)
+/// and the body has `result = value; break;`, rewrite the found-path break to
+/// `return result` so search/lookup helpers don't fall through to the not-found
+/// sentinel (`find_pair_value` / `kv_lookup`-class).
+///
+/// Only rewrites a break that is immediately preceded (same statement list)
+/// by a non-induction assignment to a local. Exit breaks like
+/// `if (i >= n) break;` are left alone.
+pub fn rewrite_found_path_break_to_return(stmts: &mut Vec<DirStmt>) -> bool {
+    let mut changed = false;
+    let mut idx = 0usize;
+    while idx < stmts.len() {
+        let has_sentinel = matches!(
+            stmts.get(idx + 1),
+            Some(DirStmt::Return(Some(DirExpr::Const(_, _))))
+        );
+        let is_loop = matches!(
+            stmts.get(idx),
+            Some(DirStmt::While { .. } | DirStmt::DoWhile { .. } | DirStmt::For { .. })
+        );
+        if is_loop && has_sentinel {
+            if rewrite_found_breaks_in_stmt(&mut stmts[idx]) {
+                changed = true;
+            }
+        } else {
+            changed |= rewrite_found_path_break_to_return_in_stmt(&mut stmts[idx]);
+        }
+        idx += 1;
+    }
+    changed
+}
+
+fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut DirStmt) -> bool {
+    match stmt {
+        DirStmt::Block(body)
+        | DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. } => rewrite_found_path_break_to_return(body),
+        DirStmt::For {
+            init, update, body, ..
+        } => {
+            let mut changed = false;
+            if let Some(init) = init {
+                changed |= rewrite_found_path_break_to_return_in_stmt(init);
+            }
+            if let Some(update) = update {
+                changed |= rewrite_found_path_break_to_return_in_stmt(update);
+            }
+            changed | rewrite_found_path_break_to_return(body)
+        }
+        DirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            rewrite_found_path_break_to_return(then_body)
+                | rewrite_found_path_break_to_return(else_body)
+        }
+        DirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases {
+                changed |= rewrite_found_path_break_to_return(&mut case.body);
+            }
+            changed | rewrite_found_path_break_to_return(default)
+        }
+        _ => false,
+    }
+}
+
+fn rewrite_found_breaks_in_stmt(stmt: &mut DirStmt) -> bool {
+    match stmt {
+        DirStmt::While { body, .. }
+        | DirStmt::DoWhile { body, .. }
+        | DirStmt::For { body, .. } => rewrite_found_breaks_in_body(body),
+        _ => false,
+    }
+}
+
+fn rewrite_found_breaks_in_body(body: &mut Vec<DirStmt>) -> bool {
+    let mut changed = false;
+    // Nested regions first.
+    for stmt in body.iter_mut() {
+        match stmt {
+            DirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= rewrite_found_breaks_in_body(then_body);
+                changed |= rewrite_found_breaks_in_body(else_body);
+            }
+            DirStmt::Block(inner)
+            | DirStmt::While { body: inner, .. }
+            | DirStmt::DoWhile { body: inner, .. }
+            | DirStmt::For { body: inner, .. } => {
+                changed |= rewrite_found_breaks_in_body(inner);
+            }
+            DirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    changed |= rewrite_found_breaks_in_body(&mut case.body);
+                }
+                changed |= rewrite_found_breaks_in_body(default);
+            }
+            _ => {}
+        }
+    }
+
+    let mut i = 0usize;
+    while i + 1 < body.len() {
+        if matches!(&body[i + 1], DirStmt::Break)
+            && let Some(ret_name) = found_result_assign_name(&body[i])
+        {
+            body[i + 1] = DirStmt::Return(Some(DirExpr::Var(ret_name)));
+            changed = true;
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    changed
+}
+
+/// `result = <expr>` that is not a loop-induction self-update (`i = i + 1`).
+fn found_result_assign_name(stmt: &DirStmt) -> Option<String> {
+    let DirStmt::Assign {
+        lhs: DirLValue::Var(name),
+        rhs,
+    } = stmt
+    else {
+        return None;
+    };
+    if is_self_increment_assign(name, rhs) {
+        return None;
+    }
+    // Avoid promoting pure param copies as "found" results.
+    if matches!(rhs, DirExpr::Var(src) if src.starts_with("param_")) {
+        return None;
+    }
+    Some(name.clone())
+}
+
+fn is_self_increment_assign(name: &str, rhs: &DirExpr) -> bool {
+    match rhs {
+        DirExpr::Binary {
+            op: DirBinaryOp::Add | DirBinaryOp::Sub,
+            lhs,
+            rhs: step,
+            ..
+        } => {
+            let lhs_is_self = matches!(lhs.as_ref(), DirExpr::Var(n) if n == name);
+            let rhs_is_self = matches!(step.as_ref(), DirExpr::Var(n) if n == name);
+            let lhs_is_const = matches!(lhs.as_ref(), DirExpr::Const(_, _));
+            let rhs_is_const = matches!(step.as_ref(), DirExpr::Const(_, _));
+            (lhs_is_self && rhs_is_const) || (rhs_is_self && lhs_is_const)
+        }
+        _ => false,
+    }
+}

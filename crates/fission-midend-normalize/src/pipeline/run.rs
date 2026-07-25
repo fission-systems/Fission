@@ -20,6 +20,7 @@ use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
     apply_condexe_folding_pass, apply_deindirect_pass, apply_expand_load_pass,
     apply_iblock_phi_elimination, apply_subvar_trim_pass, collapse_loop_exit_alias_returns,
+    rewrite_found_path_break_to_return,
     prune_unreachable_after_terminal, recover_guarded_loop_tail_accumulator_returns,
 };
 use super::super::cleanup::{
@@ -1692,6 +1693,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
         if collapse_loop_exit_alias_returns(stmts) {
             changed = true;
             last_changed_pass = Some("collapse_loop_exit_alias_returns");
+        }
+        if rewrite_found_path_break_to_return(stmts) {
+            changed = true;
+            last_changed_pass = Some("rewrite_found_path_break_to_return");
         }
         if recover_guarded_loop_tail_accumulator_returns(stmts) {
             changed = true;

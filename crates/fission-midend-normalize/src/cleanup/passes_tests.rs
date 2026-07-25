@@ -511,6 +511,58 @@ fn collapse_loop_exit_alias_return_rejects_non_alias_expression() {
 }
 
 #[test]
+fn rewrite_found_path_break_to_return_promotes_match_path() {
+    // while { if (done) break; ... result = value; break; } return -1;
+    // → match path becomes return result
+    let mut stmts = vec![
+        DirStmt::While {
+            cond: DirExpr::Const(1, int(32)),
+            body: vec![
+                DirStmt::If {
+                    cond: DirExpr::Var("done".to_string()),
+                    then_body: vec![DirStmt::Break],
+                    else_body: Vec::new(),
+                },
+                DirStmt::If {
+                    cond: DirExpr::Var("miss".to_string()),
+                    then_body: vec![DirStmt::Continue],
+                    else_body: Vec::new(),
+                },
+                DirStmt::Assign {
+                    lhs: DirLValue::Var("result".to_string()),
+                    rhs: DirExpr::Var("value".to_string()),
+                },
+                DirStmt::Break,
+            ],
+        },
+        DirStmt::Return(Some(DirExpr::Const(-1, int(32)))),
+    ];
+    assert!(rewrite_found_path_break_to_return(&mut stmts));
+    let DirStmt::While { body, .. } = &stmts[0] else {
+        panic!("expected while");
+    };
+    assert!(
+        matches!(
+            body.last(),
+            Some(DirStmt::Return(Some(DirExpr::Var(name)))) if name == "result"
+        ),
+        "match-path break must become return result, body={body:?}"
+    );
+    // Exit break must remain break.
+    assert!(matches!(
+        &body[0],
+        DirStmt::If {
+            then_body,
+            ..
+        } if matches!(then_body.as_slice(), [DirStmt::Break])
+    ));
+    assert!(matches!(
+        &stmts[1],
+        DirStmt::Return(Some(DirExpr::Const(-1, _)))
+    ));
+}
+
+#[test]
 fn recover_guarded_loop_tail_accumulator_return_rewrites_stale_temp_return() {
     let mut stmts = vec![
         DirStmt::Assign {

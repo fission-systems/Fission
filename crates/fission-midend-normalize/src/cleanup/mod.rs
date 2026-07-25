@@ -29,7 +29,7 @@ pub use loops_conds::{
     canonicalize_minmax_conditional_returns, collapse_loop_exit_alias_returns,
     collapse_redundant_conditional_returns, conditional_select_pass,
     inline_loop_condition_trailing_temps, normalize_dowhile_decrement_condition,
-    recover_guarded_loop_tail_accumulator_returns,
+    recover_guarded_loop_tail_accumulator_returns, rewrite_found_path_break_to_return,
 };
 pub use temp_var::{
     coerce_ptr_typed_bitop_vars, collapse_adjacent_pure_copy_into_if,
