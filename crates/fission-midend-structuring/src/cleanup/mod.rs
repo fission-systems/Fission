@@ -16,6 +16,12 @@ pub use goto::eliminate_redundant_gotos;
 pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<DirStmt>) -> Vec<DirStmt> {
     body = eliminate_redundant_gotos(body);
     body = dedupe_structured_region_entry_labels(body);
+    // Multi-emit residual: the same CFG block header (and sometimes a whole
+    // loop body) can be lowered more than once. Drop post-infloop residual
+    // while labels are still intact, then strip later Label(L) definitions so
+    // C does not see `redefinition of label`.
+    body = strip_post_total_infloop_label_residuals(body);
+    body = strip_duplicate_label_definitions(body);
     body = cleanup_redundant_labels_protecting(body, protected);
     let referenced = collect_referenced_labels(&body);
     while matches!(body.first(), Some(DirStmt::Label(label)) if !referenced.contains(label) && !protected.contains(label))
@@ -24,6 +30,262 @@ pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<DirSt
     }
     body
 }
+
+/// C labels are function-scoped. Keep the first `Label(L)` and drop later
+/// definitions of the same name (multi-emit of the same CFG block header).
+pub fn strip_duplicate_label_definitions(mut body: Vec<DirStmt>) -> Vec<DirStmt> {
+    let mut seen = HashSet::default();
+    strip_duplicate_label_definitions_in_place(&mut body, &mut seen);
+    body
+}
+
+fn strip_duplicate_label_definitions_in_place(
+    stmts: &mut Vec<DirStmt>,
+    seen: &mut HashSet<String>,
+) {
+    let mut i = 0;
+    while i < stmts.len() {
+        match &mut stmts[i] {
+            DirStmt::Label(label) => {
+                if !seen.insert(label.clone()) {
+                    stmts.remove(i);
+                    continue;
+                }
+            }
+            DirStmt::Block(body) => strip_duplicate_label_definitions_in_place(body, seen),
+            DirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                strip_duplicate_label_definitions_in_place(then_body, seen);
+                strip_duplicate_label_definitions_in_place(else_body, seen);
+            }
+            DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
+                strip_duplicate_label_definitions_in_place(body, seen);
+            }
+            DirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    strip_duplicate_label_definitions_in_place(&mut case.body, seen);
+                }
+                strip_duplicate_label_definitions_in_place(default, seen);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+/// After `while (1) { …; if (c) break; else continue; }` (total exit), drop
+/// following siblings that only re-host labels already defined inside that
+/// while — classic multi-emit of nested loop bodies after the outer infloop
+/// already absorbed them.
+pub fn strip_post_total_infloop_label_residuals(mut body: Vec<DirStmt>) -> Vec<DirStmt> {
+    strip_post_total_infloop_label_residuals_in_place(&mut body);
+    body
+}
+
+fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<DirStmt>) {
+    let mut i = 0;
+    while i < stmts.len() {
+        // Recurse into nested compounds first.
+        match &mut stmts[i] {
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => {
+                strip_post_total_infloop_label_residuals_in_place(body);
+            }
+            DirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                strip_post_total_infloop_label_residuals_in_place(then_body);
+                strip_post_total_infloop_label_residuals_in_place(else_body);
+            }
+            DirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    strip_post_total_infloop_label_residuals_in_place(&mut case.body);
+                }
+                strip_post_total_infloop_label_residuals_in_place(default);
+            }
+            _ => {}
+        }
+
+        if let DirStmt::While { cond, body } = &stmts[i] {
+            if is_constant_true_cond(cond) && while_body_ends_with_total_break_continue(body) {
+                let inner_labels = collect_defined_labels(body);
+                if !inner_labels.is_empty() {
+                    if let Some(end) =
+                        residual_suffix_end_after_total_infloop(stmts, i + 1, &inner_labels)
+                    {
+                        stmts.drain(i + 1..end);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Largest `from..end` suffix (stopping before Return) whose only label traffic
+/// is to `allowed`. Includes unlabeled multi-emitted compute (do-while bodies)
+/// when later gotos re-enter the absorbed region.
+fn residual_suffix_end_after_total_infloop(
+    stmts: &[DirStmt],
+    from: usize,
+    allowed: &HashSet<String>,
+) -> Option<usize> {
+    if from >= stmts.len() {
+        return None;
+    }
+    let mut end = from;
+    while end < stmts.len() {
+        if matches!(stmts[end], DirStmt::Return(_)) {
+            break;
+        }
+        end += 1;
+    }
+    if end == from {
+        return None;
+    }
+    let suffix = &stmts[from..end];
+    let mut defined = HashSet::default();
+    let mut gotos = HashSet::default();
+    collect_defined_labels_in(suffix, &mut defined);
+    collect_goto_targets_in(suffix, &mut gotos);
+    if !defined.is_subset(allowed) || !gotos.is_subset(allowed) {
+        return None;
+    }
+    // Require some re-entry into the absorbed region; bare assigns after a loop
+    // are not residual multi-emit.
+    if defined.is_empty() && gotos.is_empty() {
+        return None;
+    }
+    if !defined.is_empty() && !defined.is_subset(allowed) {
+        return None;
+    }
+    // Prefer evidence of jumping back into the region, or re-defining its labels.
+    if gotos.is_empty() && defined.is_disjoint(allowed) {
+        return None;
+    }
+    Some(end)
+}
+
+fn is_constant_true_cond(cond: &DirExpr) -> bool {
+    matches!(
+        cond,
+        DirExpr::Const(v, _) if *v != 0
+    )
+}
+
+/// Last meaningful control at the end of a while body is `if (…) break; else continue`
+/// or the reverse (possibly after trailing labels).
+fn while_body_ends_with_total_break_continue(body: &[DirStmt]) -> bool {
+    let Some(last) = body.iter().rev().find(|s| !matches!(s, DirStmt::Label(_))) else {
+        return false;
+    };
+    match last {
+        DirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let then_bc = is_solo_break_or_continue(then_body);
+            let else_bc = is_solo_break_or_continue(else_body);
+            // One arm break, the other continue — no fall-through past the loop.
+            matches!(
+                (then_bc, else_bc),
+                (Some(true), Some(false)) | (Some(false), Some(true))
+            )
+        }
+        _ => false,
+    }
+}
+
+/// `Some(true)` = only Break, `Some(false)` = only Continue, `None` = other.
+fn is_solo_break_or_continue(body: &[DirStmt]) -> Option<bool> {
+    let meaningful: Vec<&DirStmt> = body
+        .iter()
+        .filter(|s| !matches!(s, DirStmt::Label(_)))
+        .collect();
+    if meaningful.len() != 1 {
+        return None;
+    }
+    match meaningful[0] {
+        DirStmt::Break => Some(true),
+        DirStmt::Continue => Some(false),
+        _ => None,
+    }
+}
+
+fn collect_defined_labels(stmts: &[DirStmt]) -> HashSet<String> {
+    let mut out = HashSet::default();
+    collect_defined_labels_in(stmts, &mut out);
+    out
+}
+
+fn collect_defined_labels_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            DirStmt::Label(l) => {
+                out.insert(l.clone());
+            }
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => collect_defined_labels_in(body, out),
+            DirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_defined_labels_in(then_body, out);
+                collect_defined_labels_in(else_body, out);
+            }
+            DirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_defined_labels_in(&case.body, out);
+                }
+                collect_defined_labels_in(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_goto_targets_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            DirStmt::Goto(l) => {
+                out.insert(l.clone());
+            }
+            DirStmt::Block(body)
+            | DirStmt::While { body, .. }
+            | DirStmt::DoWhile { body, .. }
+            | DirStmt::For { body, .. } => collect_goto_targets_in(body, out),
+            DirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_goto_targets_in(then_body, out);
+                collect_goto_targets_in(else_body, out);
+            }
+            DirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_goto_targets_in(&case.body, out);
+                }
+                collect_goto_targets_in(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
 
 /// Like [`cleanup_redundant_labels`], but additionally protects every label
 /// in `protected` from removal even when nothing in `body` textually
@@ -816,6 +1078,65 @@ mod tests {
                 DirStmt::Return(None),
             ]
         );
+    }
+
+    #[test]
+    fn strip_duplicate_label_definitions_keeps_first_only() {
+        let body = vec![
+            DirStmt::Label("L".to_string()),
+            DirStmt::Expr(DirExpr::Var("a".to_string())),
+            DirStmt::While {
+                cond: DirExpr::Const(1, NirType::Bool),
+                body: vec![
+                    DirStmt::Label("L".to_string()),
+                    DirStmt::Continue,
+                ],
+            },
+        ];
+        let cleaned = strip_duplicate_label_definitions(body);
+        let mut labels = 0usize;
+        fn count(stmts: &[DirStmt], n: &mut usize) {
+            for s in stmts {
+                match s {
+                    DirStmt::Label(_) => *n += 1,
+                    DirStmt::While { body, .. } => count(body, n),
+                    _ => {}
+                }
+            }
+        }
+        count(&cleaned, &mut labels);
+        assert_eq!(labels, 1, "{cleaned:?}");
+    }
+
+    #[test]
+    fn strip_post_total_infloop_removes_rehosted_label_residual() {
+        // while(1) { L: …; if (c) break; else continue; }
+        // do { work } while;   // unlabeled multi-emit body
+        // goto L;
+        let body = vec![
+            DirStmt::While {
+                cond: DirExpr::Const(1, NirType::Bool),
+                body: vec![
+                    DirStmt::Label("block_inner".to_string()),
+                    DirStmt::Expr(DirExpr::Var("work".to_string())),
+                    DirStmt::If {
+                        cond: DirExpr::Var("done".to_string()),
+                        then_body: vec![DirStmt::Break],
+                        else_body: vec![DirStmt::Continue],
+                    },
+                ],
+            },
+            DirStmt::DoWhile {
+                body: vec![DirStmt::Expr(DirExpr::Var("work".to_string()))],
+                cond: DirExpr::Var("more".to_string()),
+            },
+            DirStmt::Goto("block_inner".to_string()),
+            DirStmt::Return(None),
+        ];
+        let cleaned = strip_post_total_infloop_label_residuals(body);
+        assert_eq!(cleaned.len(), 2, "{cleaned:?}");
+        assert!(matches!(cleaned[0], DirStmt::While { .. }));
+        assert!(matches!(cleaned[1], DirStmt::Return(None)));
     }
 
     #[test]
