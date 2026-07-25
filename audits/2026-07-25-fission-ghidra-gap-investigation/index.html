@@ -1846,7 +1846,7 @@
 </tr>
 <tr>
 <td><code>matrix_multiply</code></td>
-<td>Undeclared-local class improved; post-<code>1ea1a26f</code> residual was <strong>missing <code>c[]</code> store (Index DSE)</strong> + <strong>float→uint type loss</strong>. <strong><code>3ca1a786</code>:</strong> <strong>clang -O0 sem=1.0 (5/5)</strong>; gcc -O0 sem=0.20. <strong><code>a6624943</code> (midend XMM Aggregate→Float lane, no printer patch):</strong> gcc -O1/O2 no longer <code>fission_agg16</code> assign errors; residual is <strong>duplicate label</strong> structuring (<code>block_*</code> redefinition). m32 still <code>float80</code> undeclared (owner = materialize/normalize x87 float width, <strong>not</strong> printer spelling).</td>
+<td><strong><code>3ca1a786</code>:</strong> clang -O0 <strong>sem=1.0 (5/5)</strong> (Index DSE + float<em>). </em><em><code>a6624943</code>:</em><em> XMM Aggregate→Float (midend). </em><em><code>516a33bc</code> (structuring multi-emit cleanup):</em><em> gcc -O1/O2 move </em><em>compile_error → assertion_fail, sem=0.20 (1/5)</em>*; duplicate labels gone. Residual: m32 <code>float80</code>, Os undeclared xmm lane, O3 adapter, O0/O1/O2 semantic correctness.</td>
 </tr>
 </tbody>
 </table>
