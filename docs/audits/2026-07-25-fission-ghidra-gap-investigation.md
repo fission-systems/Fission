@@ -252,7 +252,7 @@ Artifacts under `fission-benchmark/results/local_gap_ee492fb6_focused/`.
 | `find_pair_value` | **gcc -O0, m32-O0: semantic 1.0 (5/5)**; clang still compile_error |
 | `kv_lookup` | **gcc -O0, m32-O0: semantic 1.0 (6/6)** — was assertion_fail class on m32-O0 |
 | `accumulate_pairs` | **gcc O0/O1/O2, m32 O0/O2: semantic 1.0**; clang-O0 still compile_error |
-| `matrix_multiply` | Undeclared-local class improved; **still mostly compile_error / assert** (float vs int / structure residual) |
+| `matrix_multiply` | Undeclared-local class improved; post-`1ea1a26f` residual was **missing `c[]` store (Index DSE)** + **float→uint type loss**. Local decomp after fix: `float *` params, float accum/`*=`, `local_18[i]=sum` restored. **Docker remeasure still required** for quality claim. |
 
 **Not a full-corpus claim** — focused rows only; do not promote to Pages.
 

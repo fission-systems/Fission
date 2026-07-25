@@ -961,6 +961,21 @@ fn try_recover_index_access(
     let mut elem_ty = pointee_ty(ptr_ty)
         .cloned()
         .unwrap_or_else(|| access_ty.clone());
+    // Prefer the access type when it is float of the same width as a default
+    // int pointee. FLOAT_* stores/loads lower with float access_ty, but the
+    // base may still be bound as `uint*` from size-default typing; do not let
+    // that erase float matrix evidence before use-type-infer runs.
+    if let (
+        NirType::Float { bits: access_bits },
+        NirType::Int {
+            bits: elem_bits, ..
+        },
+    ) = (access_ty, &elem_ty)
+    {
+        if access_bits == elem_bits {
+            elem_ty = access_ty.clone();
+        }
+    }
     let (idx_expr, stride) = try_extract_index_mul(rhs.as_ref())?;
 
     // On-the-fly refinement for stride/index matching

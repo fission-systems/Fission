@@ -190,10 +190,42 @@ impl Builder {
                     }
                     DirLValue::Index {
                         base,
-                        index: _,
+                        index,
                         elem_ty,
                     } => {
-                        let key = self.alias_key_for_ptr(base, nir_byte_size(elem_ty));
+                        // Runtime-indexed element stores must not be keyed as a
+                        // write to the *base pointer's own stack slot*.
+                        //
+                        // `ptr_arith` recovers `*(local_XX + i * stride)` into
+                        // `local_XX[i]` before dead-store runs. Keying only
+                        // `base` drops the index and classifies `local_XX` as a
+                        // promotable stack partition — then DSE deletes the
+                        // store when no load targets that same (wrong) key.
+                        // That dropped matrix/out-param stores of the form
+                        // `c[i*n+j] = sum` where `c` is a stack-spilled pointer.
+                        // Build the equivalent address expression so partition
+                        // sees a runtime stride (or falls back to Unknown).
+                        let ptr = DirExpr::Binary {
+                            op: DirBinaryOp::Add,
+                            lhs: base.clone(),
+                            rhs: Box::new(DirExpr::Binary {
+                                op: DirBinaryOp::Mul,
+                                lhs: index.clone(),
+                                rhs: Box::new(DirExpr::Const(
+                                    i64::from(nir_byte_size(elem_ty)),
+                                    NirType::Int {
+                                        bits: 64,
+                                        signed: true,
+                                    },
+                                )),
+                                ty: NirType::Int {
+                                    bits: 64,
+                                    signed: true,
+                                },
+                            }),
+                            ty: NirType::Ptr(Box::new(elem_ty.clone())),
+                        };
+                        let key = self.alias_key_for_ptr(&ptr, nir_byte_size(elem_ty));
                         self.add_def(key);
                     }
                     DirLValue::Var(_) => {} // Not a memory write.

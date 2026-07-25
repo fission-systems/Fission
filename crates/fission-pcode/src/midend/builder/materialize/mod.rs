@@ -167,6 +167,28 @@ impl<'a> PreviewBuilder<'a> {
             || asm.starts_with("PUSH R15")
     }
 
+    /// Element/value type for a store/load varnode: float when the defining
+    /// p-code op is float-class, otherwise the integer size default.
+    fn memory_value_type_for_varnode(&self, vn: &Varnode) -> NirType {
+        let mut current = vn.clone();
+        // Peel a short Copy/Cast chain so FLOAT_MULT → unique → Store sees float.
+        for _ in 0..6 {
+            let Some((_, def)) = self.lookup_def_site(&current) else {
+                break;
+            };
+            match def.opcode {
+                PcodeOpcode::Copy | PcodeOpcode::Cast if !def.inputs.is_empty() => {
+                    current = def.inputs[0].clone();
+                    continue;
+                }
+                opcode => {
+                    return pcode_output_type_from_size(opcode, vn.size);
+                }
+            }
+        }
+        type_from_size(vn.size, false)
+    }
+
     fn is_call_return_scaffold_store(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -572,7 +594,10 @@ impl<'a> PreviewBuilder<'a> {
                             {
                                 return Ok(None);
                             }
-                            let store_ty = type_from_size(op.inputs[2].size, false);
+                            // Prefer float element type when the stored value is
+                            // produced by float p-code (FLOAT_MULT/ADD/…); size
+                            // alone cannot distinguish float32 from uint32.
+                            let store_ty = this.memory_value_type_for_varnode(&op.inputs[2]);
                             let lhs = if let Some((slot_name, _slot_ty)) = this
                                 .try_stack_slot_lvalue_for_memory_op(
                                     op,
@@ -599,7 +624,7 @@ impl<'a> PreviewBuilder<'a> {
                                                 err
                                             })?,
                                     ),
-                                    ty: store_ty,
+                                    ty: store_ty.clone(),
                                 }
                             };
                             let rhs = if let Some(expr) = this
@@ -632,6 +657,24 @@ impl<'a> PreviewBuilder<'a> {
                                         err
                                     })?
                             };
+                            // If the lowered RHS is float-typed but the lvalue
+                            // was sized as int (copy/zext chain), align Deref ty.
+                            let lhs = match lhs {
+                                DirLValue::Deref { ptr, ty }
+                                    if matches!(
+                                        (expr_type(&rhs), &ty),
+                                        (NirType::Float { bits: rb }, NirType::Int { bits: ib, .. })
+                                            if rb == *ib
+                                    ) =>
+                                {
+                                    DirLValue::Deref {
+                                        ptr,
+                                        ty: expr_type(&rhs),
+                                    }
+                                }
+                                other => other,
+                            };
+                            let _ = store_ty;
                             Ok(Some(DirStmt::Assign { lhs, rhs }))
                         }
                         PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {

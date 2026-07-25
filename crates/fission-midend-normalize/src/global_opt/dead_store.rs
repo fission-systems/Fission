@@ -411,6 +411,42 @@ mod tests {
         );
     }
 
+    /// After ptr_arith, `*(local_18 + i * 4)` becomes `local_18[i]`.
+    /// MemSSA must not key that as a write to the stack slot that only
+    /// *holds* the pointer — otherwise matrix out-param stores vanish.
+    #[test]
+    fn dead_store_elimination_keeps_index_store_through_stack_spilled_pointer() {
+        let mut func = base_func(
+            vec![DirStmt::Assign {
+                lhs: DirLValue::Index {
+                    base: Box::new(DirExpr::Var("local_18".to_string())),
+                    index: Box::new(DirExpr::Var("i".to_string())),
+                    elem_ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+                rhs: DirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            }],
+            vec![ptr_binding("local_18"), int_binding("i")],
+        );
+
+        let changed = apply_dead_store_elimination(&mut func);
+
+        assert!(
+            !changed,
+            "Index store through a stack-spilled pointer must not be DSE'd: {:?}",
+            func.body
+        );
+        assert_eq!(func.body.len(), 1, "{:?}", func.body);
+    }
+
     /// Baseline: a genuine, provably-dead write to an *ordinary* stack
     /// local (no runtime index at all) must still be eliminated -- the
     /// fix above must not blunt this existing, legitimate optimization.

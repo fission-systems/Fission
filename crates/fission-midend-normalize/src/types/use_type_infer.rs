@@ -389,13 +389,23 @@ fn collect_assignment_copy_constraints(
         DirLValue::Var(lhs_name) => {
             // Reverse-propagate non-pointer types only. Propagating Ptr through
             // a simple copy is unsafe when a register is later reused for an
-            // address value.
+            // address value — except float* upgrades: once a stack home of a
+            // param is proven float* by Index/Load float stores, the param
+            // itself must match (matrix out-param `c`).
             if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
                 if let DirExpr::Var(rhs_name) = rhs {
-                    if !matches!(lhs_ty, NirType::Ptr(_)) {
-                        out.entry(rhs_name.clone())
-                            .or_default()
-                            .push(copy_constraint_from_type(lhs_ty));
+                    match lhs_ty {
+                        NirType::Ptr(pointee) if matches!(pointee.as_ref(), NirType::Float { .. }) => {
+                            out.entry(rhs_name.clone())
+                                .or_default()
+                                .push(UseConstraint::Ptr(pointee.as_ref().clone()));
+                        }
+                        NirType::Ptr(_) => {}
+                        other => {
+                            out.entry(rhs_name.clone())
+                                .or_default()
+                                .push(copy_constraint_from_type(other));
+                        }
                     }
                 }
             }
@@ -430,10 +440,37 @@ fn collect_assignment_copy_constraints(
                     .push(UseConstraint::Ptr(NirType::Unknown));
             }
 
-            if let DirExpr::Load { ty, .. } = rhs {
+            if let DirExpr::Load { ptr, ty } = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(ty.clone()));
+                // Round 2+: float-typed lhs implies the load base is float*.
+                if let (
+                    Some(NirType::Float { bits }),
+                    DirExpr::Var(base_name),
+                ) = (known_binding_types.get(lhs_name), ptr.as_ref())
+                {
+                    out.entry(base_name.clone())
+                        .or_default()
+                        .push(UseConstraint::Ptr(NirType::Float { bits: *bits }));
+                }
+            }
+
+            if let DirExpr::Index { base, elem_ty, .. } = rhs {
+                out.entry(lhs_name.clone())
+                    .or_default()
+                    .push(UseConstraint::Exact(elem_ty.clone()));
+                // Round 2+: once the destination is known float (from FLOAT_MULT
+                // use), force the array base to float* so matrix params recover.
+                if let (
+                    Some(NirType::Float { bits }),
+                    DirExpr::Var(base_name),
+                ) = (known_binding_types.get(lhs_name), base.as_ref())
+                {
+                    out.entry(base_name.clone())
+                        .or_default()
+                        .push(UseConstraint::Ptr(NirType::Float { bits: *bits }));
+                }
             }
 
             if let DirExpr::Cast {
@@ -453,11 +490,29 @@ fn collect_assignment_copy_constraints(
                     .push(UseConstraint::Exact(ty.clone()));
             }
         }
-        DirLValue::Index { elem_ty, .. } => {
+        DirLValue::Index { base, elem_ty, .. } => {
             if let DirExpr::Var(rhs_name) = rhs {
                 out.entry(rhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(elem_ty.clone()));
+                // Float value stored through `base[i]` upgrades base to float*
+                // even when Index still carries a default int elem_ty (stack
+                // spill/reload of a float accumulator loses FLOAT_* opcode
+                // provenance on the Store value path).
+                if let Some(NirType::Float { bits }) = known_binding_types.get(rhs_name) {
+                    if let DirExpr::Var(base_name) = base.as_ref() {
+                        out.entry(base_name.clone())
+                            .or_default()
+                            .push(UseConstraint::Ptr(NirType::Float { bits: *bits }));
+                    }
+                }
+            }
+            if let DirExpr::Var(base_name) = base.as_ref() {
+                if matches!(elem_ty, NirType::Float { .. }) {
+                    out.entry(base_name.clone())
+                        .or_default()
+                        .push(UseConstraint::Ptr(elem_ty.clone()));
+                }
             }
         }
         DirLValue::FieldAccess { ty, .. } => {
@@ -968,6 +1023,13 @@ fn collect_arithmetic_result_constraints(
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
+    if let NirType::Float { bits } = result_ty {
+        // FLOAT_MULT/ADD-class binary results force float operands and
+        // float* bases for Index/Load that produced those operands.
+        collect_float_operand_constraint(lhs, *bits, out);
+        collect_float_operand_constraint(rhs, *bits, out);
+        return;
+    }
     let NirType::Int {
         bits: result_bits,
         signed,
@@ -977,6 +1039,41 @@ fn collect_arithmetic_result_constraints(
     };
     collect_arithmetic_operand_constraint(lhs, *result_bits, *signed, known_binding_types, out);
     collect_arithmetic_operand_constraint(rhs, *result_bits, *signed, known_binding_types, out);
+}
+
+fn collect_float_operand_constraint(
+    expr: &DirExpr,
+    bits: u32,
+    out: &mut HashMap<String, Vec<UseConstraint>>,
+) {
+    let float_ty = NirType::Float { bits };
+    match expr {
+        DirExpr::Var(name) => {
+            out.entry(name.clone())
+                .or_default()
+                .push(UseConstraint::Exact(float_ty));
+        }
+        DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
+            collect_float_operand_constraint(expr, bits, out);
+        }
+        DirExpr::Load { ptr, .. } => {
+            if let DirExpr::Var(name) = ptr.as_ref() {
+                out.entry(name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(float_ty));
+            }
+            collect_float_operand_constraint(ptr, bits, out);
+        }
+        DirExpr::Index { base, .. } => {
+            if let DirExpr::Var(name) = base.as_ref() {
+                out.entry(name.clone())
+                    .or_default()
+                    .push(UseConstraint::Ptr(float_ty));
+            }
+            collect_float_operand_constraint(base, bits, out);
+        }
+        _ => {}
+    }
 }
 
 fn collect_arithmetic_operand_constraint(
@@ -1945,11 +2042,32 @@ fn merge_constraint(binding: &mut DirBinding, constraint: &UseConstraint) -> boo
         return false;
     }
     match (&binding.ty, constraint) {
-        // Already has a non-Unknown type — don't overwrite.
-        (NirType::Ptr(_), _) => false,
+        // Already has a strong type — don't overwrite (except float upgrades).
         (NirType::Float { .. }, _) => false,
         (NirType::Aggregate { .. }, _) => false,
         (NirType::Bool, _) => false,
+
+        // Same-width int pointee → float pointee when float ops prove element type.
+        // Size-4 loads default to `uint*`; FLOAT_MULT use upgrades to `float*`.
+        (
+            NirType::Ptr(cur_pointee),
+            UseConstraint::Ptr(NirType::Float { bits: float_bits }),
+        ) => match cur_pointee.as_ref() {
+            NirType::Int { bits, .. } if bits == float_bits => {
+                binding.ty = NirType::Ptr(Box::new(NirType::Float {
+                    bits: *float_bits,
+                }));
+                true
+            }
+            NirType::Unknown => {
+                binding.ty = NirType::Ptr(Box::new(NirType::Float {
+                    bits: *float_bits,
+                }));
+                true
+            }
+            _ => false,
+        },
+        (NirType::Ptr(_), _) => false,
 
         // Pointer constraint — always upgrade when current is Unknown or Int.
         (_, UseConstraint::Ptr(pointee)) => {
@@ -1965,6 +2083,18 @@ fn merge_constraint(binding: &mut DirBinding, constraint: &UseConstraint) -> boo
         // Exact type from Cast context — only upgrade Unknown.
         (NirType::Unknown, UseConstraint::Exact(ty)) => {
             binding.ty = ty.clone();
+            true
+        }
+        // Same-width int → float when float arithmetic uses the value.
+        (
+            NirType::Int { bits, .. },
+            UseConstraint::Exact(NirType::Float {
+                bits: float_bits,
+            }),
+        ) if bits == float_bits => {
+            binding.ty = NirType::Float {
+                bits: *float_bits,
+            };
             true
         }
         (
@@ -2211,6 +2341,70 @@ mod tests {
             body,
             ..Default::default()
         }
+    }
+
+    /// `x = a * b` with float result upgrades int temps and `uint*` bases.
+    #[test]
+    fn float_mul_promotes_int_operands_and_uint_pointer_base() {
+        let float_ty = NirType::Float { bits: 32 };
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let body = vec![
+            DirStmt::Assign {
+                lhs: DirLValue::Var("a".to_owned()),
+                rhs: DirExpr::Index {
+                    base: Box::new(DirExpr::Var("p".to_owned())),
+                    index: Box::new(DirExpr::Const(0, uint_ty.clone())),
+                    elem_ty: uint_ty.clone(),
+                },
+            },
+            DirStmt::Assign {
+                lhs: DirLValue::Var("prod".to_owned()),
+                rhs: DirExpr::Binary {
+                    op: DirBinaryOp::Mul,
+                    lhs: Box::new(DirExpr::Var("a".to_owned())),
+                    rhs: Box::new(DirExpr::Var("b".to_owned())),
+                    ty: float_ty.clone(),
+                },
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_typed_binding(
+                    "p",
+                    NirType::Ptr(Box::new(uint_ty.clone())),
+                    NirBindingOrigin::ParamIndex(0),
+                ),
+                make_typed_binding("a", uint_ty.clone(), NirBindingOrigin::Temp),
+                make_typed_binding("b", uint_ty.clone(), NirBindingOrigin::Temp),
+                make_typed_binding("prod", uint_ty, NirBindingOrigin::Temp),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        // Move `p` to params so ParamIndex origin matches production shape.
+        let p = func.locals.remove(0);
+        func.params.push(p);
+
+        let changed = super::apply_use_driven_type_infer_pass(&mut func);
+        assert!(changed, "float mul must promote operand/base types");
+        assert_eq!(
+            func.params[0].ty,
+            NirType::Ptr(Box::new(float_ty.clone())),
+            "uint* base of float mul load must become float*"
+        );
+        assert_eq!(
+            func.locals.iter().find(|b| b.name == "a").map(|b| &b.ty),
+            Some(&float_ty),
+            "float mul lhs operand must become float"
+        );
+        assert_eq!(
+            func.locals.iter().find(|b| b.name == "b").map(|b| &b.ty),
+            Some(&float_ty),
+            "float mul rhs operand must become float"
+        );
     }
 
     /// Load { ptr: Var("p"), ty: uint32 } → p: Ptr(uint32)

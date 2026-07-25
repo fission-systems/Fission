@@ -56,6 +56,46 @@ pub(crate) fn type_from_size(size: u32, signed: bool) -> NirType {
 }
 
 pub(crate) fn pcode_output_type_from_size(opcode: PcodeOpcode, size: u32) -> NirType {
+    // Float arithmetic / conversion outputs are IEEE values of `size` bytes.
+    // Without this arm, `ensure_temp_binding_for_output` types FLOAT_MULT /
+    // FLOAT_ADD temps as `uint`/`int`, so matrix-class float kernels print as
+    // integer `*=`/`+=` and poison downstream pointer elem types.
+    if matches!(
+        opcode,
+        PcodeOpcode::FloatAdd
+            | PcodeOpcode::FloatSub
+            | PcodeOpcode::FloatMult
+            | PcodeOpcode::FloatDiv
+            | PcodeOpcode::FloatNeg
+            | PcodeOpcode::FloatAbs
+            | PcodeOpcode::FloatSqrt
+            | PcodeOpcode::FloatCeil
+            | PcodeOpcode::FloatFloor
+            | PcodeOpcode::FloatRound
+            | PcodeOpcode::FloatInt2Float
+            | PcodeOpcode::FloatFloat2Float
+    ) {
+        return float_type_from_size(size);
+    }
+    // FLOAT_TRUNC is float→signed int (Ghidra TypeOpFloatTrunc: TYPE_INT).
+    if matches!(opcode, PcodeOpcode::FloatTrunc) {
+        return type_from_size(size, true);
+    }
+    // Float comparisons produce a boolean-sized flag, not a float.
+    if matches!(
+        opcode,
+        PcodeOpcode::FloatEqual
+            | PcodeOpcode::FloatNotEqual
+            | PcodeOpcode::FloatLess
+            | PcodeOpcode::FloatLessEqual
+            | PcodeOpcode::FloatNan
+    ) {
+        return if size == 1 {
+            NirType::Bool
+        } else {
+            type_from_size(size, false)
+        };
+    }
     type_from_size(
         size,
         matches!(

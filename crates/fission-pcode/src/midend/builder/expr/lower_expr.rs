@@ -2688,6 +2688,73 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Load element type: float when same-block non-copy consumers are
+    /// float-class only. Unique temps reuse offsets across the function, so
+    /// this deliberately does not scan later blocks.
+    fn memory_load_type_for_output(&self, _op: &PcodeOp, output: &Varnode) -> NirType {
+        let Some(site) = self.current_lowering_site else {
+            return type_from_size(output.size, false);
+        };
+        let Some(block) = self.pcode.blocks.get(site.block_idx) else {
+            return type_from_size(output.size, false);
+        };
+        let mut work: Vec<(usize, Varnode)> = vec![(site.op_idx, output.clone())];
+        let mut saw_float = false;
+        let mut saw_non_float = false;
+        let mut visited = 0usize;
+        while let Some((def_op_idx, vn)) = work.pop() {
+            visited += 1;
+            if visited > 24 {
+                break;
+            }
+            for (use_idx, use_op) in block.ops.iter().enumerate().skip(def_op_idx + 1) {
+                if !use_op.inputs.iter().any(|input| {
+                    input.space_id == vn.space_id
+                        && input.offset == vn.offset
+                        && input.size == vn.size
+                }) {
+                    continue;
+                }
+                match use_op.opcode {
+                    PcodeOpcode::Copy | PcodeOpcode::Cast => {
+                        if let Some(out) = use_op.output.as_ref() {
+                            work.push((use_idx, out.clone()));
+                        }
+                    }
+                    PcodeOpcode::FloatAdd
+                    | PcodeOpcode::FloatSub
+                    | PcodeOpcode::FloatMult
+                    | PcodeOpcode::FloatDiv
+                    | PcodeOpcode::FloatNeg
+                    | PcodeOpcode::FloatAbs
+                    | PcodeOpcode::FloatSqrt
+                    | PcodeOpcode::FloatCeil
+                    | PcodeOpcode::FloatFloor
+                    | PcodeOpcode::FloatRound
+                    | PcodeOpcode::FloatEqual
+                    | PcodeOpcode::FloatNotEqual
+                    | PcodeOpcode::FloatLess
+                    | PcodeOpcode::FloatLessEqual
+                    | PcodeOpcode::FloatNan
+                    | PcodeOpcode::FloatTrunc
+                    | PcodeOpcode::FloatFloat2Float => {
+                        saw_float = true;
+                    }
+                    // Spill/reload of the loaded value is not counter-evidence.
+                    PcodeOpcode::Store => {}
+                    _ => {
+                        saw_non_float = true;
+                    }
+                }
+            }
+        }
+        if saw_float && !saw_non_float {
+            float_type_from_size(output.size)
+        } else {
+            type_from_size(output.size, false)
+        }
+    }
+
     pub(in crate::midend) fn lower_def_op(
         &mut self,
         op: &PcodeOp,
@@ -2776,10 +2843,13 @@ impl<'a> PreviewBuilder<'a> {
                     .output
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprMemoryBackedVarnode)?;
+                // When this load's only consumers are float ops (or copies into
+                // float ops), recover float element type instead of uint-by-size.
+                let load_ty = self.memory_load_type_for_output(op, out);
                 if let Some((slot_name, _)) = self.try_stack_slot_lvalue_for_memory_op(
                     op,
                     &op.inputs[1],
-                    type_from_size(out.size, false),
+                    load_ty.clone(),
                 ) {
                     Ok(DirExpr::Var(slot_name))
                 } else if let Some(peb_expr) = self.try_peb_field_var(&op.inputs[1]) {
@@ -2798,14 +2868,11 @@ impl<'a> PreviewBuilder<'a> {
                 } else if let Some(addr) = self.resolve_global_address(&op.inputs[1], 16)
                     && let Some(value) = self.read_readonly_scalar_from_binary(addr, out.size)
                 {
-                    Ok(DirExpr::Const(
-                        value as i64,
-                        type_from_size(out.size, false),
-                    ))
+                    Ok(DirExpr::Const(value as i64, load_ty))
                 } else {
                     Ok(DirExpr::Load {
                         ptr: Box::new(self.lower_varnode(&op.inputs[1], visiting)?),
-                        ty: type_from_size(out.size, false),
+                        ty: load_ty,
                     })
                 }
             }
