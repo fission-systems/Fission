@@ -27,6 +27,14 @@ pub struct ServeConfig {
     #[arg(long, default_value_t = 52_428_800, env = "FISSION_MAX_UPLOAD_BYTES")]
     pub max_upload_bytes: usize,
 
+    /// Run as an internet-facing backend with packaged resources.
+    #[arg(long, default_value_t = false, env = "FISSION_CLOUD_MODE")]
+    pub cloud_mode: bool,
+
+    /// Bearer token required by cloud-mode API routes.
+    #[arg(long, env = "FISSION_SERVE_API_TOKEN")]
+    pub api_token: Option<String>,
+
     /// CORS allowed origins (comma-separated, can repeat flag).
     /// Defaults include localhost ports for local development and
     /// the canonical Vercel deployment.
@@ -52,6 +60,8 @@ impl Default for ServeConfig {
             max_sessions:     50,
             session_ttl_secs: 1800,
             max_upload_bytes: 52_428_800,
+            cloud_mode:       false,
+            api_token:        None,
             allowed_origins:  vec![
                 "http://localhost:3000".into(),
                 "http://localhost:8080".into(),
@@ -59,5 +69,53 @@ impl Default for ServeConfig {
                 "https://fission-system-web.vercel.app".into(),
             ],
         }
+    }
+}
+
+impl ServeConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.cloud_mode
+            && self
+                .api_token
+                .as_deref()
+                .is_none_or(|token| token.trim().len() < 32)
+        {
+            return Err(
+                "cloud mode requires FISSION_SERVE_API_TOKEN with at least 32 characters"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_mode_does_not_require_a_token() {
+        assert!(ServeConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn cloud_mode_rejects_missing_or_short_tokens() {
+        let mut config = ServeConfig {
+            cloud_mode: true,
+            ..ServeConfig::default()
+        };
+        assert!(config.validate().is_err());
+        config.api_token = Some("short".to_string());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn cloud_mode_accepts_a_long_token() {
+        let config = ServeConfig {
+            cloud_mode: true,
+            api_token: Some("0123456789abcdef0123456789abcdef".to_string()),
+            ..ServeConfig::default()
+        };
+        assert!(config.validate().is_ok());
     }
 }

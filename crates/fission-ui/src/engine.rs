@@ -366,28 +366,72 @@ pub use native::{
 // WASM — server URL state + HTTP fetch helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Compile-time backend default for hosted web builds.
+///
+/// `FISSION_WEB_API_URL` is intentionally only a URL. Authentication tokens
+/// must never be compiled into a public WASM bundle.
+pub fn configured_server_url() -> String {
+    option_env!("FISSION_WEB_API_URL")
+        .unwrap_or("http://localhost:7331")
+        .trim_end_matches('/')
+        .to_string()
+}
+
 #[cfg(target_arch = "wasm32")]
 mod wasm_api {
     use super::*;
     use fission_analysis_protocol::{
         DecompileResponse as ApiDecompileResponse, FnEntry as ApiFnEntry,
+        StatusResponse,
         UploadResponse as ApiUploadResponse, XrefRow as ApiXrefRow,
         XrefsResponse as ApiXrefsResponse,
     };
-    use gloo_net::http::Request;
+    use gloo_net::http::{Request, RequestBuilder};
 
     // Thread-local server URL (configurable from UI)
     thread_local! {
         static SERVER_URL: std::cell::RefCell<String> =
-            std::cell::RefCell::new("http://localhost:7331".to_string());
+            std::cell::RefCell::new(configured_server_url());
+        static SERVER_API_TOKEN: std::cell::RefCell<String> =
+            const { std::cell::RefCell::new(String::new()) };
     }
 
     pub fn set_server_url(url: String) {
-        SERVER_URL.with(|u| *u.borrow_mut() = url);
+        SERVER_URL.with(|u| *u.borrow_mut() = url.trim_end_matches('/').to_string());
     }
 
     pub fn get_server_url() -> String {
         SERVER_URL.with(|u| u.borrow().clone())
+    }
+
+    pub fn set_server_api_token(token: String) {
+        SERVER_API_TOKEN.with(|current| *current.borrow_mut() = token.trim().to_string());
+    }
+
+    fn authorized(request: RequestBuilder) -> RequestBuilder {
+        SERVER_API_TOKEN.with(|token| {
+            let token = token.borrow();
+            if token.is_empty() {
+                request
+            } else {
+                request.header("Authorization", &format!("Bearer {token}"))
+            }
+        })
+    }
+
+    pub async fn fetch_server_status() -> Result<StatusResponse, String> {
+        let base = get_server_url();
+        let response = authorized(Request::get(&format!("{base}/api/status")))
+            .send()
+            .await
+            .map_err(|error| format!("Backend status failed: {error}"))?;
+        if !response.ok() {
+            return Err(format!("Backend status returned {}", response.status()));
+        }
+        response
+            .json::<StatusResponse>()
+            .await
+            .map_err(|error| format!("Parse backend status: {error}"))
     }
 
     fn to_xref_row(r: ApiXrefRow) -> XrefRow {
@@ -412,7 +456,7 @@ mod wasm_api {
         ).map_err(|e| format!("{e:?}"))?;
         form.append_with_blob_and_filename("file", &file, &name).map_err(|e| format!("{e:?}"))?;
 
-        let resp = Request::post(&format!("{base}/api/binary"))
+        let resp = authorized(Request::post(&format!("{base}/api/binary")))
             .body(form)
             .map_err(|e| format!("Upload form body error: {e:?}"))?
             .send()
@@ -426,7 +470,10 @@ mod wasm_api {
             .map_err(|e| format!("Parse upload response: {e:?}"))?;
 
         // Fetch function list scoped to this session
-        let fn_resp = Request::get(&format!("{base}/api/functions/{}", upload.session_id))
+        let fn_resp = authorized(Request::get(&format!(
+            "{base}/api/functions/{}",
+            upload.session_id
+        )))
             .send().await
             .map_err(|e| format!("Functions fetch failed: {e:?}"))?;
 
@@ -460,7 +507,9 @@ mod wasm_api {
     ) -> Result<DecompileOutput, String> {
         let base = get_server_url();
         let sid = session_id.ok_or("no active session — upload a binary first")?;
-        let resp = Request::post(&format!("{base}/api/decompile/{sid}/{addr:x}"))
+        let resp = authorized(Request::post(&format!(
+            "{base}/api/decompile/{sid}/{addr:x}"
+        )))
             .send().await
             .map_err(|e| format!("Decompile request failed: {e}"))?;
         if !resp.ok() {
@@ -482,7 +531,9 @@ mod wasm_api {
     ) -> (Vec<XrefRow>, Vec<XrefRow>) {
         let base = get_server_url();
         let Some(sid) = session_id else { return (vec![], vec![]); };
-        let resp = Request::get(&format!("{base}/api/xrefs/{sid}/{fn_addr:x}"))
+        let resp = authorized(Request::get(&format!(
+            "{base}/api/xrefs/{sid}/{fn_addr:x}"
+        )))
             .send().await;
         match resp {
             Ok(r) if r.ok() => {
@@ -500,7 +551,9 @@ mod wasm_api {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use wasm_api::{get_server_url, set_server_url};
+pub use wasm_api::{
+    fetch_server_status, get_server_url, set_server_api_token, set_server_url,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Unified async wrappers (same signature on both platforms)

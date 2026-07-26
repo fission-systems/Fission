@@ -34,10 +34,13 @@ mod handlers;
 
 use anyhow::Result;
 use axum::{
-    Router,
-    extract::DefaultBodyLimit,
-    http::{HeaderValue, Method},
+    Extension, Router,
+    extract::{DefaultBodyLimit, Request, State},
+    http::{HeaderValue, Method, StatusCode, header::AUTHORIZATION},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
+    Json,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::cors::CorsLayer;
@@ -46,9 +49,52 @@ use tracing::info;
 pub use config::ServeConfig;
 pub use session::SessionStore;
 
+#[derive(Debug, Clone, Copy)]
+pub struct ServeRuntimeInfo {
+    pub cloud_mode: bool,
+}
+
+#[derive(Clone)]
+struct ApiToken(Arc<str>);
+
+async fn require_bearer(
+    State(expected): State<ApiToken>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let authorized = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            let expected = format!("Bearer {}", expected.0);
+            constant_time_eq(value.as_bytes(), expected.as_bytes())
+        });
+    if authorized {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(types::ErrorResponse::new("missing or invalid bearer token")),
+        )
+            .into_response()
+    }
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
+}
+
 /// Start the fission HTTP API server with the given configuration.
 /// Blocks until the server is shut down.
 pub async fn run_serve(config: ServeConfig) -> Result<()> {
+    config.validate().map_err(anyhow::Error::msg)?;
     let store = Arc::new(SessionStore::new(config.max_sessions, config.session_ttl_secs));
 
     // Start background TTL sweeper
@@ -61,14 +107,30 @@ pub async fn run_serve(config: ServeConfig) -> Result<()> {
 
     let cors = build_cors(&config.allowed_origins);
 
-    let app = Router::new()
+    let protected = Router::new()
         .route("/api/status",                    get(handlers::status::handle_status))
         .route("/api/binary",                    post(handlers::binary::handle_upload_binary))
         .route("/api/functions/{session}",        get(handlers::functions::handle_list_functions))
         .route("/api/decompile/{session}/{addr}",  post(handlers::decompile::handle_decompile))
         .route("/api/xrefs/{session}/{addr}",      get(handlers::xrefs::handle_xrefs))
-        .route("/api/session/{session}",          delete(handlers::binary::handle_delete_session))
+        .route("/api/session/{session}",          delete(handlers::binary::handle_delete_session));
+
+    let protected = if let Some(token) = config.api_token.as_deref() {
+        protected.route_layer(middleware::from_fn_with_state(
+            ApiToken(Arc::from(token)),
+            require_bearer,
+        ))
+    } else {
+        protected
+    };
+
+    let app = Router::new()
+        .route("/healthz", get(|| async { StatusCode::OK }))
+        .merge(protected)
         .with_state(store)
+        .layer(Extension(ServeRuntimeInfo {
+            cloud_mode: config.cloud_mode,
+        }))
         .layer(cors)
         .layer(DefaultBodyLimit::max(config.max_upload_bytes));
 
@@ -78,6 +140,11 @@ pub async fn run_serve(config: ServeConfig) -> Result<()> {
         config.max_sessions,
         config.session_ttl_secs,
         config.max_upload_bytes / 1024 / 1024,
+    );
+    info!(
+        "Backend mode: {}  |  API authentication: {}",
+        if config.cloud_mode { "cloud" } else { "local" },
+        if config.api_token.is_some() { "bearer" } else { "disabled" },
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub enum AnalysisBackendKind {
     NativeProcess,
     LocalHttp,
+    CloudHttp,
     BrowserWorker,
 }
 
@@ -35,6 +36,7 @@ pub struct BackendCapabilities {
     pub accepts_binary_upload: bool,
     pub executes_on_client: bool,
     pub supports_user_resource_root: bool,
+    pub requires_authentication: bool,
 }
 
 impl BackendCapabilities {
@@ -46,6 +48,19 @@ impl BackendCapabilities {
             accepts_binary_upload: true,
             executes_on_client: false,
             supports_user_resource_root: true,
+            requires_authentication: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn cloud_http() -> Self {
+        Self {
+            backend: AnalysisBackendKind::CloudHttp,
+            resource_access: ResourceAccessMode::PackagedArtifacts,
+            accepts_binary_upload: true,
+            executes_on_client: false,
+            supports_user_resource_root: false,
+            requires_authentication: true,
         }
     }
 }
@@ -153,5 +168,17 @@ mod tests {
         let json = r#"{"session_id":"worker:42","fn_count":3,"summary":"ELF"}"#;
         let response: UploadResponse = serde_json::from_str(json).expect("deserialize upload");
         assert_eq!(response.session_id, "worker:42");
+    }
+
+    #[test]
+    fn cloud_capabilities_require_auth_and_packaged_resources() {
+        let capabilities = BackendCapabilities::cloud_http();
+        assert_eq!(capabilities.backend, AnalysisBackendKind::CloudHttp);
+        assert_eq!(
+            capabilities.resource_access,
+            ResourceAccessMode::PackagedArtifacts
+        );
+        assert!(capabilities.requires_authentication);
+        assert!(!capabilities.supports_user_resource_root);
     }
 }
