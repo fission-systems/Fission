@@ -31,6 +31,7 @@ use fission_midend_dir::{DirStmt};
             userops: Default::default(),
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
+            cspec_stack_pointer_offset: None,
             cspec_extrapop: None,
             sla_register_map: None,
             cspec_return_offset: None,

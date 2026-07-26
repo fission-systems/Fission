@@ -76,6 +76,7 @@ pub fn apply_resolved_proto_to_options(options: &mut NirRenderOptions, proto: &R
     if let Some(base) = proto.stack_arg_base {
         options.cspec_stack_arg_base = Some(base);
     }
+    options.cspec_stack_pointer_offset = proto.stack_pointer_offset;
     options.cspec_extrapop = Some(proto.extrapop);
     options.cspec_return_offset = proto.return_offset;
     options.cspec_float_return_offset = proto.float_return_offset;
@@ -122,7 +123,7 @@ pub(crate) fn int_param_offsets(options: &NirRenderOptions) -> &[u64] {
 /// Ensure cspec fields are populated when missing.
 pub(crate) fn ensure_cspec(options: &mut NirRenderOptions, reg_map: &SlaRegisterMap) {
     ensure_sla_register_map(options);
-    if options.cspec_param_offsets.is_some() {
+    if options.cspec_param_offsets.is_some() && options.cspec_stack_pointer_offset.is_some() {
         return;
     }
     let map = options

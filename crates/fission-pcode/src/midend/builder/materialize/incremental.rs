@@ -7,11 +7,13 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend::builder) fn run_incremental_heritage(
         &mut self,
     ) -> Result<(), MlilPreviewError> {
-        super::super::scalar_ssa::validate_scalar_ssa(
+        super::super::scalar_ssa::validate_scalar_ssa_with_context(
             self.pcode,
             &self.heritage_successors,
             &self.heritage_predecessors,
             &self.scalar_ssa,
+            self.options,
+            self.type_context,
         )
         .map_err(|_| MlilPreviewError::UnsupportedPattern("invalid scalar ssa"))?;
 

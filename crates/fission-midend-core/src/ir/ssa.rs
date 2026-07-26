@@ -2,10 +2,10 @@
 //! out-of-SSA/HighVariable recovery.
 //!
 //! Scalar Heritage models guarded register/unique storage, overlapping byte
-//! partitions, dynamic memory/call effects, and the first conservative
-//! out-of-SSA/HighVariable congruence. Memory guards remain facts rather than
-//! promoted scalar values until a stack/object alias model owns that decision.
+//! partitions, typed dynamic memory/call effects, exact stack/RAM promotion,
+//! and conservative out-of-SSA/HighVariable congruence.
 
+use super::CallEffectSummarySource;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -87,9 +87,26 @@ pub enum SsaDynamicGuardKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SsaMemoryEffect {
+    None,
     Read,
     Write,
     ReadWrite,
+}
+
+impl SsaMemoryEffect {
+    pub fn reads(self) -> bool {
+        matches!(self, Self::Read | Self::ReadWrite)
+    }
+
+    pub fn writes(self) -> bool {
+        matches!(self, Self::Write | Self::ReadWrite)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SsaMemoryRegion {
+    Stack,
+    Ram,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,16 +121,59 @@ pub enum SsaGuardRangePrecision {
 /// Offsets are half-open. `maximum_offset_exclusive == None` means that no
 /// finite upper bound is proven. Calls use `space_id == None` until a typed
 /// call-effect model can enumerate affected address spaces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SsaDynamicGuard {
     pub site: SsaOpSite,
     pub kind: SsaDynamicGuardKind,
     pub effect: SsaMemoryEffect,
+    pub region: Option<SsaMemoryRegion>,
     pub space_id: Option<u64>,
-    pub minimum_offset: u64,
-    pub maximum_offset_exclusive: Option<u64>,
+    pub minimum_offset: i128,
+    pub maximum_offset_exclusive: Option<i128>,
     pub step: u64,
     pub precision: SsaGuardRangePrecision,
+    /// Resolved direct-call symbol when type facts identify the target.
+    pub call_target: Option<String>,
+    /// Provenance of the call-effect summary used to narrow the guard.
+    pub call_effect_source: Option<CallEffectSummarySource>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SsaMemoryStorageKey {
+    pub region: SsaMemoryRegion,
+    pub space_id: u64,
+    /// Signed for stack-relative locations; absolute RAM offsets remain non-negative.
+    pub offset: i128,
+    pub size: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SsaMemoryValueId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SsaMemoryValue {
+    pub id: SsaMemoryValueId,
+    pub storage: SsaMemoryStorageKey,
+    pub definition: SsaValueDefinition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SsaMemoryAccessPiece {
+    pub byte_offset: u32,
+    pub value: SsaMemoryValueId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SsaMemoryPhiOperand {
+    pub predecessor: u32,
+    pub value: SsaMemoryValueId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SsaMemoryPhiNode {
+    pub storage: SsaMemoryStorageKey,
+    pub output: SsaMemoryValueId,
+    pub operands: Vec<SsaMemoryPhiOperand>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -121,15 +181,24 @@ pub struct SsaHighVariableId(pub u32);
 
 /// Conservative source-variable congruence recovered from scalar SSA.
 ///
-/// The first phase performs forced phi congruence only. `crossing_guards`
-/// records indirect effects crossed by a member's live range so later
-/// speculative coalescing can fail closed.
+/// Phi congruence is forced. Adjacent COPY/CAST congruence is speculative and
+/// admitted only when aggregate value covers do not interfere.
+/// `crossing_guards` records indirect effects crossed by a member's live range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SsaHighVariable {
     pub id: SsaHighVariableId,
     pub members: Vec<SsaValueId>,
     pub storage_family: Vec<SsaStorageKey>,
     pub crossing_guards: Vec<SsaOpSite>,
+    /// Block-local half-open live intervals used for interference checks.
+    pub cover: Vec<SsaCoverBlock>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SsaCoverBlock {
+    pub block: u32,
+    pub start: u32,
+    pub end_exclusive: u32,
 }
 
 /// One parallel-copy requirement for destroying a phi on an incoming edge.
@@ -160,6 +229,12 @@ pub struct NirScalarSsa {
     /// Phi nodes keyed by their dense CFG block index.
     pub phis: BTreeMap<u32, Vec<NirPhiNode>>,
     pub dynamic_guards: BTreeMap<SsaOpSite, SsaDynamicGuard>,
+    /// Promoted exact stack/RAM locations, dense by `SsaMemoryValueId`.
+    pub memory_values: Vec<SsaMemoryValue>,
+    pub memory_inputs: BTreeMap<SsaMemoryStorageKey, SsaMemoryValueId>,
+    pub memory_operation_inputs: BTreeMap<SsaOpSite, Vec<SsaMemoryAccessPiece>>,
+    pub memory_operation_outputs: BTreeMap<SsaOpSite, Vec<SsaMemoryAccessPiece>>,
+    pub memory_phis: BTreeMap<u32, Vec<SsaMemoryPhiNode>>,
     /// Parallel copies, ordered by successor, predecessor, then storage.
     pub out_of_ssa_copies: Vec<SsaOutOfSsaCopy>,
     /// Dense by `SsaHighVariableId`.
@@ -215,6 +290,12 @@ pub enum ScalarSsaShapeError {
     MalformedDynamicGuard {
         site: SsaOpSite,
     },
+    NonDenseMemoryValue {
+        index: usize,
+        value: SsaMemoryValueId,
+    },
+    UnknownMemoryValueReference(SsaMemoryValueId),
+    MalformedMemorySsa,
     UnsortedOutOfSsaCopies,
     InvalidOutOfSsaCopy {
         copy: SsaOutOfSsaCopy,
@@ -349,6 +430,94 @@ impl NirScalarSsa {
             }
         }
 
+        for (index, value) in self.memory_values.iter().enumerate() {
+            if value.id.0 as usize != index {
+                return Err(ScalarSsaShapeError::NonDenseMemoryValue {
+                    index,
+                    value: value.id,
+                });
+            }
+            if value.storage.size == 0
+                || (value.storage.region == SsaMemoryRegion::Ram && value.storage.offset < 0)
+                || value
+                    .storage
+                    .offset
+                    .checked_add(i128::from(value.storage.size))
+                    .is_none()
+            {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+        }
+        let require_memory_value = |id: SsaMemoryValueId| {
+            self.memory_values
+                .get(id.0 as usize)
+                .filter(|value| value.id == id)
+                .ok_or(ScalarSsaShapeError::UnknownMemoryValueReference(id))
+        };
+        for (storage, value_id) in &self.memory_inputs {
+            let value = require_memory_value(*value_id)?;
+            if value.storage != *storage || value.definition != SsaValueDefinition::Input {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+        }
+        for (site, pieces) in &self.memory_operation_inputs {
+            let Some(guard) = self.dynamic_guards.get(site) else {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            };
+            if !guard.effect.reads()
+                || pieces.is_empty()
+                || (guard.kind == SsaDynamicGuardKind::Load
+                    && !self.memory_access_pieces_are_well_formed(pieces))
+            {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+            for piece in pieces {
+                require_memory_value(piece.value)?;
+            }
+        }
+        for (site, pieces) in &self.memory_operation_outputs {
+            if pieces.is_empty() {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+            for piece in pieces {
+                let value = require_memory_value(piece.value)?;
+                if value.definition != SsaValueDefinition::Operation(*site) {
+                    return Err(ScalarSsaShapeError::MalformedMemorySsa);
+                }
+            }
+            let Some(guard) = self.dynamic_guards.get(site) else {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            };
+            if !guard.effect.writes() {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+        }
+        for (block, phis) in &self.memory_phis {
+            if !phis
+                .windows(2)
+                .all(|pair| pair[0].storage < pair[1].storage)
+            {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+            for phi in phis {
+                let output = require_memory_value(phi.output)?;
+                if output.storage != phi.storage
+                    || output.definition != (SsaValueDefinition::Phi { block: *block })
+                    || !phi
+                        .operands
+                        .windows(2)
+                        .all(|pair| pair[0].predecessor < pair[1].predecessor)
+                {
+                    return Err(ScalarSsaShapeError::MalformedMemorySsa);
+                }
+                for operand in &phi.operands {
+                    if require_memory_value(operand.value)?.storage != phi.storage {
+                        return Err(ScalarSsaShapeError::MalformedMemorySsa);
+                    }
+                }
+            }
+        }
+
         if !self
             .out_of_ssa_copies
             .windows(2)
@@ -392,6 +561,11 @@ impl NirScalarSsa {
                     .crossing_guards
                     .windows(2)
                     .all(|pair| pair[0] < pair[1])
+                || !high.cover.windows(2).all(|pair| pair[0] < pair[1])
+                || high
+                    .cover
+                    .iter()
+                    .any(|cover| cover.start >= cover.end_exclusive)
                 || high
                     .crossing_guards
                     .iter()
@@ -477,20 +651,52 @@ impl NirScalarSsa {
                 && right.storage.offset == next_storage_offset
         })
     }
+
+    fn memory_access_pieces_are_well_formed(&self, pieces: &[SsaMemoryAccessPiece]) -> bool {
+        let Some(first) = pieces.first() else {
+            return false;
+        };
+        if first.byte_offset != 0 {
+            return false;
+        }
+        pieces.windows(2).all(|pair| {
+            let Some(left) = self.memory_values.get(pair[0].value.0 as usize) else {
+                return false;
+            };
+            let Some(right) = self.memory_values.get(pair[1].value.0 as usize) else {
+                return false;
+            };
+            pair[0]
+                .byte_offset
+                .checked_add(left.storage.size)
+                .is_some_and(|offset| offset == pair[1].byte_offset)
+                && left.storage.region == right.storage.region
+                && left.storage.space_id == right.storage.space_id
+                && left
+                    .storage
+                    .offset
+                    .checked_add(i128::from(left.storage.size))
+                    .is_some_and(|offset| offset == right.storage.offset)
+        })
+    }
 }
 
 impl SsaDynamicGuard {
-    fn is_well_formed(self) -> bool {
-        let expected_effect = match self.kind {
-            SsaDynamicGuardKind::Load => SsaMemoryEffect::Read,
-            SsaDynamicGuardKind::Store => SsaMemoryEffect::Write,
-            SsaDynamicGuardKind::Call => SsaMemoryEffect::ReadWrite,
-        };
-        if self.effect != expected_effect {
+    fn is_well_formed(&self) -> bool {
+        if (self.kind == SsaDynamicGuardKind::Load && self.effect != SsaMemoryEffect::Read)
+            || (self.kind == SsaDynamicGuardKind::Store && self.effect != SsaMemoryEffect::Write)
+        {
             return false;
         }
         if self.kind == SsaDynamicGuardKind::Call
-            && (self.space_id.is_some() || self.precision != SsaGuardRangePrecision::Unknown)
+            && (self.region.is_some()
+                || self.space_id.is_some()
+                || self.precision != SsaGuardRangePrecision::Unknown)
+        {
+            return false;
+        }
+        if self.kind != SsaDynamicGuardKind::Call
+            && (self.call_target.is_some() || self.call_effect_source.is_some())
         {
             return false;
         }
@@ -505,13 +711,15 @@ impl SsaDynamicGuard {
                     .is_some_and(|maximum| maximum > self.minimum_offset)
                     && self.step == 0
                     && self.space_id.is_some()
+                    && self.region.is_some()
             }
             SsaGuardRangePrecision::Bounded => {
                 self.maximum_offset_exclusive
                     .is_some_and(|maximum| maximum > self.minimum_offset)
                     && self.space_id.is_some()
+                    && self.region.is_some()
                     && self.maximum_offset_exclusive.is_some_and(|maximum| {
-                        self.step == 0 || self.step <= maximum - self.minimum_offset
+                        self.step == 0 || i128::from(self.step) <= maximum - self.minimum_offset
                     })
             }
         }

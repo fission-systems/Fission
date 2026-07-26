@@ -45,6 +45,13 @@ pub struct NirRenderOptions {
     /// Stack base offset where stack arguments begin (from .cspec `<addr space="stack" offset=...>`).
     #[serde(default)]
     pub cspec_stack_arg_base: Option<i64>,
+    /// REGISTER-space offset of the architecture stack pointer resolved from `.cspec`.
+    ///
+    /// Heritage uses this identity to distinguish signed stack-relative memory
+    /// locations from absolute RAM locations without encoding an ISA-specific
+    /// register name in the SSA implementation.
+    #[serde(default, skip)]
+    pub cspec_stack_pointer_offset: Option<u64>,
     /// Return-address stack size from .cspec prototype (`extrapop` / `stackshift`).
     ///
     /// Converts pre-call RSP-relative displacements into Ghidra stack-space offsets:
@@ -441,6 +448,7 @@ impl NirRenderOptions {
             userops: HashMap::new(),
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
+            cspec_stack_pointer_offset: None,
             cspec_extrapop: None,
             sla_register_map: None,
             cspec_return_offset: None,

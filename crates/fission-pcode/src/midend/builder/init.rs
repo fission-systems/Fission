@@ -58,10 +58,12 @@ impl<'a> PreviewBuilder<'a> {
         let mut predecessors = build_predecessor_index_map(&successors);
         let heritage_successors = successors.clone();
         let heritage_predecessors = predecessors.clone();
-        let scalar_ssa = super::scalar_ssa::build_scalar_ssa(
+        let scalar_ssa = super::scalar_ssa::build_scalar_ssa_with_context(
             pcode,
             &heritage_successors,
             &heritage_predecessors,
+            options,
+            type_context,
         );
 
         let mut dom_tree = crate::midend::structuring::DomTree::analyze(&successors, &predecessors);
