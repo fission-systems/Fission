@@ -620,6 +620,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#dual-reconstruction-products" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dual reconstruction products
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#fission-pcode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1191,6 +1202,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#dual-reconstruction-products" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dual reconstruction products
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#fission-pcode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1326,11 +1348,15 @@
 
 
 <h1 id="fission-architecture">Fission Architecture<a class="headerlink" href="#fission-architecture" title="Permanent link">&para;</a></h1>
-<p>Updated: 2026-04-15</p>
+<p>Updated: 2026-07-26</p>
 <h2 id="ownership">Ownership<a class="headerlink" href="#ownership" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Semantic owner: <code>fission-pcode</code></li>
-<li>Structuring owner: <code>fission-pcode::nir::structuring</code></li>
+<li>Executable semantic foundation: <code>fission-pcode</code> P-code</li>
+<li>Pre-structure AST substrate: <code>fission-midend-prehir</code></li>
+<li>Static normalization: <code>fission-midend-normalize</code></li>
+<li>Structuring owner: <code>fission-midend-structuring</code> plus the
+  <code>fission-pcode::midend::structuring</code> host</li>
+<li>Validated reconstruction product: <code>fission-dir</code></li>
 <li>Orchestration owner: <code>fission-decompiler</code></li>
 <li>Facts and native preparation owner: <code>fission-static</code></li>
 <li>Printer surfaces: consume-only</li>
@@ -1340,6 +1366,24 @@
 it must not be used as a semantic repair layer or as justification for
 approximate P-code success.</p>
 <h2 id="decompiler-layers">Decompiler Layers<a class="headerlink" href="#decompiler-layers" title="Permanent link">&para;</a></h2>
+<h3 id="dual-reconstruction-products">Dual reconstruction products<a class="headerlink" href="#dual-reconstruction-products" title="Permanent link">&para;</a></h3>
+<p>Fission has one executable semantic foundation and two sibling product paths:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Machine code → validated P-code foundation
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                   ├── static builder → PreHIR → normalize/structure → HIR
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                   └── DIR reconstructor → concrete/symbolic validation
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                                         → candidate + assurance report
+</span></code></pre></div>
+<p>HIR remains the default scalable decompile product. DIR is experimental and
+selective; it is not a layer above HIR. A DIR candidate may be seeded from HIR
+or PreHIR, but equivalence is stated against the identified P-code foundation.
+The first native backend admits pure, contiguous single-block integer regions,
+executes foundation observations with the emulator, and uses the solver for a
+universal proof or replayable counterexample. Until the foundation carries
+SLEIGH address-space classes, the caller must explicitly admit non-memory value
+spaces and the report remains conditionally proven on that classification.
+Memory, calls, control flow, and overlapping varnodes remain explicit
+unsupported boundaries.
+See ADR 0014.</p>
 <h3 id="fission-pcode"><code>fission-pcode</code><a class="headerlink" href="#fission-pcode" title="Permanent link">&para;</a></h3>
 <p><code>fission-pcode</code> owns the canonical decompiler semantics:</p>
 <ul>
