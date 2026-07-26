@@ -11,8 +11,20 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ScalarSsaValidationError {
     Shape(ScalarSsaShapeError),
+    AddressSpaceGuardsMismatch,
+    StoragePartitionsMismatch,
     MissingOperationOutput(SsaOpSite),
     MissingOperationInput(SsaUseSite),
+    OperationPieceCount {
+        site: SsaOpSite,
+        expected: usize,
+        actual: usize,
+    },
+    UsePieceCount {
+        site: SsaUseSite,
+        expected: usize,
+        actual: usize,
+    },
     OperationStorageMismatch {
         site: SsaOpSite,
         expected: SsaStorageKey,
@@ -169,15 +181,156 @@ impl Dominance {
     }
 }
 
-fn scalar_storage(varnode: &Varnode) -> Option<SsaStorageKey> {
-    (!varnode.is_constant
-        && varnode.size != 0
-        && (is_register_space_id(varnode.space_id) || is_unique_space_id(varnode.space_id)))
-    .then_some(SsaStorageKey {
+#[derive(Debug, Clone, Copy)]
+struct ScalarRange {
+    kind: SsaAddressSpaceKind,
+    space_id: u64,
+    start: u64,
+    end_exclusive: u64,
+}
+
+fn guarded_scalar_range(varnode: &Varnode) -> Option<ScalarRange> {
+    if varnode.is_constant || varnode.size == 0 {
+        return None;
+    }
+    let kind = if is_register_space_id(varnode.space_id) {
+        SsaAddressSpaceKind::Register
+    } else if is_unique_space_id(varnode.space_id) {
+        SsaAddressSpaceKind::Unique
+    } else {
+        return None;
+    };
+    let end_exclusive = varnode.offset.checked_add(u64::from(varnode.size))?;
+    Some(ScalarRange {
+        kind,
         space_id: varnode.space_id,
-        offset: varnode.offset,
-        size: varnode.size,
+        start: varnode.offset,
+        end_exclusive,
     })
+}
+
+#[derive(Debug, Default)]
+struct StorageLayout {
+    guards: BTreeMap<u64, SsaAddressSpaceGuard>,
+    partitions: BTreeMap<u64, Vec<SsaStorageKey>>,
+}
+
+impl StorageLayout {
+    fn build(pcode: &PcodeFunction, reachable: &BTreeSet<usize>) -> Self {
+        let mut ranges: BTreeMap<u64, (SsaAddressSpaceKind, Vec<(u64, u64)>)> = BTreeMap::new();
+        for &block in reachable {
+            let Some(pcode_block) = pcode.blocks.get(block) else {
+                continue;
+            };
+            for op in &pcode_block.ops {
+                for varnode in op.inputs.iter().chain(op.output.iter()) {
+                    let Some(range) = guarded_scalar_range(varnode) else {
+                        continue;
+                    };
+                    let entry = ranges
+                        .entry(range.space_id)
+                        .or_insert_with(|| (range.kind, Vec::new()));
+                    debug_assert_eq!(entry.0, range.kind);
+                    entry.1.push((range.start, range.end_exclusive));
+                }
+            }
+        }
+
+        let mut layout = Self::default();
+        for (space_id, (kind, mut space_ranges)) in ranges {
+            space_ranges.sort_unstable();
+            let observed_start = space_ranges
+                .iter()
+                .map(|(start, _)| *start)
+                .min()
+                .expect("space has a range");
+            let observed_end_exclusive = space_ranges
+                .iter()
+                .map(|(_, end)| *end)
+                .max()
+                .expect("space has a range");
+            layout.guards.insert(
+                space_id,
+                SsaAddressSpaceGuard {
+                    kind,
+                    observed_start,
+                    observed_end_exclusive,
+                },
+            );
+
+            let mut boundaries = BTreeSet::new();
+            for &(start, end) in &space_ranges {
+                boundaries.insert(start);
+                boundaries.insert(end);
+            }
+            let boundaries = boundaries.into_iter().collect::<Vec<_>>();
+            let mut covered_ranges: Vec<(u64, u64)> = Vec::new();
+            for &(start, end) in &space_ranges {
+                if let Some((_, covered_end)) = covered_ranges.last_mut()
+                    && start <= *covered_end
+                {
+                    *covered_end = (*covered_end).max(end);
+                } else {
+                    covered_ranges.push((start, end));
+                }
+            }
+            let mut partitions = Vec::new();
+            let mut covered_index = 0;
+            for boundary_pair in boundaries.windows(2) {
+                let start = boundary_pair[0];
+                let end = boundary_pair[1];
+                while covered_index < covered_ranges.len()
+                    && covered_ranges[covered_index].1 <= start
+                {
+                    covered_index += 1;
+                }
+                if covered_index == covered_ranges.len()
+                    || covered_ranges[covered_index].0 > start
+                    || end > covered_ranges[covered_index].1
+                {
+                    continue;
+                }
+                let size = u32::try_from(end - start)
+                    .expect("partition is bounded by an observed u32-sized varnode");
+                partitions.push(SsaStorageKey {
+                    space_id,
+                    offset: start,
+                    size,
+                });
+            }
+            layout.partitions.insert(space_id, partitions);
+        }
+        layout
+    }
+
+    fn storages(&self) -> impl Iterator<Item = SsaStorageKey> + '_ {
+        self.partitions.values().flatten().copied()
+    }
+
+    fn access_pieces(&self, varnode: &Varnode) -> Vec<(u32, SsaStorageKey)> {
+        let Some(range) = guarded_scalar_range(varnode) else {
+            return Vec::new();
+        };
+        let Some(partitions) = self.partitions.get(&range.space_id) else {
+            return Vec::new();
+        };
+        let start_index = partitions.partition_point(|storage| storage.offset < range.start);
+        partitions[start_index..]
+            .iter()
+            .take_while(|storage| storage.offset < range.end_exclusive)
+            .filter(|storage| {
+                let end = storage.offset + u64::from(storage.size);
+                range.start <= storage.offset && end <= range.end_exclusive
+            })
+            .map(|storage| {
+                (
+                    u32::try_from(storage.offset - range.start)
+                        .expect("piece lies within a u32-sized varnode"),
+                    *storage,
+                )
+            })
+            .collect()
+    }
 }
 
 fn allocate_value(
@@ -204,23 +357,24 @@ pub(super) fn build_scalar_ssa(
         return NirScalarSsa::default();
     }
 
-    let mut storages = BTreeSet::new();
+    let layout = StorageLayout::build(pcode, &dominance.reachable);
     let mut definition_blocks: BTreeMap<SsaStorageKey, BTreeSet<usize>> = BTreeMap::new();
     for &block in &dominance.reachable {
         let Some(pcode_block) = pcode.blocks.get(block) else {
             continue;
         };
         for op in &pcode_block.ops {
-            for input in &op.inputs {
-                if let Some(storage) = scalar_storage(input) {
-                    storages.insert(storage);
+            if let Some(output) = op.output.as_ref() {
+                for (_, storage) in layout.access_pieces(output) {
+                    definition_blocks.entry(storage).or_default().insert(block);
                 }
             }
-            if let Some(storage) = op.output.as_ref().and_then(scalar_storage) {
-                storages.insert(storage);
-                definition_blocks.entry(storage).or_default().insert(block);
-            }
         }
+    }
+    // Formal inputs are definitions at entry. They must participate in phi
+    // placement when only one branch arm overwrites a partition.
+    for storage in layout.storages() {
+        definition_blocks.entry(storage).or_default().insert(0);
     }
 
     let mut phi_plan: BTreeMap<usize, BTreeSet<SsaStorageKey>> = BTreeMap::new();
@@ -240,9 +394,12 @@ pub(super) fn build_scalar_ssa(
         }
     }
 
-    let mut ssa = NirScalarSsa::default();
+    let mut ssa = NirScalarSsa {
+        address_spaces: layout.guards.clone(),
+        ..NirScalarSsa::default()
+    };
     let mut stacks: BTreeMap<SsaStorageKey, Vec<SsaValueId>> = BTreeMap::new();
-    for storage in storages {
+    for storage in layout.storages() {
         let input = allocate_value(&mut ssa, storage, SsaValueDefinition::Input);
         ssa.inputs.insert(storage, input);
         stacks.insert(storage, vec![input]);
@@ -267,15 +424,26 @@ pub(super) fn build_scalar_ssa(
             continue;
         };
         for (op_index, op) in pcode_block.ops.iter().enumerate() {
-            let Some(storage) = op.output.as_ref().and_then(scalar_storage) else {
+            let Some(output_varnode) = op.output.as_ref() else {
                 continue;
             };
+            let output_storages = layout.access_pieces(output_varnode);
+            if output_storages.is_empty() {
+                continue;
+            }
             let site = SsaOpSite {
                 block: block as u32,
                 op: op_index as u32,
             };
-            let output = allocate_value(&mut ssa, storage, SsaValueDefinition::Operation(site));
-            ssa.operation_outputs.insert(site, output);
+            let mut pieces = Vec::with_capacity(output_storages.len());
+            for (byte_offset, storage) in output_storages {
+                let output = allocate_value(&mut ssa, storage, SsaValueDefinition::Operation(site));
+                pieces.push(SsaAccessPiece {
+                    byte_offset,
+                    value: output,
+                });
+            }
+            ssa.operation_outputs.insert(site, pieces);
         }
     }
 
@@ -285,6 +453,7 @@ pub(super) fn build_scalar_ssa(
         pcode,
         successors,
         &dominance,
+        &layout,
         &phi_plan,
         &phi_outputs,
         &mut stacks,
@@ -315,6 +484,7 @@ fn rename_block(
     pcode: &PcodeFunction,
     successors: &[Vec<usize>],
     dominance: &Dominance,
+    layout: &StorageLayout,
     phi_plan: &BTreeMap<usize, BTreeSet<SsaStorageKey>>,
     phi_outputs: &BTreeMap<(usize, SsaStorageKey), SsaValueId>,
     stacks: &mut BTreeMap<SsaStorageKey, Vec<SsaValueId>>,
@@ -335,20 +505,25 @@ fn rename_block(
     if let Some(pcode_block) = pcode.blocks.get(block) {
         for (op_index, op) in pcode_block.ops.iter().enumerate() {
             for (input_index, input) in op.inputs.iter().enumerate() {
-                let Some(storage) = scalar_storage(input) else {
+                let input_storages = layout.access_pieces(input);
+                if input_storages.is_empty() {
                     continue;
-                };
-                let value = *stacks
-                    .get(&storage)
-                    .and_then(|stack| stack.last())
-                    .expect("eligible storage has an input value");
+                }
+                let mut pieces = Vec::with_capacity(input_storages.len());
+                for (byte_offset, storage) in input_storages {
+                    let value = *stacks
+                        .get(&storage)
+                        .and_then(|stack| stack.last())
+                        .expect("eligible storage has an input value");
+                    pieces.push(SsaAccessPiece { byte_offset, value });
+                }
                 ssa.operation_inputs.insert(
                     SsaUseSite {
                         block: block as u32,
                         op: op_index as u32,
                         input: input_index as u32,
                     },
-                    value,
+                    pieces,
                 );
             }
 
@@ -356,13 +531,15 @@ fn rename_block(
                 block: block as u32,
                 op: op_index as u32,
             };
-            if let Some(output) = ssa.operation_outputs.get(&site).copied() {
-                let storage = ssa.value(output).expect("allocated output").storage;
-                stacks
-                    .get_mut(&storage)
-                    .expect("output storage has an input value")
-                    .push(output);
-                pushed.push(storage);
+            if let Some(outputs) = ssa.operation_outputs.get(&site).cloned() {
+                for piece in outputs {
+                    let storage = ssa.value(piece.value).expect("allocated output").storage;
+                    stacks
+                        .get_mut(&storage)
+                        .expect("output storage has an input value")
+                        .push(piece.value);
+                    pushed.push(storage);
+                }
             }
         }
     }
@@ -392,6 +569,7 @@ fn rename_block(
             pcode,
             successors,
             dominance,
+            layout,
             phi_plan,
             phi_outputs,
             stacks,
@@ -418,6 +596,13 @@ pub(super) fn validate_scalar_ssa(
     ssa.validate_shape()
         .map_err(ScalarSsaValidationError::Shape)?;
     let dominance = Dominance::analyze(successors, predecessors);
+    let layout = StorageLayout::build(pcode, &dominance.reachable);
+    if ssa.address_spaces != layout.guards {
+        return Err(ScalarSsaValidationError::AddressSpaceGuardsMismatch);
+    }
+    if ssa.inputs.keys().copied().collect::<Vec<_>>() != layout.storages().collect::<Vec<_>>() {
+        return Err(ScalarSsaValidationError::StoragePartitionsMismatch);
+    }
 
     for &block in &dominance.reachable {
         let Some(pcode_block) = pcode.blocks.get(block) else {
@@ -428,46 +613,78 @@ pub(super) fn validate_scalar_ssa(
                 block: block as u32,
                 op: op_index as u32,
             };
-            if let Some(expected) = op.output.as_ref().and_then(scalar_storage) {
-                let value_id = *ssa.operation_outputs.get(&output_site).ok_or(
-                    ScalarSsaValidationError::MissingOperationOutput(output_site),
-                )?;
-                let actual = ssa.value(value_id).expect("shape validated").storage;
-                if actual != expected {
-                    return Err(ScalarSsaValidationError::OperationStorageMismatch {
-                        site: output_site,
-                        expected,
-                        actual,
-                    });
+            if let Some(output) = op.output.as_ref() {
+                let expected_pieces = layout.access_pieces(output);
+                if !expected_pieces.is_empty() {
+                    let actual_pieces = ssa.operation_outputs.get(&output_site).ok_or(
+                        ScalarSsaValidationError::MissingOperationOutput(output_site),
+                    )?;
+                    if actual_pieces.len() != expected_pieces.len() {
+                        return Err(ScalarSsaValidationError::OperationPieceCount {
+                            site: output_site,
+                            expected: expected_pieces.len(),
+                            actual: actual_pieces.len(),
+                        });
+                    }
+                    for ((expected_offset, expected), actual_piece) in
+                        expected_pieces.into_iter().zip(actual_pieces)
+                    {
+                        let actual = ssa
+                            .value(actual_piece.value)
+                            .expect("shape validated")
+                            .storage;
+                        if actual != expected || actual_piece.byte_offset != expected_offset {
+                            return Err(ScalarSsaValidationError::OperationStorageMismatch {
+                                site: output_site,
+                                expected,
+                                actual,
+                            });
+                        }
+                    }
                 }
             }
 
             for (input_index, input) in op.inputs.iter().enumerate() {
-                let Some(expected) = scalar_storage(input) else {
+                let expected_pieces = layout.access_pieces(input);
+                if expected_pieces.is_empty() {
                     continue;
-                };
+                }
                 let use_site = SsaUseSite {
                     block: block as u32,
                     op: op_index as u32,
                     input: input_index as u32,
                 };
-                let value_id = *ssa
+                let actual_pieces = ssa
                     .operation_inputs
                     .get(&use_site)
                     .ok_or(ScalarSsaValidationError::MissingOperationInput(use_site))?;
-                let actual = ssa.value(value_id).expect("shape validated").storage;
-                if actual != expected {
-                    return Err(ScalarSsaValidationError::UseStorageMismatch {
+                if actual_pieces.len() != expected_pieces.len() {
+                    return Err(ScalarSsaValidationError::UsePieceCount {
                         site: use_site,
-                        expected,
-                        actual,
+                        expected: expected_pieces.len(),
+                        actual: actual_pieces.len(),
                     });
                 }
-                if !value_dominates_use(ssa, &dominance, value_id, use_site) {
-                    return Err(ScalarSsaValidationError::NonDominatingUse {
-                        site: use_site,
-                        value: value_id,
-                    });
+                for ((expected_offset, expected), actual_piece) in
+                    expected_pieces.into_iter().zip(actual_pieces)
+                {
+                    let actual = ssa
+                        .value(actual_piece.value)
+                        .expect("shape validated")
+                        .storage;
+                    if actual != expected || actual_piece.byte_offset != expected_offset {
+                        return Err(ScalarSsaValidationError::UseStorageMismatch {
+                            site: use_site,
+                            expected,
+                            actual,
+                        });
+                    }
+                    if !value_dominates_use(ssa, &dominance, actual_piece.value, use_site) {
+                        return Err(ScalarSsaValidationError::NonDominatingUse {
+                            site: use_site,
+                            value: actual_piece.value,
+                        });
+                    }
                 }
             }
         }
@@ -572,20 +789,28 @@ mod tests {
     use crate::pcode::PcodeBasicBlock;
 
     fn register(offset: u64) -> Varnode {
+        register_sized(offset, 4)
+    }
+
+    fn register_sized(offset: u64, size: u32) -> Varnode {
         Varnode {
             space_id: REGISTER_SPACE_ID,
             offset,
-            size: 4,
+            size,
             is_constant: false,
             constant_val: 0,
         }
     }
 
     fn unique(offset: u64) -> Varnode {
+        unique_sized(offset, 4)
+    }
+
+    fn unique_sized(offset: u64, size: u32) -> Varnode {
         Varnode {
             space_id: UNIQUE_SPACE_ID,
             offset,
-            size: 4,
+            size,
             is_constant: false,
             constant_val: 0,
         }
@@ -644,7 +869,8 @@ mod tests {
                 block: 3,
                 op: 0,
                 input: 0,
-            }],
+            }][0]
+                .value,
             phi.output
         );
     }
@@ -676,7 +902,8 @@ mod tests {
                 block: 1,
                 op: 0,
                 input: 0,
-            }],
+            }][0]
+                .value,
             phi.output
         );
     }
@@ -700,16 +927,18 @@ mod tests {
                 block: 0,
                 op: 1,
                 input: 0,
-            }],
-            ssa.operation_outputs[&SsaOpSite { block: 0, op: 0 }]
+            }][0]
+                .value,
+            ssa.operation_outputs[&SsaOpSite { block: 0, op: 0 }][0].value
         );
         assert_eq!(
             ssa.operation_inputs[&SsaUseSite {
                 block: 0,
                 op: 3,
                 input: 0,
-            }],
-            ssa.operation_outputs[&SsaOpSite { block: 0, op: 2 }]
+            }][0]
+                .value,
+            ssa.operation_outputs[&SsaOpSite { block: 0, op: 2 }][0].value
         );
     }
 
@@ -776,19 +1005,222 @@ mod tests {
         let successors = vec![vec![1, 2], vec![3], vec![3], vec![]];
         let predecessors = vec![vec![], vec![0], vec![0], vec![1, 2]];
         let mut ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
-        let sibling_value = ssa.operation_outputs[&SsaOpSite { block: 1, op: 0 }];
+        let sibling_value = ssa.operation_outputs[&SsaOpSite { block: 1, op: 0 }][0].value;
         ssa.operation_inputs.insert(
             SsaUseSite {
                 block: 3,
                 op: 0,
                 input: 0,
             },
-            sibling_value,
+            vec![SsaAccessPiece {
+                byte_offset: 0,
+                value: sibling_value,
+            }],
         );
 
         assert!(matches!(
             validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa),
             Err(ScalarSsaValidationError::NonDominatingUse { .. })
+        ));
+    }
+
+    #[test]
+    fn partial_register_write_replaces_only_overlapping_piece() {
+        let pcode = function(vec![vec![
+            copy(0x1000, register_sized(0, 8), Varnode::constant(1, 8)),
+            copy(0x1001, register_sized(0, 4), Varnode::constant(2, 4)),
+            copy(0x1002, unique_sized(0, 8), register_sized(0, 8)),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let wide_definition = &ssa.operation_outputs[&SsaOpSite { block: 0, op: 0 }];
+        let low_definition = &ssa.operation_outputs[&SsaOpSite { block: 0, op: 1 }];
+        let wide_read = &ssa.operation_inputs[&SsaUseSite {
+            block: 0,
+            op: 2,
+            input: 0,
+        }];
+        assert_eq!(wide_definition.len(), 2);
+        assert_eq!(low_definition.len(), 1);
+        assert_eq!(wide_read.len(), 2);
+        assert_eq!(
+            ssa.address_spaces[&REGISTER_SPACE_ID].kind,
+            SsaAddressSpaceKind::Register
+        );
+        assert_eq!(
+            ssa.address_spaces[&UNIQUE_SPACE_ID].kind,
+            SsaAddressSpaceKind::Unique
+        );
+        assert_eq!(wide_read[0].value, low_definition[0].value);
+        assert_eq!(wide_read[1].value, wide_definition[1].value);
+        assert_eq!(
+            wide_read
+                .iter()
+                .map(|piece| ssa.value(piece.value).unwrap().storage)
+                .collect::<Vec<_>>(),
+            vec![
+                SsaStorageKey {
+                    space_id: REGISTER_SPACE_ID,
+                    offset: 0,
+                    size: 4,
+                },
+                SsaStorageKey {
+                    space_id: REGISTER_SPACE_ID,
+                    offset: 4,
+                    size: 4,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn one_arm_partial_write_merges_with_entry_piece() {
+        let pcode = function(vec![
+            vec![],
+            vec![copy(0x1010, register_sized(0, 4), Varnode::constant(1, 4))],
+            vec![],
+            vec![copy(0x1030, unique_sized(0, 8), register_sized(0, 8))],
+        ]);
+        let successors = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let predecessors = vec![vec![], vec![0], vec![0], vec![1, 2]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let phis = &ssa.phis[&3];
+        assert_eq!(phis.len(), 1, "only the overwritten low piece needs a phi");
+        assert_eq!(phis[0].storage.offset, 0);
+        assert_eq!(phis[0].storage.size, 4);
+        let wide_read = &ssa.operation_inputs[&SsaUseSite {
+            block: 3,
+            op: 0,
+            input: 0,
+        }];
+        assert_eq!(wide_read[0].value, phis[0].output);
+        assert_eq!(
+            wide_read[1].value,
+            ssa.inputs[&SsaStorageKey {
+                space_id: REGISTER_SPACE_ID,
+                offset: 4,
+                size: 4,
+            }]
+        );
+    }
+
+    #[test]
+    fn shifted_overlaps_form_ordered_disjoint_cover() {
+        let pcode = function(vec![vec![
+            copy(0x1000, register_sized(0, 4), Varnode::constant(1, 4)),
+            copy(0x1001, register_sized(2, 4), Varnode::constant(2, 4)),
+            copy(0x1002, unique_sized(0, 6), register_sized(0, 6)),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let wide_read = &ssa.operation_inputs[&SsaUseSite {
+            block: 0,
+            op: 2,
+            input: 0,
+        }];
+        assert_eq!(
+            wide_read
+                .iter()
+                .map(|piece| {
+                    let storage = ssa.value(piece.value).unwrap().storage;
+                    (piece.byte_offset, storage.offset, storage.size)
+                })
+                .collect::<Vec<_>>(),
+            vec![(0, 0, 2), (2, 2, 2), (4, 4, 2)]
+        );
+    }
+
+    #[test]
+    fn disjoint_ranges_do_not_create_partition_across_hole() {
+        let pcode = function(vec![vec![
+            copy(0x1000, register_sized(0, 4), Varnode::constant(1, 4)),
+            copy(0x1001, register_sized(8, 4), Varnode::constant(2, 4)),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        assert_eq!(
+            ssa.inputs.keys().copied().collect::<Vec<_>>(),
+            vec![
+                SsaStorageKey {
+                    space_id: REGISTER_SPACE_ID,
+                    offset: 0,
+                    size: 4,
+                },
+                SsaStorageKey {
+                    space_id: REGISTER_SPACE_ID,
+                    offset: 8,
+                    size: 4,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn address_space_guard_excludes_unsupported_and_invalid_ranges() {
+        let unsupported = Varnode {
+            space_id: 9,
+            offset: 0x1000,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let zero_sized = register_sized(0, 0);
+        let overflowing = register_sized(u64::MAX - 1, 4);
+        let pcode = function(vec![vec![
+            copy(0x1000, unsupported, Varnode::constant(1, 4)),
+            copy(0x1001, zero_sized, Varnode::constant(2, 4)),
+            copy(0x1002, overflowing, Varnode::constant(3, 4)),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        assert!(ssa.address_spaces.is_empty());
+        assert!(ssa.values.is_empty());
+        assert!(ssa.operation_outputs.is_empty());
+    }
+
+    #[test]
+    fn validator_rejects_reordered_access_pieces() {
+        let pcode = function(vec![vec![
+            copy(0x1000, register_sized(0, 8), Varnode::constant(1, 8)),
+            copy(0x1001, register_sized(0, 4), Varnode::constant(2, 4)),
+            copy(0x1002, unique_sized(0, 8), register_sized(0, 8)),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+        let mut ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        ssa.operation_inputs
+            .get_mut(&SsaUseSite {
+                block: 0,
+                op: 2,
+                input: 0,
+            })
+            .unwrap()
+            .reverse();
+
+        assert!(matches!(
+            validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa),
+            Err(ScalarSsaValidationError::Shape(
+                ScalarSsaShapeError::MalformedOperationInputPieces { .. }
+            ))
         ));
     }
 }

@@ -19,6 +19,23 @@ pub struct SsaStorageKey {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SsaAddressSpaceKind {
+    Register,
+    Unique,
+}
+
+/// Conservative admission record for one address space participating in SSA.
+///
+/// The bounds describe the observed half-open byte range. Memory-like and
+/// special spaces do not receive a guard until their alias/effect model exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SsaAddressSpaceGuard {
+    pub kind: SsaAddressSpaceKind,
+    pub observed_start: u64,
+    pub observed_end_exclusive: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SsaOpSite {
     /// Dense CFG block index, not a machine address.
     pub block: u32,
@@ -53,6 +70,14 @@ pub struct SsaPhiOperand {
     pub value: SsaValueId,
 }
 
+/// One disjoint SSA value participating in a wider P-code varnode access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SsaAccessPiece {
+    /// Physical byte offset from the start of the original varnode.
+    pub byte_offset: u32,
+    pub value: SsaValueId,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NirPhiNode {
     pub storage: SsaStorageKey,
@@ -64,9 +89,10 @@ pub struct NirPhiNode {
 pub struct NirScalarSsa {
     /// Dense by `SsaValueId`: `values[id.0 as usize].id == id`.
     pub values: Vec<SsaValue>,
+    pub address_spaces: BTreeMap<u64, SsaAddressSpaceGuard>,
     pub inputs: BTreeMap<SsaStorageKey, SsaValueId>,
-    pub operation_outputs: BTreeMap<SsaOpSite, SsaValueId>,
-    pub operation_inputs: BTreeMap<SsaUseSite, SsaValueId>,
+    pub operation_outputs: BTreeMap<SsaOpSite, Vec<SsaAccessPiece>>,
+    pub operation_inputs: BTreeMap<SsaUseSite, Vec<SsaAccessPiece>>,
     /// Phi nodes keyed by their dense CFG block index.
     pub phis: BTreeMap<u32, Vec<NirPhiNode>>,
 }
@@ -78,6 +104,12 @@ pub enum ScalarSsaShapeError {
         value: SsaValueId,
     },
     UnknownValueReference(SsaValueId),
+    MissingAddressSpaceGuard {
+        storage: SsaStorageKey,
+    },
+    StorageOutsideGuard {
+        storage: SsaStorageKey,
+    },
     InputDefinitionMismatch {
         storage: SsaStorageKey,
         value: SsaValueId,
@@ -85,6 +117,12 @@ pub enum ScalarSsaShapeError {
     OperationDefinitionMismatch {
         site: SsaOpSite,
         value: SsaValueId,
+    },
+    MalformedOperationOutputPieces {
+        site: SsaOpSite,
+    },
+    MalformedOperationInputPieces {
+        site: SsaUseSite,
     },
     PhiDefinitionMismatch {
         block: u32,
@@ -120,6 +158,7 @@ impl NirScalarSsa {
                     value: value.id,
                 });
             }
+            self.validate_storage_guard(value.storage)?;
         }
 
         let require_value = |id| {
@@ -139,20 +178,30 @@ impl NirScalarSsa {
             }
         }
 
-        for (site, value_id) in &self.operation_outputs {
-            require_value(*value_id)?;
-            if self.value(*value_id).expect("validated value").definition
-                != SsaValueDefinition::Operation(*site)
-            {
-                return Err(ScalarSsaShapeError::OperationDefinitionMismatch {
-                    site: *site,
-                    value: *value_id,
-                });
+        for (site, pieces) in &self.operation_outputs {
+            if !self.access_pieces_are_well_formed(pieces) {
+                return Err(ScalarSsaShapeError::MalformedOperationOutputPieces { site: *site });
+            }
+            for piece in pieces {
+                require_value(piece.value)?;
+                if self.value(piece.value).expect("validated value").definition
+                    != SsaValueDefinition::Operation(*site)
+                {
+                    return Err(ScalarSsaShapeError::OperationDefinitionMismatch {
+                        site: *site,
+                        value: piece.value,
+                    });
+                }
             }
         }
 
-        for value_id in self.operation_inputs.values() {
-            require_value(*value_id)?;
+        for (site, pieces) in &self.operation_inputs {
+            if !self.access_pieces_are_well_formed(pieces) {
+                return Err(ScalarSsaShapeError::MalformedOperationInputPieces { site: *site });
+            }
+            for piece in pieces {
+                require_value(piece.value)?;
+            }
         }
 
         for (block, phis) in &self.phis {
@@ -198,5 +247,51 @@ impl NirScalarSsa {
         }
 
         Ok(())
+    }
+
+    fn validate_storage_guard(&self, storage: SsaStorageKey) -> Result<(), ScalarSsaShapeError> {
+        let Some(guard) = self.address_spaces.get(&storage.space_id) else {
+            return Err(ScalarSsaShapeError::MissingAddressSpaceGuard { storage });
+        };
+        let Some(end) = storage.offset.checked_add(u64::from(storage.size)) else {
+            return Err(ScalarSsaShapeError::StorageOutsideGuard { storage });
+        };
+        if storage.size == 0
+            || storage.offset < guard.observed_start
+            || end > guard.observed_end_exclusive
+        {
+            return Err(ScalarSsaShapeError::StorageOutsideGuard { storage });
+        }
+        Ok(())
+    }
+
+    fn access_pieces_are_well_formed(&self, pieces: &[SsaAccessPiece]) -> bool {
+        let Some(first) = pieces.first() else {
+            return false;
+        };
+        if first.byte_offset != 0 {
+            return false;
+        }
+        pieces.windows(2).all(|pair| {
+            let Some(left) = self.value(pair[0].value) else {
+                return false;
+            };
+            let Some(right) = self.value(pair[1].value) else {
+                return false;
+            };
+            let Some(next_byte_offset) = pair[0].byte_offset.checked_add(left.storage.size) else {
+                return false;
+            };
+            let Some(next_storage_offset) = left
+                .storage
+                .offset
+                .checked_add(u64::from(left.storage.size))
+            else {
+                return false;
+            };
+            pair[1].byte_offset == next_byte_offset
+                && right.storage.space_id == left.storage.space_id
+                && right.storage.offset == next_storage_offset
+        })
     }
 }
