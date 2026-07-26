@@ -3,5 +3,3 @@
 !Cargo.lock
 !crates/
 !crates/**
-!utils/
-!utils/**

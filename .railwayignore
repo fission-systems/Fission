@@ -1,0 +1,9 @@
+**
+!Cargo.toml
+!Cargo.lock
+!Dockerfile
+!.dockerignore
+!railway.json
+!.railwayignore
+!crates/
+!crates/**

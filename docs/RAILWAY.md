@@ -4,6 +4,12 @@ Railway runs `fission-serve` as a persistent Docker service. The image contains
 the version-matched SLEIGH, signature, FID, and type-information resources, so
 the deployed service does not depend on a developer checkout or a volume.
 
+`utils/` is intentionally excluded from Git. The Docker resource stage downloads
+the version-pinned `fission-utils.tar.gz` release asset and verifies its SHA-256
+before either the Rust build or runtime image can use it. When updating
+`FISSION_UTILS_TAG` in `Dockerfile`, update `FISSION_UTILS_SHA256` from the same
+release asset at the same time.
+
 ## Required service variables
 
 ```text
