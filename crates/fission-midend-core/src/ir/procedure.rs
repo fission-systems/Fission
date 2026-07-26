@@ -605,12 +605,7 @@ pub struct NirFunction {
     pub locals: Vec<NirBinding>,
     pub params: Vec<NirBinding>,
     pub return_type: NirType,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NirPhiNode {
-    pub dest_id: u32,              // Maps to SsaVarId
-    pub operands: Vec<(u32, u32)>, // Pairs of (pred_block_id, src_var_id)
+    pub scalar_ssa: NirScalarSsa,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -685,4 +680,3 @@ impl Default for HirFunction {
         }
     }
 }
-

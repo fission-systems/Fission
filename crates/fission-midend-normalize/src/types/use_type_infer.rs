@@ -387,19 +387,12 @@ fn collect_assignment_copy_constraints(
 ) {
     match lhs {
         DirLValue::Var(lhs_name) => {
-            // Reverse-propagate non-pointer types only. Propagating Ptr through
-            // a simple copy is unsafe when a register is later reused for an
-            // address value — except float* upgrades: once a stack home of a
-            // param is proven float* by Index/Load float stores, the param
-            // itself must match (matrix out-param `c`).
+            // Reverse-propagate non-pointer legacy constraints only. Pointer
+            // equality is owned by the operation-edge TypeFlow solver, which
+            // carries evidence strength and lock boundaries.
             if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
                 if let DirExpr::Var(rhs_name) = rhs {
                     match lhs_ty {
-                        NirType::Ptr(pointee) if matches!(pointee.as_ref(), NirType::Float { .. }) => {
-                            out.entry(rhs_name.clone())
-                                .or_default()
-                                .push(UseConstraint::Ptr(pointee.as_ref().clone()));
-                        }
                         NirType::Ptr(_) => {}
                         other => {
                             out.entry(rhs_name.clone())
@@ -440,37 +433,16 @@ fn collect_assignment_copy_constraints(
                     .push(UseConstraint::Ptr(NirType::Unknown));
             }
 
-            if let DirExpr::Load { ptr, ty } = rhs {
+            if let DirExpr::Load { ty, .. } = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(ty.clone()));
-                // Round 2+: float-typed lhs implies the load base is float*.
-                if let (
-                    Some(NirType::Float { bits }),
-                    DirExpr::Var(base_name),
-                ) = (known_binding_types.get(lhs_name), ptr.as_ref())
-                {
-                    out.entry(base_name.clone())
-                        .or_default()
-                        .push(UseConstraint::Ptr(NirType::Float { bits: *bits }));
-                }
             }
 
-            if let DirExpr::Index { base, elem_ty, .. } = rhs {
+            if let DirExpr::Index { elem_ty, .. } = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(elem_ty.clone()));
-                // Round 2+: once the destination is known float (from FLOAT_MULT
-                // use), force the array base to float* so matrix params recover.
-                if let (
-                    Some(NirType::Float { bits }),
-                    DirExpr::Var(base_name),
-                ) = (known_binding_types.get(lhs_name), base.as_ref())
-                {
-                    out.entry(base_name.clone())
-                        .or_default()
-                        .push(UseConstraint::Ptr(NirType::Float { bits: *bits }));
-                }
             }
 
             if let DirExpr::Cast {
@@ -495,17 +467,6 @@ fn collect_assignment_copy_constraints(
                 out.entry(rhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(elem_ty.clone()));
-                // Float value stored through `base[i]` upgrades base to float*
-                // even when Index still carries a default int elem_ty (stack
-                // spill/reload of a float accumulator loses FLOAT_* opcode
-                // provenance on the Store value path).
-                if let Some(NirType::Float { bits }) = known_binding_types.get(rhs_name) {
-                    if let DirExpr::Var(base_name) = base.as_ref() {
-                        out.entry(base_name.clone())
-                            .or_default()
-                            .push(UseConstraint::Ptr(NirType::Float { bits: *bits }));
-                    }
-                }
             }
             if let DirExpr::Var(base_name) = base.as_ref() {
                 if matches!(elem_ty, NirType::Float { .. }) {
@@ -2264,8 +2225,11 @@ fn should_skip_pointer_constraint_for_scalar_local(
 pub fn apply_use_driven_type_infer_pass(func: &mut DirFunction) -> bool {
     let before = type_state_signature(func);
     let dependencies = DefinitionDependencyMap::build(&func.body);
+    let mut flow_changed = false;
     // Iterate to convergence (alias chains may require multiple rounds).
     for _ in 0..4 {
+        let current_flow_changed = super::type_flow::apply_type_flow_pass(func);
+        flow_changed |= current_flow_changed;
         let mut constraints: HashMap<String, Vec<UseConstraint>> = HashMap::default();
         let mut roles = HashMap::<String, BindingUseRole>::default();
         let known_binding_types = collect_known_binding_types(func);
@@ -2286,7 +2250,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut DirFunction) -> bool {
         );
         propagate_logical_shift_constraints_through_aliases(&func.body, &mut constraints);
 
-        let mut round_changed = false;
+        let mut round_changed = current_flow_changed;
         for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
             if let Some(constraints_for) = constraints.get(&binding.name) {
                 for constraint in constraints_for {
@@ -2312,7 +2276,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut DirFunction) -> bool {
             break;
         }
     }
-    type_state_signature(func) != before
+    flow_changed || type_state_signature(func) != before
 }
 
 #[cfg(test)]
@@ -2413,6 +2377,68 @@ mod tests {
             func.locals.iter().find(|b| b.name == "b").map(|b| &b.ty),
             Some(&float_ty),
             "float mul rhs operand must become float"
+        );
+    }
+
+    /// A float store through a default uint pointer refines the complete alias
+    /// chain back to the original parameter.
+    #[test]
+    fn float_deref_store_refines_pointer_alias_chain() {
+        let float_ty = NirType::Float { bits: 32 };
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let uint_ptr = NirType::Ptr(Box::new(uint_ty.clone()));
+        let body = vec![
+            DirStmt::Assign {
+                lhs: DirLValue::Var("param_home".to_owned()),
+                rhs: DirExpr::Var("out".to_owned()),
+            },
+            DirStmt::Assign {
+                lhs: DirLValue::Var("store_ptr".to_owned()),
+                rhs: DirExpr::Var("param_home".to_owned()),
+            },
+            DirStmt::Assign {
+                lhs: DirLValue::Deref {
+                    ptr: Box::new(DirExpr::Var("store_ptr".to_owned())),
+                    ty: uint_ty,
+                },
+                rhs: DirExpr::Var("value".to_owned()),
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_typed_binding("param_home", uint_ptr.clone(), NirBindingOrigin::Temp),
+                make_typed_binding("store_ptr", uint_ptr.clone(), NirBindingOrigin::Temp),
+                make_typed_binding("value", float_ty.clone(), NirBindingOrigin::Temp),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.params.push(make_typed_binding(
+            "out",
+            uint_ptr,
+            NirBindingOrigin::ParamIndex(2),
+        ));
+
+        let changed = super::apply_use_driven_type_infer_pass(&mut func);
+        assert!(changed, "float store must refine pointer aliases");
+        let float_ptr = NirType::Ptr(Box::new(float_ty));
+        assert_eq!(func.params[0].ty, float_ptr);
+        assert_eq!(
+            func.locals
+                .iter()
+                .find(|binding| binding.name == "param_home")
+                .map(|binding| &binding.ty),
+            Some(&float_ptr)
+        );
+        assert_eq!(
+            func.locals
+                .iter()
+                .find(|binding| binding.name == "store_ptr")
+                .map(|binding| &binding.ty),
+            Some(&float_ptr)
         );
     }
 

@@ -19,6 +19,7 @@ mod hir;
 pub mod inference;
 mod options;
 mod procedure;
+mod ssa;
 mod stats_merge;
 
 pub use build_stats::*;
@@ -26,3 +27,4 @@ pub use decomp_facts::*;
 pub use hir::*;
 pub use options::*;
 pub use procedure::*;
+pub use ssa::*;

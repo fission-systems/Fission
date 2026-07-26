@@ -58,8 +58,9 @@ pub use cleanup::{
 };
 pub use host::StructuringHost;
 pub use graph::{
-    StructureEdge, StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeId,
-    StructureNodeKind, capture_structuring_failure, surface_structure_graph,
+    BlockOwnership, DuplicateBlockOwnership, StructureEdge, StructureEdgeFlags, StructureGraph,
+    StructureNode, StructureNodeId, StructureNodeKind, capture_structuring_failure,
+    surface_structure_graph,
 };
 pub use admission::{
     StructuringAdmissionInput, StructuringAdmissionReason, blockgraph_collapse_admission_enabled,
@@ -127,4 +128,3 @@ pub use regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,
 };
-

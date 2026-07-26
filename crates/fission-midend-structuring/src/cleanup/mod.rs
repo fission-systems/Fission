@@ -1171,6 +1171,43 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_structured_label_keeps_unique_residual_statements() {
+        let body = vec![
+            DirStmt::While {
+                cond: DirExpr::Const(1, NirType::Bool),
+                body: vec![DirStmt::Label("block_residual".to_string())],
+            },
+            DirStmt::Label("block_residual".to_string()),
+            DirStmt::Assign {
+                lhs: DirLValue::Var("output".to_string()),
+                rhs: DirExpr::Const(
+                    7,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
+            },
+        ];
+
+        let deduped = strip_duplicate_label_definitions(body);
+        assert_eq!(
+            deduped
+                .iter()
+                .filter(|stmt| matches!(stmt, DirStmt::Label(label) if label == "block_residual"))
+                .count(),
+            0,
+            "the nested definition owns the C label"
+        );
+        assert!(
+            deduped.iter().any(
+                |stmt| matches!(stmt, DirStmt::Assign { lhs: DirLValue::Var(name), .. } if name == "output")
+            ),
+            "deduplicating a label must not delete the residual block's statements"
+        );
+    }
+
+    #[test]
     fn guard_clause_promotion_converts_forward_goto_to_early_return() {
         // Pattern: if (n <= 0) { goto end }; loop_body; return sum; end: return 0
         // Expected: if (n <= 0) { return 0 }; loop_body; return sum

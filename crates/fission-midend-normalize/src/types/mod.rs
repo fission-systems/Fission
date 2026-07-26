@@ -5,6 +5,7 @@ mod constraint;
 mod entry_param_promotion;
 mod interproc_sig_prop;
 mod procedure_summary;
+mod type_flow;
 mod type_infer;
 mod use_type_infer;
 mod variadic_stack_region;

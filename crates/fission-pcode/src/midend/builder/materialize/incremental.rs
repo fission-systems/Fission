@@ -4,9 +4,19 @@ use crate::midend::ir::*;
 use crate::pcode::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(in crate::midend::builder) fn run_incremental_heritage(&mut self) {
+    pub(in crate::midend::builder) fn run_incremental_heritage(
+        &mut self,
+    ) -> Result<(), MlilPreviewError> {
+        super::super::scalar_ssa::validate_scalar_ssa(
+            self.pcode,
+            &self.heritage_successors,
+            &self.heritage_predecessors,
+            &self.scalar_ssa,
+        )
+        .map_err(|_| MlilPreviewError::UnsupportedPattern("invalid scalar ssa"))?;
+
         if !self.locals.is_empty() {
-            return;
+            return Ok(());
         }
 
         let mut rsp_accesses = Vec::new();
@@ -76,6 +86,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         self.invalidate_materialization_dependent_caches();
+        Ok(())
     }
 
     fn register_refined_slot(&mut self, base: StackBase, offset: i64, size: u32) {

@@ -56,6 +56,13 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let mut predecessors = build_predecessor_index_map(&successors);
+        let heritage_successors = successors.clone();
+        let heritage_predecessors = predecessors.clone();
+        let scalar_ssa = super::scalar_ssa::build_scalar_ssa(
+            pcode,
+            &heritage_successors,
+            &heritage_predecessors,
+        );
 
         let mut dom_tree = crate::midend::structuring::DomTree::analyze(&successors, &predecessors);
         let cfg_analysis =
@@ -118,6 +125,9 @@ impl<'a> PreviewBuilder<'a> {
             block_target_keys,
             target_key_to_index,
             layout_fallthrough,
+            heritage_successors,
+            heritage_predecessors,
+            scalar_ssa,
             successors,
             predecessors,
             reachability_cache: std::cell::RefCell::new(BuilderCacheMap::default()),

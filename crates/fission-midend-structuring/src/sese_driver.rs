@@ -395,14 +395,26 @@ pub fn promote_guarded_tails(host: &mut impl StructuringHost, body: &mut Vec<Dir
     }
 }
 
+/// Whether a residual CFG block's body was consumed by a proven structured region.
+///
+/// A `Label(block_K)` surfaced inside another structured child is not ownership
+/// evidence: the child can expose a jump target without materializing block K's
+/// statements. Label-definition deduplication is handled separately.
+fn structured_region_owns_block(
+    idx: usize,
+    structured_ownership: &crate::graph::BlockOwnership,
+) -> bool {
+    structured_ownership.contains(idx)
+}
+
 /// Final SESE reconstruction: surface the structure graph only.
 ///
 /// Graph-only contract (Ghidra `CollapseStructure` invariant):
 /// - Structured regions in `active_child_map` own their `[start, skip_to)` range.
-/// - Labels already present inside any structured region body must never be
-///   re-emitted by residual materialization.
-/// - Residual blocks are only those never absorbed into a structure node and
-///   never already labeled inside one — not a second linear walk of covered CFG.
+/// - Labels already present inside any structured region body are not emitted
+///   twice, but they do not by themselves consume the corresponding CFG body.
+/// - Residual blocks are only those never absorbed into a structure node; their
+///   labels and statements are surfaced through independent decisions.
 pub fn reconstruct_sese_final_body(
     host: &mut impl StructuringHost,
     entry: usize,
@@ -412,7 +424,9 @@ pub fn reconstruct_sese_final_body(
     diag: bool,
 ) -> Result<Vec<DirStmt>, MlilPreviewError> {
     use crate::cleanup::{child_body_has_entry_label, collect_defined_labels};
-    use crate::graph::{StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeKind, surface_structure_graph};
+    use crate::graph::{
+        BlockOwnership, StructureEdgeFlags, StructureGraph, StructureNode, surface_structure_graph,
+    };
     use crate::helpers::{block_label, recovered_switch_case_values};
     use crate::linear_types::LoweredTerminator;
     use crate::regions::EmitReadyDecision;
@@ -420,15 +434,13 @@ pub fn reconstruct_sese_final_body(
 
     let mut graph = StructureGraph::default();
     let mut emitted_labels: HashSet<u64> = HashSet::default();
-    // Block indices owned by an already-surfaced structured region [start, skip_to).
-    // Residual basic emission must not re-lower these (multi-emit / duplicate labels).
-    let mut tombstoned: HashSet<usize> = HashSet::default();
+    // Block indices owned by proven structured regions. RegionProof.members is
+    // the canonical ownership source; ranges and labels are presentation facts.
+    let mut structured_ownership = BlockOwnership::default();
     // Labels already defined inside structured region bodies — exclusive surface.
     let mut structure_defined_labels: HashSet<String> = HashSet::default();
-    for (&start, (child_body, skip_to, _)) in active_child_map.iter() {
-        for bi in start..*skip_to {
-            tombstoned.insert(bi);
-        }
+    for (_, (child_body, _, proof)) in active_child_map.iter() {
+        structured_ownership.extend(proof.members.iter().copied());
         structure_defined_labels.extend(collect_defined_labels(child_body));
     }
     let mut previous_node_id = None;
@@ -458,24 +470,27 @@ pub fn reconstruct_sese_final_body(
                     structure_defined_labels.insert(header_label);
                 }
 
-                let node = StructureNode {
-                    id: graph.next_node_id(),
-                    kind: StructureNodeKind::Region(child_proof.kind),
-                    skip_to: *child_exit,
-                    statements: node_statements,
-                    proof: Some(child_proof.clone()),
-                };
+                let node = StructureNode::region_body(
+                    graph.next_node_id(),
+                    node_statements,
+                    *child_exit,
+                    child_proof.clone(),
+                );
 
-                let node_id = graph.push(node);
+                let node_id = graph.push(node).map_err(|conflict| {
+                    if diag {
+                        eprintln!(
+                            "[DIAG] final reconstruction: duplicate block ownership block={} existing_node={} attempted_node={}",
+                            conflict.block, conflict.existing_owner, conflict.attempted_owner
+                        );
+                    }
+                    MlilPreviewError::UnsupportedCfgRegionShape
+                })?;
                 if let Some(prev) = previous_node_id {
                     graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
                 }
                 previous_node_id = Some(node_id);
                 let next_idx = *child_exit;
-                // Region owns [idx, next_idx); reinforce tombstone.
-                for bi in idx..next_idx.max(idx + 1) {
-                    tombstoned.insert(bi);
-                }
                 if next_idx <= idx {
                     if diag {
                         eprintln!(
@@ -490,13 +505,14 @@ pub fn reconstruct_sese_final_body(
                 continue;
             }
 
-            // Graph residual only: never re-emit a block owned by a structured
-            // region (tombstone) or already labeled inside one (exclusive label).
+            // Graph residual only: never re-emit a block body owned by a proven
+            // structured region. A label inside a child is not sufficient
+            // ownership evidence; the residual statements may still be unique.
             let residual_label = block_label(block_key);
-            if tombstoned.contains(&idx) || structure_defined_labels.contains(&residual_label) {
+            if structured_region_owns_block(idx, &structured_ownership) {
                 if diag {
                     eprintln!(
-                        "[DIAG] final reconstruction: skip graph-owned residual block idx={} key=0x{:x} label={}",
+                        "[DIAG] final reconstruction: skip range-owned residual block idx={} key=0x{:x} label={}",
                         idx, block_key, residual_label
                     );
                 }
@@ -510,8 +526,6 @@ pub fn reconstruct_sese_final_body(
                 node_body.push(DirStmt::Label(residual_label.clone()));
                 structure_defined_labels.insert(residual_label);
             }
-            // Residual materialize is exclusive for this index (one graph node).
-            tombstoned.insert(idx);
             node_body.extend(host.lower_block_stmts(idx)?);
             match host.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => node_body.push(DirStmt::Return(expr)),
@@ -673,14 +687,18 @@ pub fn reconstruct_sese_final_body(
             }
             if explicit_edge_surface {
                 let node_id = graph.next_node_id();
-                let node_id = graph.push(StructureNode::unstructured(node_id, node_body, idx + 1));
+                let node_id = graph
+                    .push(StructureNode::unstructured(node_id, node_body, idx))
+                    .map_err(|_| MlilPreviewError::UnsupportedCfgRegionShape)?;
                 if let Some(prev) = previous_node_id {
                     graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
                 }
                 previous_node_id = Some(node_id);
             } else {
                 let node_id = graph.next_node_id();
-                let node_id = graph.push(StructureNode::basic(node_id, node_body, idx + 1));
+                let node_id = graph
+                    .push(StructureNode::basic(node_id, node_body, idx))
+                    .map_err(|_| MlilPreviewError::UnsupportedCfgRegionShape)?;
                 if let Some(prev) = previous_node_id {
                     graph.push_edge(prev, node_id, StructureEdgeFlags::Plain);
                 }
@@ -695,3 +713,27 @@ pub fn reconstruct_sese_final_body(
     Ok(body)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structured_label_does_not_own_residual_block() {
+        let ownership = crate::graph::BlockOwnership::from_members([1usize, 2]);
+        let structured_labels =
+            HashSet::from_iter(["block_10".to_string(), "block_30".to_string()]);
+
+        assert!(
+            structured_labels.contains("block_30"),
+            "precondition: another child surfaced the residual label"
+        );
+        assert!(
+            !structured_region_owns_block(3, &ownership),
+            "textual label presence must not consume block 3's statements"
+        );
+        assert!(
+            structured_region_owns_block(2, &ownership),
+            "proven region range must still consume block 2 exactly once"
+        );
+    }
+}

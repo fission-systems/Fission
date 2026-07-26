@@ -18,6 +18,7 @@ mod expr;
 mod init;
 mod materialize;
 mod memory;
+mod scalar_ssa;
 mod stats;
 pub(super) mod switch_table;
 mod telemetry;
@@ -270,7 +271,7 @@ impl<'a> PreviewBuilder<'a> {
             return Err(MlilPreviewError::UnsupportedPattern("empty pcode"));
         }
 
-        self.run_incremental_heritage();
+        self.run_incremental_heritage()?;
 
         let mut body = Vec::new();
         if self.pcode.blocks.len() == 1 {

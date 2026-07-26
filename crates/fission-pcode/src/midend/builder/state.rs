@@ -24,6 +24,12 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) block_target_keys: Vec<u64>,
     pub(crate) target_key_to_index: HashMap<u64, usize>,
     pub(crate) layout_fallthrough: Vec<Option<usize>>,
+    /// Original lifted CFG used by Heritage/SSA. Structuring may prune
+    /// irreducible edges from `successors`/`predecessors`, but must not alter
+    /// the semantic data-flow graph.
+    pub(crate) heritage_successors: Vec<Vec<usize>>,
+    pub(crate) heritage_predecessors: Vec<Vec<usize>>,
+    pub(crate) scalar_ssa: NirScalarSsa,
     pub(crate) successors: Vec<Vec<usize>>,
     pub(crate) predecessors: Vec<Vec<usize>>,
     pub(crate) reachability_cache: RefCell<BuilderCacheMap<(usize, usize, usize), bool>>,
