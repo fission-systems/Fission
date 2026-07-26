@@ -27,11 +27,6 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(crate) fn compute_follow_blocks(&self) -> Vec<Option<usize>> {
         let total = self.pcode.blocks.len() + self.virtual_block_map.len();
-        compute_follow_blocks(
-            &self.successors,
-            &self.predecessors,
-            &self.cfg_facts,
-            total,
-        )
+        compute_follow_blocks(&self.successors, &self.predecessors, &self.cfg_facts, total)
     }
 }

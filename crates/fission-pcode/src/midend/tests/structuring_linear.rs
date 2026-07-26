@@ -113,8 +113,7 @@ fn lower_linear_body_breaks_recursive_conditional_cycle() {
 
     let options = preview_options_x86();
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body(&mut builder,
-        1, LinearExit::Join(5))
+    let lowered = lower_linear_body(&mut builder, 1, LinearExit::Join(5))
         .expect("recursive cycle should not error");
     assert!(lowered.is_none());
 }
@@ -178,14 +177,10 @@ fn lower_linear_body_caches_repeated_requests() {
 
     let options = preview_options_x86();
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let first = lower_linear_body(&mut builder,
-        1, LinearExit::Join(2))
-        .expect("first lowering");
+    let first = lower_linear_body(&mut builder, 1, LinearExit::Join(2)).expect("first lowering");
     assert!(has_linear_body_cache(&builder, 1, LinearExit::Join(2)));
     let cache_len = builder.linear_body_cache.len();
-    let second = lower_linear_body(&mut builder,
-        1, LinearExit::Join(2))
-        .expect("second lowering");
+    let second = lower_linear_body(&mut builder, 1, LinearExit::Join(2)).expect("second lowering");
     assert_eq!(first, second);
     assert_eq!(builder.linear_body_cache.len(), cache_len);
 }
@@ -227,13 +222,13 @@ fn lower_linear_body_region_cache_preserves_reject_reason_across_retries() {
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
 
-    let first = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(1), None)
-        .expect("first detailed lowering should not error");
+    let first =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(1), None)
+            .expect("first detailed lowering should not error");
     let cache_len = builder.linear_body_cache.len();
-    let second = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(1), None)
-        .expect("second detailed lowering should not error");
+    let second =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(1), None)
+            .expect("second detailed lowering should not error");
 
     assert!(matches!(
         first,
@@ -522,8 +517,7 @@ fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
 
     let options = preview_options_x86();
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body(&mut builder,
-        0, LinearExit::Join(4))
+    let lowered = lower_linear_body(&mut builder, 0, LinearExit::Join(4))
         .expect("detailed lowering should not error");
     assert!(lowered.is_some());
 }
@@ -613,8 +607,7 @@ fn lower_linear_body_lowers_trampoline_tail_shape() {
 
     let options = preview_options_x86();
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body(&mut builder,
-        0, LinearExit::Join(4))
+    let lowered = lower_linear_body(&mut builder, 0, LinearExit::Join(4))
         .expect("detailed lowering should not error");
     assert!(lowered.is_some());
 }

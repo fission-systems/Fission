@@ -129,9 +129,9 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(7), None)
-        .expect("region detailed lowering should not error");
+    let lowered =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(7), None)
+            .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
 
@@ -331,9 +331,9 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(5), None)
-        .expect("region detailed lowering should not error");
+    let lowered =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(5), None)
+            .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
 
@@ -482,9 +482,9 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(6), None)
-        .expect("region detailed lowering should not error");
+    let lowered =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(6), None)
+            .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
 
@@ -653,9 +653,9 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(6), None)
-        .expect("region detailed lowering should not error");
+    let lowered =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(6), None)
+            .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
 

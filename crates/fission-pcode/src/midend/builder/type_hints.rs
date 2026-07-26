@@ -415,10 +415,7 @@ fn collect_assign_stats_in_stmts(
                 collect_assign_stats_in_stmts(body, assign_counts, direct_copies)
             }
             HirStmt::For {
-                init,
-                update,
-                body,
-                ..
+                init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
                     collect_assign_stats_in_stmts(
@@ -619,9 +616,7 @@ fn promote_field_access_in_expr(
             promote_field_access_in_expr(base, eligible, promoted);
             promote_field_access_in_expr(index, eligible, promoted);
         }
-        HirExpr::FieldAccess { base, .. } => {
-            promote_field_access_in_expr(base, eligible, promoted)
-        }
+        HirExpr::FieldAccess { base, .. } => promote_field_access_in_expr(base, eligible, promoted),
     }
 }
 

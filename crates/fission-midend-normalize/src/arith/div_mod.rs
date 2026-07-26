@@ -1,7 +1,7 @@
 use super::util::*;
 use crate::prelude::*;
 
-pub fn recognize_mod_div_power_of_two(expr: &DirExpr) -> Option<DirExpr> {
+pub fn recognize_mod_div_power_of_two(expr: &PreHirExpr) -> Option<PreHirExpr> {
     normalize_signed_power_of_two_mod(expr)
         .or_else(|| normalize_signed_power_of_two_div(expr))
         .or_else(|| normalize_unsigned_power_of_two_mod(expr))
@@ -18,22 +18,22 @@ pub fn recognize_mod_div_power_of_two(expr: &DirExpr) -> Option<DirExpr> {
 /// - bind `t → wide` only while `t` is live with that CDQ RHS;
 /// - kill `t` on any reassign of `t`;
 /// - kill entries whose free vars are redefined before the mod/div use.
-pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     // Live CDQ temps: name → (wide expr, free vars of wide).
-    let mut live: crate::HashMap<String, (DirExpr, crate::HashSet<String>)> =
+    let mut live: crate::HashMap<String, (PreHirExpr, crate::HashSet<String>)> =
         crate::HashMap::default();
 
     for i in 0..stmts.len() {
         // Nested structures first (independent scopes).
         match &mut stmts[i] {
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 changed |= collapse_cdq_signed_mod_in_stmts(body);
                 // Conservative: control transfer may clobber linear live set.
                 live.clear();
                 continue;
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -43,16 +43,16 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
                 live.clear();
                 continue;
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
-                    if let DirStmt::Block(b) = init_stmt.as_mut() {
+                    if let PreHirStmt::Block(b) = init_stmt.as_mut() {
                         changed |= collapse_cdq_signed_mod_in_stmts(b);
                     }
                 }
                 if let Some(upd) = update {
-                    if let DirStmt::Block(b) = upd.as_mut() {
+                    if let PreHirStmt::Block(b) = upd.as_mut() {
                         changed |= collapse_cdq_signed_mod_in_stmts(b);
                     }
                 }
@@ -60,7 +60,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
                 live.clear();
                 continue;
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     changed |= collapse_cdq_signed_mod_in_stmts(&mut case.body);
                 }
@@ -72,8 +72,8 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
         }
 
         // Kill live temps whose free vars are written by this stmt's LHS.
-        if let DirStmt::Assign {
-            lhs: DirLValue::Var(written),
+        if let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(written),
             ..
         } = &stmts[i]
         {
@@ -83,7 +83,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
             live.remove(&written);
         }
 
-        let DirStmt::Assign { lhs, rhs } = &mut stmts[i] else {
+        let PreHirStmt::Assign { lhs, rhs } = &mut stmts[i] else {
             continue;
         };
 
@@ -92,23 +92,23 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
             *rhs = collapsed;
             changed = true;
             // After collapse, if lhs is a name, it is not a CDQ wide temp.
-            if let DirLValue::Var(name) = lhs {
+            if let PreHirLValue::Var(name) = lhs {
                 live.remove(name);
             }
             continue;
         }
 
         // Across temp: t = wide; …; x = t % d  (t still live, free vars not killed).
-        if let DirExpr::Binary {
-            op: bin_op @ (DirBinaryOp::Mod | DirBinaryOp::Div),
+        if let PreHirExpr::Binary {
+            op: bin_op @ (PreHirBinaryOp::Mod | PreHirBinaryOp::Div),
             lhs: mod_lhs,
             rhs: div,
             ty,
         } = rhs
         {
-            if let DirExpr::Var(name) = mod_lhs.as_ref() {
+            if let PreHirExpr::Var(name) = mod_lhs.as_ref() {
                 if let Some((wide, _frees)) = live.get(name) {
-                    let candidate = DirExpr::Binary {
+                    let candidate = PreHirExpr::Binary {
                         op: *bin_op,
                         lhs: Box::new(wide.clone()),
                         rhs: div.clone(),
@@ -124,7 +124,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
 
         // Bind or rebind after processing uses (so same-stmt x = t % d cannot
         // use a pure just bound on this line).
-        if let DirLValue::Var(name) = lhs {
+        if let PreHirLValue::Var(name) = lhs {
             if extract_cdq_low_from_wide_dividend(rhs).is_some() {
                 let mut frees = crate::HashSet::default();
                 collect_free_var_names(rhs, &mut frees);
@@ -137,20 +137,20 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
     changed
 }
 
-fn collect_free_var_names(expr: &DirExpr, out: &mut crate::HashSet<String>) {
+fn collect_free_var_names(expr: &PreHirExpr, out: &mut crate::HashSet<String>) {
     match expr {
-        DirExpr::Var(n) => {
+        PreHirExpr::Var(n) => {
             out.insert(n.clone());
         }
-        DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
-        DirExpr::Unary { expr, .. } | DirExpr::Cast { expr, .. } => {
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Unary { expr, .. } | PreHirExpr::Cast { expr, .. } => {
             collect_free_var_names(expr, out);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             collect_free_var_names(lhs, out);
             collect_free_var_names(rhs, out);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -160,23 +160,23 @@ fn collect_free_var_names(expr: &DirExpr, out: &mut crate::HashSet<String>) {
             collect_free_var_names(then_expr, out);
             collect_free_var_names(else_expr, out);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for a in args {
                 collect_free_var_names(a, out);
             }
         }
-        DirExpr::Load { ptr, .. }
-        | DirExpr::PtrOffset { base: ptr, .. }
-        | DirExpr::FieldAccess { base: ptr, .. }
-        | DirExpr::AggregateCopy { src: ptr, .. } => collect_free_var_names(ptr, out),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Load { ptr, .. }
+        | PreHirExpr::PtrOffset { base: ptr, .. }
+        | PreHirExpr::FieldAccess { base: ptr, .. }
+        | PreHirExpr::AggregateCopy { src: ptr, .. } => collect_free_var_names(ptr, out),
+        PreHirExpr::Index { base, index, .. } => {
             collect_free_var_names(base, out);
             collect_free_var_names(index, out);
         }
     }
 }
-pub fn collapse_cdq_style_signed_mod_div(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
+pub fn collapse_cdq_style_signed_mod_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
         op,
         lhs,
         rhs,
@@ -185,7 +185,7 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    if !matches!(op, DirBinaryOp::Mod | DirBinaryOp::Div) {
+    if !matches!(op, PreHirBinaryOp::Mod | PreHirBinaryOp::Div) {
         return None;
     }
     let low = extract_cdq_low_from_wide_dividend(lhs)?;
@@ -194,13 +194,13 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &DirExpr) -> Option<DirExpr> {
         _ => 32,
     };
     let signed_ty = NirType::Int { bits, signed: true };
-    Some(DirExpr::Binary {
+    Some(PreHirExpr::Binary {
         op: *op,
-        lhs: Box::new(DirExpr::Cast {
+        lhs: Box::new(PreHirExpr::Cast {
             ty: signed_ty.clone(),
             expr: Box::new(low),
         }),
-        rhs: Box::new(DirExpr::Cast {
+        rhs: Box::new(PreHirExpr::Cast {
             ty: signed_ty.clone(),
             expr: Box::new((**rhs).clone()),
         }),
@@ -208,11 +208,11 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &DirExpr) -> Option<DirExpr> {
     })
 }
 
-fn extract_cdq_low_from_wide_dividend(expr: &DirExpr) -> Option<DirExpr> {
+fn extract_cdq_low_from_wide_dividend(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let expr = strip_casts(expr);
     // (hi << k) | lo
-    let DirExpr::Binary {
-        op: DirBinaryOp::Or,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Or,
         lhs: or_lhs,
         rhs: or_rhs,
         ..
@@ -222,8 +222,8 @@ fn extract_cdq_low_from_wide_dividend(expr: &DirExpr) -> Option<DirExpr> {
     };
     let (hi_expr, shift_expr, low_expr) = match (or_lhs.as_ref(), or_rhs.as_ref()) {
         (
-            DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 lhs: hi,
                 rhs: shift,
                 ..
@@ -232,8 +232,8 @@ fn extract_cdq_low_from_wide_dividend(expr: &DirExpr) -> Option<DirExpr> {
         ) => (hi.as_ref(), shift.as_ref(), low),
         (
             low,
-            DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 lhs: hi,
                 rhs: shift,
                 ..
@@ -241,7 +241,7 @@ fn extract_cdq_low_from_wide_dividend(expr: &DirExpr) -> Option<DirExpr> {
         ) => (hi.as_ref(), shift.as_ref(), low),
         _ => return None,
     };
-    let DirExpr::Const(shift_amt, _) = shift_expr else {
+    let PreHirExpr::Const(shift_amt, _) = shift_expr else {
         return None;
     };
     if !(32..=64).contains(shift_amt) {
@@ -256,26 +256,26 @@ fn extract_cdq_low_from_wide_dividend(expr: &DirExpr) -> Option<DirExpr> {
     None
 }
 
-fn expr_is_sign_fill_of(hi: &DirExpr, low: &DirExpr, shift_amt: i64) -> bool {
+fn expr_is_sign_fill_of(hi: &PreHirExpr, low: &PreHirExpr, shift_amt: i64) -> bool {
     // Only arithmetic SAR is CDQ-class sign-fill. Logical Shr is not (negative
     // low logical high ≠ sign bits). Materialize emits Sar for SubPiece of
     // signed IntSExt; residual must match that and reject bare Shr.
     let hi = strip_casts(hi);
     match hi {
-        DirExpr::Binary {
-            op: DirBinaryOp::Sar,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
             lhs,
             rhs: shift,
             ..
         } => {
-            let DirExpr::Const(s, _) = shift.as_ref() else {
+            let PreHirExpr::Const(s, _) = shift.as_ref() else {
                 return false;
             };
             let base = strip_casts(lhs.as_ref());
             let base_ok = base == *low
                 || matches!(
                     &base,
-                    DirExpr::Cast { expr, .. } if strip_casts(expr.as_ref()) == *low
+                    PreHirExpr::Cast { expr, .. } if strip_casts(expr.as_ref()) == *low
                 );
             let shift_ok = *s == shift_amt || *s == shift_amt - 1 || *s == 31 || *s == 63;
             base_ok && shift_ok
@@ -284,16 +284,16 @@ fn expr_is_sign_fill_of(hi: &DirExpr, low: &DirExpr, shift_amt: i64) -> bool {
     }
 }
 
-pub fn recognize_compiler_runtime_division(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Call {
+pub fn recognize_compiler_runtime_division(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Call {
         target, args, ty, ..
     } = expr
     else {
         return None;
     };
     let (op, signed) = match target.as_str() {
-        "__aeabi_uidiv" | "__aeabi_uidivmod" => (DirBinaryOp::Div, false),
-        "__aeabi_idiv" | "__aeabi_idivmod" => (DirBinaryOp::Div, true),
+        "__aeabi_uidiv" | "__aeabi_uidivmod" => (PreHirBinaryOp::Div, false),
+        "__aeabi_idiv" | "__aeabi_idivmod" => (PreHirBinaryOp::Div, true),
         _ => return None,
     };
     if args.len() < 2 {
@@ -303,7 +303,7 @@ pub fn recognize_compiler_runtime_division(expr: &DirExpr) -> Option<DirExpr> {
         NirType::Int { bits, .. } => *bits,
         _ => 32,
     };
-    Some(DirExpr::Binary {
+    Some(PreHirExpr::Binary {
         op,
         lhs: Box::new(cast_runtime_div_arg(args[0].clone(), bits, signed)),
         rhs: Box::new(cast_runtime_div_arg(args[1].clone(), bits, signed)),
@@ -311,21 +311,21 @@ pub fn recognize_compiler_runtime_division(expr: &DirExpr) -> Option<DirExpr> {
     })
 }
 
-fn cast_runtime_div_arg(expr: DirExpr, bits: u32, signed: bool) -> DirExpr {
+fn cast_runtime_div_arg(expr: PreHirExpr, bits: u32, signed: bool) -> PreHirExpr {
     let target_ty = NirType::Int { bits, signed };
     if expr_type(&expr) == target_ty {
         expr
     } else {
-        DirExpr::Cast {
+        PreHirExpr::Cast {
             ty: target_ty,
             expr: Box::new(expr),
         }
     }
 }
 
-fn normalize_unsigned_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::And,
+fn normalize_unsigned_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::And,
         lhs,
         rhs,
         ..
@@ -333,7 +333,7 @@ fn normalize_unsigned_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(
+    let PreHirExpr::Const(
         mask,
         NirType::Int {
             bits,
@@ -354,10 +354,10 @@ fn normalize_unsigned_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
     if divisor == 2 {
         return None;
     }
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::Mod,
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Mod,
         lhs: lhs.clone(),
-        rhs: Box::new(DirExpr::Const(
+        rhs: Box::new(PreHirExpr::Const(
             divisor as i64,
             NirType::Int {
                 bits: *bits,
@@ -371,9 +371,9 @@ fn normalize_unsigned_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
     })
 }
 
-fn normalize_unsigned_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shr,
+fn normalize_unsigned_power_of_two_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr,
         lhs,
         rhs,
         ty,
@@ -381,7 +381,7 @@ fn normalize_unsigned_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(shift_amount, _) = rhs.as_ref() else {
+    let PreHirExpr::Const(shift_amount, _) = rhs.as_ref() else {
         return None;
     };
     let width = match ty {
@@ -413,10 +413,10 @@ fn normalize_unsigned_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
     if *shift_amount == 1 {
         return None;
     }
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::Div,
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Div,
         lhs: lhs.clone(),
-        rhs: Box::new(DirExpr::Const(
+        rhs: Box::new(PreHirExpr::Const(
             divisor,
             NirType::Int {
                 bits: width,
@@ -430,9 +430,9 @@ fn normalize_unsigned_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
     })
 }
 
-fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+fn normalize_signed_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs,
         rhs,
         ty,
@@ -440,18 +440,18 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Shl,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
         lhs: shl_inner,
         rhs: shl_rhs,
         ..
     } = rhs.as_ref()
     {
-        let DirExpr::Const(shift_amount, _) = shl_rhs.as_ref() else {
+        let PreHirExpr::Const(shift_amount, _) = shl_rhs.as_ref() else {
             return None;
         };
-        let DirExpr::Binary {
-            op: DirBinaryOp::Div,
+        let PreHirExpr::Binary {
+            op: PreHirBinaryOp::Div,
             lhs: div_lhs,
             rhs: div_rhs,
             ..
@@ -459,7 +459,7 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
         else {
             return None;
         };
-        let DirExpr::Const(divisor, _) = div_rhs.as_ref() else {
+        let PreHirExpr::Const(divisor, _) = div_rhs.as_ref() else {
             return None;
         };
         if div_lhs.as_ref() == lhs.as_ref()
@@ -471,10 +471,10 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
                 NirType::Int { bits, signed: true } => *bits,
                 _ => 64,
             };
-            return Some(DirExpr::Binary {
-                op: DirBinaryOp::Mod,
+            return Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mod,
                 lhs: lhs.clone(),
-                rhs: Box::new(DirExpr::Const(
+                rhs: Box::new(PreHirExpr::Const(
                     *divisor,
                     NirType::Int {
                         bits: width,
@@ -488,8 +488,8 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
             });
         }
     }
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shl,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
         lhs: shl_inner,
         rhs: shl_rhs,
         ..
@@ -497,11 +497,11 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(shift_amount, _) = shl_rhs.as_ref() else {
+    let PreHirExpr::Const(shift_amount, _) = shl_rhs.as_ref() else {
         return None;
     };
-    let DirExpr::Binary {
-        op: DirBinaryOp::Sar,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sar,
         lhs: sar_inner,
         rhs: sar_rhs,
         ..
@@ -509,14 +509,14 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(sar_shift, _) = sar_rhs.as_ref() else {
+    let PreHirExpr::Const(sar_shift, _) = sar_rhs.as_ref() else {
         return None;
     };
     if sar_shift != shift_amount {
         return None;
     }
-    let DirExpr::Binary {
-        op: DirBinaryOp::Add,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
         lhs: add_lhs,
         rhs: add_rhs,
         ..
@@ -528,14 +528,14 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
         return None;
     }
     let (sign_source, sign_shift, mask) = match add_rhs.as_ref() {
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs: and_lhs,
             rhs: and_rhs,
             ..
         } => {
-            let DirExpr::Binary {
-                op: DirBinaryOp::Shr,
+            let PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
                 lhs: shr_lhs,
                 rhs: shr_rhs,
                 ..
@@ -543,22 +543,22 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
             else {
                 return None;
             };
-            let DirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
                 return None;
             };
-            let DirExpr::Const(mask, _) = and_rhs.as_ref() else {
+            let PreHirExpr::Const(mask, _) = and_rhs.as_ref() else {
                 return None;
             };
             (shr_lhs.as_ref(), *sign_shift, *mask)
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Mod,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mod,
             lhs: mod_lhs,
             rhs: mod_rhs,
             ..
         } => {
-            let DirExpr::Binary {
-                op: DirBinaryOp::Shr,
+            let PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
                 lhs: shr_lhs,
                 rhs: shr_rhs,
                 ..
@@ -566,10 +566,10 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
             else {
                 return None;
             };
-            let DirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
                 return None;
             };
-            let DirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
+            let PreHirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
                 return None;
             };
             (shr_lhs.as_ref(), *sign_shift, *divisor - 1)
@@ -589,10 +589,10 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
         return None;
     }
 
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::Mod,
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Mod,
         lhs: lhs.clone(),
-        rhs: Box::new(DirExpr::Const(
+        rhs: Box::new(PreHirExpr::Const(
             divisor,
             NirType::Int {
                 bits: width,
@@ -606,9 +606,9 @@ fn normalize_signed_power_of_two_mod(expr: &DirExpr) -> Option<DirExpr> {
     })
 }
 
-fn normalize_signed_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Sar,
+fn normalize_signed_power_of_two_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sar,
         lhs,
         rhs,
         ty,
@@ -616,11 +616,11 @@ fn normalize_signed_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(shift_amount, _) = rhs.as_ref() else {
+    let PreHirExpr::Const(shift_amount, _) = rhs.as_ref() else {
         return None;
     };
-    let DirExpr::Binary {
-        op: DirBinaryOp::Add,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
         lhs: add_lhs,
         rhs: add_rhs,
         ..
@@ -629,14 +629,14 @@ fn normalize_signed_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
         return None;
     };
     let (sign_source, sign_shift, mask) = match add_rhs.as_ref() {
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs: and_lhs,
             rhs: and_rhs,
             ..
         } => {
-            let DirExpr::Binary {
-                op: DirBinaryOp::Shr,
+            let PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
                 lhs: shr_lhs,
                 rhs: shr_rhs,
                 ..
@@ -644,22 +644,22 @@ fn normalize_signed_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
             else {
                 return None;
             };
-            let DirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
                 return None;
             };
-            let DirExpr::Const(mask, _) = and_rhs.as_ref() else {
+            let PreHirExpr::Const(mask, _) = and_rhs.as_ref() else {
                 return None;
             };
             (shr_lhs.as_ref(), *sign_shift, *mask)
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Mod,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mod,
             lhs: mod_lhs,
             rhs: mod_rhs,
             ..
         } => {
-            let DirExpr::Binary {
-                op: DirBinaryOp::Shr,
+            let PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
                 lhs: shr_lhs,
                 rhs: shr_rhs,
                 ..
@@ -667,10 +667,10 @@ fn normalize_signed_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
             else {
                 return None;
             };
-            let DirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
                 return None;
             };
-            let DirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
+            let PreHirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
                 return None;
             };
             (shr_lhs.as_ref(), *sign_shift, *divisor - 1)
@@ -698,10 +698,10 @@ fn normalize_signed_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
         return None;
     }
 
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::Div,
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Div,
         lhs: div_lhs,
-        rhs: Box::new(DirExpr::Const(
+        rhs: Box::new(PreHirExpr::Const(
             divisor,
             NirType::Int {
                 bits: width,
@@ -715,13 +715,13 @@ fn normalize_signed_power_of_two_div(expr: &DirExpr) -> Option<DirExpr> {
     })
 }
 
-pub fn recognize_magic_number_division(expr: &DirExpr) -> Option<DirExpr> {
+pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let mut current = expr;
     let mut n = 0u32;
     let mut x_size_bits = None;
     let mut ext_ty_bits = None;
 
-    if let DirExpr::Cast { ty, expr: inner } = current {
+    if let PreHirExpr::Cast { ty, expr: inner } = current {
         if let Some(bits) = int_type_bits(ty) {
             ext_ty_bits = Some(bits);
             current = inner.as_ref();
@@ -729,32 +729,32 @@ pub fn recognize_magic_number_division(expr: &DirExpr) -> Option<DirExpr> {
     }
 
     let mut is_signed_shift = false;
-    if let DirExpr::Binary { op, lhs, rhs, .. } = current {
-        if matches!(op, DirBinaryOp::Shr | DirBinaryOp::Sar) {
-            if let DirExpr::Const(shift_amt, _) = rhs.as_ref() {
+    if let PreHirExpr::Binary { op, lhs, rhs, .. } = current {
+        if matches!(op, PreHirBinaryOp::Shr | PreHirBinaryOp::Sar) {
+            if let PreHirExpr::Const(shift_amt, _) = rhs.as_ref() {
                 n += *shift_amt as u32;
-                is_signed_shift = matches!(op, DirBinaryOp::Sar);
+                is_signed_shift = matches!(op, PreHirBinaryOp::Sar);
                 current = lhs.as_ref();
             }
         }
     }
 
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Mul,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Mul,
         lhs,
         rhs,
         ty: mul_ty,
     } = current
     {
-        let (x_ext, y_expr) = if let DirExpr::Const(_, _) = rhs.as_ref() {
+        let (x_ext, y_expr) = if let PreHirExpr::Const(_, _) = rhs.as_ref() {
             (lhs.as_ref(), rhs.as_ref())
-        } else if let DirExpr::Const(_, _) = lhs.as_ref() {
+        } else if let PreHirExpr::Const(_, _) = lhs.as_ref() {
             (rhs.as_ref(), lhs.as_ref())
         } else {
             return None;
         };
 
-        let DirExpr::Const(y_val, _) = y_expr else {
+        let PreHirExpr::Const(y_val, _) = y_expr else {
             return None;
         };
 
@@ -769,7 +769,7 @@ pub fn recognize_magic_number_division(expr: &DirExpr) -> Option<DirExpr> {
             let mut x_val = x_ext;
             let mut is_sext = false;
 
-            if let DirExpr::Cast {
+            if let PreHirExpr::Cast {
                 ty: cast_ty,
                 expr: original_x,
             } = x_ext
@@ -823,16 +823,16 @@ pub fn recognize_magic_number_division(expr: &DirExpr) -> Option<DirExpr> {
                                 let divisor = q as u64;
                                 let _out_bits = ext_ty_bits.unwrap_or(x_bits);
                                 // Return the recovered division
-                                let div = DirExpr::Binary {
-                                    op: DirBinaryOp::Div,
+                                let div = PreHirExpr::Binary {
+                                    op: PreHirBinaryOp::Div,
                                     lhs: Box::new(x_val.clone()),
-                                    rhs: Box::new(DirExpr::Const(divisor as i64, expr_type(x_val))),
+                                    rhs: Box::new(PreHirExpr::Const(divisor as i64, expr_type(x_val))),
                                     ty: expr_type(x_val),
                                 };
                                 return Some(if expr_type(expr) == expr_type(x_val) {
                                     div
                                 } else {
-                                    DirExpr::Cast {
+                                    PreHirExpr::Cast {
                                         ty: expr_type(expr),
                                         expr: Box::new(div),
                                     }
@@ -852,13 +852,13 @@ mod tests {
     use super::*;
     // prelude via parent
 
-    fn var(name: &str) -> DirExpr {
-        DirExpr::Var(name.to_string())
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
     }
 
     #[test]
     fn recognizes_arm_eabi_unsigned_division_helper() {
-        let expr = DirExpr::Call {
+        let expr = PreHirExpr::Call {
             target: "__aeabi_uidiv".to_string(),
             args: vec![var("numerator"), var("denominator"), var("dead_r2")],
             ty: NirType::Unknown,
@@ -868,16 +868,16 @@ mod tests {
 
         assert_eq!(
             normalized,
-            DirExpr::Binary {
-                op: DirBinaryOp::Div,
-                lhs: Box::new(DirExpr::Cast {
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                lhs: Box::new(PreHirExpr::Cast {
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                     expr: Box::new(var("numerator")),
                 }),
-                rhs: Box::new(DirExpr::Cast {
+                rhs: Box::new(PreHirExpr::Cast {
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
@@ -910,39 +910,39 @@ mod cdq_tests {
         }
     }
 
-    fn cdq_wide(low_name: &str) -> DirExpr {
-        let x = DirExpr::Var(low_name.into());
-        let sar = DirExpr::Binary {
-            op: DirBinaryOp::Sar,
-            lhs: Box::new(DirExpr::Cast {
+    fn cdq_wide(low_name: &str) -> PreHirExpr {
+        let x = PreHirExpr::Var(low_name.into());
+        let sar = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(PreHirExpr::Cast {
                 ty: NirType::Int {
                     bits: 64,
                     signed: true,
                 },
                 expr: Box::new(x.clone()),
             }),
-            rhs: Box::new(DirExpr::Const(32, i32_ty())),
+            rhs: Box::new(PreHirExpr::Const(32, i32_ty())),
             ty: NirType::Int {
                 bits: 64,
                 signed: true,
             },
         };
-        let hi = DirExpr::Cast {
+        let hi = PreHirExpr::Cast {
             ty: u64_ty(),
-            expr: Box::new(DirExpr::Cast {
+            expr: Box::new(PreHirExpr::Cast {
                 ty: i32_ty(),
                 expr: Box::new(sar),
             }),
         };
-        DirExpr::Binary {
-            op: DirBinaryOp::Or,
-            lhs: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 lhs: Box::new(hi),
-                rhs: Box::new(DirExpr::Const(32, i32_ty())),
+                rhs: Box::new(PreHirExpr::Const(32, i32_ty())),
                 ty: u64_ty(),
             }),
-            rhs: Box::new(DirExpr::Cast {
+            rhs: Box::new(PreHirExpr::Cast {
                 ty: u64_ty(),
                 expr: Box::new(x),
             }),
@@ -950,11 +950,11 @@ mod cdq_tests {
         }
     }
 
-    fn mod_vars(lhs: DirExpr, rhs_name: &str) -> DirExpr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Mod,
+    fn mod_vars(lhs: PreHirExpr, rhs_name: &str) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mod,
             lhs: Box::new(lhs),
-            rhs: Box::new(DirExpr::Var(rhs_name.into())),
+            rhs: Box::new(PreHirExpr::Var(rhs_name.into())),
             ty: u64_ty(),
         }
     }
@@ -964,14 +964,14 @@ mod cdq_tests {
         let expr = mod_vars(cdq_wide("param_10"), "param_18");
         let out = collapse_cdq_style_signed_mod_div(&expr).expect("collapse");
         match out {
-            DirExpr::Binary {
-                op: DirBinaryOp::Mod,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mod,
                 lhs,
                 rhs,
                 ty: NirType::Int { signed: true, .. },
             } => {
-                assert!(matches!(strip_casts(&lhs), DirExpr::Var(n) if n == "param_10"));
-                assert!(matches!(strip_casts(&rhs), DirExpr::Var(n) if n == "param_18"));
+                assert!(matches!(strip_casts(&lhs), PreHirExpr::Var(n) if n == "param_10"));
+                assert!(matches!(strip_casts(&rhs), PreHirExpr::Var(n) if n == "param_18"));
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -981,21 +981,21 @@ mod cdq_tests {
     fn stmt_collapse_adjacent_temp_fold() {
         // t = wide(a); x = t % d  →  x = (int)a % (int)d
         let mut stmts = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("t".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".into()),
                 rhs: cdq_wide("a"),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("x".into()),
-                rhs: mod_vars(DirExpr::Var("t".into()), "d"),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".into()),
+                rhs: mod_vars(PreHirExpr::Var("t".into()), "d"),
             },
         ];
         assert!(collapse_cdq_signed_mod_in_stmts(&mut stmts));
         match &stmts[1] {
-            DirStmt::Assign {
+            PreHirStmt::Assign {
                 rhs:
-                    DirExpr::Binary {
-                        op: DirBinaryOp::Mod,
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Mod,
                         lhs,
                         rhs,
                         ..
@@ -1003,10 +1003,10 @@ mod cdq_tests {
                 ..
             } => {
                 assert!(
-                    matches!(strip_casts(lhs), DirExpr::Var(n) if n == "a"),
+                    matches!(strip_casts(lhs), PreHirExpr::Var(n) if n == "a"),
                     "expected low half a, got {lhs:?}"
                 );
-                assert!(matches!(strip_casts(rhs), DirExpr::Var(n) if n == "d"));
+                assert!(matches!(strip_casts(rhs), PreHirExpr::Var(n) if n == "d"));
             }
             other => panic!("unexpected stmt: {other:?}"),
         }
@@ -1017,36 +1017,36 @@ mod cdq_tests {
         // t = wide(a); x = t % d1; t = wide(b); y = t % d2
         // x must use a; y must use b (not last-wins for x).
         let mut stmts = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("t".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".into()),
                 rhs: cdq_wide("a"),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("x".into()),
-                rhs: mod_vars(DirExpr::Var("t".into()), "d1"),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".into()),
+                rhs: mod_vars(PreHirExpr::Var("t".into()), "d1"),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("t".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".into()),
                 rhs: cdq_wide("b"),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("y".into()),
-                rhs: mod_vars(DirExpr::Var("t".into()), "d2"),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("y".into()),
+                rhs: mod_vars(PreHirExpr::Var("t".into()), "d2"),
             },
         ];
         assert!(collapse_cdq_signed_mod_in_stmts(&mut stmts));
-        let low_of = |stmt: &DirStmt| -> String {
+        let low_of = |stmt: &PreHirStmt| -> String {
             match stmt {
-                DirStmt::Assign {
+                PreHirStmt::Assign {
                     rhs:
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Mod,
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Mod,
                             lhs,
                             ..
                         },
                     ..
                 } => match strip_casts(lhs) {
-                    DirExpr::Var(n) => n,
+                    PreHirExpr::Var(n) => n,
                     other => panic!("expected var low, got {other:?}"),
                 },
                 other => panic!("expected assign mod, got {other:?}"),
@@ -1060,33 +1060,33 @@ mod cdq_tests {
     fn stmt_collapse_free_var_redef_kills_live_temp() {
         // t = wide(a); a = 0; x = t % d  → must NOT rewrite x to use new a.
         let mut stmts = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("t".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".into()),
                 rhs: cdq_wide("a"),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("a".into()),
-                rhs: DirExpr::Const(0, i32_ty()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("a".into()),
+                rhs: PreHirExpr::Const(0, i32_ty()),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("x".into()),
-                rhs: mod_vars(DirExpr::Var("t".into()), "d"),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".into()),
+                rhs: mod_vars(PreHirExpr::Var("t".into()), "d"),
             },
         ];
         let _ = collapse_cdq_signed_mod_in_stmts(&mut stmts);
         // x should still be t % d (Var form), not (int)a % …
         match &stmts[2] {
-            DirStmt::Assign {
+            PreHirStmt::Assign {
                 rhs:
-                    DirExpr::Binary {
-                        op: DirBinaryOp::Mod,
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Mod,
                         lhs,
                         ..
                     },
                 ..
             } => {
                 assert!(
-                    matches!(lhs.as_ref(), DirExpr::Var(n) if n == "t"),
+                    matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == "t"),
                     "free-var redef must kill temp fold; got {lhs:?}"
                 );
             }
@@ -1097,25 +1097,25 @@ mod cdq_tests {
     #[test]
     fn logical_shr_is_not_cdq_sign_fill() {
         // ( (x >> 32 logical) << 32 | x ) % y must NOT collapse.
-        let x = DirExpr::Var("x".into());
-        let shr = DirExpr::Binary {
-            op: DirBinaryOp::Shr,
-            lhs: Box::new(DirExpr::Cast {
+        let x = PreHirExpr::Var("x".into());
+        let shr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Cast {
                 ty: u64_ty(),
                 expr: Box::new(x.clone()),
             }),
-            rhs: Box::new(DirExpr::Const(32, i32_ty())),
+            rhs: Box::new(PreHirExpr::Const(32, i32_ty())),
             ty: u64_ty(),
         };
-        let wide = DirExpr::Binary {
-            op: DirBinaryOp::Or,
-            lhs: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+        let wide = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 lhs: Box::new(shr),
-                rhs: Box::new(DirExpr::Const(32, i32_ty())),
+                rhs: Box::new(PreHirExpr::Const(32, i32_ty())),
                 ty: u64_ty(),
             }),
-            rhs: Box::new(DirExpr::Cast {
+            rhs: Box::new(PreHirExpr::Cast {
                 ty: u64_ty(),
                 expr: Box::new(x),
             }),
@@ -1131,16 +1131,16 @@ mod cdq_tests {
     #[test]
     fn bare_copy_high_half_is_not_cdq_sign_fill() {
         // (copy(x) << 32 | x) % y — high is not SAR/SExt of x.
-        let x = DirExpr::Var("x".into());
-        let wide = DirExpr::Binary {
-            op: DirBinaryOp::Or,
-            lhs: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+        let x = PreHirExpr::Var("x".into());
+        let wide = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 lhs: Box::new(x.clone()),
-                rhs: Box::new(DirExpr::Const(32, i32_ty())),
+                rhs: Box::new(PreHirExpr::Const(32, i32_ty())),
                 ty: u64_ty(),
             }),
-            rhs: Box::new(DirExpr::Cast {
+            rhs: Box::new(PreHirExpr::Cast {
                 ty: u64_ty(),
                 expr: Box::new(x),
             }),

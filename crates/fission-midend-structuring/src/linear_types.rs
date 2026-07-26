@@ -5,7 +5,7 @@
 //! [`crate::host::StructuringHost`] without depending on PreviewBuilder.
 
 use fission_midend_core::ir::{DispatcherProofUnit, MlilPreviewOptions, UnsupportedControlEvidence};
-use fission_midend_dir::{DirExpr};
+use fission_midend_prehir::{PreHirExpr};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Instant;
@@ -37,12 +37,12 @@ pub enum LoweredTerminator {
     Fallthrough(Option<u64>),
     Goto(u64),
     Cond {
-        cond: DirExpr,
+        cond: PreHirExpr,
         true_target: u64,
         false_target: Option<u64>,
     },
     Switch {
-        expr: DirExpr,
+        expr: PreHirExpr,
         targets: Vec<u64>,
         default_target: Option<u64>,
         /// Offset for ordinal case indices when the selector was adjusted
@@ -50,10 +50,10 @@ pub enum LoweredTerminator {
         min_val: i64,
         proof: Option<DispatcherProofUnit>,
     },
-    Return(Option<DirExpr>),
+    Return(Option<PreHirExpr>),
     Unsupported {
         evidence: UnsupportedControlEvidence,
-        target_expr: Option<DirExpr>,
+        target_expr: Option<PreHirExpr>,
     },
 }
 
@@ -177,13 +177,13 @@ pub enum LinearBodyRejectReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearBodyLoweringOutcome {
-    Lowered((Vec<fission_midend_dir::DirStmt>, usize)),
+    Lowered((Vec<fission_midend_prehir::PreHirStmt>, usize)),
     Rejected(LinearBodyRejectReason),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearBodyCachedOutcome {
-    Lowered((Vec<fission_midend_dir::DirStmt>, usize)),
+    Lowered((Vec<fission_midend_prehir::PreHirStmt>, usize)),
     Rejected(LinearBodyRejectReason),
 }
 
@@ -201,7 +201,7 @@ pub enum ConditionalTailMismatchSubtype {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConditionalTailLoweringResult {
-    Lowered((fission_midend_dir::DirStmt, usize)),
+    Lowered((fission_midend_prehir::PreHirStmt, usize)),
     Mismatch(ConditionalTailMismatchSubtype),
 }
 

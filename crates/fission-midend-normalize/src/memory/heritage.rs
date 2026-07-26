@@ -14,7 +14,7 @@ use crate::{HashMap, HashSet};
 /// Aggregate) so heritage vars inherit real types rather than default uint.
 /// HighVariable `Cover` merge of resulting `vVar_*` versions is owned by
 /// [`crate::recovery::variable_merge::apply_variable_merge_pass`].
-pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
+pub fn apply_memory_heritage(func: &mut PreHirFunction) -> bool {
     let mem_ssa = build_mem_ssa(func);
 
     // All heritage-promotable spaces: fixed non-escaping stack/aggregate partitions.
@@ -88,7 +88,7 @@ pub fn apply_memory_heritage(func: &mut DirFunction) -> bool {
     // Register all new versioned variables in func.locals
     let mut new_locals = Vec::new();
     for (name, ty) in &var_types {
-        new_locals.push(DirBinding {
+        new_locals.push(PreHirBinding {
             name: name.clone(),
             ty: ty.clone(),
             surface_type_name: None,
@@ -142,7 +142,7 @@ fn record_access_type(out: &mut HashMap<AliasKey, NirType>, key: AliasKey, ty: &
 /// Scan the function for typed memory accesses on promotable keys
 /// (Cover-inspired type witness for heritage vars across all type spaces).
 fn collect_access_types_for_keys(
-    func: &DirFunction,
+    func: &PreHirFunction,
     promotable: &HashSet<AliasKey>,
 ) -> HashMap<AliasKey, NirType> {
     let mut out = HashMap::default();
@@ -151,14 +151,14 @@ fn collect_access_types_for_keys(
 }
 
 fn collect_access_types_in_stmts(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     promotable: &HashSet<AliasKey>,
     out: &mut HashMap<AliasKey, NirType>,
 ) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
-                if let DirLValue::Deref { ptr, ty } = lhs {
+            PreHirStmt::Assign { lhs, rhs } => {
+                if let PreHirLValue::Deref { ptr, ty } = lhs {
                     if !matches!(ty, NirType::Unknown) {
                         let key = alias_key_for_ptr(ptr, nir_byte_size(ty));
                         if promotable.contains(&key) {
@@ -166,7 +166,7 @@ fn collect_access_types_in_stmts(
                         }
                     }
                 }
-                if let DirLValue::Index { base, elem_ty, .. } = lhs {
+                if let PreHirLValue::Index { base, elem_ty, .. } = lhs {
                     if !matches!(elem_ty, NirType::Unknown) {
                         let key = alias_key_for_ptr(base, nir_byte_size(elem_ty));
                         if promotable.contains(&key) {
@@ -176,11 +176,11 @@ fn collect_access_types_in_stmts(
                 }
                 collect_access_types_in_expr(rhs, promotable, out);
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => collect_access_types_in_stmts(body, promotable, out),
-            DirStmt::If {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_access_types_in_stmts(body, promotable, out),
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -188,13 +188,13 @@ fn collect_access_types_in_stmts(
                 collect_access_types_in_stmts(then_body, promotable, out);
                 collect_access_types_in_stmts(else_body, promotable, out);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_access_types_in_stmts(&case.body, promotable, out);
                 }
                 collect_access_types_in_stmts(default, promotable, out);
             }
-            DirStmt::Expr(e) | DirStmt::Return(Some(e)) => {
+            PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => {
                 collect_access_types_in_expr(e, promotable, out);
             }
             _ => {}
@@ -203,19 +203,19 @@ fn collect_access_types_in_stmts(
 }
 
 fn collect_access_types_in_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     promotable: &HashSet<AliasKey>,
     out: &mut HashMap<AliasKey, NirType>,
 ) {
     match expr {
-        DirExpr::Load { ptr, ty } if !matches!(ty, NirType::Unknown) => {
+        PreHirExpr::Load { ptr, ty } if !matches!(ty, NirType::Unknown) => {
             let key = alias_key_for_ptr(ptr, nir_byte_size(ty));
             if promotable.contains(&key) {
                 record_access_type(out, key, ty);
             }
             collect_access_types_in_expr(ptr, promotable, out);
         }
-        DirExpr::Index {
+        PreHirExpr::Index {
             base,
             elem_ty,
             index,
@@ -227,18 +227,18 @@ fn collect_access_types_in_expr(
             collect_access_types_in_expr(base, promotable, out);
             collect_access_types_in_expr(index, promotable, out);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             collect_access_types_in_expr(lhs, promotable, out);
             collect_access_types_in_expr(rhs, promotable, out);
         }
-        DirExpr::Unary { expr, .. }
-        | DirExpr::Cast { expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => {
+        PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => {
             collect_access_types_in_expr(expr, promotable, out);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -248,13 +248,13 @@ fn collect_access_types_in_expr(
             collect_access_types_in_expr(then_expr, promotable, out);
             collect_access_types_in_expr(else_expr, promotable, out);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for a in args {
                 collect_access_types_in_expr(a, promotable, out);
             }
         }
-        DirExpr::Load { ptr, .. } => collect_access_types_in_expr(ptr, promotable, out),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Load { ptr, .. } => collect_access_types_in_expr(ptr, promotable, out),
+        PreHirExpr::Index { base, index, .. } => {
             collect_access_types_in_expr(base, promotable, out);
             collect_access_types_in_expr(index, promotable, out);
         }
@@ -274,7 +274,7 @@ struct Rewriter<'a> {
 }
 
 impl<'a> Rewriter<'a> {
-    fn rewrite_stmts(&mut self, stmts: &mut Vec<DirStmt>) {
+    fn rewrite_stmts(&mut self, stmts: &mut Vec<PreHirStmt>) {
         let mut i = 0;
         while i < stmts.len() {
             let to_insert = self.rewrite_stmt(&mut stmts[i]);
@@ -289,10 +289,10 @@ impl<'a> Rewriter<'a> {
         }
     }
 
-    fn rewrite_stmt(&mut self, stmt: &mut DirStmt) -> Vec<DirStmt> {
+    fn rewrite_stmt(&mut self, stmt: &mut PreHirStmt) -> Vec<PreHirStmt> {
         let mut pre_insert = Vec::new();
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
+            PreHirStmt::Assign { lhs, rhs } => {
                 // Rewrite rhs uses first
                 self.rewrite_expr(rhs);
 
@@ -301,7 +301,7 @@ impl<'a> Rewriter<'a> {
                 let mut new_var_name = None;
 
                 match lhs {
-                    DirLValue::Deref { ptr, ty } => {
+                    PreHirLValue::Deref { ptr, ty } => {
                         let size = nir_byte_size(ty);
                         let key = alias_key_for_ptr(ptr, size);
                         if self.promotable_keys.contains(&key) {
@@ -321,7 +321,7 @@ impl<'a> Rewriter<'a> {
                             }
                         }
                     }
-                    DirLValue::Index {
+                    PreHirLValue::Index {
                         base,
                         index: _,
                         elem_ty,
@@ -349,17 +349,17 @@ impl<'a> Rewriter<'a> {
 
                 if is_promoted {
                     if let Some(var_name) = new_var_name {
-                        *lhs = DirLValue::Var(var_name);
+                        *lhs = PreHirLValue::Var(var_name);
                     }
                 }
             }
-            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 self.rewrite_expr(expr);
             }
-            DirStmt::Block(body) => {
+            PreHirStmt::Block(body) => {
                 self.rewrite_stmts(body);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -393,9 +393,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     then_body,
-                                    DirStmt::Assign {
-                                        lhs: DirLValue::Var(phi_var.clone()),
-                                        rhs: DirExpr::Var(then_var.clone()),
+                                    PreHirStmt::Assign {
+                                        lhs: PreHirLValue::Var(phi_var.clone()),
+                                        rhs: PreHirExpr::Var(then_var.clone()),
                                     },
                                 );
                             }
@@ -405,9 +405,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     else_body,
-                                    DirStmt::Assign {
-                                        lhs: DirLValue::Var(phi_var.clone()),
-                                        rhs: DirExpr::Var(else_var.clone()),
+                                    PreHirStmt::Assign {
+                                        lhs: PreHirLValue::Var(phi_var.clone()),
+                                        rhs: PreHirExpr::Var(else_var.clone()),
                                     },
                                 );
                             }
@@ -415,7 +415,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            DirStmt::While { cond, body } => {
+            PreHirStmt::While { cond, body } => {
                 self.rewrite_expr(cond);
 
                 let mut merge_phis = Vec::new();
@@ -439,9 +439,9 @@ impl<'a> Rewriter<'a> {
                             // Pre-loop: phi_var = pre_input_var
                             if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
                             {
-                                pre_insert.push(DirStmt::Assign {
-                                    lhs: DirLValue::Var(phi_var.clone()),
-                                    rhs: DirExpr::Var(pre_var.clone()),
+                                pre_insert.push(PreHirStmt::Assign {
+                                    lhs: PreHirLValue::Var(phi_var.clone()),
+                                    rhs: PreHirExpr::Var(pre_var.clone()),
                                 });
                             }
                             // Loop end: phi_var = body_input_var
@@ -450,9 +450,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     body,
-                                    DirStmt::Assign {
-                                        lhs: DirLValue::Var(phi_var.clone()),
-                                        rhs: DirExpr::Var(body_var.clone()),
+                                    PreHirStmt::Assign {
+                                        lhs: PreHirLValue::Var(phi_var.clone()),
+                                        rhs: PreHirExpr::Var(body_var.clone()),
                                     },
                                 );
                             }
@@ -460,7 +460,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 let mut merge_phis = Vec::new();
                 while self.current_phi_idx < self.phis.len() {
                     let phi = &self.phis[self.current_phi_idx];
@@ -481,9 +481,9 @@ impl<'a> Rewriter<'a> {
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
                             if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
                             {
-                                pre_insert.push(DirStmt::Assign {
-                                    lhs: DirLValue::Var(phi_var.clone()),
-                                    rhs: DirExpr::Var(pre_var.clone()),
+                                pre_insert.push(PreHirStmt::Assign {
+                                    lhs: PreHirLValue::Var(phi_var.clone()),
+                                    rhs: PreHirExpr::Var(pre_var.clone()),
                                 });
                             }
                             if let Some(body_var) =
@@ -491,9 +491,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     body,
-                                    DirStmt::Assign {
-                                        lhs: DirLValue::Var(phi_var.clone()),
-                                        rhs: DirExpr::Var(body_var.clone()),
+                                    PreHirStmt::Assign {
+                                        lhs: PreHirLValue::Var(phi_var.clone()),
+                                        rhs: PreHirExpr::Var(body_var.clone()),
                                     },
                                 );
                             }
@@ -501,7 +501,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -513,7 +513,7 @@ impl<'a> Rewriter<'a> {
                     if dummy.len() == 1 {
                         *s = Box::new(dummy.remove(0));
                     } else if !dummy.is_empty() {
-                        *s = Box::new(DirStmt::Block(dummy));
+                        *s = Box::new(PreHirStmt::Block(dummy));
                     }
                 }
                 if let Some(e) = cond {
@@ -537,7 +537,7 @@ impl<'a> Rewriter<'a> {
                     if dummy.len() == 1 {
                         *s = Box::new(dummy.remove(0));
                     } else if !dummy.is_empty() {
-                        *s = Box::new(DirStmt::Block(dummy));
+                        *s = Box::new(PreHirStmt::Block(dummy));
                     }
                 }
 
@@ -549,9 +549,9 @@ impl<'a> Rewriter<'a> {
                         if let Some(phi_var) = self.var_names.get(&(phi.key.clone(), phi.id)) {
                             if let Some(pre_var) = self.var_names.get(&(phi.key.clone(), pre_input))
                             {
-                                pre_insert.push(DirStmt::Assign {
-                                    lhs: DirLValue::Var(phi_var.clone()),
-                                    rhs: DirExpr::Var(pre_var.clone()),
+                                pre_insert.push(PreHirStmt::Assign {
+                                    lhs: PreHirLValue::Var(phi_var.clone()),
+                                    rhs: PreHirExpr::Var(pre_var.clone()),
                                 });
                             }
                             if let Some(body_var) =
@@ -559,9 +559,9 @@ impl<'a> Rewriter<'a> {
                             {
                                 append_to_body_before_cf(
                                     body,
-                                    DirStmt::Assign {
-                                        lhs: DirLValue::Var(phi_var.clone()),
-                                        rhs: DirExpr::Var(body_var.clone()),
+                                    PreHirStmt::Assign {
+                                        lhs: PreHirLValue::Var(phi_var.clone()),
+                                        rhs: PreHirExpr::Var(body_var.clone()),
                                     },
                                 );
                             }
@@ -569,7 +569,7 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -620,9 +620,9 @@ impl<'a> Rewriter<'a> {
                                     if let Some(v) = arm_var {
                                         append_to_body_before_cf(
                                             &mut case.body,
-                                            DirStmt::Assign {
-                                                lhs: DirLValue::Var(phi_var.clone()),
-                                                rhs: DirExpr::Var(v),
+                                            PreHirStmt::Assign {
+                                                lhs: PreHirLValue::Var(phi_var.clone()),
+                                                rhs: PreHirExpr::Var(v),
                                             },
                                         );
                                     }
@@ -633,9 +633,9 @@ impl<'a> Rewriter<'a> {
                                 if let Some(v) = default_var {
                                     append_to_body_before_cf(
                                         default,
-                                        DirStmt::Assign {
-                                            lhs: DirLValue::Var(phi_var.clone()),
-                                            rhs: DirExpr::Var(v),
+                                        PreHirStmt::Assign {
+                                            lhs: PreHirLValue::Var(phi_var.clone()),
+                                            rhs: PreHirExpr::Var(v),
                                         },
                                     );
                                 }
@@ -649,9 +649,9 @@ impl<'a> Rewriter<'a> {
         pre_insert
     }
 
-    fn rewrite_expr(&mut self, expr: &mut DirExpr) {
+    fn rewrite_expr(&mut self, expr: &mut PreHirExpr) {
         match expr {
-            DirExpr::Load { ptr, ty } => {
+            PreHirExpr::Load { ptr, ty } => {
                 let size = nir_byte_size(ty);
                 let key = alias_key_for_ptr(ptr, size);
 
@@ -680,23 +680,23 @@ impl<'a> Rewriter<'a> {
 
                 if is_promoted {
                     if let Some(var_name) = promoted_var {
-                        *expr = DirExpr::Var(var_name);
+                        *expr = PreHirExpr::Var(var_name);
                     }
                 } else {
                     self.rewrite_expr(ptr);
                 }
             }
-            DirExpr::Cast { expr, .. }
-            | DirExpr::Unary { expr, .. }
-            | DirExpr::PtrOffset { base: expr, .. }
-            | DirExpr::AggregateCopy { src: expr, .. } => {
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. } => {
                 self.rewrite_expr(expr);
             }
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 self.rewrite_expr(lhs);
                 self.rewrite_expr(rhs);
             }
-            DirExpr::Select {
+            PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -706,12 +706,12 @@ impl<'a> Rewriter<'a> {
                 self.rewrite_expr(then_expr);
                 self.rewrite_expr(else_expr);
             }
-            DirExpr::Call { args, .. } => {
+            PreHirExpr::Call { args, .. } => {
                 for arg in args {
                     self.rewrite_expr(arg);
                 }
             }
-            DirExpr::Index { base, index, .. } => {
+            PreHirExpr::Index { base, index, .. } => {
                 self.rewrite_expr(base);
                 self.rewrite_expr(index);
             }
@@ -720,7 +720,7 @@ impl<'a> Rewriter<'a> {
     }
 }
 
-fn alias_key_for_ptr(ptr: &DirExpr, size: u32) -> AliasKey {
+fn alias_key_for_ptr(ptr: &PreHirExpr, size: u32) -> AliasKey {
     let access_ty = NirType::Aggregate {
         size,
         fields: vec![],
@@ -730,22 +730,22 @@ fn alias_key_for_ptr(ptr: &DirExpr, size: u32) -> AliasKey {
         .unwrap_or(AliasKey::Unknown)
 }
 
-fn find_last_def_in_stmts(stmts: &[DirStmt], base_name: &str) -> Option<String> {
+fn find_last_def_in_stmts(stmts: &[PreHirStmt], base_name: &str) -> Option<String> {
     for stmt in stmts.iter().rev() {
         match stmt {
-            DirStmt::Assign { lhs, .. } => {
-                if let DirLValue::Var(name) = lhs {
+            PreHirStmt::Assign { lhs, .. } => {
+                if let PreHirLValue::Var(name) = lhs {
                     if name.starts_with(&format!("vVar_{}_", base_name)) {
                         return Some(name.clone());
                     }
                 }
             }
-            DirStmt::Block(body) => {
+            PreHirStmt::Block(body) => {
                 if let Some(name) = find_last_def_in_stmts(body, base_name) {
                     return Some(name);
                 }
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -757,14 +757,14 @@ fn find_last_def_in_stmts(stmts: &[DirStmt], base_name: &str) -> Option<String> 
                     return Some(name);
                 }
             }
-            DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 if let Some(name) = find_last_def_in_stmts(body, base_name) {
                     return Some(name);
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 if let Some(name) = find_last_def_in_stmts(default, base_name) {
                     return Some(name);
                 }
@@ -780,11 +780,11 @@ fn find_last_def_in_stmts(stmts: &[DirStmt], base_name: &str) -> Option<String> 
     None
 }
 
-fn append_to_body_before_cf(body: &mut Vec<DirStmt>, stmt: DirStmt) {
+fn append_to_body_before_cf(body: &mut Vec<PreHirStmt>, stmt: PreHirStmt) {
     if let Some(last) = body.last() {
         if matches!(
             last,
-            DirStmt::Break | DirStmt::Continue | DirStmt::Goto(_) | DirStmt::Return(_)
+            PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Goto(_) | PreHirStmt::Return(_)
         ) {
             let idx = body.len() - 1;
             body.insert(idx, stmt);

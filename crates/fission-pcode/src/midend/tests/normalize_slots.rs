@@ -63,12 +63,12 @@ fn stack_slot_recovery_names_locals() {
 #[test]
 fn normalize_trivial_assign_return_chain() {
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("result".to_string()),
-            rhs: DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Var("param_1".to_string())),
-                rhs: Box::new(DirExpr::Const(
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("result".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("param_1".to_string())),
+                rhs: Box::new(PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -81,7 +81,7 @@ fn normalize_trivial_assign_return_chain() {
                 },
             },
         },
-        DirStmt::Return(Some(DirExpr::Var("result".to_string()))),
+        PreHirStmt::Return(Some(PreHirExpr::Var("result".to_string()))),
     ];
     normalize_function_body(&mut body);
     assert_eq!(body.len(), 1);
@@ -91,9 +91,9 @@ fn normalize_trivial_assign_return_chain() {
 #[test]
 fn normalize_inlines_single_use_trivial_temp() {
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("uVar1".to_string()),
-            rhs: DirExpr::Const(
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("uVar1".to_string()),
+            rhs: PreHirExpr::Const(
                 7,
                 NirType::Int {
                     bits: 32,
@@ -101,7 +101,7 @@ fn normalize_inlines_single_use_trivial_temp() {
                 },
             ),
         },
-        DirStmt::Return(Some(DirExpr::Var("uVar1".to_string()))),
+        PreHirStmt::Return(Some(PreHirExpr::Var("uVar1".to_string()))),
     ];
     normalize_function_body(&mut body);
     assert_eq!(body.len(), 1);
@@ -111,9 +111,9 @@ fn normalize_inlines_single_use_trivial_temp() {
 #[test]
 fn normalize_inlines_non_adjacent_single_use_trivial_temp() {
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("uVar1".to_string()),
-            rhs: DirExpr::Const(
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("uVar1".to_string()),
+            rhs: PreHirExpr::Const(
                 7,
                 NirType::Int {
                     bits: 32,
@@ -121,9 +121,9 @@ fn normalize_inlines_non_adjacent_single_use_trivial_temp() {
                 },
             ),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("local_10".to_string()),
-            rhs: DirExpr::Const(
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("local_10".to_string()),
+            rhs: PreHirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 32,
@@ -131,10 +131,10 @@ fn normalize_inlines_non_adjacent_single_use_trivial_temp() {
                 },
             ),
         },
-        DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Var("uVar1".to_string())),
-            rhs: Box::new(DirExpr::Var("local_10".to_string())),
+        PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("uVar1".to_string())),
+            rhs: Box::new(PreHirExpr::Var("local_10".to_string())),
             ty: NirType::Int {
                 bits: 32,
                 signed: true,
@@ -153,29 +153,29 @@ fn normalize_does_not_inline_load_temp_across_store() {
         signed: false,
     };
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("uVar1".to_string()),
-            rhs: DirExpr::Load {
-                ptr: Box::new(DirExpr::Var("a".to_string())),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("uVar1".to_string()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("a".to_string())),
                 ty: uint_ty.clone(),
             },
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Deref {
-                ptr: Box::new(DirExpr::Var("a".to_string())),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("a".to_string())),
                 ty: uint_ty.clone(),
             },
-            rhs: DirExpr::Load {
-                ptr: Box::new(DirExpr::Var("b".to_string())),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("b".to_string())),
                 ty: uint_ty.clone(),
             },
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Deref {
-                ptr: Box::new(DirExpr::Var("b".to_string())),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("b".to_string())),
                 ty: uint_ty,
             },
-            rhs: DirExpr::Var("uVar1".to_string()),
+            rhs: PreHirExpr::Var("uVar1".to_string()),
         },
     ];
     normalize_function_body(&mut body);
@@ -190,17 +190,17 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
         bits: 32,
         signed: false,
     };
-    let idx = DirExpr::Var("idx".to_string());
-    let slot_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::PtrOffset {
-            base: Box::new(DirExpr::Var("param_1".to_string())),
+    let idx = PreHirExpr::Var("idx".to_string());
+    let slot_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("param_1".to_string())),
             offset: 0x20,
         }),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(idx.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 64,
@@ -214,10 +214,10 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
         }),
         ty: NirType::Ptr(Box::new(NirType::Unknown)),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -227,13 +227,13 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
         locals: vec![],
         return_type: uint_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr.clone()),
                 ty: uint_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr),
                 ty: uint_ty.clone(),
             }),
@@ -243,7 +243,7 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         func.locals
             .iter()
@@ -262,26 +262,26 @@ fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
         bits: 8,
         signed: false,
     };
-    let slot_ptr = |base: &str| DirExpr::PtrOffset {
-        base: Box::new(DirExpr::Var(base.to_string())),
+    let slot_ptr = |base: &str| PreHirExpr::PtrOffset {
+        base: Box::new(PreHirExpr::Var(base.to_string())),
         offset: 0,
     };
-    let repeated_load = |base: &str| DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::Load {
+    let repeated_load = |base: &str| PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::Load {
             ptr: Box::new(slot_ptr(base)),
             ty: byte_ty.clone(),
         }),
-        rhs: Box::new(DirExpr::Load {
+        rhs: Box::new(PreHirExpr::Load {
             ptr: Box::new(slot_ptr(base)),
             ty: byte_ty.clone(),
         }),
         ty: byte_ty.clone(),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_alias_order_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -289,14 +289,14 @@ fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
             initializer: None,
         }],
         locals: vec![
-            DirBinding {
+            PreHirBinding {
                 name: "rdi".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            DirBinding {
+            PreHirBinding {
                 name: "rax".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
                 surface_type_name: None,
@@ -306,10 +306,10 @@ fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
         ],
         return_type: byte_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Add,
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
                 lhs: Box::new(repeated_load("rax")),
                 rhs: Box::new(repeated_load("param_1")),
                 ty: byte_ty.clone(),
@@ -322,7 +322,7 @@ fn memory_slot_surfacing_assigns_aliases_in_deterministic_first_use_order() {
 
     normalize_hir_function(&mut func);
 
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         !func
             .locals
@@ -342,26 +342,26 @@ fn memory_slot_surfacing_sorts_promoted_bindings_by_final_name() {
         bits: 32,
         signed: false,
     };
-    let slot_ptr = |offset: i64| DirExpr::PtrOffset {
-        base: Box::new(DirExpr::Var("param_1".to_string())),
+    let slot_ptr = |offset: i64| PreHirExpr::PtrOffset {
+        base: Box::new(PreHirExpr::Var("param_1".to_string())),
         offset,
     };
-    let repeated_load = |offset: i64| DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::Load {
+    let repeated_load = |offset: i64| PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::Load {
             ptr: Box::new(slot_ptr(offset)),
             ty: uint_ty.clone(),
         }),
-        rhs: Box::new(DirExpr::Load {
+        rhs: Box::new(PreHirExpr::Load {
             ptr: Box::new(slot_ptr(offset)),
             ty: uint_ty.clone(),
         }),
         ty: uint_ty.clone(),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_decl_order_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -371,8 +371,8 @@ fn memory_slot_surfacing_sorts_promoted_bindings_by_final_name() {
         locals: vec![],
         return_type: uint_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs: Box::new(repeated_load(0x12f0)),
             rhs: Box::new(repeated_load(0)),
             ty: uint_ty.clone(),
@@ -397,39 +397,39 @@ fn memory_slot_surfacing_collapses_zero_offset_direct_alias_source() {
         bits: 8,
         signed: false,
     };
-    let slot_ptr = DirExpr::PtrOffset {
-        base: Box::new(DirExpr::Var("xVar203".to_string())),
+    let slot_ptr = PreHirExpr::PtrOffset {
+        base: Box::new(PreHirExpr::Var("xVar203".to_string())),
         offset: 0,
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_alias_source_fn".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            DirBinding {
+            PreHirBinding {
                 name: "rax".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
             },
-            DirBinding {
+            PreHirBinding {
                 name: "xVar203".to_string(),
                 ty: NirType::Ptr(Box::new(NirType::Unknown)),
                 surface_type_name: None,
                 origin: None,
-                initializer: Some(DirExpr::Var("rax".to_string())),
+                initializer: Some(PreHirExpr::Var("rax".to_string())),
             },
         ],
         return_type: byte_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr.clone()),
                 ty: byte_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr),
                 ty: byte_ty.clone(),
             }),
@@ -440,7 +440,7 @@ fn memory_slot_surfacing_collapses_zero_offset_direct_alias_source() {
 
     normalize_hir_function(&mut func);
 
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         !func.locals.iter().any(|binding| binding.name == "slot_0"),
         "{rendered}"
@@ -454,15 +454,15 @@ fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
         bits: 8,
         signed: false,
     };
-    let slot_ptr = DirExpr::PtrOffset {
-        base: Box::new(DirExpr::Var("xVar203".to_string())),
+    let slot_ptr = PreHirExpr::PtrOffset {
+        base: Box::new(PreHirExpr::Var("xVar203".to_string())),
         offset: 0,
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_body_alias_source_fn".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
-        locals: vec![DirBinding {
+        locals: vec![PreHirBinding {
             name: "rax".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -472,17 +472,17 @@ fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
         return_type: byte_ty.clone(),
         surface_return_type_name: None,
         body: vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("xVar203".to_string()),
-                rhs: DirExpr::Var("rax".to_string()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("xVar203".to_string()),
+                rhs: PreHirExpr::Var("rax".to_string()),
             },
-            DirStmt::Return(Some(DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Load {
+            PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Load {
                     ptr: Box::new(slot_ptr.clone()),
                     ty: byte_ty.clone(),
                 }),
-                rhs: Box::new(DirExpr::Load {
+                rhs: Box::new(PreHirExpr::Load {
                     ptr: Box::new(slot_ptr),
                     ty: byte_ty.clone(),
                 }),
@@ -494,7 +494,7 @@ fn memory_slot_surfacing_collapses_zero_offset_single_def_body_alias_source() {
 
     normalize_hir_function(&mut func);
 
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         !func.locals.iter().any(|binding| binding.name == "slot_0"),
         "{rendered}"
@@ -513,24 +513,24 @@ fn memory_slot_surfacing_skips_zero_offset_naked_temp_bases() {
         bits: 8,
         signed: false,
     };
-    let slot_ptr = DirExpr::PtrOffset {
-        base: Box::new(DirExpr::Var("xVar203".to_string())),
+    let slot_ptr = PreHirExpr::PtrOffset {
+        base: Box::new(PreHirExpr::Var("xVar203".to_string())),
         offset: 0,
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_naked_temp_base_fn".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![],
         return_type: byte_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr.clone()),
                 ty: byte_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr),
                 ty: byte_ty.clone(),
             }),
@@ -560,14 +560,14 @@ fn normalize_hir_function_preserves_stack_origin_on_surfaced_slot_alias() {
         bits: 32,
         signed: false,
     };
-    let idx = DirExpr::Var("idx".to_string());
-    let slot_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::Var("local_base".to_string())),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+    let idx = PreHirExpr::Var("idx".to_string());
+    let slot_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::Var("local_base".to_string())),
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(idx.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 64,
@@ -581,11 +581,11 @@ fn normalize_hir_function_preserves_stack_origin_on_surfaced_slot_alias() {
         }),
         ty: NirType::Ptr(Box::new(NirType::Unknown)),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_origin_fn".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
-        locals: vec![DirBinding {
+        locals: vec![PreHirBinding {
             name: "local_base".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -594,13 +594,13 @@ fn normalize_hir_function_preserves_stack_origin_on_surfaced_slot_alias() {
         }],
         return_type: uint_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr.clone()),
                 ty: uint_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr),
                 ty: uint_ty.clone(),
             }),
@@ -628,14 +628,14 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
         bits: 32,
         signed: false,
     };
-    let idx = DirExpr::Var("idx".to_string());
-    let slot_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::Var("local_base".to_string())),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+    let idx = PreHirExpr::Var("idx".to_string());
+    let slot_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::Var("local_base".to_string())),
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(idx.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 64,
@@ -649,11 +649,11 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
         }),
         ty: NirType::Ptr(Box::new(NirType::Unknown)),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_hint_fn".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
-        locals: vec![DirBinding {
+        locals: vec![PreHirBinding {
             name: "local_base".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -662,13 +662,13 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
         }],
         return_type: uint_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr.clone()),
                 ty: uint_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr),
                 ty: uint_ty.clone(),
             }),
@@ -679,11 +679,11 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
 
     normalize_hir_function(&mut func);
     // Mirrors the real pipeline boundary (orchestrate.rs): normalize
-    // operates on DIR, `apply_preview_type_hints` runs after structuring
+    // operates on PreHIR, `apply_preview_type_hints` runs after structuring
     // on the real HIR -- this fixture has no actual structuring step (its
-    // body is already a single `Return`), so the DIR->HIR conversion here
+    // body is already a single `Return`), so the PreHIR->HIR conversion here
     // is the whole boundary crossing.
-    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(func.body.clone());
+    let hir_body = fission_midend_prehir::ir::prehir_stmts_to_hir_stmts(func.body.clone());
     let mut func = func.into_hir_function(hir_body);
 
     let context = PreviewTypeContext {
@@ -698,8 +698,12 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
         function_hints: Some(PreviewFunctionHints {
             param_names: Vec::new(),
             param_type_names: std::collections::HashMap::default(),
-            stack_local_names: [(-0x20, "base_ptr".to_string())].into_iter().collect::<std::collections::HashMap<_,_>>(),
-            stack_local_type_names: [(-0x20, "RECT".to_string())].into_iter().collect::<std::collections::HashMap<_,_>>(),
+            stack_local_names: [(-0x20, "base_ptr".to_string())]
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>(),
+            stack_local_type_names: [(-0x20, "RECT".to_string())]
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>(),
             return_type_name: None,
             register_local_names: std::collections::HashMap::default(),
         }),
@@ -735,17 +739,17 @@ fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
         bits: 32,
         signed: false,
     };
-    let idx = DirExpr::Var("idx".to_string());
-    let slot_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::PtrOffset {
-            base: Box::new(DirExpr::Var("param_1".to_string())),
+    let idx = PreHirExpr::Var("idx".to_string());
+    let slot_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("param_1".to_string())),
             offset: 0x28,
         }),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(idx.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 64,
@@ -759,10 +763,10 @@ fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
         }),
         ty: NirType::Ptr(Box::new(NirType::Unknown)),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "slot_store_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -773,14 +777,14 @@ fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
         return_type: NirType::Unknown,
         surface_return_type_name: None,
         body: vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Deref {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
                     ptr: Box::new(slot_ptr.clone()),
                     ty: uint_ty.clone(),
                 },
-                rhs: DirExpr::Const(7, uint_ty.clone()),
+                rhs: PreHirExpr::Const(7, uint_ty.clone()),
             },
-            DirStmt::Return(Some(DirExpr::Load {
+            PreHirStmt::Return(Some(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr),
                 ty: uint_ty.clone(),
             })),
@@ -789,7 +793,7 @@ fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(rendered.contains("slot_28[idx] = 7;"), "{rendered}");
     assert!(rendered.contains("return slot_28[idx];"), "{rendered}");
 }
@@ -800,17 +804,17 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
         bits: 8,
         signed: false,
     };
-    let idx = DirExpr::Var("idx".to_string());
-    let mismatched_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::PtrOffset {
-            base: Box::new(DirExpr::Var("param_1".to_string())),
+    let idx = PreHirExpr::Var("idx".to_string());
+    let mismatched_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("param_1".to_string())),
             offset: 0x30,
         }),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(idx),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 64,
@@ -824,10 +828,10 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
         }),
         ty: NirType::Ptr(Box::new(NirType::Unknown)),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "mismatch_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -837,13 +841,13 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
         locals: vec![],
         return_type: byte_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(mismatched_ptr.clone()),
                 ty: byte_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(mismatched_ptr),
                 ty: byte_ty.clone(),
             }),
@@ -853,7 +857,7 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(!rendered.contains("slot_30["), "{rendered}");
     assert!(
         !func
@@ -869,17 +873,17 @@ fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
         bits: 32,
         signed: false,
     };
-    let idx = DirExpr::Var("idx".to_string());
-    let lane0_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::PtrOffset {
-            base: Box::new(DirExpr::Var("param_1".to_string())),
+    let idx = PreHirExpr::Var("idx".to_string());
+    let lane0_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("param_1".to_string())),
             offset: 0xc9b8,
         }),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(idx.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 16,
                 NirType::Int {
                     bits: 64,
@@ -893,14 +897,14 @@ fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
         }),
         ty: NirType::Ptr(Box::new(NirType::Unknown)),
     };
-    let lane1_ptr = DirExpr::PtrOffset {
+    let lane1_ptr = PreHirExpr::PtrOffset {
         base: Box::new(lane0_ptr.clone()),
         offset: 4,
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "family_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -910,13 +914,13 @@ fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
         locals: vec![],
         return_type: uint_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(lane0_ptr),
                 ty: uint_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(lane1_ptr),
                 ty: uint_ty.clone(),
             }),
@@ -926,7 +930,7 @@ fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(rendered.contains("slot_c9b8[idx]"), "{rendered}");
     assert!(rendered.contains("slot_c9b8_lane1[idx]"), "{rendered}");
 }
@@ -937,10 +941,10 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
         bits: 32,
         signed: false,
     };
-    let biased_idx = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::Var("idx".to_string())),
-        rhs: Box::new(DirExpr::Const(
+    let biased_idx = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::Var("idx".to_string())),
+        rhs: Box::new(PreHirExpr::Const(
             1,
             NirType::Int {
                 bits: 64,
@@ -952,16 +956,16 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
             signed: true,
         },
     };
-    let slot_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::PtrOffset {
-            base: Box::new(DirExpr::Var("param_1".to_string())),
+    let slot_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("param_1".to_string())),
             offset: 0x20,
         }),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(biased_idx),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 64,
@@ -975,10 +979,10 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
         }),
         ty: NirType::Ptr(Box::new(NirType::Unknown)),
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "biased_idx_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -988,13 +992,13 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
         locals: vec![],
         return_type: uint_ty.clone(),
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Load {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr.clone()),
                 ty: uint_ty.clone(),
             }),
-            rhs: Box::new(DirExpr::Load {
+            rhs: Box::new(PreHirExpr::Load {
                 ptr: Box::new(slot_ptr),
                 ty: uint_ty.clone(),
             }),
@@ -1004,7 +1008,7 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         rendered.contains("slot_24[idx] + slot_24[idx]"),
         "{rendered}"
@@ -1017,14 +1021,14 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
         bits: 32,
         signed: false,
     };
-    let idx = DirExpr::Var("idx".to_string());
-    let slot_ptr = DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::Var("esp".to_string())),
-        rhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+    let idx = PreHirExpr::Var("idx".to_string());
+    let slot_ptr = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::Var("esp".to_string())),
+        rhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(idx.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 32,
@@ -1040,7 +1044,7 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
     };
     let mut body = Vec::new();
     for i in 0..230 {
-        body.push(DirStmt::Expr(DirExpr::Const(
+        body.push(PreHirStmt::Expr(PreHirExpr::Const(
             i,
             NirType::Int {
                 bits: 32,
@@ -1048,19 +1052,19 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
             },
         )));
     }
-    body.push(DirStmt::Return(Some(DirExpr::Binary {
-        op: DirBinaryOp::Add,
-        lhs: Box::new(DirExpr::Load {
+    body.push(PreHirStmt::Return(Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(PreHirExpr::Load {
             ptr: Box::new(slot_ptr.clone()),
             ty: uint_ty.clone(),
         }),
-        rhs: Box::new(DirExpr::Load {
+        rhs: Box::new(PreHirExpr::Load {
             ptr: Box::new(slot_ptr),
             ty: uint_ty.clone(),
         }),
         ty: uint_ty.clone(),
     })));
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "large_slot_fn".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
@@ -1072,16 +1076,16 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(rendered.contains("slot_0[idx] + slot_0[idx]"), "{rendered}");
 }
 
 #[test]
 fn normalize_hir_function_removes_write_only_non_temp_locals() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "dead_local_clobber_fn".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Int {
                 bits: 32,
@@ -1092,7 +1096,7 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
             initializer: None,
         }],
         locals: vec![
-            DirBinding {
+            PreHirBinding {
                 name: "local_c".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1102,7 +1106,7 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
                 origin: None,
                 initializer: None,
             },
-            DirBinding {
+            PreHirBinding {
                 name: "param_fffffffc".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1119,9 +1123,9 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
         },
         surface_return_type_name: None,
         body: vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("local_c".to_string()),
-                rhs: DirExpr::Const(
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("local_c".to_string()),
+                rhs: PreHirExpr::Const(
                     4198578,
                     NirType::Int {
                         bits: 32,
@@ -1129,9 +1133,9 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
                     },
                 ),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("param_fffffffc".to_string()),
-                rhs: DirExpr::Const(
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("param_fffffffc".to_string()),
+                rhs: PreHirExpr::Const(
                     0,
                     NirType::Int {
                         bits: 32,
@@ -1139,13 +1143,13 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
                     },
                 ),
             },
-            DirStmt::Return(Some(DirExpr::Var("param_1".to_string()))),
+            PreHirStmt::Return(Some(PreHirExpr::Var("param_1".to_string()))),
         ],
         ..Default::default()
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(!rendered.contains("local_c ="), "{rendered}");
     assert!(!rendered.contains("param_fffffffc ="), "{rendered}");
     assert!(!rendered.contains("uint local_c;"), "{rendered}");
@@ -1155,12 +1159,12 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
 
 #[test]
 fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "keep_local_clobber_fn".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
         locals: vec![
-            DirBinding {
+            PreHirBinding {
                 name: "local_c".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1170,7 +1174,7 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
                 origin: None,
                 initializer: None,
             },
-            DirBinding {
+            PreHirBinding {
                 name: "local_10".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1187,9 +1191,9 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
         },
         surface_return_type_name: None,
         body: vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("local_c".to_string()),
-                rhs: DirExpr::Call {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("local_c".to_string()),
+                rhs: PreHirExpr::Call {
                     target: "sub_401000".to_string(),
                     args: vec![],
                     ty: NirType::Int {
@@ -1198,9 +1202,9 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
                     },
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("local_10".to_string()),
-                rhs: DirExpr::Const(
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("local_10".to_string()),
+                rhs: PreHirExpr::Const(
                     7,
                     NirType::Int {
                         bits: 32,
@@ -1208,13 +1212,13 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
                     },
                 ),
             },
-            DirStmt::Return(Some(DirExpr::Var("local_10".to_string()))),
+            PreHirStmt::Return(Some(PreHirExpr::Var("local_10".to_string()))),
         ],
         ..Default::default()
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(rendered.contains("local_c = sub_401000();"), "{rendered}");
     assert!(
         rendered.contains("return 7;") || rendered.contains("return local_10;"),

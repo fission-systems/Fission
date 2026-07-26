@@ -8,7 +8,7 @@
 //! slot.
 
 use fission_midend_core::ir::NirBindingOrigin;
-use fission_midend_dir::{DirExpr, DirFunction, DirStmt};
+use fission_midend_prehir::{PreHirExpr, PreHirFunction, PreHirStmt};
 use fission_core::CallingConvention;
 use crate::HashMap;
 use std::collections::BTreeSet;
@@ -18,7 +18,7 @@ use fission_midend_core::wave_stats::{
     add_variadic_stack_region_folds,
 };
 
-fn home_slot_map(func: &DirFunction) -> HashMap<String, i64> {
+fn home_slot_map(func: &PreHirFunction) -> HashMap<String, i64> {
     func.locals
         .iter()
         .filter_map(|binding| match binding.origin {
@@ -28,24 +28,24 @@ fn home_slot_map(func: &DirFunction) -> HashMap<String, i64> {
         .collect()
 }
 
-fn expr_uses_home_slot(expr: &DirExpr, home_slots: &HashMap<String, i64>) -> bool {
+fn expr_uses_home_slot(expr: &PreHirExpr, home_slots: &HashMap<String, i64>) -> bool {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => home_slots.contains_key(name),
-        DirExpr::Load { ptr, .. } => expr_uses_home_slot(ptr, home_slots),
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => home_slots.contains_key(name),
+        PreHirExpr::Load { ptr, .. } => expr_uses_home_slot(ptr, home_slots),
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             expr_uses_home_slot(base, home_slots)
         }
-        DirExpr::Cast { expr, .. } => expr_uses_home_slot(expr, home_slots),
-        DirExpr::Unary { expr, .. } => expr_uses_home_slot(expr, home_slots),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr, .. } => expr_uses_home_slot(expr, home_slots),
+        PreHirExpr::Unary { expr, .. } => expr_uses_home_slot(expr, home_slots),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_uses_home_slot(lhs, home_slots) || expr_uses_home_slot(rhs, home_slots)
         }
-        DirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_home_slot(arg, home_slots)),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_uses_home_slot(arg, home_slots)),
+        PreHirExpr::Index { base, index, .. } => {
             expr_uses_home_slot(base, home_slots) || expr_uses_home_slot(index, home_slots)
         }
-        DirExpr::AggregateCopy { src, .. } => expr_uses_home_slot(src, home_slots),
-        DirExpr::Select {
+        PreHirExpr::AggregateCopy { src, .. } => expr_uses_home_slot(src, home_slots),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -55,18 +55,18 @@ fn expr_uses_home_slot(expr: &DirExpr, home_slots: &HashMap<String, i64>) -> boo
                 || expr_uses_home_slot(then_expr, home_slots)
                 || expr_uses_home_slot(else_expr, home_slots)
         }
-        DirExpr::Const(_, _) => false,
+        PreHirExpr::Const(_, _) => false,
     }
 }
 
-fn call_tail_uses_home_slot(args: &[DirExpr], home_slots: &HashMap<String, i64>) -> bool {
+fn call_tail_uses_home_slot(args: &[PreHirExpr], home_slots: &HashMap<String, i64>) -> bool {
     args.len() > 4
         && args[4..]
             .iter()
-            .any(|arg| expr_uses_home_slot(arg, home_slots) || matches!(arg, DirExpr::Load { .. }))
+            .any(|arg| expr_uses_home_slot(arg, home_slots) || matches!(arg, PreHirExpr::Load { .. }))
 }
 
-fn call_last_arg_is_va_region(args: &[DirExpr], home_slots: &HashMap<String, i64>) -> bool {
+fn call_last_arg_is_va_region(args: &[PreHirExpr], home_slots: &HashMap<String, i64>) -> bool {
     let Some(last) = args.last() else {
         return false;
     };
@@ -74,14 +74,14 @@ fn call_last_arg_is_va_region(args: &[DirExpr], home_slots: &HashMap<String, i64
 }
 
 fn recover_in_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     home_slots: &HashMap<String, i64>,
     last_named_param: Option<&str>,
     folds: &mut usize,
     va_starts: &mut usize,
 ) -> bool {
     match stmt {
-        DirStmt::Expr(DirExpr::Call { args, .. }) => {
+        PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => {
             if call_tail_uses_home_slot(args, home_slots) {
                 *folds += 1;
                 if last_named_param.is_some() && call_last_arg_is_va_region(args, home_slots) {
@@ -90,22 +90,22 @@ fn recover_in_stmt(
             }
             false
         }
-        DirStmt::VaStart { va_list, .. } => expr_uses_home_slot(va_list, home_slots),
-        DirStmt::Assign { rhs, .. } => {
-            if let DirExpr::Call { args, .. } = rhs
+        PreHirStmt::VaStart { va_list, .. } => expr_uses_home_slot(va_list, home_slots),
+        PreHirStmt::Assign { rhs, .. } => {
+            if let PreHirExpr::Call { args, .. } = rhs
                 && call_tail_uses_home_slot(args, home_slots)
             {
                 *folds += 1;
             }
             false
         }
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. }
-        | DirStmt::For { body: stmts, .. } => {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. }
+        | PreHirStmt::For { body: stmts, .. } => {
             recover_in_stmts(stmts, home_slots, last_named_param, folds, va_starts)
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
                 changed |= recover_in_stmts(
@@ -119,7 +119,7 @@ fn recover_in_stmt(
             changed |= recover_in_stmts(default, home_slots, last_named_param, folds, va_starts);
             changed
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -127,17 +127,17 @@ fn recover_in_stmt(
             recover_in_stmts(then_body, home_slots, last_named_param, folds, va_starts)
                 | recover_in_stmts(else_body, home_slots, last_named_param, folds, va_starts)
         }
-        DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Return(_)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
         _ => false,
     }
 }
 
 fn recover_in_stmts(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     home_slots: &HashMap<String, i64>,
     last_named_param: Option<&str>,
     folds: &mut usize,
@@ -152,17 +152,17 @@ fn recover_in_stmts(
             last_named_param,
             folds,
             va_starts,
-        ) && let DirStmt::Expr(DirExpr::Call { args, .. }) = &stmts[idx]
+        ) && let PreHirStmt::Expr(PreHirExpr::Call { args, .. }) = &stmts[idx]
             && let Some(last_param) = last_named_param
         {
-            let marker = DirStmt::VaStart {
-                va_list: args.last().cloned().unwrap_or(DirExpr::Var("va".into())),
+            let marker = PreHirStmt::VaStart {
+                va_list: args.last().cloned().unwrap_or(PreHirExpr::Var("va".into())),
                 last_named_param: last_param.to_string(),
             };
             let already_present = idx > 0
                 && matches!(
                     &stmts[idx - 1],
-                    DirStmt::VaStart {
+                    PreHirStmt::VaStart {
                         last_named_param,
                         ..
                     } if last_named_param == last_param
@@ -179,7 +179,7 @@ fn recover_in_stmts(
     changed
 }
 
-pub fn apply_variadic_stack_region_pass(func: &mut DirFunction) -> bool {
+pub fn apply_variadic_stack_region_pass(func: &mut PreHirFunction) -> bool {
     if !func.is_64bit || func.calling_convention != CallingConvention::WindowsX64 {
         return false;
     }

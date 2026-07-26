@@ -17,17 +17,17 @@ pub use short_circuit::{
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, structuring_diag_enabled};
 use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_dir::{DirExpr, DirLValue, DirStmt};
-use fission_midend_dir::util::expr_has_side_effecting_call;
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
+use fission_midend_prehir::util::expr_has_side_effecting_call;
 
 /// Side-effect-free assign/expr statements that may sit in condition prefixes.
-pub fn is_trivial_structuring_stmt(stmt: &DirStmt) -> bool {
+pub fn is_trivial_structuring_stmt(stmt: &PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(_),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(_),
             rhs,
         } => !expr_has_side_effecting_call(rhs),
-        DirStmt::Expr(expr) => !expr_has_side_effecting_call(expr),
+        PreHirStmt::Expr(expr) => !expr_has_side_effecting_call(expr),
         _ => false,
     }
 }

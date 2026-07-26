@@ -15,7 +15,7 @@ impl<'a> PreviewBuilder<'a> {
         err: &MlilPreviewError,
         targeted: &HashSet<u64>,
         emitted_labels: &mut HashSet<u64>,
-    ) -> Result<Option<(Vec<DirStmt>, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError> {
         try_recover_region_linearized_body(self, start_idx, err, targeted, emitted_labels)
     }
 
@@ -24,7 +24,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         entry: usize,
         exit: usize,
-    ) -> Result<Vec<DirStmt>, MlilPreviewError> {
+    ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
         build_linear_sese_child_fallback(self, entry, exit)
     }
 }

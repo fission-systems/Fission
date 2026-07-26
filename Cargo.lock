@@ -2551,6 +2551,7 @@ dependencies = [
  "fission-analysis-db",
  "fission-core",
  "fission-decompiler",
+ "fission-dir",
  "fission-dynamic",
  "fission-emulator",
  "fission-loader",
@@ -2559,7 +2560,6 @@ dependencies = [
  "fission-sleigh",
  "fission-static",
  "fission-tui",
- "fission-verify",
  "jemallocator",
  "libc",
  "miette",
@@ -2629,6 +2629,26 @@ dependencies = [
  "futures-util",
  "rfd 0.14.1",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "fission-dir"
+version = "0.1.6"
+dependencies = [
+ "anyhow",
+ "fission-core",
+ "fission-decompiler",
+ "fission-emulator",
+ "fission-loader",
+ "fission-midend-core",
+ "fission-midend-prehir",
+ "fission-pcode",
+ "fission-sleigh",
+ "fission-solver",
+ "fission-static",
+ "serde_json",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -2733,7 +2753,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "fission-midend-dir"
+name = "fission-midend-normalize"
+version = "0.1.6"
+dependencies = [
+ "fission-core",
+ "fission-midend-core",
+ "fission-midend-prehir",
+ "fission-signatures",
+ "indexmap",
+ "once_cell",
+ "rustc-hash 2.1.2",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "fission-midend-prehir"
 version = "0.1.6"
 dependencies = [
  "fission-core",
@@ -2749,27 +2784,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fission-midend-normalize"
-version = "0.1.6"
-dependencies = [
- "fission-core",
- "fission-midend-core",
- "fission-midend-dir",
- "fission-signatures",
- "indexmap",
- "once_cell",
- "rustc-hash 2.1.2",
- "serde_json",
- "tracing",
-]
-
-[[package]]
 name = "fission-midend-structuring"
 version = "0.1.6"
 dependencies = [
  "fission-core",
  "fission-midend-core",
- "fission-midend-dir",
+ "fission-midend-prehir",
  "indexmap",
  "rustc-hash 2.1.2",
  "tracing",
@@ -2785,8 +2805,8 @@ dependencies = [
  "fission-core",
  "fission-loader",
  "fission-midend-core",
- "fission-midend-dir",
  "fission-midend-normalize",
+ "fission-midend-prehir",
  "fission-midend-structuring",
  "fission-signatures",
  "fission-sleigh",
@@ -2978,25 +2998,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
-]
-
-[[package]]
-name = "fission-verify"
-version = "0.1.6"
-dependencies = [
- "anyhow",
- "fission-core",
- "fission-decompiler",
- "fission-emulator",
- "fission-loader",
- "fission-midend-core",
- "fission-midend-dir",
- "fission-sleigh",
- "fission-solver",
- "fission-static",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]

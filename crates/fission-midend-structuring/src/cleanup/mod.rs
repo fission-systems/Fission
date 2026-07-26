@@ -1,6 +1,6 @@
 use fission_midend_core::ir::{NirType};
-use fission_midend_dir::{DirExpr, DirLValue, DirStmt, DirSwitchCase};
-use fission_midend_dir::util::label_cleanup as core_labels;
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt, PreHirSwitchCase};
+use fission_midend_prehir::util::label_cleanup as core_labels;
 use crate::HashMap;
 use crate::HashSet;
 
@@ -13,7 +13,7 @@ pub use goto::eliminate_redundant_gotos;
 /// [`cleanup_redundant_labels_protecting`]. Pass `host.lsda_landing_pad_labels()`
 /// (empty for the overwhelming majority of functions, which have no C++
 /// exception handling at all).
-pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<DirStmt>) -> Vec<DirStmt> {
+pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
     body = eliminate_redundant_gotos(body);
     body = dedupe_structured_region_entry_labels(body);
     // Secondary multi-emit guard (belt-and-suspenders after exclusive emission
@@ -23,7 +23,7 @@ pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<DirSt
     body = strip_duplicate_label_definitions(body);
     body = cleanup_redundant_labels_protecting(body, protected);
     let referenced = collect_referenced_labels(&body);
-    while matches!(body.first(), Some(DirStmt::Label(label)) if !referenced.contains(label) && !protected.contains(label))
+    while matches!(body.first(), Some(PreHirStmt::Label(label)) if !referenced.contains(label) && !protected.contains(label))
     {
         body.remove(0);
     }
@@ -32,27 +32,27 @@ pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<DirSt
 
 /// C labels are function-scoped. Keep the first `Label(L)` and drop later
 /// definitions of the same name (multi-emit of the same CFG block header).
-pub fn strip_duplicate_label_definitions(mut body: Vec<DirStmt>) -> Vec<DirStmt> {
+pub fn strip_duplicate_label_definitions(mut body: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
     let mut seen = HashSet::default();
     strip_duplicate_label_definitions_in_place(&mut body, &mut seen);
     body
 }
 
 fn strip_duplicate_label_definitions_in_place(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     seen: &mut HashSet<String>,
 ) {
     let mut i = 0;
     while i < stmts.len() {
         match &mut stmts[i] {
-            DirStmt::Label(label) => {
+            PreHirStmt::Label(label) => {
                 if !seen.insert(label.clone()) {
                     stmts.remove(i);
                     continue;
                 }
             }
-            DirStmt::Block(body) => strip_duplicate_label_definitions_in_place(body, seen),
-            DirStmt::If {
+            PreHirStmt::Block(body) => strip_duplicate_label_definitions_in_place(body, seen),
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -60,12 +60,12 @@ fn strip_duplicate_label_definitions_in_place(
                 strip_duplicate_label_definitions_in_place(then_body, seen);
                 strip_duplicate_label_definitions_in_place(else_body, seen);
             }
-            DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 strip_duplicate_label_definitions_in_place(body, seen);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     strip_duplicate_label_definitions_in_place(&mut case.body, seen);
                 }
@@ -81,23 +81,23 @@ fn strip_duplicate_label_definitions_in_place(
 /// following siblings that only re-host labels already defined inside that
 /// while — classic multi-emit of nested loop bodies after the outer infloop
 /// already absorbed them.
-pub fn strip_post_total_infloop_label_residuals(mut body: Vec<DirStmt>) -> Vec<DirStmt> {
+pub fn strip_post_total_infloop_label_residuals(mut body: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
     strip_post_total_infloop_label_residuals_in_place(&mut body);
     body
 }
 
-fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<DirStmt>) {
+fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<PreHirStmt>) {
     let mut i = 0;
     while i < stmts.len() {
         // Recurse into nested compounds first.
         match &mut stmts[i] {
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 strip_post_total_infloop_label_residuals_in_place(body);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -105,7 +105,7 @@ fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<DirStmt>) {
                 strip_post_total_infloop_label_residuals_in_place(then_body);
                 strip_post_total_infloop_label_residuals_in_place(else_body);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     strip_post_total_infloop_label_residuals_in_place(&mut case.body);
                 }
@@ -114,7 +114,7 @@ fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<DirStmt>) {
             _ => {}
         }
 
-        if let DirStmt::While { cond, body } = &stmts[i] {
+        if let PreHirStmt::While { cond, body } = &stmts[i] {
             if is_constant_true_cond(cond) && while_body_ends_with_total_break_continue(body) {
                 let inner_labels = collect_defined_labels(body);
                 if !inner_labels.is_empty() {
@@ -134,7 +134,7 @@ fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<DirStmt>) {
 /// is to `allowed`. Includes unlabeled multi-emitted compute (do-while bodies)
 /// when later gotos re-enter the absorbed region.
 fn residual_suffix_end_after_total_infloop(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     from: usize,
     allowed: &HashSet<String>,
 ) -> Option<usize> {
@@ -143,7 +143,7 @@ fn residual_suffix_end_after_total_infloop(
     }
     let mut end = from;
     while end < stmts.len() {
-        if matches!(stmts[end], DirStmt::Return(_)) {
+        if matches!(stmts[end], PreHirStmt::Return(_)) {
             break;
         }
         end += 1;
@@ -174,21 +174,21 @@ fn residual_suffix_end_after_total_infloop(
     Some(end)
 }
 
-fn is_constant_true_cond(cond: &DirExpr) -> bool {
+fn is_constant_true_cond(cond: &PreHirExpr) -> bool {
     matches!(
         cond,
-        DirExpr::Const(v, _) if *v != 0
+        PreHirExpr::Const(v, _) if *v != 0
     )
 }
 
 /// Last meaningful control at the end of a while body is `if (…) break; else continue`
 /// or the reverse (possibly after trailing labels).
-fn while_body_ends_with_total_break_continue(body: &[DirStmt]) -> bool {
-    let Some(last) = body.iter().rev().find(|s| !matches!(s, DirStmt::Label(_))) else {
+fn while_body_ends_with_total_break_continue(body: &[PreHirStmt]) -> bool {
+    let Some(last) = body.iter().rev().find(|s| !matches!(s, PreHirStmt::Label(_))) else {
         return false;
     };
     match last {
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -206,39 +206,39 @@ fn while_body_ends_with_total_break_continue(body: &[DirStmt]) -> bool {
 }
 
 /// `Some(true)` = only Break, `Some(false)` = only Continue, `None` = other.
-fn is_solo_break_or_continue(body: &[DirStmt]) -> Option<bool> {
-    let meaningful: Vec<&DirStmt> = body
+fn is_solo_break_or_continue(body: &[PreHirStmt]) -> Option<bool> {
+    let meaningful: Vec<&PreHirStmt> = body
         .iter()
-        .filter(|s| !matches!(s, DirStmt::Label(_)))
+        .filter(|s| !matches!(s, PreHirStmt::Label(_)))
         .collect();
     if meaningful.len() != 1 {
         return None;
     }
     match meaningful[0] {
-        DirStmt::Break => Some(true),
-        DirStmt::Continue => Some(false),
+        PreHirStmt::Break => Some(true),
+        PreHirStmt::Continue => Some(false),
         _ => None,
     }
 }
 
 /// Labels already defined in a structured region body (for exclusive emission).
-pub fn collect_defined_labels(stmts: &[DirStmt]) -> HashSet<String> {
+pub fn collect_defined_labels(stmts: &[PreHirStmt]) -> HashSet<String> {
     let mut out = HashSet::default();
     collect_defined_labels_in(stmts, &mut out);
     out
 }
 
-fn collect_defined_labels_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
+fn collect_defined_labels_in(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Label(l) => {
+            PreHirStmt::Label(l) => {
                 out.insert(l.clone());
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => collect_defined_labels_in(body, out),
-            DirStmt::If {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_defined_labels_in(body, out),
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -246,7 +246,7 @@ fn collect_defined_labels_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
                 collect_defined_labels_in(then_body, out);
                 collect_defined_labels_in(else_body, out);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_defined_labels_in(&case.body, out);
                 }
@@ -257,17 +257,17 @@ fn collect_defined_labels_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
     }
 }
 
-fn collect_goto_targets_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
+fn collect_goto_targets_in(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Goto(l) => {
+            PreHirStmt::Goto(l) => {
                 out.insert(l.clone());
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => collect_goto_targets_in(body, out),
-            DirStmt::If {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_goto_targets_in(body, out),
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -275,7 +275,7 @@ fn collect_goto_targets_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
                 collect_goto_targets_in(then_body, out);
                 collect_goto_targets_in(else_body, out);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_goto_targets_in(&case.body, out);
                 }
@@ -290,15 +290,15 @@ fn collect_goto_targets_in(stmts: &[DirStmt], out: &mut HashSet<String>) {
 /// Like [`cleanup_redundant_labels`], but additionally protects every label
 /// in `protected` from removal even when nothing in `body` textually
 /// references it via `Goto` -- for labels reachable only via an edge with
-/// no `DirStmt` representation at all (see
+/// no `PreHirStmt` representation at all (see
 /// `StructuringHost::lsda_landing_pad_labels`). Ordinary label cleanup
 /// (`referenced.contains`) is exactly right for real dead labels; it just
 /// has no way to know a C++ exception landing pad's label is a live entry
 /// point when nothing in the text ever does `Goto` to it.
 pub fn cleanup_redundant_labels_protecting(
-    body: Vec<DirStmt>,
+    body: Vec<PreHirStmt>,
     protected: &HashSet<String>,
-) -> Vec<DirStmt> {
+) -> Vec<PreHirStmt> {
     if protected.is_empty() {
         return cleanup_redundant_labels(body, None);
     }
@@ -310,14 +310,14 @@ pub fn cleanup_redundant_labels_protecting(
 /// Remove duplicate block labels emitted both outside and inside a structured region
 /// (e.g. `Label(L); while (1) { Label(L); ... }`). Keeps the inner declaration so
 /// loop back-edges and continue lowering remain anchored on the region body.
-pub fn dedupe_structured_region_entry_labels(mut body: Vec<DirStmt>) -> Vec<DirStmt> {
+pub fn dedupe_structured_region_entry_labels(mut body: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
     dedupe_structured_region_entry_labels_in_place(&mut body);
     body
 }
 
-fn first_meaningful_label(stmts: &[DirStmt]) -> Option<&str> {
+fn first_meaningful_label(stmts: &[PreHirStmt]) -> Option<&str> {
     stmts.iter().find_map(|stmt| {
-        if let DirStmt::Label(label) = stmt {
+        if let PreHirStmt::Label(label) = stmt {
             Some(label.as_str())
         } else {
             None
@@ -325,15 +325,15 @@ fn first_meaningful_label(stmts: &[DirStmt]) -> Option<&str> {
     })
 }
 
-fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<DirStmt>) {
+fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<PreHirStmt>) {
     let mut i = 0;
     while i < stmts.len() {
-        if let DirStmt::Label(outer) = stmts[i].clone() {
+        if let PreHirStmt::Label(outer) = stmts[i].clone() {
             if i + 1 < stmts.len() {
                 let inner_matches = match &mut stmts[i + 1] {
-                    DirStmt::While { body, .. }
-                    | DirStmt::DoWhile { body, .. }
-                    | DirStmt::For { body, .. } => {
+                    PreHirStmt::While { body, .. }
+                    | PreHirStmt::DoWhile { body, .. }
+                    | PreHirStmt::For { body, .. } => {
                         dedupe_structured_region_entry_labels_in_place(body);
                         first_meaningful_label(body) == Some(outer.as_str())
                     }
@@ -350,10 +350,10 @@ fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<DirStmt>) {
     }
 }
 
-fn dedupe_structured_region_entry_labels_stmt(stmt: &mut DirStmt) {
+fn dedupe_structured_region_entry_labels_stmt(stmt: &mut PreHirStmt) {
     match stmt {
-        DirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(body),
-        DirStmt::If {
+        PreHirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(body),
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -361,17 +361,17 @@ fn dedupe_structured_region_entry_labels_stmt(stmt: &mut DirStmt) {
             dedupe_structured_region_entry_labels_in_place(then_body);
             dedupe_structured_region_entry_labels_in_place(else_body);
         }
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } | DirStmt::For { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => {
             dedupe_structured_region_entry_labels_in_place(body);
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 if case.body.len() >= 2 {
-                    if let DirStmt::Label(outer) = case.body[0].clone() {
+                    if let PreHirStmt::Label(outer) = case.body[0].clone() {
                         let inner_matches = match &mut case.body[1] {
-                            DirStmt::While { body, .. }
-                            | DirStmt::DoWhile { body, .. }
-                            | DirStmt::For { body, .. } => {
+                            PreHirStmt::While { body, .. }
+                            | PreHirStmt::DoWhile { body, .. }
+                            | PreHirStmt::For { body, .. } => {
                                 dedupe_structured_region_entry_labels_in_place(body);
                                 first_meaningful_label(body) == Some(outer.as_str())
                             }
@@ -391,9 +391,9 @@ fn dedupe_structured_region_entry_labels_stmt(stmt: &mut DirStmt) {
 }
 
 /// True when `child_body` is a single loop whose body already begins with `label`.
-pub fn child_body_has_entry_label(child_body: &[DirStmt], label: &str) -> bool {
+pub fn child_body_has_entry_label(child_body: &[PreHirStmt], label: &str) -> bool {
     child_body.iter().any(|stmt| match stmt {
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } | DirStmt::For { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => {
             first_meaningful_label(body) == Some(label)
         }
         _ => false,
@@ -404,12 +404,12 @@ pub fn child_body_has_entry_label(child_body: &[DirStmt], label: &str) -> bool {
 /// `Label(label)` is absent from the body.  Such "orphan" gotos indicate
 /// a structuring failure where a back-edge or cross-edge target was referenced
 /// but the emitter never placed the matching label statement.
-pub fn has_orphan_goto_labels(body: &[DirStmt]) -> bool {
+pub fn has_orphan_goto_labels(body: &[PreHirStmt]) -> bool {
     !orphan_goto_labels(body).is_empty()
 }
 
 /// Label names referenced by `Goto` but absent from any `Label` declaration in `body`.
-pub fn orphan_goto_labels(body: &[DirStmt]) -> Vec<String> {
+pub fn orphan_goto_labels(body: &[PreHirStmt]) -> Vec<String> {
     let goto_targets = collect_referenced_labels(body);
     if goto_targets.is_empty() {
         return Vec::new();
@@ -425,7 +425,7 @@ pub fn orphan_goto_labels(body: &[DirStmt]) -> Vec<String> {
 
 /// Collects the set of label names that are *declared* (i.e. `Label(name)`)
 /// anywhere in the body, recursing into nested statement blocks.
-fn collect_declared_labels(body: &[DirStmt]) -> HashSet<String> {
+fn collect_declared_labels(body: &[PreHirStmt]) -> HashSet<String> {
     let mut declared = HashSet::default();
     for stmt in body {
         collect_stmt_declared_labels(stmt, &mut declared);
@@ -433,20 +433,20 @@ fn collect_declared_labels(body: &[DirStmt]) -> HashSet<String> {
     declared
 }
 
-fn collect_stmt_declared_labels(stmt: &DirStmt, declared: &mut HashSet<String>) {
+fn collect_stmt_declared_labels(stmt: &PreHirStmt, declared: &mut HashSet<String>) {
     match stmt {
-        DirStmt::Label(label) => {
+        PreHirStmt::Label(label) => {
             declared.insert(label.clone());
         }
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
             for s in body {
                 collect_stmt_declared_labels(s, declared);
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for s in &case.body {
                     collect_stmt_declared_labels(s, declared);
@@ -456,7 +456,7 @@ fn collect_stmt_declared_labels(stmt: &DirStmt, declared: &mut HashSet<String>) 
                 collect_stmt_declared_labels(s, declared);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -468,13 +468,13 @@ fn collect_stmt_declared_labels(stmt: &DirStmt, declared: &mut HashSet<String>) 
                 collect_stmt_declared_labels(s, declared);
             }
         }
-        DirStmt::Assign { .. }
-        | DirStmt::VaStart { .. }
-        | DirStmt::Expr(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Return(_)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
@@ -483,16 +483,16 @@ fn collect_stmt_declared_labels(stmt: &DirStmt, declared: &mut HashSet<String>) 
 // ---------------------------------------------------------------------------
 
 pub fn cleanup_redundant_labels(
-    body: Vec<DirStmt>,
+    body: Vec<PreHirStmt>,
     global_refs: Option<&std::collections::HashSet<String>>,
-) -> Vec<DirStmt> {
+) -> Vec<PreHirStmt> {
     core_labels::cleanup_redundant_labels(body, global_refs)
 }
 
 pub fn normalize_guarded_tail_layout(
-    body: Vec<DirStmt>,
+    body: Vec<PreHirStmt>,
     protected: &HashSet<String>,
-) -> (Vec<DirStmt>, usize) {
+) -> (Vec<PreHirStmt>, usize) {
     let cleaned = cleanup_redundant_labels_protecting(body, protected);
     let (canonicalized, rewritten_aliases) = canonicalize_top_level_forward_label_aliases(cleaned);
     let cleaned = cleanup_redundant_labels_protecting(canonicalized, protected);
@@ -500,8 +500,8 @@ pub fn normalize_guarded_tail_layout(
 }
 
 pub fn canonicalize_top_level_forward_label_aliases(
-    body: Vec<DirStmt>,
-) -> (Vec<DirStmt>, usize) {
+    body: Vec<PreHirStmt>,
+) -> (Vec<PreHirStmt>, usize) {
     let (aliases, alias_ranges) = top_level_forward_label_aliases_with_ranges(&body);
     if aliases.is_empty() {
         return (body, 0);
@@ -531,23 +531,23 @@ pub fn canonicalize_top_level_forward_label_aliases(
 }
 
 fn top_level_forward_label_aliases_with_ranges(
-    body: &[DirStmt],
+    body: &[PreHirStmt],
 ) -> (HashMap<String, String>, Vec<(usize, usize)>) {
     let mut aliases = HashMap::default();
     let mut ranges = Vec::new();
     let mut idx = 0usize;
     while idx < body.len() {
-        let DirStmt::Label(alias_label) = &body[idx] else {
+        let PreHirStmt::Label(alias_label) = &body[idx] else {
             idx += 1;
             continue;
         };
         let next_label_idx =
-            (idx + 1..body.len()).find(|pos| matches!(body[*pos], DirStmt::Label(_)));
+            (idx + 1..body.len()).find(|pos| matches!(body[*pos], PreHirStmt::Label(_)));
         let Some(next_label_idx) = next_label_idx else {
             idx += 1;
             continue;
         };
-        let DirStmt::Label(next_label) = &body[next_label_idx] else {
+        let PreHirStmt::Label(next_label) = &body[next_label_idx] else {
             unreachable!();
         };
         if is_top_level_forward_alias_segment(&body[idx + 1..next_label_idx], next_label) {
@@ -559,14 +559,14 @@ fn top_level_forward_label_aliases_with_ranges(
     (aliases, ranges)
 }
 
-fn is_top_level_forward_alias_segment(segment: &[DirStmt], next_label: &str) -> bool {
+fn is_top_level_forward_alias_segment(segment: &[PreHirStmt], next_label: &str) -> bool {
     let mut saw_forward_goto = false;
     for stmt in segment {
         if is_ignorable_discovery_stmt(stmt) {
             continue;
         }
         match stmt {
-            DirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+            PreHirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
                 saw_forward_goto = true;
             }
             _ => return false,
@@ -575,24 +575,24 @@ fn is_top_level_forward_alias_segment(segment: &[DirStmt], next_label: &str) -> 
     saw_forward_goto
 }
 
-fn adjacent_label_aliases(body: &[DirStmt]) -> HashMap<String, String> {
+fn adjacent_label_aliases(body: &[PreHirStmt]) -> HashMap<String, String> {
     let mut aliases = HashMap::default();
     let mut idx = 0usize;
     while idx < body.len() {
-        let DirStmt::Label(_) = &body[idx] else {
+        let PreHirStmt::Label(_) = &body[idx] else {
             idx += 1;
             continue;
         };
         let start = idx;
-        while idx + 1 < body.len() && matches!(body[idx + 1], DirStmt::Label(_)) {
+        while idx + 1 < body.len() && matches!(body[idx + 1], PreHirStmt::Label(_)) {
             idx += 1;
         }
         if idx > start {
-            let DirStmt::Label(canonical) = &body[idx] else {
+            let PreHirStmt::Label(canonical) = &body[idx] else {
                 unreachable!();
             };
             for alias_idx in start..idx {
-                let DirStmt::Label(alias) = &body[alias_idx] else {
+                let PreHirStmt::Label(alias) = &body[alias_idx] else {
                     unreachable!();
                 };
                 aliases.insert(alias.clone(), canonical.clone());
@@ -615,53 +615,53 @@ fn canonicalize_label(label: &str, aliases: &HashMap<String, String>) -> String 
     current
 }
 
-fn rewrite_stmt_labels(body: Vec<DirStmt>, aliases: &HashMap<String, String>) -> Vec<DirStmt> {
+fn rewrite_stmt_labels(body: Vec<PreHirStmt>, aliases: &HashMap<String, String>) -> Vec<PreHirStmt> {
     body.into_iter()
         .map(|stmt| rewrite_stmt_label(stmt, aliases))
         .collect()
 }
 
-fn rewrite_stmt_label(stmt: DirStmt, aliases: &HashMap<String, String>) -> DirStmt {
+fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> PreHirStmt {
     match stmt {
-        DirStmt::Block(body) => DirStmt::Block(rewrite_stmt_labels(body, aliases)),
-        DirStmt::Switch {
+        PreHirStmt::Block(body) => PreHirStmt::Block(rewrite_stmt_labels(body, aliases)),
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
-        } => DirStmt::Switch {
+        } => PreHirStmt::Switch {
             expr,
             cases: cases
                 .into_iter()
-                .map(|case| DirSwitchCase {
+                .map(|case| PreHirSwitchCase {
                     values: case.values,
                     body: rewrite_stmt_labels(case.body, aliases),
                 })
                 .collect(),
             default: rewrite_stmt_labels(default, aliases),
         },
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
-        } => DirStmt::If {
+        } => PreHirStmt::If {
             cond,
             then_body: rewrite_stmt_labels(then_body, aliases),
             else_body: rewrite_stmt_labels(else_body, aliases),
         },
-        DirStmt::While { cond, body } => DirStmt::While {
+        PreHirStmt::While { cond, body } => PreHirStmt::While {
             cond,
             body: rewrite_stmt_labels(body, aliases),
         },
-        DirStmt::DoWhile { body, cond } => DirStmt::DoWhile {
+        PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
             body: rewrite_stmt_labels(body, aliases),
             cond,
         },
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
             body,
-        } => DirStmt::For {
+        } => PreHirStmt::For {
             init: init.map(|s| {
                 Box::new(
                     rewrite_stmt_labels(vec![*s], aliases)
@@ -681,13 +681,13 @@ fn rewrite_stmt_label(stmt: DirStmt, aliases: &HashMap<String, String>) -> DirSt
             }),
             body: rewrite_stmt_labels(body, aliases),
         },
-        DirStmt::Label(label) => DirStmt::Label(canonicalize_label(&label, aliases)),
-        DirStmt::Goto(label) => DirStmt::Goto(canonicalize_label(&label, aliases)),
+        PreHirStmt::Label(label) => PreHirStmt::Label(canonicalize_label(&label, aliases)),
+        PreHirStmt::Goto(label) => PreHirStmt::Goto(canonicalize_label(&label, aliases)),
         other => other,
     }
 }
 
-fn collect_referenced_labels(body: &[DirStmt]) -> HashSet<String> {
+fn collect_referenced_labels(body: &[PreHirStmt]) -> HashSet<String> {
     let mut referenced = HashSet::default();
     for stmt in body {
         collect_stmt_referenced_labels(stmt, &mut referenced);
@@ -695,7 +695,7 @@ fn collect_referenced_labels(body: &[DirStmt]) -> HashSet<String> {
     referenced
 }
 
-pub fn collect_referenced_label_counts(body: &[DirStmt]) -> HashMap<String, usize> {
+pub fn collect_referenced_label_counts(body: &[PreHirStmt]) -> HashMap<String, usize> {
     let mut counts = HashMap::default();
     for stmt in body {
         collect_stmt_referenced_label_counts(stmt, &mut counts);
@@ -703,17 +703,17 @@ pub fn collect_referenced_label_counts(body: &[DirStmt]) -> HashMap<String, usiz
     counts
 }
 
-fn collect_stmt_referenced_labels(stmt: &DirStmt, referenced: &mut HashSet<String>) {
+fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut HashSet<String>) {
     match stmt {
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for stmt in &case.body {
                     collect_stmt_referenced_labels(stmt, referenced);
@@ -723,7 +723,7 @@ fn collect_stmt_referenced_labels(stmt: &DirStmt, referenced: &mut HashSet<Strin
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -735,30 +735,30 @@ fn collect_stmt_referenced_labels(stmt: &DirStmt, referenced: &mut HashSet<Strin
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
-        DirStmt::Goto(label) => {
+        PreHirStmt::Goto(label) => {
             referenced.insert(label.clone());
         }
-        DirStmt::Assign { .. }
-        | DirStmt::VaStart { .. }
-        | DirStmt::Expr(_)
-        | DirStmt::Label(_)
-        | DirStmt::Return(_)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
-fn collect_stmt_referenced_label_counts(stmt: &DirStmt, counts: &mut HashMap<String, usize>) {
+fn collect_stmt_referenced_label_counts(stmt: &PreHirStmt, counts: &mut HashMap<String, usize>) {
     match stmt {
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for stmt in &case.body {
                     collect_stmt_referenced_label_counts(stmt, counts);
@@ -768,7 +768,7 @@ fn collect_stmt_referenced_label_counts(stmt: &DirStmt, counts: &mut HashMap<Str
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -780,35 +780,35 @@ fn collect_stmt_referenced_label_counts(stmt: &DirStmt, counts: &mut HashMap<Str
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
-        DirStmt::Goto(label) => {
+        PreHirStmt::Goto(label) => {
             *counts.entry(label.clone()).or_insert(0) += 1;
         }
-        DirStmt::Assign { .. }
-        | DirStmt::VaStart { .. }
-        | DirStmt::Expr(_)
-        | DirStmt::Label(_)
-        | DirStmt::Return(_)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
-pub fn single_goto_target(body: &[DirStmt]) -> Option<&str> {
+pub fn single_goto_target(body: &[PreHirStmt]) -> Option<&str> {
     match body {
-        [DirStmt::Goto(label)] => Some(label.as_str()),
+        [PreHirStmt::Goto(label)] => Some(label.as_str()),
         _ => None,
     }
 }
 
-pub fn has_top_level_label(body: &[DirStmt]) -> bool {
-    body.iter().any(|stmt| matches!(stmt, DirStmt::Label(_)))
+pub fn has_top_level_label(body: &[PreHirStmt]) -> bool {
+    body.iter().any(|stmt| matches!(stmt, PreHirStmt::Label(_)))
 }
 
-pub fn is_ignorable_discovery_stmt(stmt: &DirStmt) -> bool {
-    matches!(stmt, DirStmt::Label(_)) || matches!(stmt, DirStmt::Block(body) if body.is_empty())
+pub fn is_ignorable_discovery_stmt(stmt: &PreHirStmt) -> bool {
+    matches!(stmt, PreHirStmt::Label(_)) || matches!(stmt, PreHirStmt::Block(body) if body.is_empty())
 }
 
-pub fn trim_ignorable_stmt_bounds(body: &[DirStmt]) -> Option<(usize, usize)> {
+pub fn trim_ignorable_stmt_bounds(body: &[PreHirStmt]) -> Option<(usize, usize)> {
     let start = body
         .iter()
         .position(|stmt| !is_ignorable_discovery_stmt(stmt))?;
@@ -819,7 +819,7 @@ pub fn trim_ignorable_stmt_bounds(body: &[DirStmt]) -> Option<(usize, usize)> {
     Some((start, end + 1))
 }
 
-pub fn has_non_ignorable_payload(body: &[DirStmt]) -> bool {
+pub fn has_non_ignorable_payload(body: &[PreHirStmt]) -> bool {
     trim_ignorable_stmt_bounds(body).is_some()
 }
 
@@ -833,14 +833,14 @@ mod tests {
     #[test]
     fn goto_elim_removes_empty_jump_before_label() {
         let stmts = vec![
-            DirStmt::Goto("exit".to_string()),
-            DirStmt::Label("exit".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("exit".to_string()),
+            PreHirStmt::Label("exit".to_string()),
+            PreHirStmt::Return(None),
         ];
         let result = eliminate_redundant_gotos(stmts);
         assert_eq!(
             result,
-            vec![DirStmt::Label("exit".to_string()), DirStmt::Return(None)]
+            vec![PreHirStmt::Label("exit".to_string()), PreHirStmt::Return(None)]
         );
     }
 
@@ -848,16 +848,16 @@ mod tests {
     fn goto_elim_removes_single_ref_label_and_goto_pair() {
         // Goto(L) immediately before Label(L) with a single reference → both removed.
         let stmts = vec![
-            DirStmt::Goto("lbl".to_string()),
-            DirStmt::Label("lbl".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("lbl".to_string()),
+            PreHirStmt::Label("lbl".to_string()),
+            PreHirStmt::Return(None),
         ];
         let result = eliminate_redundant_gotos(stmts);
         // After empty-jump removal, Label(lbl) + Return remains.
         // Then single-ref inline removes both Goto and Label (they are adjacent).
         // The result should have no Goto and no Label.
         assert!(
-            !result.iter().any(|s| matches!(s, DirStmt::Goto(_))),
+            !result.iter().any(|s| matches!(s, PreHirStmt::Goto(_))),
             "goto should be eliminated: {result:?}"
         );
     }
@@ -867,13 +867,13 @@ mod tests {
         // `if (cond) { Goto(L) }; Label(L); Return` →
         // `if (!cond) { Return }` (conditional inversion).
         let stmts = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("tail".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("tail".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("tail".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("tail".to_string()),
+            PreHirStmt::Return(None),
         ];
         let result = eliminate_redundant_gotos(stmts);
         // After inversion the Label should be gone and we should have a single If.
@@ -882,7 +882,7 @@ mod tests {
             1,
             "expected single If after inversion: {result:?}"
         );
-        let DirStmt::If {
+        let PreHirStmt::If {
             else_body,
             then_body,
             ..
@@ -891,35 +891,35 @@ mod tests {
             panic!("expected If: {result:?}");
         };
         assert!(else_body.is_empty(), "else should be empty: {result:?}");
-        assert_eq!(then_body, &vec![DirStmt::Return(None)]);
+        assert_eq!(then_body, &vec![PreHirStmt::Return(None)]);
     }
 
     #[test]
     fn normalize_guarded_tail_layout_collapses_adjacent_labels_before_alias_rewrite() {
         let body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("block_alias_a".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("block_alias_a".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("block_alias_a".to_string()),
-            DirStmt::Label("block_alias_b".to_string()),
-            DirStmt::Goto("block_tail".to_string()),
-            DirStmt::Label("block_tail".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Label("block_alias_a".to_string()),
+            PreHirStmt::Label("block_alias_b".to_string()),
+            PreHirStmt::Goto("block_tail".to_string()),
+            PreHirStmt::Label("block_tail".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ];
 
         let (normalized, _) = normalize_guarded_tail_layout(body, &HashSet::default());
         assert_eq!(
             normalized,
             vec![
-                DirStmt::If {
-                    cond: DirExpr::Var("cond".to_string()),
-                    then_body: vec![DirStmt::Goto("block_tail".to_string())],
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("cond".to_string()),
+                    then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
                     else_body: Vec::new(),
                 },
-                DirStmt::Label("block_tail".to_string()),
-                DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+                PreHirStmt::Label("block_tail".to_string()),
+                PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
             ]
         );
     }
@@ -927,15 +927,15 @@ mod tests {
     #[test]
     fn canonicalize_top_level_forward_aliases_rewrites_and_prunes_alias_segment() {
         let body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("block_alias".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("block_alias".to_string()),
-            DirStmt::Goto("block_tail".to_string()),
-            DirStmt::Label("block_tail".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Label("block_alias".to_string()),
+            PreHirStmt::Goto("block_tail".to_string()),
+            PreHirStmt::Label("block_tail".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ];
 
         let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body);
@@ -943,13 +943,13 @@ mod tests {
         assert_eq!(
             normalized,
             vec![
-                DirStmt::If {
-                    cond: DirExpr::Var("cond".to_string()),
-                    then_body: vec![DirStmt::Goto("block_tail".to_string())],
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("cond".to_string()),
+                    then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
                     else_body: Vec::new(),
                 },
-                DirStmt::Label("block_tail".to_string()),
-                DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+                PreHirStmt::Label("block_tail".to_string()),
+                PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
             ]
         );
     }
@@ -957,11 +957,11 @@ mod tests {
     #[test]
     fn canonicalize_top_level_forward_aliases_preserves_nontrivial_alias_payload() {
         let body = vec![
-            DirStmt::Label("block_alias".to_string()),
-            DirStmt::Expr(DirExpr::Var("work".to_string())),
-            DirStmt::Goto("block_tail".to_string()),
-            DirStmt::Label("block_tail".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Label("block_alias".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+            PreHirStmt::Goto("block_tail".to_string()),
+            PreHirStmt::Label("block_tail".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ];
 
         let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body.clone());
@@ -971,9 +971,9 @@ mod tests {
 
     #[test]
     fn orphan_goto_labels_detects_missing_declarations() {
-        let body = vec![DirStmt::While {
-            cond: DirExpr::Const(1, NirType::Bool),
-            body: vec![DirStmt::Goto("block_140001890".to_string())],
+        let body = vec![PreHirStmt::While {
+            cond: PreHirExpr::Const(1, NirType::Bool),
+            body: vec![PreHirStmt::Goto("block_140001890".to_string())],
         }];
         assert_eq!(
             orphan_goto_labels(&body),
@@ -985,8 +985,8 @@ mod tests {
     #[test]
     fn orphan_goto_labels_empty_when_all_targets_declared() {
         let body = vec![
-            DirStmt::Label("block_140001890".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("block_140001890".to_string()),
+            PreHirStmt::Return(None),
         ];
         assert!(orphan_goto_labels(&body).is_empty());
         assert!(!has_orphan_goto_labels(&body));
@@ -995,17 +995,17 @@ mod tests {
     #[test]
     fn finalize_structured_body_inlines_single_predecessor_dead_forward_segment() {
         let body = vec![
-            DirStmt::Goto("block_join".to_string()),
-            DirStmt::Expr(DirExpr::Var("dead_unreachable".to_string())),
-            DirStmt::Goto("block_join".to_string()),
-            DirStmt::Label("block_join".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Goto("block_join".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("dead_unreachable".to_string())),
+            PreHirStmt::Goto("block_join".to_string()),
+            PreHirStmt::Label("block_join".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ];
 
         let finalized = finalize_structured_body(&HashSet::default(), body);
         assert_eq!(
             finalized,
-            vec![DirStmt::Return(Some(DirExpr::Var("ret".to_string())))]
+            vec![PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string())))]
         );
     }
 
@@ -1018,12 +1018,12 @@ mod tests {
     #[test]
     fn finalize_structured_body_protects_unreferenced_landing_pad_label() {
         let body = vec![
-            DirStmt::Goto("block_join".to_string()),
-            DirStmt::Label("block_landing_pad".to_string()),
-            DirStmt::Expr(DirExpr::Var("catch_handler_call".to_string())),
-            DirStmt::Goto("block_join".to_string()),
-            DirStmt::Label("block_join".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Goto("block_join".to_string()),
+            PreHirStmt::Label("block_landing_pad".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("catch_handler_call".to_string())),
+            PreHirStmt::Goto("block_join".to_string()),
+            PreHirStmt::Label("block_join".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ];
         let protected: HashSet<String> = ["block_landing_pad".to_string()].into_iter().collect();
 
@@ -1035,11 +1035,11 @@ mod tests {
         assert_eq!(
             finalized,
             vec![
-                DirStmt::Goto("block_join".to_string()),
-                DirStmt::Label("block_landing_pad".to_string()),
-                DirStmt::Expr(DirExpr::Var("catch_handler_call".to_string())),
-                DirStmt::Label("block_join".to_string()),
-                DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+                PreHirStmt::Goto("block_join".to_string()),
+                PreHirStmt::Label("block_landing_pad".to_string()),
+                PreHirStmt::Expr(PreHirExpr::Var("catch_handler_call".to_string())),
+                PreHirStmt::Label("block_join".to_string()),
+                PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
             ]
         );
     }
@@ -1051,9 +1051,9 @@ mod tests {
         // unrelated statement first exercises the actual `referenced`/
         // `protected` check this test is pinning.
         let body = vec![
-            DirStmt::Expr(DirExpr::Var("leading".to_string())),
-            DirStmt::Label("block_unreferenced".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Expr(PreHirExpr::Var("leading".to_string())),
+            PreHirStmt::Label("block_unreferenced".to_string()),
+            PreHirStmt::Return(None),
         ];
         let protected: HashSet<String> = ["block_unreferenced".to_string()].into_iter().collect();
 
@@ -1064,8 +1064,8 @@ mod tests {
         assert_eq!(
             unprotected,
             vec![
-                DirStmt::Expr(DirExpr::Var("leading".to_string())),
-                DirStmt::Return(None),
+                PreHirStmt::Expr(PreHirExpr::Var("leading".to_string())),
+                PreHirStmt::Return(None),
             ]
         );
 
@@ -1073,9 +1073,9 @@ mod tests {
         assert_eq!(
             protected_result,
             vec![
-                DirStmt::Expr(DirExpr::Var("leading".to_string())),
-                DirStmt::Label("block_unreferenced".to_string()),
-                DirStmt::Return(None),
+                PreHirStmt::Expr(PreHirExpr::Var("leading".to_string())),
+                PreHirStmt::Label("block_unreferenced".to_string()),
+                PreHirStmt::Return(None),
             ]
         );
     }
@@ -1083,23 +1083,23 @@ mod tests {
     #[test]
     fn strip_duplicate_label_definitions_keeps_first_only() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Expr(DirExpr::Var("a".to_string())),
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("a".to_string())),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
                 body: vec![
-                    DirStmt::Label("L".to_string()),
-                    DirStmt::Continue,
+                    PreHirStmt::Label("L".to_string()),
+                    PreHirStmt::Continue,
                 ],
             },
         ];
         let cleaned = strip_duplicate_label_definitions(body);
         let mut labels = 0usize;
-        fn count(stmts: &[DirStmt], n: &mut usize) {
+        fn count(stmts: &[PreHirStmt], n: &mut usize) {
             for s in stmts {
                 match s {
-                    DirStmt::Label(_) => *n += 1,
-                    DirStmt::While { body, .. } => count(body, n),
+                    PreHirStmt::Label(_) => *n += 1,
+                    PreHirStmt::While { body, .. } => count(body, n),
                     _ => {}
                 }
             }
@@ -1114,42 +1114,42 @@ mod tests {
         // do { work } while;   // unlabeled multi-emit body
         // goto L;
         let body = vec![
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
                 body: vec![
-                    DirStmt::Label("block_inner".to_string()),
-                    DirStmt::Expr(DirExpr::Var("work".to_string())),
-                    DirStmt::If {
-                        cond: DirExpr::Var("done".to_string()),
-                        then_body: vec![DirStmt::Break],
-                        else_body: vec![DirStmt::Continue],
+                    PreHirStmt::Label("block_inner".to_string()),
+                    PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+                    PreHirStmt::If {
+                        cond: PreHirExpr::Var("done".to_string()),
+                        then_body: vec![PreHirStmt::Break],
+                        else_body: vec![PreHirStmt::Continue],
                     },
                 ],
             },
-            DirStmt::DoWhile {
-                body: vec![DirStmt::Expr(DirExpr::Var("work".to_string()))],
-                cond: DirExpr::Var("more".to_string()),
+            PreHirStmt::DoWhile {
+                body: vec![PreHirStmt::Expr(PreHirExpr::Var("work".to_string()))],
+                cond: PreHirExpr::Var("more".to_string()),
             },
-            DirStmt::Goto("block_inner".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("block_inner".to_string()),
+            PreHirStmt::Return(None),
         ];
         let cleaned = strip_post_total_infloop_label_residuals(body);
         assert_eq!(cleaned.len(), 2, "{cleaned:?}");
-        assert!(matches!(cleaned[0], DirStmt::While { .. }));
-        assert!(matches!(cleaned[1], DirStmt::Return(None)));
+        assert!(matches!(cleaned[0], PreHirStmt::While { .. }));
+        assert!(matches!(cleaned[1], PreHirStmt::Return(None)));
     }
 
     #[test]
     fn dedupe_structured_region_entry_labels_removes_outer_loop_header_duplicate() {
         let body = vec![
-            DirStmt::Label("block_140001890".to_string()),
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
+            PreHirStmt::Label("block_140001890".to_string()),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
                 body: vec![
-                    DirStmt::Label("block_140001890".to_string()),
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var("x".to_string()),
-                        rhs: DirExpr::Const(
+                    PreHirStmt::Label("block_140001890".to_string()),
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("x".to_string()),
+                        rhs: PreHirExpr::Const(
                             0,
                             NirType::Int {
                                 bits: 32,
@@ -1163,24 +1163,24 @@ mod tests {
 
         let deduped = dedupe_structured_region_entry_labels(body);
         assert_eq!(deduped.len(), 1);
-        let DirStmt::While { body, .. } = &deduped[0] else {
+        let PreHirStmt::While { body, .. } = &deduped[0] else {
             panic!("expected while");
         };
         assert_eq!(body.len(), 2);
-        assert!(matches!(body[0], DirStmt::Label(ref l) if l == "block_140001890"));
+        assert!(matches!(body[0], PreHirStmt::Label(ref l) if l == "block_140001890"));
     }
 
     #[test]
     fn duplicate_structured_label_keeps_unique_residual_statements() {
         let body = vec![
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
-                body: vec![DirStmt::Label("block_residual".to_string())],
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                body: vec![PreHirStmt::Label("block_residual".to_string())],
             },
-            DirStmt::Label("block_residual".to_string()),
-            DirStmt::Assign {
-                lhs: DirLValue::Var("output".to_string()),
-                rhs: DirExpr::Const(
+            PreHirStmt::Label("block_residual".to_string()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("output".to_string()),
+                rhs: PreHirExpr::Const(
                     7,
                     NirType::Int {
                         bits: 32,
@@ -1194,14 +1194,14 @@ mod tests {
         assert_eq!(
             deduped
                 .iter()
-                .filter(|stmt| matches!(stmt, DirStmt::Label(label) if label == "block_residual"))
+                .filter(|stmt| matches!(stmt, PreHirStmt::Label(label) if label == "block_residual"))
                 .count(),
             0,
             "the nested definition owns the C label"
         );
         assert!(
             deduped.iter().any(
-                |stmt| matches!(stmt, DirStmt::Assign { lhs: DirLValue::Var(name), .. } if name == "output")
+                |stmt| matches!(stmt, PreHirStmt::Assign { lhs: PreHirLValue::Var(name), .. } if name == "output")
             ),
             "deduplicating a label must not delete the residual block's statements"
         );
@@ -1212,33 +1212,33 @@ mod tests {
         // Pattern: if (n <= 0) { goto end }; loop_body; return sum; end: return 0
         // Expected: if (n <= 0) { return 0 }; loop_body; return sum
         let stmts = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("block_end".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("block_end".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("sum".to_string()),
-                rhs: DirExpr::Var("work".to_string()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("sum".to_string()),
+                rhs: PreHirExpr::Var("work".to_string()),
             },
-            DirStmt::Return(Some(DirExpr::Var("sum".to_string()))),
-            DirStmt::Label("block_end".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("zero".to_string()))),
+            PreHirStmt::Return(Some(PreHirExpr::Var("sum".to_string()))),
+            PreHirStmt::Label("block_end".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("zero".to_string()))),
         ];
         let result = eliminate_redundant_gotos(stmts);
         assert_eq!(
             result,
             vec![
-                DirStmt::If {
-                    cond: DirExpr::Var("cond".to_string()),
-                    then_body: vec![DirStmt::Return(Some(DirExpr::Var("zero".to_string())))],
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("cond".to_string()),
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("zero".to_string())))],
                     else_body: Vec::new(),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("sum".to_string()),
-                    rhs: DirExpr::Var("work".to_string()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("sum".to_string()),
+                    rhs: PreHirExpr::Var("work".to_string()),
                 },
-                DirStmt::Return(Some(DirExpr::Var("sum".to_string()))),
+                PreHirStmt::Return(Some(PreHirExpr::Var("sum".to_string()))),
             ]
         );
     }

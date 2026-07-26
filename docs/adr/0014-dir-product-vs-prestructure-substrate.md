@@ -1,7 +1,7 @@
 # ADR 0014: Dual reconstruction paths — product DIR vs pre-structure substrate
 
 **Status:** Accepted  
-**Last verified:** 2026-07-25
+**Last verified:** 2026-07-26
 
 ## Context
 
@@ -9,24 +9,23 @@ The token **DIR** is overloaded in Fission.
 
 ### A. Code substrate (shipped today)
 
-`fission-midend-dir` owns **pre-structuring** midend types (`DirStmt` /
-`DirExpr` / `DirFunction`), the DIR-typed action pipeline, DIR VSA, and pure
-DIR helpers. Pipeline shape:
+`fission-midend-prehir` owns **pre-structuring** midend types (`PreHirStmt` /
+`PreHirExpr` / `PreHirFunction`), the PreHIR action pipeline, VSA, and pure
+static helpers. Pipeline shape:
 
 ```text
-p-code → builder raise → Dir* (flat goto/label AST)
+p-code → builder raise → PreHir* (flat goto/label AST)
        → normalize
-       → structure (CFG-to-AST on Dir*)
+       → structure (CFG-to-AST on PreHir*)
        → HirFunction
        → dual-layer print (NIR / HIR profiles; ADR 0011)
 ```
 
-In this layout, “DIR” is **not** a sibling product of HIR. It is the
-**static intermediate** consumed by normalize/structuring, then converted to
-`HirFunction` (`dir_stmts_to_hir_stmts`). ADR 0012 describes this substrate as
+This static intermediate is consumed by normalize/structuring, then converted to
+`HirFunction` (`prehir_stmts_to_hir_stmts`). ADR 0012 describes this substrate as
 the pre-structuring counterpart to `fission-midend-core`’s HIR types.
 
-### B. Product concept (exploratory)
+### B. Product contract (experimental)
 
 A separate design thread treats DIR as an **independent reconstruction
 strategy** beside HIR, both rooted in the same low-level semantic IR:
@@ -50,15 +49,14 @@ In that model:
 
 Using one name for both A and B causes design and review failures:
 
-- “Structure on DIR” is read as “structure on the product path” when code means
-  “structure on the flat pre-HIR AST”.
-- “DIR is not above HIR” is true for B and false for A’s current pipeline.
-- Emulator / selfjit / solver work gets mis-owned under midend-dir crates that
-  only hold static AST helpers.
+- “Structure on DIR” used to be read as “structure on the product path” when
+  code meant “structure on the flat pre-HIR AST”.
+- Emulator / selfjit / solver work could be mis-owned under a static midend
+  substrate instead of the validated product crate.
 
 A second overload is **NIR**: dual-layer **print profile** (ADR 0011), historical
 midend module name, and informal “low-level IR” in product writing. Emulator and
-selfjit today step **`PcodeOp` / `PcodeOpcode`**, not `Dir*` / `HirFunction` /
+selfjit today step **`PcodeOp` / `PcodeOpcode`**, not `PreHir*` / `HirFunction` /
 print-NIR text. Hybrid decompile+emu+solver designs must not treat those as
 interchangeable.
 
@@ -69,23 +67,21 @@ interchangeable.
 | Name | Role | Layer | Status |
 |------|------|--------|--------|
 | **Semantic foundation** | Executable, fidelity-first ops after lift — **p-code**, or a view **isomorphic** to p-code (same op meaning, sizes, spaces, control) | Foundation | Shipped as `PcodeOp` / `PcodeFunction` |
-| **Pre-structure IR** | Flat raised AST used by static normalize + structure (`Dir*` types today) | Static pipeline intermediate | Shipped under the name `Dir*` |
+| **Pre-structure IR** | Flat raised AST used by static normalize + structure (`PreHir*`) | Static pipeline intermediate | Shipped in `fission-midend-prehir` |
 | **HIR product** | Fast static high-level reconstruction + dual-layer print (ADR 0011) | Default decompile product | Shipped |
 | **NIR print profile** | Mechanical C **text** from the structured tree (`PrintProfile::Nir`) | Presentation / oracle **string** | Shipped; **not** the foundation |
-| **Validated reconstruction product** (concept name: **DIR product**) | Optional path: candidate high-level form + behavioral checks + assurance metadata | Sibling of HIR product, not a post-HIR polish stage | Exploratory; not a shipped public contract yet |
+| **Validated reconstruction product** (**DIR**) | Optional path: candidate high-level form + behavioral checks + assurance metadata | Sibling of HIR product, not a post-HIR polish stage | Experimental public Rust contract in `fission-dir` |
 
 Rules:
 
-1. New architecture text must not use bare “DIR” without saying **substrate**
-   (`Dir*` / pre-structure IR) or **product** (validated reconstruction).
+1. Bare “DIR” means the validated product. The static substrate is **PreHIR**.
 2. The DIR **product** must not be described as `NIR → HIR → DIR` or as a
    presentation pass over HIR. It shares the **semantic foundation** with HIR
    and may **reuse HIR candidates** as inputs to validation, but HIR is not its
    semantic oracle, and **NIR print text is not its oracle either**.
-3. Until a rename lands, **code identifiers** (`DirStmt`, `fission-midend-dir`,
-   `DirFunction`) continue to mean **pre-structure IR only**. Do not overload
-   those types with assurance metadata or emulator coupling “because the product
-   is also called DIR”.
+3. `PreHirStmt`, `PreHirFunction`, and `fission-midend-prehir` mean
+   **pre-structure IR only**. Assurance metadata and emulator/solver coupling
+   belong to `fission-dir`.
 4. Bare “NIR” in new dual-path / hybrid docs is forbidden unless qualified:
    **foundation** (only if p-code-isomorphic — prefer saying **p-code**),
    **print profile**, or **legacy midend name**. Default: say **p-code** for the
@@ -112,7 +108,7 @@ may be called “NIR” in product language **if and only if**:
 
 | Surface | Why insufficient alone |
 |---------|-------------------------|
-| Pre-structure `Dir*` | Already raised; materialize choices blur lift vs structure bugs |
+| Pre-structure `PreHir*` | Already raised; materialize choices blur lift vs structure bugs |
 | `HirFunction` | Static product; presentation and recovery policy embedded |
 | NIR **print** text (`PrintProfile::Nir`) | String surface; not an execution IR (ADR 0011 oracle is for **quality ranking of decompile text**, not emu step semantics) |
 | HIR **print** text | Readability surface only |
@@ -131,7 +127,7 @@ p-code ─┼── solver experiments   (same op / BV / memory model)
 **“Share NIR instead of p-code”** is therefore:
 
 - **OK** only when “NIR” means a p-code-isomorphic foundation view (§2 conditions);
-- **Not OK** when “NIR” means print profile, `Dir*`, or HIR.
+- **Not OK** when “NIR” means print profile, `PreHir*`, or HIR.
 
 Prefer documenting the foundation as **p-code** to match `fission-emulator` and
 `fission-pcode` today; do not invent a second executable IR without a parity
@@ -177,30 +173,30 @@ Explicit non-goals of this ADR:
 - Replacing p-code execution with print-NIR or HIR interpretation as the hybrid
   oracle.
 
-### 5. Rename policy for the code substrate (planned, not blocking)
+### 5. Code-substrate rename (completed)
 
-The long-term goal is to stop calling pre-structure IR “DIR” in product docs.
+The mechanical rename landed on 2026-07-26:
 
-| Phase | Action |
-|-------|--------|
-| Now | Docs/ADRs use **pre-structure IR** / `Dir*` for substrate; **DIR product** for the validated path; **p-code** for foundation |
-| Next | Prefer new APIs and comments that say pre-structure / flat IR; avoid expanding `Dir*` semantics toward validation |
-| Later (optional mechanical rename) | `Dir*` → e.g. `Flat*` / `PreHir*` / `GotoIr*`, crate `fission-midend-dir` → name matching pre-structure role; free the token **DIR** for the validated product — only with a dedicated migration PR, not drive-by |
+- `Dir*` → `PreHir*`
+- `fission-midend-dir` → `fission-midend-prehir`
+- `decomp --prehir` and JSON `code_prehir` are canonical; `--dir` remains a
+  compatibility CLI alias
+- `fission-verify` → `fission-dir`, reserving DIR for the validated product
 
-This ADR **accepts the dual-path vocabulary, foundation rule, and owner intent**.
-It does **not** require an immediate identifier rename to stay consistent.
+The rename changes ownership vocabulary, not static decompiler semantics.
 
 ### 6. Owner boundaries (relative to existing ADRs)
 
 | Concern | Owner | Notes |
 |---------|--------|------|
 | Semantic foundation (lift / p-code meaning) | `fission-pcode` (+ sleigh) | ADR 0002 / 0008; hybrid shared IR |
-| Pre-structure IR types & static normalize helpers | `fission-midend-dir` / normalize | Code “DIR” = substrate only |
+| Pre-structure IR types & static normalize helpers | `fission-midend-prehir` / normalize | No assurance or emulator coupling |
 | Static structuring free functions | `fission-midend-structuring` | Prefer CFG facts from foundation over HIR-only repair |
 | HIR presentation / dual-layer print (incl. NIR profile) | `render` + ADR 0011 | **Not** foundation; **not** DIR product |
 | Emulator / selfjit differential | `fission-emulator` | Executes foundation (`PcodeOp`); DIR-product oracle |
 | Constraint / solver experiments | dedicated solver surface (existing or future) | Same foundation model; must not silently alter print-NIR oracle text |
-| DIR-product assurance schema / lane | **TBD** under a future ADR when first public contract ships | Until then: research / internal only |
+| DIR-product foundation, candidate, scope, evidence, assurance, pipeline | `fission-dir` | Experimental public Rust contract; P-code identity is mandatory |
+| First native region reconstruction and observation verification | `fission-dir::native` | Pure single-block integer regions; emulator traces plus solver proof/counterexample |
 
 ADR 0006 still gates **semantic quality** claims for the static path. DIR-product
 work may land mechanical scaffolding and focused differential tests, but must
@@ -213,15 +209,12 @@ not claim decompiler quality wins without measured evidence.
 - Stops treating “DIR above HIR” and “DIR before HIR” as the same design.
 - Aligns dual-path exploration with a single **executable** foundation (p-code).
 - Separates print-NIR / HIR oracle text from emu/solver step semantics.
-- Gives rename and crate work a stable target language without blocking current
-  static decompile.
+- Frees DIR for the validated product and makes PreHIR ownership unambiguous.
 
 **Costs / risks**
 
-- Temporary dual meaning of “DIR” in oral discussion until rename or habit
-  settles; mitigate with “substrate” vs “product” every time.
 - Temporary dual meaning of “NIR”; mitigate with §1 rule 4 and “p-code” default.
-- Risk of smuggling validation logic into `DirStmt` or normalize “for DIR”;
+- Risk of smuggling validation logic into `PreHirStmt` or normalize “for DIR”;
   reject in review using §1 rule 3.
 - Risk of dual structuring stacks; reject unless a proposal proves the shared
   candidate core is insufficient.
@@ -230,13 +223,13 @@ not claim decompiler quality wins without measured evidence.
 
 **Follow-ups**
 
-1. Architecture / PROJECT docs: one diagram with dual paths + foundation =
-   p-code + current static pipeline (pre-structure IR labeled).
-2. First DIR-product spike design: region-scoped Path/Trace Validated check
-   **against p-code / foundation observations** (no full-function proof).
-3. Optional rename RFC when `Dir*` churn cost is justified.
-4. When a public DIR-product contract exists, add ADR 001x for assurance bands,
-   CLI/API surface, and non-goals (syscalls, concurrency, SMC, etc.).
+1. Extend the first P-code-native region backend beyond pure single-block
+   integer expressions, preserving explicit admission errors and observation
+   scopes.
+2. Add a selective CLI/API surface for the native region reconstructor and
+   emulator/solver assurance report.
+3. Keep memory aliasing, calls, syscalls, concurrency, self-modifying code, and incomplete environment
+   models explicit as `UnresolvedEffect` or `Unsupported`, never implicit pass.
 
 ## Related
 
@@ -247,4 +240,4 @@ not claim decompiler quality wins without measured evidence.
 - [ADR 0011](0011-hir-presentation-contract.md) — HIR presentation / NIR print ≠
   executable foundation
 - [ADR 0012](0012-midend-rename-and-crate-extraction.md) — midend crate split;
-  `fission-midend-dir` as pre-structure substrate
+  `fission-midend-prehir` as pre-structure substrate

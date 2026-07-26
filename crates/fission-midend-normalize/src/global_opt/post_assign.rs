@@ -17,12 +17,12 @@
 use super::super::analysis::expr_key::{PureExprMap, invalidate_pure_map, pure_expr_key};
 use crate::prelude::*;
 
-pub fn apply_post_assign_value_representative_pass(func: &mut DirFunction) -> bool {
+pub fn apply_post_assign_value_representative_pass(func: &mut PreHirFunction) -> bool {
     let mut reps = PureExprMap::default();
     stabilize_stmts(&mut func.body, &mut reps)
 }
 
-fn stabilize_stmts(stmts: &mut [DirStmt], reps: &mut PureExprMap) -> bool {
+fn stabilize_stmts(stmts: &mut [PreHirStmt], reps: &mut PureExprMap) -> bool {
     let mut changed = false;
     for stmt in stmts {
         changed |= stabilize_stmt(stmt, reps);
@@ -30,11 +30,11 @@ fn stabilize_stmts(stmts: &mut [DirStmt], reps: &mut PureExprMap) -> bool {
     changed
 }
 
-fn stabilize_stmt(stmt: &mut DirStmt, reps: &mut PureExprMap) -> bool {
+fn stabilize_stmt(stmt: &mut PreHirStmt, reps: &mut PureExprMap) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
-            if let DirLValue::Var(name) = lhs {
+        PreHirStmt::Assign { lhs, rhs } => {
+            if let PreHirLValue::Var(name) = lhs {
                 invalidate_pure_map(reps, name);
                 if is_representable_expr(rhs) {
                     if let Some(key) = pure_expr_key(rhs) {
@@ -46,7 +46,7 @@ fn stabilize_stmt(stmt: &mut DirStmt, reps: &mut PureExprMap) -> bool {
                 changed |= stabilize_expr(rhs, reps);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -58,19 +58,19 @@ fn stabilize_stmt(stmt: &mut DirStmt, reps: &mut PureExprMap) -> bool {
             changed |= stabilize_stmts(else_body, &mut else_reps);
             reps.clear();
         }
-        DirStmt::While { cond, body } => {
+        PreHirStmt::While { cond, body } => {
             changed |= stabilize_expr(cond, reps);
             let mut body_reps = reps.clone();
             changed |= stabilize_stmts(body, &mut body_reps);
             reps.clear();
         }
-        DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::DoWhile { body, cond } => {
             let mut body_reps = reps.clone();
             changed |= stabilize_stmts(body, &mut body_reps);
             changed |= stabilize_expr(cond, &mut body_reps);
             reps.clear();
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -89,7 +89,7 @@ fn stabilize_stmt(stmt: &mut DirStmt, reps: &mut PureExprMap) -> bool {
             }
             reps.clear();
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -103,70 +103,70 @@ fn stabilize_stmt(stmt: &mut DirStmt, reps: &mut PureExprMap) -> bool {
             changed |= stabilize_stmts(default, &mut default_reps);
             reps.clear();
         }
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             changed |= stabilize_stmts(body, reps);
         }
-        DirStmt::Expr(expr)
-        | DirStmt::Return(Some(expr))
-        | DirStmt::VaStart { va_list: expr, .. } => {
+        PreHirStmt::Expr(expr)
+        | PreHirStmt::Return(Some(expr))
+        | PreHirStmt::VaStart { va_list: expr, .. } => {
             changed |= stabilize_expr(expr, reps);
         }
-        DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Return(None)
-        | DirStmt::Break
-        | DirStmt::Continue => {
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {
             reps.clear();
         }
     }
     changed
 }
 
-fn stabilize_lvalue(lhs: &mut DirLValue, reps: &PureExprMap) -> bool {
+fn stabilize_lvalue(lhs: &mut PreHirLValue, reps: &PureExprMap) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, .. } => stabilize_expr(ptr, reps),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => stabilize_expr(ptr, reps),
+        PreHirLValue::Index { base, index, .. } => {
             let base_changed = stabilize_expr(base, reps);
             let index_changed = stabilize_expr(index, reps);
             base_changed || index_changed
         }
-        DirLValue::FieldAccess { base, .. } => stabilize_expr(base, reps),
+        PreHirLValue::FieldAccess { base, .. } => stabilize_expr(base, reps),
     }
 }
 
-fn stabilize_expr(expr: &mut DirExpr, reps: &PureExprMap) -> bool {
+fn stabilize_expr(expr: &mut PreHirExpr, reps: &PureExprMap) -> bool {
     if let Some(key) = pure_expr_key(expr) {
         if let Some(name) = reps.get(&key) {
-            *expr = DirExpr::Var(name.clone());
+            *expr = PreHirExpr::Var(name.clone());
             return true;
         }
     }
 
     let mut changed = false;
     match expr {
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
             changed |= stabilize_expr(expr, reps);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= stabilize_expr(lhs, reps);
             changed |= stabilize_expr(rhs, reps);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= stabilize_expr(arg, reps);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= stabilize_expr(base, reps);
             changed |= stabilize_expr(index, reps);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -176,15 +176,15 @@ fn stabilize_expr(expr: &mut DirExpr, reps: &PureExprMap) -> bool {
             changed |= stabilize_expr(then_expr, reps);
             changed |= stabilize_expr(else_expr, reps);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
     changed
 }
 
-fn is_representable_expr(expr: &DirExpr) -> bool {
+fn is_representable_expr(expr: &PreHirExpr) -> bool {
     !matches!(
         expr,
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _)
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _)
     ) && pure_expr_key(expr).is_some()
 }
 
@@ -200,32 +200,32 @@ mod tests {
         }
     }
 
-    fn var(name: &str) -> DirExpr {
-        DirExpr::Var(name.to_string())
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
     }
 
     #[test]
     fn stabilizes_self_referential_assignment_before_do_while_condition() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "test_post_assign_do_while".to_string(),
             int_param_offsets: Vec::new(),
             return_type: NirType::Unknown,
-            body: vec![DirStmt::DoWhile {
-                body: vec![DirStmt::Assign {
-                    lhs: DirLValue::Var("p".to_string()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
+            body: vec![PreHirStmt::DoWhile {
+                body: vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("p".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
                         lhs: Box::new(var("p")),
-                        rhs: Box::new(DirExpr::Const(2, int(64))),
+                        rhs: Box::new(PreHirExpr::Const(2, int(64))),
                         ty: int(64),
                     },
                 }],
-                cond: DirExpr::Binary {
-                    op: DirBinaryOp::Sub,
-                    lhs: Box::new(DirExpr::Binary {
-                        op: DirBinaryOp::Add,
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Sub,
+                    lhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
                         lhs: Box::new(var("p")),
-                        rhs: Box::new(DirExpr::Const(2, int(64))),
+                        rhs: Box::new(PreHirExpr::Const(2, int(64))),
                         ty: int(64),
                     }),
                     rhs: Box::new(var("end")),
@@ -236,10 +236,10 @@ mod tests {
         };
 
         assert!(apply_post_assign_value_representative_pass(&mut func));
-        let DirStmt::DoWhile { cond, .. } = &func.body[0] else {
+        let PreHirStmt::DoWhile { cond, .. } = &func.body[0] else {
             panic!("expected do-while");
         };
-        let DirExpr::Binary { lhs, .. } = cond else {
+        let PreHirExpr::Binary { lhs, .. } = cond else {
             panic!("expected binary condition");
         };
         assert_eq!(lhs.as_ref(), &var("p"));
@@ -247,33 +247,33 @@ mod tests {
 
     #[test]
     fn stabilizes_self_referential_assignment_before_if_condition() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "test_post_assign_if".to_string(),
             int_param_offsets: Vec::new(),
             return_type: NirType::Unknown,
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("i".to_string()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("i".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
                         lhs: Box::new(var("i")),
-                        rhs: Box::new(DirExpr::Const(1, int(32))),
+                        rhs: Box::new(PreHirExpr::Const(1, int(32))),
                         ty: int(32),
                     },
                 },
-                DirStmt::If {
-                    cond: DirExpr::Binary {
-                        op: DirBinaryOp::Sub,
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Sub,
                         lhs: Box::new(var("rows")),
-                        rhs: Box::new(DirExpr::Binary {
-                            op: DirBinaryOp::Add,
+                        rhs: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
                             lhs: Box::new(var("i")),
-                            rhs: Box::new(DirExpr::Const(1, int(32))),
+                            rhs: Box::new(PreHirExpr::Const(1, int(32))),
                             ty: int(32),
                         }),
                         ty: int(32),
                     },
-                    then_body: vec![DirStmt::Goto("loop".to_string())],
+                    then_body: vec![PreHirStmt::Goto("loop".to_string())],
                     else_body: vec![],
                 },
             ],
@@ -281,10 +281,10 @@ mod tests {
         };
 
         assert!(apply_post_assign_value_representative_pass(&mut func));
-        let DirStmt::If { cond, .. } = &func.body[1] else {
+        let PreHirStmt::If { cond, .. } = &func.body[1] else {
             panic!("expected if");
         };
-        let DirExpr::Binary { rhs, .. } = cond else {
+        let PreHirExpr::Binary { rhs, .. } = cond else {
             panic!("expected binary condition");
         };
         assert_eq!(rhs.as_ref(), &var("i"));

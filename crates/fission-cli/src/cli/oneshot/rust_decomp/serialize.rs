@@ -1,11 +1,7 @@
 use super::record::{CliRustDecompileRecord, CliRustOutcome};
 use fission_decompiler::{LayeredPseudocode, PseudocodeLayer};
 
-fn primary_json_code(
-    code: &str,
-    code_hir: Option<&str>,
-    layer: PseudocodeLayer,
-) -> String {
+fn primary_json_code(code: &str, code_hir: Option<&str>, layer: PseudocodeLayer) -> String {
     match layer {
         PseudocodeLayer::Hir => code_hir.unwrap_or(code).to_string(),
         _ => code.to_string(),
@@ -30,7 +26,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
             code,
             code_nir,
             code_hir,
-            code_dir,
+            code_prehir,
             fell_back,
             fallback_reason,
             build_stats,
@@ -49,10 +45,10 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "fell_back": fell_back,
                 "fallback_reason": fallback_reason,
             });
-            // Only present when `decomp --dir` was passed -- absence means
+            // Only present when `decomp --prehir` was passed -- absence means
             // "not requested", not "structuring produced nothing".
-            if let Some(dir) = code_dir {
-                obj["code_dir"] = serde_json::json!(dir);
+            if let Some(prehir) = code_prehir {
+                obj["code_prehir"] = serde_json::json!(prehir);
             }
             if let Some(stats) = build_stats {
                 obj["preview_build_stats"] = serde_json::json!(stats);
@@ -154,17 +150,17 @@ pub(crate) fn record_plain_output(entry: &CliRustDecompileRecord) -> String {
             code,
             code_nir,
             code_hir,
-            code_dir,
+            code_prehir,
             ..
         } => {
             let mut out = layered_text(code, code_nir.as_deref(), code_hir.as_deref(), entry.layer);
-            // Only present when `decomp --dir` was passed. Appended as its
+            // Only present when `decomp --prehir` was passed. Appended as its
             // own section (not merged into the NIR/HIR layer switch above)
-            // since DIR is a diagnostic view, not a selectable final
+            // since PreHIR is a diagnostic view, not a selectable final
             // pseudocode surface.
-            if let Some(dir) = code_dir {
-                out.push_str("\n\n// ===== DIR (pre-structuring) =====\n");
-                out.push_str(dir);
+            if let Some(prehir) = code_prehir {
+                out.push_str("\n\n// ===== PreHIR (pre-structuring) =====\n");
+                out.push_str(prehir);
             }
             out
         }

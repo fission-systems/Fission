@@ -1,8 +1,8 @@
 //! Shared pure helpers for residual structuring free functions.
 
 use fission_midend_core::ir::{DispatcherProofUnit};
-use fission_midend_dir::{DirBinaryOp, DirExpr, DirStmt, DirSwitchCase, DirUnaryOp};
-use fission_midend_dir::util::strip_casts;
+use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirStmt, PreHirSwitchCase, PreHirUnaryOp};
+use fission_midend_prehir::util::strip_casts;
 use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
 use crate::regions::EmitReadyDecision;
 
@@ -57,8 +57,8 @@ pub fn proof_supports_direct_emit(proof: &DispatcherProofUnit) -> bool {
         && proof.recovered_cases.len() >= proof.selector_cardinality
 }
 
-pub fn merge_equivalent_switch_cases(cases: &mut Vec<DirSwitchCase>) {
-    let mut merged: Vec<DirSwitchCase> = Vec::with_capacity(cases.len());
+pub fn merge_equivalent_switch_cases(cases: &mut Vec<PreHirSwitchCase>) {
+    let mut merged: Vec<PreHirSwitchCase> = Vec::with_capacity(cases.len());
     for case in cases.drain(..) {
         if let Some(existing) = merged
             .iter_mut()
@@ -72,7 +72,7 @@ pub fn merge_equivalent_switch_cases(cases: &mut Vec<DirSwitchCase>) {
     *cases = merged;
 }
 
-pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<DirSwitchCase>) -> usize {
+pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<PreHirSwitchCase>) -> usize {
     let mut patched = 0usize;
     let n = cases.len();
     if n < 2 {
@@ -81,7 +81,7 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<DirSwitchCase>) -> usiz
     let next_labels: Vec<Option<String>> = (0..n)
         .map(|i| {
             cases[i].body.iter().find_map(|s| {
-                if let DirStmt::Label(l) = s {
+                if let PreHirStmt::Label(l) = s {
                     Some(l.clone())
                 } else {
                     None
@@ -97,8 +97,8 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<DirSwitchCase>) -> usiz
             .body
             .iter_mut()
             .rev()
-            .find(|s| !matches!(s, DirStmt::Label(_)));
-        if let Some(DirStmt::Goto(label)) = last_stmt {
+            .find(|s| !matches!(s, PreHirStmt::Label(_)));
+        if let Some(PreHirStmt::Goto(label)) = last_stmt {
             if label == next_label {
                 *label = SWITCH_FALLTHROUGH_SENTINEL.to_string();
                 patched += 1;
@@ -108,23 +108,23 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<DirSwitchCase>) -> usiz
     patched
 }
 
-pub fn extract_eq_const_for_case(expr: &DirExpr, case_on_true: bool) -> Option<(DirExpr, i64)> {
+pub fn extract_eq_const_for_case(expr: &PreHirExpr, case_on_true: bool) -> Option<(PreHirExpr, i64)> {
     let expr = strip_casts(expr);
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Eq,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if case_on_true => extract_eq_const_operands(lhs.as_ref(), rhs.as_ref()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } if !case_on_true => extract_eq_const_operands(lhs.as_ref(), rhs.as_ref()),
-        DirExpr::Unary {
-            op: DirUnaryOp::Not,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
             expr,
             ..
         } => extract_eq_const_for_case(expr.as_ref(), !case_on_true),
@@ -132,29 +132,29 @@ pub fn extract_eq_const_for_case(expr: &DirExpr, case_on_true: bool) -> Option<(
     }
 }
 
-pub fn extract_eq_const_operands(lhs: &DirExpr, rhs: &DirExpr) -> Option<(DirExpr, i64)> {
+pub fn extract_eq_const_operands(lhs: &PreHirExpr, rhs: &PreHirExpr) -> Option<(PreHirExpr, i64)> {
     match (strip_casts(lhs), strip_casts(rhs)) {
-        (DirExpr::Const(value, _), other) => normalize_affine_case_expr(&other, value),
-        (other, DirExpr::Const(value, _)) => normalize_affine_case_expr(&other, value),
+        (PreHirExpr::Const(value, _), other) => normalize_affine_case_expr(&other, value),
+        (other, PreHirExpr::Const(value, _)) => normalize_affine_case_expr(&other, value),
         _ => None,
     }
 }
 
-pub fn extract_range_guard_for_chain(expr: &DirExpr, chain_on_true: bool) -> Option<DirExpr> {
+pub fn extract_range_guard_for_chain(expr: &PreHirExpr, chain_on_true: bool) -> Option<PreHirExpr> {
     let expr = strip_casts(expr);
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Lt | DirBinaryOp::Le | DirBinaryOp::SLt | DirBinaryOp::SLe,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::SLt | PreHirBinaryOp::SLe,
             lhs,
             rhs,
             ..
         } => match (strip_casts(lhs.as_ref()), strip_casts(rhs.as_ref())) {
-            (other, DirExpr::Const(_, _)) if chain_on_true => normalize_affine_bound_expr(&other),
-            (DirExpr::Const(_, _), other) if !chain_on_true => normalize_affine_bound_expr(&other),
+            (other, PreHirExpr::Const(_, _)) if chain_on_true => normalize_affine_bound_expr(&other),
+            (PreHirExpr::Const(_, _), other) if !chain_on_true => normalize_affine_bound_expr(&other),
             _ => None,
         },
-        DirExpr::Unary {
-            op: DirUnaryOp::Not,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
             expr,
             ..
         } => extract_range_guard_for_chain(expr.as_ref(), !chain_on_true),
@@ -162,48 +162,48 @@ pub fn extract_range_guard_for_chain(expr: &DirExpr, chain_on_true: bool) -> Opt
     }
 }
 
-fn normalize_affine_bound_expr(expr: &DirExpr) -> Option<DirExpr> {
+fn normalize_affine_bound_expr(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let expr = strip_casts(expr);
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         }
-        | DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        | PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
-        } if matches!(strip_casts(rhs.as_ref()), DirExpr::Const(_, _)) => Some(*lhs.clone()),
+        } if matches!(strip_casts(rhs.as_ref()), PreHirExpr::Const(_, _)) => Some(*lhs.clone()),
         _ => Some(expr.clone()),
     }
 }
 
-fn normalize_affine_case_expr(expr: &DirExpr, value: i64) -> Option<(DirExpr, i64)> {
+fn normalize_affine_case_expr(expr: &PreHirExpr, value: i64) -> Option<(PreHirExpr, i64)> {
     let expr = strip_casts(expr);
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             ref lhs,
             ref rhs,
             ..
         } => {
-            let DirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
+            let PreHirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
                 return Some((expr.clone(), value));
             };
             value
                 .checked_add(offset)
                 .map(|normalized| ((*lhs.clone()), normalized))
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             ref lhs,
             ref rhs,
             ..
         } => {
-            let DirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
+            let PreHirExpr::Const(offset, _) = strip_casts(rhs.as_ref()) else {
                 return Some((expr.clone(), value));
             };
             value

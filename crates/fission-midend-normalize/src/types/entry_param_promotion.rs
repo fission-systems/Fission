@@ -5,8 +5,8 @@
 //! for a parameter slot and the assignment appears in the leading linear prefix of the body.
 
 use fission_midend_core::ir::{NirBindingOrigin, NirType};
-use fission_midend_dir::{DirBinding, DirExpr, DirFunction, DirLValue, DirStmt};
-use fission_midend_dir::util::rename_vars_in_stmts;
+use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
+use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_midend_core::{AbiState, CallingConvention};
 use crate::HashSet;
 use std::collections::BTreeSet;
@@ -42,41 +42,41 @@ fn param_slot_for_hw_register(reg: &str, abi: CallingConvention, is_64bit: bool)
     AbiState::new(abi, is_64bit, abi_pointer_size(is_64bit, abi), 0).param_slot_for_name(reg)
 }
 
-fn peel_var_name<'a>(expr: &'a DirExpr) -> Option<&'a str> {
+fn peel_var_name<'a>(expr: &'a PreHirExpr) -> Option<&'a str> {
     match expr {
-        DirExpr::Var(s) => Some(s.as_str()),
-        DirExpr::Cast { expr, .. } => peel_var_name(expr),
+        PreHirExpr::Var(s) => Some(s.as_str()),
+        PreHirExpr::Cast { expr, .. } => peel_var_name(expr),
         _ => None,
     }
 }
 
-fn collect_entry_linear_prefix<'a>(stmts: &'a [DirStmt], out: &mut Vec<&'a DirStmt>) {
+fn collect_entry_linear_prefix<'a>(stmts: &'a [PreHirStmt], out: &mut Vec<&'a PreHirStmt>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Label(_) => continue,
-            DirStmt::Block(inner) if out.is_empty() => {
+            PreHirStmt::Label(_) => continue,
+            PreHirStmt::Block(inner) if out.is_empty() => {
                 collect_entry_linear_prefix(inner, out);
                 return;
             }
-            DirStmt::Assign { .. } => out.push(stmt),
+            PreHirStmt::Assign { .. } => out.push(stmt),
             _ => break,
         }
     }
 }
 
-fn stmt_contains_rhs_var(stmt: &DirStmt, target: &str) -> bool {
+fn stmt_contains_rhs_var(stmt: &PreHirStmt, target: &str) -> bool {
     match stmt {
-        DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
+        PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
             expr_contains_var(rhs, target)
         }
-        DirStmt::VaStart { va_list, .. } => expr_contains_var(va_list, target),
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. }
-        | DirStmt::For { body: stmts, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => expr_contains_var(va_list, target),
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. }
+        | PreHirStmt::For { body: stmts, .. } => {
             stmts.iter().any(|stmt| stmt_contains_rhs_var(stmt, target))
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -89,7 +89,7 @@ fn stmt_contains_rhs_var(stmt: &DirStmt, target: &str) -> bool {
                     .iter()
                     .any(|stmt| stmt_contains_rhs_var(stmt, target))
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -104,31 +104,31 @@ fn stmt_contains_rhs_var(stmt: &DirStmt, target: &str) -> bool {
                     .iter()
                     .any(|stmt| stmt_contains_rhs_var(stmt, target))
         }
-        DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Return(None)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
     }
 }
 
-fn expr_contains_var(expr: &DirExpr, target: &str) -> bool {
+fn expr_contains_var(expr: &PreHirExpr, target: &str) -> bool {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => name == target,
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, target),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => name == target,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, target),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_var(lhs, target) || expr_contains_var(rhs, target)
         }
-        DirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, target)),
-        DirExpr::PtrOffset { base, .. } => expr_contains_var(base, target),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, target)),
+        PreHirExpr::PtrOffset { base, .. } => expr_contains_var(base, target),
+        PreHirExpr::Index { base, index, .. } => {
             expr_contains_var(base, target) || expr_contains_var(index, target)
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -138,23 +138,23 @@ fn expr_contains_var(expr: &DirExpr, target: &str) -> bool {
                 || expr_contains_var(then_expr, target)
                 || expr_contains_var(else_expr, target)
         }
-        DirExpr::Const(_, _) => false,
+        PreHirExpr::Const(_, _) => false,
     }
 }
 
-fn stmt_assigns_var(stmt: &DirStmt, target: &str) -> bool {
+fn stmt_assigns_var(stmt: &PreHirStmt, target: &str) -> bool {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             ..
         } => name == target,
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. }
-        | DirStmt::For { body: stmts, .. } => {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. }
+        | PreHirStmt::For { body: stmts, .. } => {
             stmts.iter().any(|stmt| stmt_assigns_var(stmt, target))
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -162,7 +162,7 @@ fn stmt_assigns_var(stmt: &DirStmt, target: &str) -> bool {
             then_body.iter().any(|stmt| stmt_assigns_var(stmt, target))
                 || else_body.iter().any(|stmt| stmt_assigns_var(stmt, target))
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             cases
                 .iter()
                 .any(|case| case.body.iter().any(|stmt| stmt_assigns_var(stmt, target)))
@@ -172,20 +172,20 @@ fn stmt_assigns_var(stmt: &DirStmt, target: &str) -> bool {
     }
 }
 
-fn detect_variadic_register_save(func: &DirFunction) -> bool {
-    fn stmt_has_variadic_shape(stmt: &DirStmt) -> bool {
+fn detect_variadic_register_save(func: &PreHirFunction) -> bool {
+    fn stmt_has_variadic_shape(stmt: &PreHirStmt) -> bool {
         match stmt {
-            DirStmt::Assign {
-                rhs: DirExpr::Call { args, .. },
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Call { args, .. },
                 ..
             }
-            | DirStmt::Expr(DirExpr::Call { args, .. }) => args.len() > 4,
-            DirStmt::VaStart { .. } => true,
-            DirStmt::Block(stmts)
-            | DirStmt::While { body: stmts, .. }
-            | DirStmt::DoWhile { body: stmts, .. }
-            | DirStmt::For { body: stmts, .. } => stmts.iter().any(stmt_has_variadic_shape),
-            DirStmt::If {
+            | PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => args.len() > 4,
+            PreHirStmt::VaStart { .. } => true,
+            PreHirStmt::Block(stmts)
+            | PreHirStmt::While { body: stmts, .. }
+            | PreHirStmt::DoWhile { body: stmts, .. }
+            | PreHirStmt::For { body: stmts, .. } => stmts.iter().any(stmt_has_variadic_shape),
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -193,7 +193,7 @@ fn detect_variadic_register_save(func: &DirFunction) -> bool {
                 then_body.iter().any(stmt_has_variadic_shape)
                     || else_body.iter().any(stmt_has_variadic_shape)
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 cases
                     .iter()
                     .any(|case| case.body.iter().any(stmt_has_variadic_shape))
@@ -206,14 +206,14 @@ fn detect_variadic_register_save(func: &DirFunction) -> bool {
     func.body.iter().any(stmt_has_variadic_shape)
 }
 
-fn param_ty_for_abi(func: &DirFunction) -> NirType {
+fn param_ty_for_abi(func: &PreHirFunction) -> NirType {
     NirType::Int {
         bits: abi_pointer_size(func.is_64bit, func.calling_convention) * 8,
         signed: true,
     }
 }
 
-fn promote_existing_param_name_reads(func: &mut DirFunction) -> usize {
+fn promote_existing_param_name_reads(func: &mut PreHirFunction) -> usize {
     let mut promotions = 0usize;
     for slot in 0..func.int_param_offsets.len() {
         let param_name = format!("param_{}", slot + 1);
@@ -235,7 +235,7 @@ fn promote_existing_param_name_reads(func: &mut DirFunction) -> usize {
     promotions
 }
 
-fn promote_direct_param_register_reads(func: &mut DirFunction) -> usize {
+fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
     let abi = func.calling_convention;
     let variadic_evidence =
         abi == CallingConvention::WindowsX64 && detect_variadic_register_save(func);
@@ -254,7 +254,7 @@ fn promote_direct_param_register_reads(func: &mut DirFunction) -> usize {
         let param_name = format!("param_{}", slot + 1);
         let mut promoted = false;
         for hw in hw_names {
-            if stmt_assigns_var(&DirStmt::Block(func.body.clone()), &hw) {
+            if stmt_assigns_var(&PreHirStmt::Block(func.body.clone()), &hw) {
                 continue;
             }
             if !func
@@ -278,7 +278,7 @@ fn promote_direct_param_register_reads(func: &mut DirFunction) -> usize {
     promotions
 }
 
-fn sort_params_by_index(params: &mut [fission_midend_dir::DirBinding]) {
+fn sort_params_by_index(params: &mut [fission_midend_prehir::PreHirBinding]) {
     params.sort_by_key(|b| {
         b.name
             .strip_prefix("param_")
@@ -287,7 +287,7 @@ fn sort_params_by_index(params: &mut [fission_midend_dir::DirBinding]) {
     });
 }
 
-fn ensure_param_binding(func: &mut DirFunction, slot: usize, ty: NirType) {
+fn ensure_param_binding(func: &mut PreHirFunction, slot: usize, ty: NirType) {
     let name = format!("param_{}", slot + 1);
     if let Some(p) = func.params.iter_mut().find(|p| p.name == name) {
         if matches!(p.ty, NirType::Unknown) && !matches!(ty, NirType::Unknown) {
@@ -295,7 +295,7 @@ fn ensure_param_binding(func: &mut DirFunction, slot: usize, ty: NirType) {
         }
         return;
     }
-    func.params.push(DirBinding {
+    func.params.push(PreHirBinding {
         name,
         ty,
         surface_type_name: None,
@@ -305,13 +305,13 @@ fn ensure_param_binding(func: &mut DirFunction, slot: usize, ty: NirType) {
     sort_params_by_index(&mut func.params);
 }
 
-fn remove_local_binding(func: &mut DirFunction, name: &str) {
+fn remove_local_binding(func: &mut PreHirFunction, name: &str) {
     if let Some(pos) = func.locals.iter().position(|b| b.name == name) {
         func.locals.remove(pos);
     }
 }
 
-fn trim_unused_variadic_tail_params(func: &mut DirFunction) -> bool {
+fn trim_unused_variadic_tail_params(func: &mut PreHirFunction) -> bool {
     if func.calling_convention != CallingConvention::WindowsX64
         || !detect_variadic_register_save(func)
         || func.params.len() <= 2
@@ -332,7 +332,7 @@ fn trim_unused_variadic_tail_params(func: &mut DirFunction) -> bool {
     true
 }
 
-fn abi_state_for_func(func: &DirFunction) -> AbiState {
+fn abi_state_for_func(func: &PreHirFunction) -> AbiState {
     AbiState::new_with_cspec(
         func.calling_convention,
         func.is_64bit,
@@ -344,11 +344,11 @@ fn abi_state_for_func(func: &DirFunction) -> AbiState {
     )
 }
 
-fn hw_name_for_slot(func: &DirFunction, slot: usize) -> Option<String> {
+fn hw_name_for_slot(func: &PreHirFunction, slot: usize) -> Option<String> {
     abi_state_for_func(func).param_hw_name(slot)
 }
 
-fn hardware_names_for_slot(func: &DirFunction, slot: usize) -> Vec<String> {
+fn hardware_names_for_slot(func: &PreHirFunction, slot: usize) -> Vec<String> {
     let abi = abi_state_for_func(func);
     let mut names = BTreeSet::new();
     if let Some(hw) = abi.param_hw_name(slot) {
@@ -366,12 +366,12 @@ fn hardware_names_for_slot(func: &DirFunction, slot: usize) -> Vec<String> {
     names.into_iter().collect()
 }
 
-fn collect_var_names_in_stmt(stmt: &DirStmt, vars: &mut HashSet<String>) {
+fn collect_var_names_in_stmt(stmt: &PreHirStmt, vars: &mut HashSet<String>) {
     match stmt {
-        DirStmt::Assign { rhs, .. } => collect_var_names_in_expr(rhs, vars),
-        DirStmt::Return(Some(expr)) => collect_var_names_in_expr(expr, vars),
-        DirStmt::Expr(expr) => collect_var_names_in_expr(expr, vars),
-        DirStmt::If {
+        PreHirStmt::Assign { rhs, .. } => collect_var_names_in_expr(rhs, vars),
+        PreHirStmt::Return(Some(expr)) => collect_var_names_in_expr(expr, vars),
+        PreHirStmt::Expr(expr) => collect_var_names_in_expr(expr, vars),
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -384,7 +384,7 @@ fn collect_var_names_in_stmt(stmt: &DirStmt, vars: &mut HashSet<String>) {
                 collect_var_names_in_stmt(s, vars);
             }
         }
-        DirStmt::Block(stmts) => {
+        PreHirStmt::Block(stmts) => {
             for s in stmts {
                 collect_var_names_in_stmt(s, vars);
             }
@@ -393,22 +393,22 @@ fn collect_var_names_in_stmt(stmt: &DirStmt, vars: &mut HashSet<String>) {
     }
 }
 
-fn collect_var_names_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
+fn collect_var_names_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             vars.insert(name.clone());
         }
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => collect_var_names_in_expr(inner, vars),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => collect_var_names_in_expr(inner, vars),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             collect_var_names_in_expr(lhs, vars);
             collect_var_names_in_expr(rhs, vars);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -418,24 +418,24 @@ fn collect_var_names_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
             collect_var_names_in_expr(then_expr, vars);
             collect_var_names_in_expr(else_expr, vars);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_var_names_in_expr(arg, vars);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             collect_var_names_in_expr(base, vars);
             collect_var_names_in_expr(index, vars);
         }
-        DirExpr::Const(_, _) | DirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
     }
 }
 
 /// Remove `param_k = <hw>` copies where `<hw>` is the incoming register for slot `k`.
-fn remove_redundant_param_hw_copies(body: &mut Vec<DirStmt>, abi: CallingConvention) {
+fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConvention) {
     body.retain_mut(|stmt| match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(lhs_name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs_name),
             rhs,
         } => {
             if let Some(slot) = lhs_name
@@ -452,26 +452,26 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<DirStmt>, abi: CallingConvent
             }
             true
         }
-        DirStmt::Block(stmts) => {
+        PreHirStmt::Block(stmts) => {
             remove_redundant_param_hw_copies(stmts, abi);
             true
         }
-        DirStmt::While { body: stmts, .. } | DirStmt::DoWhile { body: stmts, .. } => {
+        PreHirStmt::While { body: stmts, .. } | PreHirStmt::DoWhile { body: stmts, .. } => {
             remove_redundant_param_hw_copies(stmts, abi);
             true
         }
-        DirStmt::For { body: stmts, .. } => {
+        PreHirStmt::For { body: stmts, .. } => {
             remove_redundant_param_hw_copies(stmts, abi);
             true
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for c in cases.iter_mut() {
                 remove_redundant_param_hw_copies(&mut c.body, abi);
             }
             remove_redundant_param_hw_copies(default, abi);
             true
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -484,7 +484,7 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<DirStmt>, abi: CallingConvent
     });
 }
 
-pub fn apply_entry_param_promotion_pass(func: &mut DirFunction) -> bool {
+pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
     if (!func.is_64bit
         && !matches!(
             func.calling_convention,
@@ -506,10 +506,10 @@ pub fn apply_entry_param_promotion_pass(func: &mut DirFunction) -> bool {
     let mut spill_to_slot: Vec<(String, usize, NirType)> = Vec::new();
 
     for stmt in &prefix {
-        let DirStmt::Assign { lhs, rhs } = stmt else {
+        let PreHirStmt::Assign { lhs, rhs } = stmt else {
             continue;
         };
-        let DirLValue::Var(lhs_name) = lhs else {
+        let PreHirLValue::Var(lhs_name) = lhs else {
             continue;
         };
         if lhs_name.starts_with("param_") {
@@ -525,11 +525,11 @@ pub fn apply_entry_param_promotion_pass(func: &mut DirFunction) -> bool {
             continue;
         }
         let ty = match rhs {
-            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => NirType::Int {
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => NirType::Int {
                 bits: 64,
                 signed: true,
             },
-            DirExpr::Cast { ty, .. } => ty.clone(),
+            PreHirExpr::Cast { ty, .. } => ty.clone(),
             _ => NirType::Unknown,
         };
         spill_to_slot.push((lhs_name.clone(), slot, ty));

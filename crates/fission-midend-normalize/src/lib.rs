@@ -26,7 +26,7 @@ pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHas
 /// Shared prelude for historical `use super::super::*` midend imports.
 pub mod prelude {
     pub(crate) use crate::{HashMap, HashSet};
-    pub use fission_midend_dir::action_pipeline::{
+    pub use fission_midend_prehir::action_pipeline::{
         self, ActionGroup, ActionPool, Gate, GhidraActionConcept, Pass, PassBudget, PassCtx,
         PassOutcome, Pipeline, Repeat, STRUCTURING_TIME_CEILING_SECS, count_hir_blocks,
         count_hir_stmts, fn_pass, group, hir_shape, is_large_hir_function, run_pass_logged,
@@ -38,15 +38,15 @@ pub mod prelude {
     // items every time this crate starts using one more Nir*/procedure-
     // summary type).
     pub use fission_midend_core::ir::*;
-    // DirStmt/DirExpr/etc, plus the Nir* re-exports fission-midend-dir itself
-    // needs -- this crate operates purely on DIR, never HIR.
-    pub use fission_midend_dir::ir::*;
-    pub use fission_midend_dir::util::{
+    // PreHirStmt/PreHirExpr/etc, plus the Nir* re-exports fission-midend-prehir itself
+    // needs -- this crate operates purely on PreHIR, never HIR.
+    pub use fission_midend_prehir::ir::*;
+    pub use fission_midend_prehir::util::{
         cleanup_redundant_labels, collect_referenced_labels, expr_has_side_effecting_call,
         expr_type, fold_logical_chain, is_pure_intrinsic_call, negate_expr, next_temp_name,
         format_expr_key, rename_vars_in_stmts, simplify_logical_expr, strip_casts,
     };
-    pub use fission_midend_dir::vsa::{
+    pub use fission_midend_prehir::vsa::{
         apply_jump_resolver_pass, jump_resolver_candidate_count,
     };
     pub use fission_midend_core::wave_stats;
@@ -74,12 +74,12 @@ pub use types::is_known_api_signature;
 pub use cleanup::eliminate_redundant_var_assigns;
 
 #[allow(dead_code)]
-pub fn normalize_function_body(body: &mut Vec<prelude::DirStmt>) {
+pub fn normalize_function_body(body: &mut Vec<prelude::PreHirStmt>) {
     pipeline::normalize_function_body(body);
 }
 
 /// Run the full normalize pipeline on a structured function.
-pub fn normalize_hir_function(func: &mut prelude::DirFunction) {
+pub fn normalize_hir_function(func: &mut prelude::PreHirFunction) {
     pipeline::normalize_hir_function(func);
 }
 
@@ -89,10 +89,10 @@ pub fn take_normalize_wave_stats() -> fission_midend_core::NirBuildStats {
 }
 
 #[allow(dead_code)]
-pub fn normalize_stmt(stmt: &mut prelude::DirStmt) {
+pub fn normalize_stmt(stmt: &mut prelude::PreHirStmt) {
     pipeline::normalize_stmt(stmt);
 }
 
 // Re-export shared types for facade callers.
 pub use fission_midend_core::NirBuildStats;
-pub use fission_midend_dir::{DirFunction, DirStmt};
+pub use fission_midend_prehir::{PreHirFunction, PreHirStmt};

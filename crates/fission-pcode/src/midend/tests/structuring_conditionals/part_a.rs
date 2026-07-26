@@ -1167,9 +1167,9 @@ fn region_recovery_succeeds_on_one_arm_forwarding_join() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(4), None)
-        .expect("region detailed lowering should not error");
+    let lowered =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(4), None)
+            .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
 
@@ -1259,9 +1259,9 @@ fn region_recovery_succeeds_on_trampoline_tail_shared_join() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(4), None)
-        .expect("region detailed lowering should not error");
+    let lowered =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(4), None)
+            .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
 
@@ -1338,8 +1338,8 @@ fn region_recovery_succeeds_on_two_arm_nearby_join() {
     let mut options = preview_options_x86();
     options.region_linearize_structuring = true;
     let mut builder = PreviewBuilder::new(&func, &options, None);
-    let lowered = lower_linear_body_for_region_recovery_detailed(&mut builder,
-        0, LinearExit::Join(3), None)
-        .expect("region detailed lowering should not error");
+    let lowered =
+        lower_linear_body_for_region_recovery_detailed(&mut builder, 0, LinearExit::Join(3), None)
+            .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }

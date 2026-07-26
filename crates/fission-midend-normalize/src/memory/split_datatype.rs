@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-pub fn apply_split_datatype_pass(func: &mut DirFunction) -> bool {
+pub fn apply_split_datatype_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     let mut new_body = Vec::new();
     for stmt in func.body.drain(..) {
@@ -19,31 +19,31 @@ pub fn apply_split_datatype_pass(func: &mut DirFunction) -> bool {
     changed
 }
 
-fn recurse_split_stmt(stmt: &mut DirStmt) -> bool {
+fn recurse_split_stmt(stmt: &mut PreHirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             changed |= split_datatype_in_stmts(body);
         }
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             changed |= split_datatype_in_stmts(body);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(init) = init {
-                if let DirStmt::Block(body) = init.as_mut() {
+                if let PreHirStmt::Block(body) = init.as_mut() {
                     changed |= split_datatype_in_stmts(body);
                 }
             }
             if let Some(update) = update {
-                if let DirStmt::Block(body) = update.as_mut() {
+                if let PreHirStmt::Block(body) = update.as_mut() {
                     changed |= split_datatype_in_stmts(body);
                 }
             }
             changed |= split_datatype_in_stmts(body);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -51,7 +51,7 @@ fn recurse_split_stmt(stmt: &mut DirStmt) -> bool {
             changed |= split_datatype_in_stmts(then_body);
             changed |= split_datatype_in_stmts(else_body);
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 changed |= split_datatype_in_stmts(&mut case.body);
             }
@@ -62,7 +62,7 @@ fn recurse_split_stmt(stmt: &mut DirStmt) -> bool {
     changed
 }
 
-fn split_datatype_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
+fn split_datatype_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut new_stmts = Vec::new();
     for mut stmt in stmts.drain(..) {
@@ -78,11 +78,11 @@ fn split_datatype_in_stmts(stmts: &mut Vec<DirStmt>) -> bool {
     changed
 }
 
-fn try_split_stmt(stmt: &DirStmt) -> Option<Vec<DirStmt>> {
-    let DirStmt::Assign { lhs, rhs } = stmt else {
+fn try_split_stmt(stmt: &PreHirStmt) -> Option<Vec<PreHirStmt>> {
+    let PreHirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
-    let DirLValue::Deref {
+    let PreHirLValue::Deref {
         ptr: dest,
         ty: NirType::Aggregate { fields, .. },
     } = lhs
@@ -94,54 +94,54 @@ fn try_split_stmt(stmt: &DirStmt) -> Option<Vec<DirStmt>> {
     }
 
     match rhs {
-        DirExpr::Load {
+        PreHirExpr::Load {
             ptr: src,
             ty: NirType::Aggregate { .. },
         } => {
             let mut split = Vec::new();
             for field in fields {
-                let new_lhs = DirLValue::Deref {
+                let new_lhs = PreHirLValue::Deref {
                     ptr: Box::new(make_ptr_offset((**dest).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
                 };
-                let new_rhs = DirExpr::Load {
+                let new_rhs = PreHirExpr::Load {
                     ptr: Box::new(make_ptr_offset((**src).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
                 };
-                split.push(DirStmt::Assign {
+                split.push(PreHirStmt::Assign {
                     lhs: new_lhs,
                     rhs: new_rhs,
                 });
             }
             Some(split)
         }
-        DirExpr::AggregateCopy { src, .. } => {
+        PreHirExpr::AggregateCopy { src, .. } => {
             let mut split = Vec::new();
             for field in fields {
-                let new_lhs = DirLValue::Deref {
+                let new_lhs = PreHirLValue::Deref {
                     ptr: Box::new(make_ptr_offset((**dest).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
                 };
-                let new_rhs = DirExpr::Load {
+                let new_rhs = PreHirExpr::Load {
                     ptr: Box::new(make_ptr_offset((**src).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
                 };
-                split.push(DirStmt::Assign {
+                split.push(PreHirStmt::Assign {
                     lhs: new_lhs,
                     rhs: new_rhs,
                 });
             }
             Some(split)
         }
-        DirExpr::Const(0, _) => {
+        PreHirExpr::Const(0, _) => {
             let mut split = Vec::new();
             for field in fields {
-                let new_lhs = DirLValue::Deref {
+                let new_lhs = PreHirLValue::Deref {
                     ptr: Box::new(make_ptr_offset((**dest).clone(), field.offset as i64)),
                     ty: field.ty.clone(),
                 };
-                let new_rhs = DirExpr::Const(0, field.ty.clone());
-                split.push(DirStmt::Assign {
+                let new_rhs = PreHirExpr::Const(0, field.ty.clone());
+                split.push(PreHirStmt::Assign {
                     lhs: new_lhs,
                     rhs: new_rhs,
                 });
@@ -152,16 +152,16 @@ fn try_split_stmt(stmt: &DirStmt) -> Option<Vec<DirStmt>> {
     }
 }
 
-fn make_ptr_offset(ptr: DirExpr, offset: i64) -> DirExpr {
+fn make_ptr_offset(ptr: PreHirExpr, offset: i64) -> PreHirExpr {
     match ptr {
-        DirExpr::PtrOffset {
+        PreHirExpr::PtrOffset {
             base,
             offset: existing_offset,
-        } => DirExpr::PtrOffset {
+        } => PreHirExpr::PtrOffset {
             base,
             offset: existing_offset + offset,
         },
-        _ => DirExpr::PtrOffset {
+        _ => PreHirExpr::PtrOffset {
             base: Box::new(ptr),
             offset,
         },

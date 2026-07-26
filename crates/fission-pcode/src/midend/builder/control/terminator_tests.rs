@@ -1,8 +1,8 @@
-use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
 use crate::midend::ir::{MlilPreviewOptions, NirType, StructuringEngineKind};
-use fission_midend_dir::{DirBinaryOp, DirExpr};
+use crate::midend::support::{CallingConvention, RUST_SLEIGH_REGISTER_SPACE_ID};
 use crate::midend::{PreviewBuilder, render_mlil_preview};
 use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr};
 
 use super::{
     InferredJumpTableTargets, branchind_decode_modes, extract_selector_upper_bound_from_cond,
@@ -14,8 +14,8 @@ fn preview_options_with_cspec(mut options: MlilPreviewOptions) -> MlilPreviewOpt
     options
 }
 
-fn test_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr, ty: NirType) -> DirExpr {
-    DirExpr::Binary {
+fn test_binary(op: PreHirBinaryOp, lhs: PreHirExpr, rhs: PreHirExpr, ty: NirType) -> PreHirExpr {
+    PreHirExpr::Binary {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -80,20 +80,25 @@ fn merge_inferred_branchind_targets_preserves_case_map_with_successors() {
 
 #[test]
 fn selector_upper_bound_keeps_false_arm_hi_equality_case() {
-    let selector = DirExpr::Var("sel".to_string());
-    let three = DirExpr::Const(3, NirType::Unknown);
-    let zero = DirExpr::Const(0, NirType::Unknown);
+    let selector = PreHirExpr::Var("sel".to_string());
+    let three = PreHirExpr::Const(3, NirType::Unknown);
+    let zero = PreHirExpr::Const(0, NirType::Unknown);
     let cond = test_binary(
-        DirBinaryOp::LogicalAnd,
+        PreHirBinaryOp::LogicalAnd,
         test_binary(
-            DirBinaryOp::Le,
+            PreHirBinaryOp::Le,
             three.clone(),
             selector.clone(),
             NirType::Bool,
         ),
         test_binary(
-            DirBinaryOp::Ne,
-            test_binary(DirBinaryOp::Sub, selector.clone(), three, NirType::Unknown),
+            PreHirBinaryOp::Ne,
+            test_binary(
+                PreHirBinaryOp::Sub,
+                selector.clone(),
+                three,
+                NirType::Unknown,
+            ),
             zero,
             NirType::Bool,
         ),
@@ -243,9 +248,9 @@ fn x64_cbranch_condition_recovers_cmp_jnz_from_fresh_zero_flag() {
     assert_eq!(
         cond,
         test_binary(
-            DirBinaryOp::Ne,
-            DirExpr::Var("rsi".to_string()),
-            DirExpr::Var("param_1".to_string()),
+            PreHirBinaryOp::Ne,
+            PreHirExpr::Var("rsi".to_string()),
+            PreHirExpr::Var("param_1".to_string()),
             NirType::Bool
         )
     );
@@ -842,7 +847,8 @@ fn x86_32_epilogue_join_live_eax_when_pred_values_differ() {
     let code = render_mlil_preview(&pcode, "sat_add_ret", 0x1000, &options).expect("render");
     // Must not emit bare `return;` — live primary return must appear.
     assert!(
-        !code.contains("return;") || code.contains("return ") && !code.lines().any(|l| l.trim() == "return;"),
+        !code.contains("return;")
+            || code.contains("return ") && !code.lines().any(|l| l.trim() == "return;"),
         "empty return without value:\n{code}"
     );
     assert!(
@@ -862,9 +868,9 @@ fn x86_32_epilogue_join_live_eax_when_pred_values_differ() {
 /// temp, so epilogue `return rax` sees the underflow arm.
 #[test]
 fn x64_eax_int_min_arm_shares_rax_return_surface() {
-    use crate::midend::cspec::test_maps::apply_preview_cspec;
-    use fission_midend_dir::DirStmt;
     use crate::midend::PreviewBuilder;
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+    use fission_midend_prehir::PreHirStmt;
 
     let eax4 = Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
@@ -1010,7 +1016,7 @@ fn x64_eax_int_min_arm_shares_rax_return_surface() {
     let dump = format!("{stmts:?}");
     eprintln!("x64_eax_intmin_materialize:\n{dump}");
     assert!(
-        stmts.iter().any(|s| matches!(s, DirStmt::If { .. })),
+        stmts.iter().any(|s| matches!(s, PreHirStmt::If { .. })),
         "cmov body must be guarded by if, got {dump}"
     );
     let has_int_min =
@@ -1316,9 +1322,7 @@ fn x64_stack_target_ret_recovers_live_primary_return_from_pred_def() {
         "expected value-bearing return, got:\n{code}"
     );
     assert!(
-        !code
-            .lines()
-            .any(|line| line.trim() == "return;"),
+        !code.lines().any(|line| line.trim() == "return;"),
         "bare return must not appear when primary return reg is live:\n{code}"
     );
     let _ = rax; // silence if unused under some recovery paths

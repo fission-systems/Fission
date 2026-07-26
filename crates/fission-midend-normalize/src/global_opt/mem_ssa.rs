@@ -3,7 +3,7 @@
 /// Builds a lightweight overlay of memory access nodes:
 ///
 /// - `MemDef`: a store to a memory location (lhs is `Deref` or `Index`).
-/// - `MemUse`: a load from a memory location (`DirExpr::Load`).
+/// - `MemUse`: a load from a memory location (`PreHirExpr::Load`).
 /// - `MemPhi`: a virtual merge node at CFG join points (after `if`/`while`).
 ///
 /// ## Alias Key
@@ -171,24 +171,24 @@ impl Builder {
         });
     }
 
-    fn scan_stmts(&mut self, stmts: &[DirStmt]) {
+    fn scan_stmts(&mut self, stmts: &[PreHirStmt]) {
         for stmt in stmts {
             self.scan_stmt(stmt);
         }
     }
 
-    fn scan_stmt(&mut self, stmt: &DirStmt) {
+    fn scan_stmt(&mut self, stmt: &PreHirStmt) {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
+            PreHirStmt::Assign { lhs, rhs } => {
                 // Scan rhs first for uses.
                 self.scan_expr_uses(rhs);
                 // Then record the def.
                 match lhs {
-                    DirLValue::Deref { ptr, ty } => {
+                    PreHirLValue::Deref { ptr, ty } => {
                         let key = self.alias_key_for_ptr(ptr, nir_byte_size(ty));
                         self.add_def(key);
                     }
-                    DirLValue::Index {
+                    PreHirLValue::Index {
                         base,
                         index,
                         elem_ty,
@@ -205,13 +205,13 @@ impl Builder {
                         // `c[i*n+j] = sum` where `c` is a stack-spilled pointer.
                         // Build the equivalent address expression so partition
                         // sees a runtime stride (or falls back to Unknown).
-                        let ptr = DirExpr::Binary {
-                            op: DirBinaryOp::Add,
+                        let ptr = PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
                             lhs: base.clone(),
-                            rhs: Box::new(DirExpr::Binary {
-                                op: DirBinaryOp::Mul,
+                            rhs: Box::new(PreHirExpr::Binary {
+                                op: PreHirBinaryOp::Mul,
                                 lhs: index.clone(),
-                                rhs: Box::new(DirExpr::Const(
+                                rhs: Box::new(PreHirExpr::Const(
                                     i64::from(nir_byte_size(elem_ty)),
                                     NirType::Int {
                                         bits: 64,
@@ -228,14 +228,14 @@ impl Builder {
                         let key = self.alias_key_for_ptr(&ptr, nir_byte_size(elem_ty));
                         self.add_def(key);
                     }
-                    DirLValue::Var(_) => {} // Not a memory write.
-                    DirLValue::FieldAccess { base, ty, .. } => {
+                    PreHirLValue::Var(_) => {} // Not a memory write.
+                    PreHirLValue::FieldAccess { base, ty, .. } => {
                         let key = self.alias_key_for_ptr(base, nir_byte_size(ty));
                         self.add_def(key);
                     }
                 }
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -250,14 +250,14 @@ impl Builder {
                 // Merge: emit MemPhi where defs differ.
                 self.merge_reaching(then_reaching, else_reaching);
             }
-            DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
                 self.scan_expr_uses(cond);
                 let saved = self.reaching.clone();
                 self.scan_stmts(body);
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
                 self.merge_reaching(body_reaching, saved);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -277,7 +277,7 @@ impl Builder {
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
                 self.merge_reaching(body_reaching, saved);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -300,51 +300,51 @@ impl Builder {
                     self.merge_reaching(curr, arm);
                 }
             }
-            DirStmt::Block(stmts) => self.scan_stmts(stmts),
-            DirStmt::Return(Some(e)) => self.scan_expr_uses(e),
-            DirStmt::Expr(e) => self.scan_expr_uses(e),
+            PreHirStmt::Block(stmts) => self.scan_stmts(stmts),
+            PreHirStmt::Return(Some(e)) => self.scan_expr_uses(e),
+            PreHirStmt::Expr(e) => self.scan_expr_uses(e),
             _ => {}
         }
     }
 
-    fn scan_expr_uses(&mut self, expr: &DirExpr) {
+    fn scan_expr_uses(&mut self, expr: &PreHirExpr) {
         match expr {
-            DirExpr::Load { ptr, ty } => {
+            PreHirExpr::Load { ptr, ty } => {
                 // Record use before scanning ptr (so nested loads get their own uses).
                 let key = self.alias_key_for_ptr(ptr, nir_byte_size(ty));
                 self.add_use(key);
                 self.scan_expr_uses(ptr);
             }
-            DirExpr::Call { args, .. } => {
+            PreHirExpr::Call { args, .. } => {
                 // Mark any Var whose address might be passed as potentially escaped.
                 for arg in args {
                     self.scan_expr_uses(arg);
-                    if let DirExpr::PtrOffset { base, .. } = arg {
-                        if let DirExpr::Var(name) = base.as_ref() {
+                    if let PreHirExpr::PtrOffset { base, .. } = arg {
+                        if let PreHirExpr::Var(name) = base.as_ref() {
                             self.escaped.insert(name.clone());
                         }
                     }
                 }
             }
-            DirExpr::Unary { expr: inner, .. } => self.scan_expr_uses(inner),
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Unary { expr: inner, .. } => self.scan_expr_uses(inner),
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 self.scan_expr_uses(lhs);
                 self.scan_expr_uses(rhs);
             }
-            DirExpr::Cast { expr: inner, .. } => self.scan_expr_uses(inner),
-            DirExpr::PtrOffset { base, .. } => self.scan_expr_uses(base),
-            DirExpr::Index { base, index, .. } => {
+            PreHirExpr::Cast { expr: inner, .. } => self.scan_expr_uses(inner),
+            PreHirExpr::PtrOffset { base, .. } => self.scan_expr_uses(base),
+            PreHirExpr::Index { base, index, .. } => {
                 self.scan_expr_uses(base);
                 self.scan_expr_uses(index);
             }
-            DirExpr::AggregateCopy { src, .. } => self.scan_expr_uses(src),
-            DirExpr::FieldAccess { base, .. } => self.scan_expr_uses(base),
+            PreHirExpr::AggregateCopy { src, .. } => self.scan_expr_uses(src),
+            PreHirExpr::FieldAccess { base, .. } => self.scan_expr_uses(base),
             _ => {}
         }
     }
 
     /// Compute an alias key for a pointer expression.
-    fn alias_key_for_ptr(&self, ptr: &DirExpr, size: u32) -> AliasKey {
+    fn alias_key_for_ptr(&self, ptr: &PreHirExpr, size: u32) -> AliasKey {
         alias_key_for_pointer_expr(ptr, size)
     }
 
@@ -410,7 +410,7 @@ pub fn nir_byte_size(ty: &NirType) -> u32 {
 /// Used by MemSSA construction and by redundant-load elimination. Precision
 /// comes from the canonical partition collector; everything else is conservatively
 /// collapsed to [`AliasKey::Unknown`].
-pub fn alias_key_for_pointer_expr(ptr: &DirExpr, size: u32) -> AliasKey {
+pub fn alias_key_for_pointer_expr(ptr: &PreHirExpr, size: u32) -> AliasKey {
     let access_ty = NirType::Aggregate {
         size,
         fields: vec![],
@@ -421,7 +421,7 @@ pub fn alias_key_for_pointer_expr(ptr: &DirExpr, size: u32) -> AliasKey {
 }
 
 /// Build MemSSA for a HIR function.
-pub fn build_mem_ssa(func: &DirFunction) -> MemSsa {
+pub fn build_mem_ssa(func: &PreHirFunction) -> MemSsa {
     let mut builder = Builder::new();
     builder.scan_stmts(&func.body);
     builder.finish()

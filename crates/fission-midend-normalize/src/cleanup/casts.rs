@@ -2,7 +2,7 @@ use crate::prelude::*;
 use super::utils::*;
 use crate::HashMap;
 
-pub fn strip_redundant_assign_casts(func: &mut DirFunction) -> bool {
+pub fn strip_redundant_assign_casts(func: &mut PreHirFunction) -> bool {
     let mut type_map: HashMap<String, NirType> = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
@@ -14,7 +14,7 @@ pub fn strip_redundant_assign_casts(func: &mut DirFunction) -> bool {
 }
 
 fn strip_redundant_casts_in_stmts(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
@@ -24,19 +24,19 @@ fn strip_redundant_casts_in_stmts(
     changed
 }
 
-fn strip_redundant_casts_in_stmt(stmt: &mut DirStmt, type_map: &HashMap<String, NirType>) -> bool {
+fn strip_redundant_casts_in_stmt(stmt: &mut PreHirStmt, type_map: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { rhs, .. } => {
+        PreHirStmt::Assign { rhs, .. } => {
             changed |= strip_redundant_casts_in_expr(rhs, type_map);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= strip_redundant_casts_in_expr(expr, type_map);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             changed |= strip_redundant_casts_in_stmts(body, type_map);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             update,
             body,
@@ -53,7 +53,7 @@ fn strip_redundant_casts_in_stmt(stmt: &mut DirStmt, type_map: &HashMap<String, 
             }
             changed |= strip_redundant_casts_in_stmts(body, type_map);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -62,7 +62,7 @@ fn strip_redundant_casts_in_stmt(stmt: &mut DirStmt, type_map: &HashMap<String, 
             changed |= strip_redundant_casts_in_stmts(then_body, type_map);
             changed |= strip_redundant_casts_in_stmts(else_body, type_map);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -78,33 +78,33 @@ fn strip_redundant_casts_in_stmt(stmt: &mut DirStmt, type_map: &HashMap<String, 
     changed
 }
 
-fn strip_redundant_casts_in_expr(expr: &mut DirExpr, type_map: &HashMap<String, NirType>) -> bool {
+fn strip_redundant_casts_in_expr(expr: &mut PreHirExpr, type_map: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     match expr {
-        DirExpr::Cast { expr: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. } => {
             changed |= strip_redundant_casts_in_expr(inner, type_map);
         }
-        DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= strip_redundant_casts_in_expr(inner, type_map);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= strip_redundant_casts_in_expr(lhs, type_map);
             changed |= strip_redundant_casts_in_expr(rhs, type_map);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= strip_redundant_casts_in_expr(arg, type_map);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= strip_redundant_casts_in_expr(base, type_map);
             changed |= strip_redundant_casts_in_expr(index, type_map);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -114,23 +114,23 @@ fn strip_redundant_casts_in_expr(expr: &mut DirExpr, type_map: &HashMap<String, 
             changed |= strip_redundant_casts_in_expr(then_expr, type_map);
             changed |= strip_redundant_casts_in_expr(else_expr, type_map);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
-    if let DirExpr::Cast { ty, expr: inner } = expr {
-        if let DirExpr::Var(name) = inner.as_ref() {
+    if let PreHirExpr::Cast { ty, expr: inner } = expr {
+        if let PreHirExpr::Var(name) = inner.as_ref() {
             if let Some(var_ty) = type_map.get(name) {
                 if var_ty == ty {
                     *expr = (**inner).clone();
                     changed = true;
                 }
             }
-        } else if let DirExpr::Cast {
+        } else if let PreHirExpr::Cast {
             ty: inner_ty,
             expr: innermost,
         } = inner.as_ref()
         {
             if inner_ty == ty {
-                *expr = DirExpr::Cast {
+                *expr = PreHirExpr::Cast {
                     ty: ty.clone(),
                     expr: innermost.clone(),
                 };
@@ -141,8 +141,8 @@ fn strip_redundant_casts_in_expr(expr: &mut DirExpr, type_map: &HashMap<String, 
     changed
 }
 
-pub fn collapse_trivial_pointer_alias_bindings(func: &mut DirFunction) -> bool {
-    let mut aliases = HashMap::<String, DirExpr>::default();
+pub fn collapse_trivial_pointer_alias_bindings(func: &mut PreHirFunction) -> bool {
+    let mut aliases = HashMap::<String, PreHirExpr>::default();
     for binding in &func.locals {
         if !matches!(binding.ty, NirType::Ptr(_)) {
             continue;
@@ -191,7 +191,7 @@ pub fn collapse_trivial_pointer_alias_bindings(func: &mut DirFunction) -> bool {
     before != func.locals.len()
 }
 
-fn should_preserve_slot_alias_binding(func: &DirFunction, binding: &DirBinding) -> bool {
+fn should_preserve_slot_alias_binding(func: &PreHirFunction, binding: &PreHirBinding) -> bool {
     binding.surface_type_name.is_some()
         || matches!(
             binding.origin,
@@ -206,33 +206,33 @@ fn should_preserve_slot_alias_binding(func: &DirFunction, binding: &DirBinding) 
         || stmt_list_uses_var_as_index_base(&func.body, &binding.name)
 }
 
-fn ptr_offset_const(expr: &DirExpr) -> Option<i64> {
+fn ptr_offset_const(expr: &PreHirExpr) -> Option<i64> {
     match expr {
-        DirExpr::PtrOffset { offset, .. } => Some(*offset),
-        DirExpr::Cast { expr, .. } => ptr_offset_const(expr),
+        PreHirExpr::PtrOffset { offset, .. } => Some(*offset),
+        PreHirExpr::Cast { expr, .. } => ptr_offset_const(expr),
         _ => Some(0),
     }
 }
 
-fn stmt_list_uses_var_as_index_base(stmts: &[DirStmt], name: &str) -> bool {
+fn stmt_list_uses_var_as_index_base(stmts: &[PreHirStmt], name: &str) -> bool {
     stmts
         .iter()
         .any(|stmt| stmt_uses_var_as_index_base(stmt, name))
 }
 
-fn stmt_uses_var_as_index_base(stmt: &DirStmt, name: &str) -> bool {
+fn stmt_uses_var_as_index_base(stmt: &PreHirStmt, name: &str) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             lvalue_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
         }
-        DirStmt::Expr(expr)
-        | DirStmt::Return(Some(expr))
-        | DirStmt::VaStart { va_list: expr, .. } => expr_uses_var_as_index_base(expr, name),
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => stmt_list_uses_var_as_index_base(body, name),
-        DirStmt::If {
+        PreHirStmt::Expr(expr)
+        | PreHirStmt::Return(Some(expr))
+        | PreHirStmt::VaStart { va_list: expr, .. } => expr_uses_var_as_index_base(expr, name),
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => stmt_list_uses_var_as_index_base(body, name),
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -241,7 +241,7 @@ fn stmt_uses_var_as_index_base(stmt: &DirStmt, name: &str) -> bool {
                 || stmt_list_uses_var_as_index_base(then_body, name)
                 || stmt_list_uses_var_as_index_base(else_body, name)
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -252,47 +252,47 @@ fn stmt_uses_var_as_index_base(stmt: &DirStmt, name: &str) -> bool {
                     .any(|case| stmt_list_uses_var_as_index_base(&case.body, name))
                 || stmt_list_uses_var_as_index_base(default, name)
         }
-        DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Return(None)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
     }
 }
 
-fn lvalue_uses_var_as_index_base(lhs: &DirLValue, name: &str) -> bool {
+fn lvalue_uses_var_as_index_base(lhs: &PreHirLValue, name: &str) -> bool {
     match lhs {
-        DirLValue::Index { base, index, .. } => {
-            matches!(base.as_ref(), DirExpr::Var(var) if var == name)
+        PreHirLValue::Index { base, index, .. } => {
+            matches!(base.as_ref(), PreHirExpr::Var(var) if var == name)
                 || expr_uses_var_as_index_base(base, name)
                 || expr_uses_var_as_index_base(index, name)
         }
-        DirLValue::Deref { ptr, .. } => expr_uses_var_as_index_base(ptr, name),
-        DirLValue::Var(_) => false,
-        DirLValue::FieldAccess { base, .. } => expr_uses_var_as_index_base(base, name),
+        PreHirLValue::Deref { ptr, .. } => expr_uses_var_as_index_base(ptr, name),
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::FieldAccess { base, .. } => expr_uses_var_as_index_base(base, name),
     }
 }
 
-fn expr_uses_var_as_index_base(expr: &DirExpr, name: &str) -> bool {
+fn expr_uses_var_as_index_base(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
-        DirExpr::Index { base, index, .. } => {
-            matches!(base.as_ref(), DirExpr::Var(var) if var == name)
+        PreHirExpr::Index { base, index, .. } => {
+            matches!(base.as_ref(), PreHirExpr::Var(var) if var == name)
                 || expr_uses_var_as_index_base(base, name)
                 || expr_uses_var_as_index_base(index, name)
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => expr_uses_var_as_index_base(expr, name),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_uses_var_as_index_base(expr, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_uses_var_as_index_base(lhs, name) || expr_uses_var_as_index_base(rhs, name)
         }
-        DirExpr::Call { args, .. } => args
+        PreHirExpr::Call { args, .. } => args
             .iter()
             .any(|arg| expr_uses_var_as_index_base(arg, name)),
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -302,25 +302,25 @@ fn expr_uses_var_as_index_base(expr: &DirExpr, name: &str) -> bool {
                 || expr_uses_var_as_index_base(then_expr, name)
                 || expr_uses_var_as_index_base(else_expr, name)
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
     }
 }
 
-fn pointer_alias_replacement(expr: &DirExpr) -> Option<DirExpr> {
+fn pointer_alias_replacement(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => Some(expr.clone()),
-        DirExpr::Cast {
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => Some(expr.clone()),
+        PreHirExpr::Cast {
             ty: NirType::Ptr(_),
             expr,
         } => match expr.as_ref() {
-            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => Some((**expr).clone()),
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => Some((**expr).clone()),
             _ => None,
         },
         _ => None,
     }
 }
 
-pub fn cast_elision_pass(func: &mut DirFunction) -> bool {
+pub fn cast_elision_pass(func: &mut PreHirFunction) -> bool {
     let binding_types: crate::HashMap<String, NirType> = func
         .locals
         .iter()
@@ -357,11 +357,11 @@ fn scalar_bit_width(ty: &NirType) -> Option<u32> {
     }
 }
 
-fn redundant_self_cast_assignment(name: &str, rhs: &DirExpr, binding_ty: &NirType) -> bool {
-    let DirExpr::Cast { ty: cast_ty, expr } = rhs else {
+fn redundant_self_cast_assignment(name: &str, rhs: &PreHirExpr, binding_ty: &NirType) -> bool {
+    let PreHirExpr::Cast { ty: cast_ty, expr } = rhs else {
         return false;
     };
-    let DirExpr::Var(var) = expr.as_ref() else {
+    let PreHirExpr::Var(var) = expr.as_ref() else {
         return false;
     };
     if var != name {
@@ -377,7 +377,7 @@ fn redundant_self_cast_assignment(name: &str, rhs: &DirExpr, binding_ty: &NirTyp
 }
 
 fn elide_casts_in_stmts(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     binding_types: &crate::HashMap<String, NirType>,
     return_type: Option<&NirType>,
     changed: &mut bool,
@@ -388,19 +388,19 @@ fn elide_casts_in_stmts(
 }
 
 fn elide_casts_in_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     binding_types: &crate::HashMap<String, NirType>,
     return_type: Option<&NirType>,
     changed: &mut bool,
 ) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         } => {
             if let Some(binding_ty) = binding_types.get(name.as_str()) {
                 if redundant_self_cast_assignment(name, rhs, binding_ty) {
-                    *rhs = DirExpr::Var(name.clone());
+                    *rhs = PreHirExpr::Var(name.clone());
                     *changed = true;
                 } else if let Some(stripped) = try_strip_outer_cast(rhs, binding_ty) {
                     *rhs = stripped;
@@ -408,7 +408,7 @@ fn elide_casts_in_stmt(
                 }
             }
         }
-        DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Return(Some(expr)) => {
             if let Some(return_type) = return_type
                 && let Some(stripped) = try_strip_return_outer_cast(expr, return_type)
             {
@@ -416,8 +416,8 @@ fn elide_casts_in_stmt(
                 *changed = true;
             }
         }
-        DirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, return_type, changed),
-        DirStmt::If {
+        PreHirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, return_type, changed),
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -425,10 +425,10 @@ fn elide_casts_in_stmt(
             elide_casts_in_stmts(then_body, binding_types, return_type, changed);
             elide_casts_in_stmts(else_body, binding_types, return_type, changed);
         }
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             elide_casts_in_stmts(body, binding_types, return_type, changed)
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -439,7 +439,7 @@ fn elide_casts_in_stmt(
             }
             elide_casts_in_stmts(body, binding_types, return_type, changed);
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 elide_casts_in_stmts(&mut case.body, binding_types, return_type, changed);
             }
@@ -449,8 +449,8 @@ fn elide_casts_in_stmt(
     }
 }
 
-fn try_strip_outer_cast(expr: &DirExpr, binding_ty: &NirType) -> Option<DirExpr> {
-    let DirExpr::Cast {
+fn try_strip_outer_cast(expr: &PreHirExpr, binding_ty: &NirType) -> Option<PreHirExpr> {
+    let PreHirExpr::Cast {
         ty: cast_ty,
         expr: inner,
     } = expr
@@ -488,8 +488,8 @@ fn try_strip_outer_cast(expr: &DirExpr, binding_ty: &NirType) -> Option<DirExpr>
     None
 }
 
-fn try_strip_return_outer_cast(expr: &DirExpr, return_type: &NirType) -> Option<DirExpr> {
-    let DirExpr::Cast {
+fn try_strip_return_outer_cast(expr: &PreHirExpr, return_type: &NirType) -> Option<PreHirExpr> {
+    let PreHirExpr::Cast {
         ty: cast_ty,
         expr: inner,
     } = expr
@@ -513,12 +513,12 @@ fn try_strip_return_outer_cast(expr: &DirExpr, return_type: &NirType) -> Option<
 }
 
 /// ActionSetCasts / RulePushPtr / RuleStructOffset0-style cleanups at expression level.
-pub fn normalize_pointer_and_struct_casts(expr: &DirExpr) -> Option<DirExpr> {
+pub fn normalize_pointer_and_struct_casts(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        DirExpr::FieldAccess {
+        PreHirExpr::FieldAccess {
             offset: 0, base, ..
         } => Some((**base).clone()),
-        DirExpr::PtrOffset { base, offset: 0 } => Some((**base).clone()),
+        PreHirExpr::PtrOffset { base, offset: 0 } => Some((**base).clone()),
         _ => None,
     }
 }

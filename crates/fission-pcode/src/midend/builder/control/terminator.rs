@@ -24,28 +24,28 @@ fn merge_inferred_branchind_targets(
     }
 }
 
-fn arm32_callable_target_expr(expr: &DirExpr) -> DirExpr {
+fn arm32_callable_target_expr(expr: &PreHirExpr) -> PreHirExpr {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if matches!(
             &**rhs,
-            DirExpr::Const(0xffff_fffe, _) | DirExpr::Const(-2, _)
+            PreHirExpr::Const(0xffff_fffe, _) | PreHirExpr::Const(-2, _)
         ) =>
         {
             (**lhs).clone()
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if matches!(
             &**lhs,
-            DirExpr::Const(0xffff_fffe, _) | DirExpr::Const(-2, _)
+            PreHirExpr::Const(0xffff_fffe, _) | PreHirExpr::Const(-2, _)
         ) =>
         {
             (**rhs).clone()
@@ -64,9 +64,9 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-        target_expr: &DirExpr,
-    ) -> Option<DirExpr> {
-        let resolved_target = if let DirExpr::Var(target_name) = target_expr {
+        target_expr: &PreHirExpr,
+    ) -> Option<PreHirExpr> {
+        let resolved_target = if let PreHirExpr::Var(target_name) = target_expr {
             self.resolve_address_like_call_target_name(target_name)
         } else {
             None
@@ -75,7 +75,7 @@ impl<'a> PreviewBuilder<'a> {
             (self.options.calling_convention == CallingConvention::Arm32).then(|| {
                 format!(
                     "((code *){})",
-                    print_dir_expr(&arm32_callable_target_expr(target_expr))
+                    print_prehir_expr(&arm32_callable_target_expr(target_expr))
                 )
             })
         })?;
@@ -84,7 +84,7 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             Vec::new()
         };
-        Some(DirExpr::Call {
+        Some(PreHirExpr::Call {
             target,
             args,
             ty: NirType::Unknown,
@@ -96,11 +96,11 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-        target_expr: &DirExpr,
-    ) -> DirExpr {
+        target_expr: &PreHirExpr,
+    ) -> PreHirExpr {
         // Prefer opaque CallInd-style rendering for register/param fps so the
         // printer emits a cast callable. Known symbols keep direct names.
-        let resolved_symbol = if let DirExpr::Var(target_name) = target_expr {
+        let resolved_symbol = if let PreHirExpr::Var(target_name) = target_expr {
             self.resolve_address_like_call_target_name(target_name)
         } else {
             None
@@ -110,7 +110,7 @@ impl<'a> PreviewBuilder<'a> {
         // (x64 O2 apply_binop: 3 blocks, args live in the tail-call arm).
         let mut args = self.recover_tail_call_args(block_idx, block, term_idx);
         if let Some(target) = resolved_symbol {
-            return DirExpr::Call {
+            return PreHirExpr::Call {
                 target,
                 args,
                 ty: NirType::Unknown,
@@ -118,7 +118,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         // Unresolved fp: opaque form — printer casts to callable.
         args.insert(0, target_expr.clone());
-        DirExpr::Call {
+        PreHirExpr::Call {
             target: "__fission_callind_opaque".to_string(),
             args,
             ty: NirType::Unknown,
@@ -131,8 +131,8 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
         switch_var: &Varnode,
-        switch_expr: &DirExpr,
-    ) -> Option<DirExpr> {
+        switch_expr: &PreHirExpr,
+    ) -> Option<PreHirExpr> {
         if let Some(target_expr) =
             self.recover_branchind_callable_target(block.index as usize, term_idx, switch_var)
         {
@@ -151,7 +151,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         term_idx: usize,
         switch_var: &Varnode,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         // x86/x64: `jmp rax` / `jmp r8` tail-calls through a register-held
         // function pointer (gcc -O2 apply_binop). ARM keeps the existing mask
         // and source recovery; x86 uses the same copy-chain → param/reg path.
@@ -209,7 +209,7 @@ impl<'a> PreviewBuilder<'a> {
         before_op_idx: usize,
         source: &Varnode,
         depth: usize,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         if depth > 8 {
             return None;
         }
@@ -232,7 +232,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Some(expr);
             }
         }
-        self.register_param(source).map(DirExpr::Var)
+        self.register_param(source).map(PreHirExpr::Var)
     }
 
     fn recover_known_external_tail_call_expr(
@@ -241,7 +241,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
         target_vn: &Varnode,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let target_addr = branch_target_address(target_vn)?;
         if self.address_to_index.contains_key(&target_addr) {
             return None;
@@ -255,7 +255,7 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             Vec::new()
         };
-        Some(DirExpr::Call {
+        Some(PreHirExpr::Call {
             target: resolved_target,
             args,
             ty: NirType::Unknown,
@@ -267,7 +267,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Vec<DirExpr> {
+    ) -> Vec<PreHirExpr> {
         if let Ok(Some(args)) = self.recover_tail_call_args_from_block(block, term_idx)
             && !args.is_empty()
         {
@@ -402,7 +402,7 @@ impl<'a> PreviewBuilder<'a> {
             })
     }
 
-    fn compose_arm32_return_pair(&self, r0: DirExpr, r1: DirExpr) -> DirExpr {
+    fn compose_arm32_return_pair(&self, r0: PreHirExpr, r1: PreHirExpr) -> PreHirExpr {
         let (low, high) = if self.options.is_big_endian {
             (r1, r0)
         } else {
@@ -412,19 +412,19 @@ impl<'a> PreviewBuilder<'a> {
             bits: 64,
             signed: false,
         };
-        let shifted_high = DirExpr::Binary {
-            op: DirBinaryOp::Shl,
-            lhs: Box::new(DirExpr::Cast {
+        let shifted_high = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
+            lhs: Box::new(PreHirExpr::Cast {
                 ty: u64_ty.clone(),
                 expr: Box::new(high),
             }),
-            rhs: Box::new(DirExpr::Const(32, u64_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(32, u64_ty.clone())),
             ty: u64_ty.clone(),
         };
-        DirExpr::Binary {
-            op: DirBinaryOp::Or,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
             lhs: Box::new(shifted_high),
-            rhs: Box::new(DirExpr::Cast {
+            rhs: Box::new(PreHirExpr::Cast {
                 ty: u64_ty.clone(),
                 expr: Box::new(low),
             }),
@@ -432,25 +432,29 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn arm32_return_pair_part_is_address_like(&self, expr: &DirExpr) -> bool {
+    fn arm32_return_pair_part_is_address_like(&self, expr: &PreHirExpr) -> bool {
         match expr {
-            DirExpr::AddressOfGlobal(_) | DirExpr::PtrOffset { .. } | DirExpr::Index { .. } => true,
-            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
+            PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::PtrOffset { .. }
+            | PreHirExpr::Index { .. } => true,
+            PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
                 self.arm32_return_pair_part_is_address_like(expr)
             }
-            DirExpr::FieldAccess { base, ty, .. } => {
+            PreHirExpr::FieldAccess { base, ty, .. } => {
                 matches!(ty, NirType::Ptr(_)) || self.arm32_return_pair_part_is_address_like(base)
             }
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 self.arm32_return_pair_part_is_address_like(lhs)
                     || self.arm32_return_pair_part_is_address_like(rhs)
             }
-            DirExpr::Load { ptr, ty } => {
+            PreHirExpr::Load { ptr, ty } => {
                 matches!(ty, NirType::Ptr(_)) || self.arm32_return_pair_part_is_address_like(ptr)
             }
-            DirExpr::Call { ty, .. } => matches!(ty, NirType::Ptr(_)),
-            DirExpr::AggregateCopy { src, .. } => self.arm32_return_pair_part_is_address_like(src),
-            DirExpr::Select {
+            PreHirExpr::Call { ty, .. } => matches!(ty, NirType::Ptr(_)),
+            PreHirExpr::AggregateCopy { src, .. } => {
+                self.arm32_return_pair_part_is_address_like(src)
+            }
+            PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -460,7 +464,7 @@ impl<'a> PreviewBuilder<'a> {
                     || self.arm32_return_pair_part_is_address_like(then_expr)
                     || self.arm32_return_pair_part_is_address_like(else_expr)
             }
-            DirExpr::Var(name) => {
+            PreHirExpr::Var(name) => {
                 self.options
                     .global_names
                     .values()
@@ -471,7 +475,7 @@ impl<'a> PreviewBuilder<'a> {
                         .values()
                         .any(|global| global == name)
             }
-            DirExpr::Const(_, _) => false,
+            PreHirExpr::Const(_, _) => false,
         }
     }
 
@@ -480,7 +484,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         let Some(((_low_op_idx, low_vn), (_high_op_idx, high_vn))) =
             self.arm32_return_pair_def_after_barrier(block, term_idx)
         else {
@@ -538,7 +542,7 @@ impl<'a> PreviewBuilder<'a> {
         block_idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         if let Some(expr) =
             self.lower_arm32_return_pair_expr_from_block(block_idx, block, term_idx)?
         {
@@ -701,9 +705,8 @@ impl<'a> PreviewBuilder<'a> {
     /// distinguish void-like functions from value-returning ones when RET's
     /// p-code input is only the return address on the stack.
     fn function_has_primary_return_def(&self) -> bool {
-        (0..self.pcode.blocks.len()).any(|block_idx| {
-            self.block_has_primary_return_def_before_terminator(block_idx)
-        })
+        (0..self.pcode.blocks.len())
+            .any(|block_idx| self.block_has_primary_return_def_before_terminator(block_idx))
     }
 
     fn side_effect_consumes_primary_return_register_before(
@@ -810,7 +813,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         pred_idx: usize,
         return_idx: usize,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         if self.options.is_64bit
             && let Some(source_vn) = self.return_join_source_register(return_idx)
         {
@@ -958,11 +961,11 @@ impl<'a> PreviewBuilder<'a> {
     fn predecessor_primary_return_expr(
         &mut self,
         return_idx: usize,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         let Some(preds) = self.predecessors.get(return_idx) else {
             return Ok(None);
         };
-        let mut recovered: Vec<DirExpr> = Vec::new();
+        let mut recovered: Vec<PreHirExpr> = Vec::new();
         for pred_idx in preds.clone() {
             if pred_idx == return_idx {
                 continue;
@@ -1000,7 +1003,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         self.lower_return_terminator_impl(idx, block, term_idx)
     }
 
@@ -1009,7 +1012,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         if self.uses_primary_return_registers()
             && let Some(expr) =
                 self.lower_arm32_return_pair_expr_from_block(idx, block, term_idx)?
@@ -1157,7 +1160,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         let Some(ret_vn) = self
             .register_namer()
             .primary_return_registers()
@@ -1240,19 +1243,19 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         ret_vn: &Varnode,
         ret_op_idx: usize,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         // Prefer the name chosen when the guarded Copy was materialized.
         if let Some(op) = block.ops.get(ret_op_idx)
             && let Some(output) = op.output.as_ref()
         {
             let key = MaterializedVarnodeKey::new(output, op);
             if let Some(name) = self.materialized_vns.get(&key) {
-                return Some(DirExpr::Var(name.clone()));
+                return Some(PreHirExpr::Var(name.clone()));
             }
         }
         // Fall back to the hardware return-register name.
         if let Some(name) = self.sla_hw_name(ret_vn.offset, ret_vn.size) {
-            return Some(DirExpr::Var(name));
+            return Some(PreHirExpr::Var(name));
         }
         None
     }
@@ -1400,7 +1403,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(in crate::midend) fn try_lower_intra_instruction_conditional_return(
         &mut self,
-    ) -> Result<Option<Vec<DirStmt>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
         if !self.options.is_64bit || self.pcode.blocks.len() != 3 {
             return Ok(None);
         }
@@ -1488,18 +1491,18 @@ impl<'a> PreviewBuilder<'a> {
         )?;
 
         Ok(Some(vec![
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
-                then_body: vec![DirStmt::Return(Some(default_expr))],
+                then_body: vec![PreHirStmt::Return(Some(default_expr))],
                 else_body: Vec::new(),
             },
-            DirStmt::Return(Some(alt_expr)),
+            PreHirStmt::Return(Some(alt_expr)),
         ]))
     }
 
     pub(in crate::midend) fn try_lower_conditional_tailcall_after_return(
         &mut self,
-    ) -> Result<Option<Vec<DirStmt>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
         if !self.options.is_64bit || self.pcode.blocks.len() > 4 {
             return Ok(None);
         }
@@ -1557,29 +1560,29 @@ impl<'a> PreviewBuilder<'a> {
                 tail_body.push(self.emit_unsupported_control_surface(evidence, target_expr));
             }
             LoweredTerminator::Goto(target) if self.address_to_index.get(&target).is_none() => {
-                tail_body.push(DirStmt::Goto(block_label(target)));
+                tail_body.push(PreHirStmt::Goto(block_label(target)));
             }
             LoweredTerminator::Fallthrough(None) | LoweredTerminator::Return(None) => {}
             _ => return Ok(None),
         }
-        tail_body.push(DirStmt::Return(None));
+        tail_body.push(PreHirStmt::Return(None));
 
         let return_cond = if return_on_true {
             cond
         } else {
-            DirExpr::Unary {
-                op: DirUnaryOp::Not,
+            PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
                 expr: Box::new(cond),
                 ty: NirType::Bool,
             }
         };
         Ok(Some(vec![
-            DirStmt::If {
+            PreHirStmt::If {
                 cond: return_cond,
-                then_body: vec![DirStmt::Return(None)],
+                then_body: vec![PreHirStmt::Return(None)],
                 else_body: Vec::new(),
             },
-            DirStmt::Block(tail_body),
+            PreHirStmt::Block(tail_body),
         ]))
     }
 
@@ -1616,7 +1619,7 @@ impl<'a> PreviewBuilder<'a> {
                                 let evidence = UnsupportedControlEvidence {
                                     opcode: format!("{:?}", op.opcode),
                                     source_block: Some(block.start_address),
-                                    target_expr: Some(print_dir_expr(&tail_call_expr)),
+                                    target_expr: Some(print_prehir_expr(&tail_call_expr)),
                                     successor_targets: Vec::new(),
                                     failure_family: UnsupportedControlFamily::ExternalTarget,
                                     surface: IndirectControlSurface::BranchInd,
@@ -1679,7 +1682,7 @@ impl<'a> PreviewBuilder<'a> {
                                             target_expr: tail_call_expr
                                                 .as_ref()
                                                 .or(target_expr.as_ref())
-                                                .map(print_dir_expr),
+                                                .map(print_prehir_expr),
                                             successor_targets: succ_addrs,
                                             failure_family:
                                                 UnsupportedControlFamily::ExternalTarget,
@@ -1818,7 +1821,7 @@ impl<'a> PreviewBuilder<'a> {
                                     "[DIAG] branchind_switch_expr block=0x{:x} seq=0x{:x} expr={}",
                                     block.start_address,
                                     op.seq_num,
-                                    print_dir_expr(&switch_expr)
+                                    print_prehir_expr(&switch_expr)
                                 );
                             }
                             let mut targets = Vec::new();
@@ -1908,7 +1911,7 @@ impl<'a> PreviewBuilder<'a> {
                                     .predecessors
                                     .get(idx)
                                     .is_some_and(|preds| !preds.is_empty())
-                                && matches!(switch_expr, DirExpr::Var(_))
+                                && matches!(switch_expr, PreHirExpr::Var(_))
                             {
                                 this.record_unsupported_inventory_event(
                                     "terminator_branchind_arm32_targets_missing",
@@ -1920,7 +1923,7 @@ impl<'a> PreviewBuilder<'a> {
                                     true,
                                     "arm32_branchind_targets_missing_value_fallback",
                                 );
-                                return Ok(LoweredTerminator::Return(Some(DirExpr::Const(
+                                return Ok(LoweredTerminator::Return(Some(PreHirExpr::Const(
                                     0,
                                     NirType::Int {
                                         bits: 32,
@@ -2172,8 +2175,8 @@ impl<'a> PreviewBuilder<'a> {
                                     valid: proof_complete,
                                 });
                                 let proof = Some(DispatcherProofUnit {
-                                    selector_expr: print_dir_expr(&expr),
-                                    rendered_selector_expr: Some(print_dir_expr(&expr)),
+                                    selector_expr: print_prehir_expr(&expr),
+                                    rendered_selector_expr: Some(print_prehir_expr(&expr)),
                                     candidate_targets: targets.clone(),
                                     recovered_cases,
                                     selector_cardinality,
@@ -2202,7 +2205,7 @@ impl<'a> PreviewBuilder<'a> {
                                     let evidence = UnsupportedControlEvidence {
                                         opcode: format!("{:?}", op.opcode),
                                         source_block: Some(block.start_address),
-                                        target_expr: Some(print_dir_expr(&expr)),
+                                        target_expr: Some(print_prehir_expr(&expr)),
                                         successor_targets: targets,
                                         failure_family:
                                             UnsupportedControlFamily::NonStructuralDispatcher,
@@ -2238,7 +2241,7 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend::builder) fn lower_cbranch_condition_for_block(
         &mut self,
         idx: usize,
-    ) -> Option<(u64, DirExpr)> {
+    ) -> Option<(u64, PreHirExpr)> {
         if let Some(cached) = self.terminator_cache.get(&idx) {
             if let LoweredTerminator::Cond {
                 cond, true_target, ..
@@ -2280,7 +2283,7 @@ impl<'a> PreviewBuilder<'a> {
     fn try_recover_branch_condition(
         &mut self,
         vn: &Varnode,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         if self.options.is_64bit
             && !matches!(
                 self.options.calling_convention,
@@ -2327,7 +2330,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<DirExpr, MlilPreviewError> {
+    ) -> Result<PreHirExpr, MlilPreviewError> {
         match self.lower_varnode(vn, visiting) {
             Ok(expr) => Ok(expr),
             Err(err) => {
@@ -2358,27 +2361,27 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn branch_cond_too_complex(expr: &DirExpr) -> bool {
+    fn branch_cond_too_complex(expr: &PreHirExpr) -> bool {
         Self::expr_contains_call(expr) || Self::expr_node_count(expr) > 24
     }
 
-    fn expr_contains_call(expr: &DirExpr) -> bool {
+    fn expr_contains_call(expr: &PreHirExpr) -> bool {
         match expr {
-            DirExpr::Call { .. } => true,
-            DirExpr::Const(_, _) | DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => false,
-            DirExpr::Cast { expr, .. }
-            | DirExpr::Unary { expr, .. }
-            | DirExpr::Load { ptr: expr, .. }
-            | DirExpr::PtrOffset { base: expr, .. }
-            | DirExpr::AggregateCopy { src: expr, .. }
-            | DirExpr::FieldAccess { base: expr, .. } => Self::expr_contains_call(expr),
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Call { .. } => true,
+            PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => false,
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => Self::expr_contains_call(expr),
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 Self::expr_contains_call(lhs) || Self::expr_contains_call(rhs)
             }
-            DirExpr::Index { base, index, .. } => {
+            PreHirExpr::Index { base, index, .. } => {
                 Self::expr_contains_call(base) || Self::expr_contains_call(index)
             }
-            DirExpr::Select {
+            PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -2391,23 +2394,25 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn expr_node_count(expr: &DirExpr) -> usize {
+    fn expr_node_count(expr: &PreHirExpr) -> usize {
         match expr {
-            DirExpr::Const(_, _) | DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => 1,
-            DirExpr::Cast { expr, .. }
-            | DirExpr::Unary { expr, .. }
-            | DirExpr::Load { ptr: expr, .. }
-            | DirExpr::PtrOffset { base: expr, .. }
-            | DirExpr::AggregateCopy { src: expr, .. }
-            | DirExpr::FieldAccess { base: expr, .. } => 1 + Self::expr_node_count(expr),
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => 1,
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => 1 + Self::expr_node_count(expr),
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 1 + Self::expr_node_count(lhs) + Self::expr_node_count(rhs)
             }
-            DirExpr::Call { args, .. } => 1 + args.iter().map(Self::expr_node_count).sum::<usize>(),
-            DirExpr::Index { base, index, .. } => {
+            PreHirExpr::Call { args, .. } => {
+                1 + args.iter().map(Self::expr_node_count).sum::<usize>()
+            }
+            PreHirExpr::Index { base, index, .. } => {
                 1 + Self::expr_node_count(base) + Self::expr_node_count(index)
             }
-            DirExpr::Select {
+            PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -2430,7 +2435,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<DirExpr, MlilPreviewError> {
+    ) -> Result<PreHirExpr, MlilPreviewError> {
         if is_register_varnode(vn)
             && let Some((site, op)) = self.lookup_def_site(vn)
             && matches!(
@@ -2449,7 +2454,7 @@ impl<'a> PreviewBuilder<'a> {
     fn lower_x86_branch_predicate(
         &mut self,
         predicate: X86BranchPredicate,
-    ) -> Result<DirExpr, MlilPreviewError> {
+    ) -> Result<PreHirExpr, MlilPreviewError> {
         let mut visiting = HashSet::default();
         // Tested values (EqZero/NeZero/…) freeze Copy sources; compare operands
         // still use ordinary lowering so both sides stay live-SSA consistent.
@@ -2462,99 +2467,99 @@ impl<'a> PreviewBuilder<'a> {
         Ok(match predicate {
             X86BranchPredicate::EqZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(DirBinaryOp::Eq, value.clone(), zero_like(&value))
+                bool_binary(PreHirBinaryOp::Eq, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::NeZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(DirBinaryOp::Ne, value.clone(), zero_like(&value))
+                bool_binary(PreHirBinaryOp::Ne, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLtZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLt, value.clone(), zero_like(&value))
+                bool_binary(PreHirBinaryOp::SLt, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SLeZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLe, value.clone(), zero_like(&value))
+                bool_binary(PreHirBinaryOp::SLe, value.clone(), zero_like(&value))
             }
             X86BranchPredicate::SGtZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLt, zero_like(&value), value)
+                bool_binary(PreHirBinaryOp::SLt, zero_like(&value), value)
             }
             X86BranchPredicate::SGeZero(value) => {
                 let value = lower_tested(self, &value, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLe, zero_like(&value), value)
+                bool_binary(PreHirBinaryOp::SLe, zero_like(&value), value)
             }
             X86BranchPredicate::MaskEqZero { value, mask } => {
                 let value = lower_tested(self, &value, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
-                let masked = DirExpr::Binary {
-                    op: DirBinaryOp::And,
+                let masked = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
                     lhs: Box::new(value.clone()),
                     rhs: Box::new(mask),
                     ty: expr_type(&value),
                 };
-                bool_binary(DirBinaryOp::Eq, masked.clone(), zero_like(&masked))
+                bool_binary(PreHirBinaryOp::Eq, masked.clone(), zero_like(&masked))
             }
             X86BranchPredicate::MaskNeZero { value, mask } => {
                 let value = lower_tested(self, &value, &mut visiting)?;
                 let mask = lower(self, &mask, &mut visiting)?;
-                let masked = DirExpr::Binary {
-                    op: DirBinaryOp::And,
+                let masked = PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
                     lhs: Box::new(value.clone()),
                     rhs: Box::new(mask),
                     ty: expr_type(&value),
                 };
-                bool_binary(DirBinaryOp::Ne, masked.clone(), zero_like(&masked))
+                bool_binary(PreHirBinaryOp::Ne, masked.clone(), zero_like(&masked))
             }
             X86BranchPredicate::Eq(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::Eq, lhs, rhs)
+                bool_binary(PreHirBinaryOp::Eq, lhs, rhs)
             }
             X86BranchPredicate::Ne(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::Ne, lhs, rhs)
+                bool_binary(PreHirBinaryOp::Ne, lhs, rhs)
             }
             X86BranchPredicate::ULt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::Lt, lhs, rhs)
+                bool_binary(PreHirBinaryOp::Lt, lhs, rhs)
             }
             X86BranchPredicate::ULe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::Le, lhs, rhs)
+                bool_binary(PreHirBinaryOp::Le, lhs, rhs)
             }
             X86BranchPredicate::UGt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::Lt, rhs, lhs)
+                bool_binary(PreHirBinaryOp::Lt, rhs, lhs)
             }
             X86BranchPredicate::UGe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::Le, rhs, lhs)
+                bool_binary(PreHirBinaryOp::Le, rhs, lhs)
             }
             X86BranchPredicate::SLt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLt, lhs, rhs)
+                bool_binary(PreHirBinaryOp::SLt, lhs, rhs)
             }
             X86BranchPredicate::SLe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLe, lhs, rhs)
+                bool_binary(PreHirBinaryOp::SLe, lhs, rhs)
             }
             X86BranchPredicate::SGt(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLt, rhs, lhs)
+                bool_binary(PreHirBinaryOp::SLt, rhs, lhs)
             }
             X86BranchPredicate::SGe(lhs_vn, rhs_vn) => {
                 let lhs = lower(self, &lhs_vn, &mut visiting)?;
                 let rhs = lower(self, &rhs_vn, &mut visiting)?;
-                bool_binary(DirBinaryOp::SLe, rhs, lhs)
+                bool_binary(PreHirBinaryOp::SLe, rhs, lhs)
             }
         })
     }
@@ -2731,7 +2736,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         switch_var: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<DirExpr, MlilPreviewError> {
+    ) -> Result<PreHirExpr, MlilPreviewError> {
         let exact_expr = self.lower_wrapped_varnode(switch_var, visiting).ok();
         let alias_expr = self.lower_branchind_same_block_alias_expr(idx, switch_var, visiting);
         let predecessor_expr =
@@ -2763,7 +2768,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         switch_var: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let pcode_idx = self.pcode_block_idx(idx);
         let block = &self.pcode.blocks[pcode_idx];
         let term_idx = self.block_terminator_index(block)?;
@@ -2815,9 +2820,9 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
         selector_alias: &Varnode,
-        fallback: DirExpr,
+        fallback: PreHirExpr,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> DirExpr {
+    ) -> PreHirExpr {
         self.lower_branchind_same_block_alias_expr(idx, selector_alias, visiting)
             .or_else(|| self.recover_selector_expr_from_predecessors(idx, selector_alias, visiting))
             .unwrap_or(fallback)
@@ -2828,7 +2833,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         switch_var: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let predecessors = self.predecessors.get(idx)?.clone();
         if preview_builder_diag_enabled() {
             let pred_blocks = predecessors
@@ -2875,7 +2880,7 @@ impl<'a> PreviewBuilder<'a> {
                             self.block_start_address(idx),
                             block.start_address,
                             op.seq_num,
-                            print_dir_expr(&expr)
+                            print_prehir_expr(&expr)
                         );
                     }
                     return Some(expr);
@@ -2900,7 +2905,7 @@ impl<'a> PreviewBuilder<'a> {
                                 self.block_start_address(idx),
                                 block.start_address,
                                 term_op.seq_num,
-                                print_dir_expr(&expr)
+                                print_prehir_expr(&expr)
                             );
                         }
                         return Some(expr);
@@ -2912,7 +2917,11 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn normalize_rendered_selector_expr(&self, expr: DirExpr, min_val: i64) -> (DirExpr, i64) {
+    fn normalize_rendered_selector_expr(
+        &self,
+        expr: PreHirExpr,
+        min_val: i64,
+    ) -> (PreHirExpr, i64) {
         let Some((base_expr, offset)) = super::switch_table::split_selector_base_offset(&expr)
         else {
             return (expr, min_val);
@@ -2925,7 +2934,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn selector_normalization_for_branchind(
         &self,
-        expr: &DirExpr,
+        expr: &PreHirExpr,
         min_val: i64,
         entry_size: u64,
         recovered_cases: Option<&[(i64, u64)]>,
@@ -2948,20 +2957,20 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn selector_expr_width(expr: &DirExpr) -> Option<u32> {
+    fn selector_expr_width(expr: &PreHirExpr) -> Option<u32> {
         match expr {
-            DirExpr::Const(_, ty)
-            | DirExpr::Load { ty, .. }
-            | DirExpr::Cast { ty, .. }
-            | DirExpr::Unary { ty, .. }
-            | DirExpr::Binary { ty, .. }
-            | DirExpr::FieldAccess { ty, .. } => Self::nir_type_width(ty),
-            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => None,
-            DirExpr::Call { ty, .. } => Self::nir_type_width(ty),
-            DirExpr::PtrOffset { .. } => None,
-            DirExpr::AggregateCopy { size, .. } => Some(*size * 8),
-            DirExpr::Index { elem_ty, .. } => Self::nir_type_width(elem_ty),
-            DirExpr::Select { ty, .. } => Self::nir_type_width(ty),
+            PreHirExpr::Const(_, ty)
+            | PreHirExpr::Load { ty, .. }
+            | PreHirExpr::Cast { ty, .. }
+            | PreHirExpr::Unary { ty, .. }
+            | PreHirExpr::Binary { ty, .. }
+            | PreHirExpr::FieldAccess { ty, .. } => Self::nir_type_width(ty),
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => None,
+            PreHirExpr::Call { ty, .. } => Self::nir_type_width(ty),
+            PreHirExpr::PtrOffset { .. } => None,
+            PreHirExpr::AggregateCopy { size, .. } => Some(*size * 8),
+            PreHirExpr::Index { elem_ty, .. } => Self::nir_type_width(elem_ty),
+            PreHirExpr::Select { ty, .. } => Self::nir_type_width(ty),
         }
     }
 
@@ -2976,26 +2985,26 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn selector_expr_is_side_effect_free(expr: &DirExpr) -> bool {
+    fn selector_expr_is_side_effect_free(expr: &PreHirExpr) -> bool {
         match expr {
-            DirExpr::Const(_, _) | DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => true,
-            DirExpr::Cast { expr, .. }
-            | DirExpr::Unary { expr, .. }
-            | DirExpr::Load { ptr: expr, .. }
-            | DirExpr::PtrOffset { base: expr, .. }
-            | DirExpr::AggregateCopy { src: expr, .. }
-            | DirExpr::FieldAccess { base: expr, .. } => {
+            PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => true,
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => {
                 Self::selector_expr_is_side_effect_free(expr)
             }
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 Self::selector_expr_is_side_effect_free(lhs)
                     && Self::selector_expr_is_side_effect_free(rhs)
             }
-            DirExpr::Index { base, index, .. } => {
+            PreHirExpr::Index { base, index, .. } => {
                 Self::selector_expr_is_side_effect_free(base)
                     && Self::selector_expr_is_side_effect_free(index)
             }
-            DirExpr::Select {
+            PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -3005,14 +3014,14 @@ impl<'a> PreviewBuilder<'a> {
                     && Self::selector_expr_is_side_effect_free(then_expr)
                     && Self::selector_expr_is_side_effect_free(else_expr)
             }
-            DirExpr::Call { .. } => false,
+            PreHirExpr::Call { .. } => false,
         }
     }
 
     fn infer_branchind_targets_from_jump_table_expr(
         &mut self,
         idx: usize,
-        switch_expr: &DirExpr,
+        switch_expr: &PreHirExpr,
         selector_alias: Option<&Varnode>,
     ) -> Option<InferredJumpTableTargets> {
         const MAX_JUMP_TABLE_CASES: u64 = 256;
@@ -3024,8 +3033,8 @@ impl<'a> PreviewBuilder<'a> {
             eprintln!(
                 "[DIAG] branchind_switch_selector block=0x{:x} expr={} discrim={} min={} table=0x{:x} target_base={:?} relative={} entry_size={}",
                 self.block_start_address(idx),
-                print_dir_expr(switch_expr),
-                print_dir_expr(&selector.discriminant),
+                print_prehir_expr(switch_expr),
+                print_prehir_expr(&selector.discriminant),
                 selector.min_val,
                 selector.table_base,
                 selector.target_base.map(|addr| format!("0x{addr:x}")),
@@ -3061,7 +3070,7 @@ impl<'a> PreviewBuilder<'a> {
             eprintln!(
                 "[DIAG] branchind_switch_bound block=0x{:x} normalized_selector={} max_selector={} min={}",
                 self.block_start_address(idx),
-                print_dir_expr(&normalized_selector),
+                print_prehir_expr(&normalized_selector),
                 max_selector,
                 selector.min_val
             );
@@ -3325,7 +3334,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
         selector_alias: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let cache_key = (idx, selector_alias.space_id, selector_alias.offset);
         if let Some(cached) = self.selector_representatives.get(&cache_key) {
             return Some(cached.clone());
@@ -3368,7 +3377,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
-    ) -> Result<DirExpr, MlilPreviewError> {
+    ) -> Result<PreHirExpr, MlilPreviewError> {
         let peeled = self.peel_passthrough_varnode(vn);
         if let Some((_, op)) = self.lookup_def_site(&peeled) {
             match op.opcode {
@@ -3387,20 +3396,20 @@ impl<'a> PreviewBuilder<'a> {
         self.lower_wrapped_varnode(&peeled, visiting)
     }
 
-    fn extract_modulo_bound(expr: &DirExpr) -> Option<u64> {
+    fn extract_modulo_bound(expr: &PreHirExpr) -> Option<u64> {
         let mut current = expr;
         loop {
             match current {
-                DirExpr::Cast { expr, .. } => {
+                PreHirExpr::Cast { expr, .. } => {
                     current = expr;
                 }
-                DirExpr::Binary {
-                    op: DirBinaryOp::Mod,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mod,
                     rhs,
                     ..
                 } => {
                     let stripped_rhs = strip_casts(rhs);
-                    if let DirExpr::Const(divisor, _) = stripped_rhs {
+                    if let PreHirExpr::Const(divisor, _) = stripped_rhs {
                         if divisor > 0 {
                             return Some((divisor - 1) as u64);
                         }
@@ -3415,7 +3424,7 @@ impl<'a> PreviewBuilder<'a> {
     fn infer_branchind_selector_upper_bound(
         &mut self,
         idx: usize,
-        selector: &DirExpr,
+        selector: &PreHirExpr,
         selector_alias: Option<&Varnode>,
         min_val: i64,
     ) -> Option<u64> {
@@ -3424,10 +3433,10 @@ impl<'a> PreviewBuilder<'a> {
         let predecessors = self.predecessors.get(idx)?.clone();
 
         let mut selector_names = HashSet::default();
-        if let DirExpr::Var(name) = &normalized {
+        if let PreHirExpr::Var(name) = &normalized {
             selector_names.insert(name.clone());
         }
-        if let DirExpr::Var(name) = strip_casts(selector) {
+        if let PreHirExpr::Var(name) = strip_casts(selector) {
             selector_names.insert(name.clone());
         }
 
@@ -3481,9 +3490,9 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
-        let is_match = |expr: &DirExpr| {
+        let is_match = |expr: &PreHirExpr| {
             let stripped = strip_casts(expr);
-            if let DirExpr::Var(name) = &stripped {
+            if let PreHirExpr::Var(name) = &stripped {
                 if selector_names.contains(name) {
                     return true;
                 }
@@ -4107,8 +4116,8 @@ enum X86BranchPredicate {
     SGe(Varnode, Varnode),
 }
 
-fn bool_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr) -> DirExpr {
-    DirExpr::Binary {
+fn bool_binary(op: PreHirBinaryOp, lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+    PreHirExpr::Binary {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -4116,8 +4125,8 @@ fn bool_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr) -> DirExpr {
     }
 }
 
-fn zero_like(expr: &DirExpr) -> DirExpr {
-    DirExpr::Const(0, expr_type(expr))
+fn zero_like(expr: &PreHirExpr) -> PreHirExpr {
+    PreHirExpr::Const(0, expr_type(expr))
 }
 
 fn same_cmp_pair(lhs: &(Varnode, Varnode), rhs: &(Varnode, Varnode)) -> bool {
@@ -4218,13 +4227,13 @@ fn containing_section_start(sections: &[(u64, u64)], address: u64) -> Option<u64
 }
 
 fn extract_selector_upper_bound_from_cond(
-    cond: &DirExpr,
-    selector_match: &impl Fn(&DirExpr) -> bool,
+    cond: &PreHirExpr,
+    selector_match: &impl Fn(&PreHirExpr) -> bool,
     current_on_true: bool,
 ) -> Option<u64> {
     let cond = strip_casts(cond);
-    if let DirExpr::Unary {
-        op: DirUnaryOp::Not,
+    if let PreHirExpr::Unary {
+        op: PreHirUnaryOp::Not,
         expr,
         ..
     } = cond
@@ -4232,22 +4241,22 @@ fn extract_selector_upper_bound_from_cond(
         return extract_selector_upper_bound_from_cond(&expr, selector_match, !current_on_true);
     }
 
-    let DirExpr::Binary { op, lhs, rhs, .. } = cond else {
+    let PreHirExpr::Binary { op, lhs, rhs, .. } = cond else {
         return None;
     };
 
     let lhs = strip_casts(&lhs);
     let rhs = strip_casts(&rhs);
-    let const_u64 = |expr: &DirExpr| match strip_casts(expr) {
-        DirExpr::Const(value, _) if value >= 0 => Some(value as u64),
+    let const_u64 = |expr: &PreHirExpr| match strip_casts(expr) {
+        PreHirExpr::Const(value, _) if value >= 0 => Some(value as u64),
         _ => None,
     };
-    let selector_sub_const_eq_zero = |expr: &DirExpr, zero_side: &DirExpr| {
+    let selector_sub_const_eq_zero = |expr: &PreHirExpr, zero_side: &PreHirExpr| {
         if const_u64(zero_side) != Some(0) {
             return None;
         }
-        let DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        let PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
@@ -4259,7 +4268,7 @@ fn extract_selector_upper_bound_from_cond(
     };
 
     match op {
-        DirBinaryOp::LogicalAnd | DirBinaryOp::And => {
+        PreHirBinaryOp::LogicalAnd | PreHirBinaryOp::And => {
             let lhs_bound =
                 extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
             let rhs_bound =
@@ -4278,7 +4287,7 @@ fn extract_selector_upper_bound_from_cond(
                 }
             };
         }
-        DirBinaryOp::LogicalOr | DirBinaryOp::Or => {
+        PreHirBinaryOp::LogicalOr | PreHirBinaryOp::Or => {
             let lhs_bound =
                 extract_selector_upper_bound_from_cond(&lhs, selector_match, current_on_true);
             let rhs_bound =
@@ -4301,34 +4310,42 @@ fn extract_selector_upper_bound_from_cond(
     }
 
     match (op, selector_match(&lhs), selector_match(&rhs)) {
-        (DirBinaryOp::Eq, true, false) if current_on_true => const_u64(&rhs),
-        (DirBinaryOp::Eq, false, true) if current_on_true => const_u64(&lhs),
-        (DirBinaryOp::Ne, true, false) if !current_on_true => const_u64(&rhs),
-        (DirBinaryOp::Ne, false, true) if !current_on_true => const_u64(&lhs),
-        (DirBinaryOp::Eq, false, false) if current_on_true => {
+        (PreHirBinaryOp::Eq, true, false) if current_on_true => const_u64(&rhs),
+        (PreHirBinaryOp::Eq, false, true) if current_on_true => const_u64(&lhs),
+        (PreHirBinaryOp::Ne, true, false) if !current_on_true => const_u64(&rhs),
+        (PreHirBinaryOp::Ne, false, true) if !current_on_true => const_u64(&lhs),
+        (PreHirBinaryOp::Eq, false, false) if current_on_true => {
             selector_sub_const_eq_zero(&lhs, &rhs)
                 .or_else(|| selector_sub_const_eq_zero(&rhs, &lhs))
         }
-        (DirBinaryOp::Ne, false, false) if !current_on_true => {
+        (PreHirBinaryOp::Ne, false, false) if !current_on_true => {
             selector_sub_const_eq_zero(&lhs, &rhs)
                 .or_else(|| selector_sub_const_eq_zero(&rhs, &lhs))
         }
-        (DirBinaryOp::Le | DirBinaryOp::SLe, true, false) if current_on_true => const_u64(&rhs),
-        (DirBinaryOp::Lt | DirBinaryOp::SLt, true, false) if current_on_true => {
+        (PreHirBinaryOp::Le | PreHirBinaryOp::SLe, true, false) if current_on_true => {
+            const_u64(&rhs)
+        }
+        (PreHirBinaryOp::Lt | PreHirBinaryOp::SLt, true, false) if current_on_true => {
             const_u64(&rhs)?.checked_sub(1)
         }
-        (DirBinaryOp::Le | DirBinaryOp::SLe, false, true) if !current_on_true => {
+        (PreHirBinaryOp::Le | PreHirBinaryOp::SLe, false, true) if !current_on_true => {
             const_u64(&lhs)?.checked_sub(1)
         }
-        (DirBinaryOp::Lt | DirBinaryOp::SLt, false, true) if !current_on_true => const_u64(&lhs),
-        (DirBinaryOp::Gt | DirBinaryOp::SGt, true, false) if !current_on_true => const_u64(&rhs),
-        (DirBinaryOp::Ge | DirBinaryOp::SGe, true, false) if !current_on_true => {
+        (PreHirBinaryOp::Lt | PreHirBinaryOp::SLt, false, true) if !current_on_true => {
+            const_u64(&lhs)
+        }
+        (PreHirBinaryOp::Gt | PreHirBinaryOp::SGt, true, false) if !current_on_true => {
+            const_u64(&rhs)
+        }
+        (PreHirBinaryOp::Ge | PreHirBinaryOp::SGe, true, false) if !current_on_true => {
             const_u64(&rhs)?.checked_sub(1)
         }
-        (DirBinaryOp::Gt | DirBinaryOp::SGt, false, true) if current_on_true => {
+        (PreHirBinaryOp::Gt | PreHirBinaryOp::SGt, false, true) if current_on_true => {
             const_u64(&lhs)?.checked_sub(1)
         }
-        (DirBinaryOp::Ge | DirBinaryOp::SGe, false, true) if current_on_true => const_u64(&lhs),
+        (PreHirBinaryOp::Ge | PreHirBinaryOp::SGe, false, true) if current_on_true => {
+            const_u64(&lhs)
+        }
         _ => None,
     }
 }

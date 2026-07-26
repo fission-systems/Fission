@@ -6,7 +6,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         rhs: &Varnode,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         let debug = preview_debug_enabled();
         if rhs.size < 16 {
             return Ok(None);
@@ -86,8 +86,10 @@ impl<'a> PreviewBuilder<'a> {
                     &current,
                 ) {
                     if debug {
-                        let line =
-                            format!("[T4] asm-guided xmm source -> {}", print_dir_expr(&slot_expr));
+                        let line = format!(
+                            "[T4] asm-guided xmm source -> {}",
+                            print_prehir_expr(&slot_expr)
+                        );
                         eprintln!("{line}");
                         append_preview_debug_trace(&line);
                     }
@@ -165,7 +167,7 @@ impl<'a> PreviewBuilder<'a> {
                                 slot_name
                             ));
                         }
-                        return Ok(Some(DirExpr::Var(slot_name)));
+                        return Ok(Some(PreHirExpr::Var(slot_name)));
                     }
                     if debug {
                         eprintln!("[mlil-preview][agg] load did not resolve stack slot");
@@ -283,7 +285,7 @@ impl<'a> PreviewBuilder<'a> {
         start_block_idx: usize,
         scan_end: usize,
         reg_vn: &Varnode,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let xmm_index = xmm_register_index(reg_vn)?;
         let mut block_idx = start_block_idx;
         let mut current_scan_end = scan_end;
@@ -308,7 +310,7 @@ impl<'a> PreviewBuilder<'a> {
                         fields: vec![],
                     },
                 )?;
-                return Some(DirExpr::Var(slot_name));
+                return Some(PreHirExpr::Var(slot_name));
             }
 
             let preds = self.predecessors.get(block_idx)?;

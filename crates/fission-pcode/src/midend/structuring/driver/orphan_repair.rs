@@ -8,7 +8,7 @@ mod tests {
     use crate::PcodeFunction;
     use crate::midend::PreviewBuilder;
     use crate::midend::ir::{MlilPreviewOptions, StructuringEngineKind};
-use fission_midend_dir::{DirStmt};
+    use fission_midend_prehir::PreHirStmt;
     use fission_midend_structuring::try_repair_orphan_gotos;
 
     fn test_options() -> MlilPreviewOptions {
@@ -49,7 +49,7 @@ use fission_midend_dir::{DirStmt};
         let dummy = PcodeFunction { blocks: Vec::new() };
         let options = test_options();
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
-        let body = vec![DirStmt::Goto("block_deadbeef".to_string())];
+        let body = vec![PreHirStmt::Goto("block_deadbeef".to_string())];
         assert!(orphan_goto_labels(&body).contains(&"block_deadbeef".to_string()));
         assert!(try_repair_orphan_gotos(&mut builder, body).is_none());
     }
@@ -60,8 +60,8 @@ use fission_midend_dir::{DirStmt};
         let options = test_options();
         let mut builder = PreviewBuilder::new(&dummy, &options, None);
         let body = vec![
-            DirStmt::Label("block_100".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("block_100".to_string()),
+            PreHirStmt::Return(None),
         ];
         assert!(!has_orphan_goto_labels(&body));
         let repaired = try_repair_orphan_gotos(&mut builder, body.clone()).expect("noop repair");

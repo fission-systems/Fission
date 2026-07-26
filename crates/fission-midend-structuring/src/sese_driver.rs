@@ -21,7 +21,7 @@ use crate::loops::{
 use crate::regions::{RegionKind, RegionProof};
 use crate::switch::try_lower_switch;
 use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_dir::{DirStmt};
+use fission_midend_prehir::{PreHirStmt};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -85,7 +85,7 @@ pub fn apply_collapse_rule(
     rule: CollapseRule,
     idx: usize,
     follow: Option<usize>,
-) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
     match rule {
         CollapseRule::Switch => try_lower_switch(host, idx),
         CollapseRule::ForLoop => try_lower_for(host, idx),
@@ -130,7 +130,7 @@ pub struct CollapseCandidate {
 }
 
 /// Build a structured-region proof from a recovered statement shape.
-pub fn build_region_proof(start_idx: usize, skip_to: usize, stmt: &DirStmt) -> Option<RegionProof> {
+pub fn build_region_proof(start_idx: usize, skip_to: usize, stmt: &PreHirStmt) -> Option<RegionProof> {
     let kind = region_kind_for_stmt(stmt)?;
     Some(RegionProof::structured(
         kind,
@@ -148,7 +148,7 @@ pub fn consider_structured_candidate(
     targeted: &HashSet<u64>,
     last_structuring_failure: &mut Option<MlilPreviewError>,
     candidates: &mut Vec<CollapseCandidate>,
-    result: Result<Option<(DirStmt, usize)>, MlilPreviewError>,
+    result: Result<Option<(PreHirStmt, usize)>, MlilPreviewError>,
 ) -> Result<(), MlilPreviewError> {
     if let Some((stmt, skip_to)) = capture_structuring_failure(result, last_structuring_failure)? {
         let accepted = if matches!(rule, CollapseRule::Switch) {
@@ -183,8 +183,8 @@ pub fn build_sese_region_body(
     host: &mut impl StructuringHost,
     entry: usize,
     exit: usize,
-    child_map: HashMap<usize, (Vec<DirStmt>, usize, RegionProof)>,
-) -> Result<Vec<DirStmt>, MlilPreviewError> {
+    child_map: HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
+) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
     let diag = structuring_diag_enabled();
     if host.sese_region_proof_budget_exceeded() {
         if diag {
@@ -388,7 +388,7 @@ pub fn build_sese_region_body(
 }
 
 /// Promote guarded-tail regions to a fixed point (free entry).
-pub fn promote_guarded_tails(host: &mut impl StructuringHost, body: &mut Vec<DirStmt>) {
+pub fn promote_guarded_tails(host: &mut impl StructuringHost, body: &mut Vec<PreHirStmt>) {
     promote_guarded_tail_regions_until_stable(host, body);
     if structuring_diag_enabled() {
         // keep quiet unless already enabled elsewhere
@@ -419,10 +419,10 @@ pub fn reconstruct_sese_final_body(
     host: &mut impl StructuringHost,
     entry: usize,
     exit: usize,
-    active_child_map: &HashMap<usize, (Vec<DirStmt>, usize, crate::regions::RegionProof)>,
+    active_child_map: &HashMap<usize, (Vec<PreHirStmt>, usize, crate::regions::RegionProof)>,
     targeted: &HashSet<u64>,
     diag: bool,
-) -> Result<Vec<DirStmt>, MlilPreviewError> {
+) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
     use crate::cleanup::{child_body_has_entry_label, collect_defined_labels};
     use crate::graph::{
         BlockOwnership, StructureEdgeFlags, StructureGraph, StructureNode, surface_structure_graph,
@@ -430,7 +430,7 @@ pub fn reconstruct_sese_final_body(
     use crate::helpers::{block_label, recovered_switch_case_values};
     use crate::linear_types::LoweredTerminator;
     use crate::regions::EmitReadyDecision;
-    use fission_midend_dir::DirSwitchCase;
+    use fission_midend_prehir::PreHirSwitchCase;
 
     let mut graph = StructureGraph::default();
     let mut emitted_labels: HashSet<u64> = HashSet::default();
@@ -466,7 +466,7 @@ pub fn reconstruct_sese_final_body(
                     && !child_body_has_entry_label(child_body, &header_label)
                     && !structure_defined_labels.contains(&header_label)
                 {
-                    node_statements.insert(0, DirStmt::Label(header_label.clone()));
+                    node_statements.insert(0, PreHirStmt::Label(header_label.clone()));
                     structure_defined_labels.insert(header_label);
                 }
 
@@ -523,25 +523,25 @@ pub fn reconstruct_sese_final_body(
             let mut node_body = Vec::new();
             let mut explicit_edge_surface = false;
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-                node_body.push(DirStmt::Label(residual_label.clone()));
+                node_body.push(PreHirStmt::Label(residual_label.clone()));
                 structure_defined_labels.insert(residual_label);
             }
             node_body.extend(host.lower_block_stmts(idx)?);
             match host.lower_block_terminator(idx)? {
-                LoweredTerminator::Return(expr) => node_body.push(DirStmt::Return(expr)),
+                LoweredTerminator::Return(expr) => node_body.push(PreHirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
                     if let Some(target_idx) = host.find_block_index_by_address(target) {
                         if let Some(expr) =
                             host.lower_return_join_expr_for_predecessor(idx, target_idx)?
                         {
-                            node_body.push(DirStmt::Return(Some(expr)));
+                            node_body.push(PreHirStmt::Return(Some(expr)));
                             explicit_edge_surface = true;
                         } else if host.next_block_address(idx) != Some(target) {
-                            node_body.push(DirStmt::Goto(block_label(target)));
+                            node_body.push(PreHirStmt::Goto(block_label(target)));
                             explicit_edge_surface = true;
                         }
                     } else if host.next_block_address(idx) != Some(target) {
-                        node_body.push(DirStmt::Goto(block_label(target)));
+                        node_body.push(PreHirStmt::Goto(block_label(target)));
                         explicit_edge_surface = true;
                     }
                 }
@@ -550,7 +550,7 @@ pub fn reconstruct_sese_final_body(
                         if let Some(expr) =
                             host.lower_return_join_expr_for_predecessor(idx, target_idx)?
                         {
-                            node_body.push(DirStmt::Return(Some(expr)));
+                            node_body.push(PreHirStmt::Return(Some(expr)));
                             explicit_edge_surface = true;
                         }
                     }
@@ -569,7 +569,7 @@ pub fn reconstruct_sese_final_body(
                     let false_virtual =
                         false_idx.is_some_and(|fi| crate::collapse_loop::is_virtual_goto_edge(host, idx, fi));
                     let mut then_body = if true_virtual || next_addr != Some(true_target) {
-                        vec![DirStmt::Goto(block_label(true_target))]
+                        vec![PreHirStmt::Goto(block_label(true_target))]
                     } else {
                         Vec::new()
                     };
@@ -577,14 +577,14 @@ pub fn reconstruct_sese_final_body(
                         if let Some(expr) =
                             host.lower_return_join_expr_for_predecessor(idx, true_idx)?
                         {
-                            then_body = vec![DirStmt::Return(Some(expr))];
+                            then_body = vec![PreHirStmt::Return(Some(expr))];
                         }
                     }
                     let else_body = match false_target {
                         Some(false_target) => {
                             let mut else_body = if false_virtual || Some(false_target) != next_addr
                             {
-                                vec![DirStmt::Goto(block_label(false_target))]
+                                vec![PreHirStmt::Goto(block_label(false_target))]
                             } else {
                                 Vec::new()
                             };
@@ -592,14 +592,14 @@ pub fn reconstruct_sese_final_body(
                                 if let Some(expr) =
                                     host.lower_return_join_expr_for_predecessor(idx, false_idx)?
                                 {
-                                    else_body = vec![DirStmt::Return(Some(expr))];
+                                    else_body = vec![PreHirStmt::Return(Some(expr))];
                                 }
                             }
                             else_body
                         }
                         _ => Vec::new(),
                     };
-                    node_body.push(DirStmt::If {
+                    node_body.push(PreHirStmt::If {
                         cond,
                         then_body,
                         else_body,
@@ -621,15 +621,15 @@ pub fn reconstruct_sese_final_body(
                     min_val,
                     proof,
                 } => {
-                    let cases: Vec<DirSwitchCase> = if let Some(proof) = proof.as_ref() {
+                    let cases: Vec<PreHirSwitchCase> = if let Some(proof) = proof.as_ref() {
                         if EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready {
                             proof
                                 .recovered_cases
                                 .iter()
                                 .filter(|(_, target)| Some(*target) != default_target)
-                                .map(|(value, target)| DirSwitchCase {
+                                .map(|(value, target)| PreHirSwitchCase {
                                     values: vec![*value],
-                                    body: vec![DirStmt::Goto(block_label(*target))],
+                                    body: vec![PreHirStmt::Goto(block_label(*target))],
                                 })
                                 .collect()
                         } else {
@@ -641,9 +641,9 @@ pub fn reconstruct_sese_final_body(
                             )
                             .0
                             .into_iter()
-                            .map(|(value, target)| DirSwitchCase {
+                            .map(|(value, target)| PreHirSwitchCase {
                                 values: vec![value],
-                                body: vec![DirStmt::Goto(block_label(target))],
+                                body: vec![PreHirStmt::Goto(block_label(target))],
                             })
                             .collect()
                         }
@@ -655,9 +655,9 @@ pub fn reconstruct_sese_final_body(
                                 let target = host.block_target_key(*block_idx);
                                 Some(target) != default_target
                             })
-                            .map(|(value, block_idx)| DirSwitchCase {
+                            .map(|(value, block_idx)| PreHirSwitchCase {
                                 values: vec![value],
-                                body: vec![DirStmt::Goto(block_label(
+                                body: vec![PreHirStmt::Goto(block_label(
                                     host.block_target_key(block_idx),
                                 ))],
                             })
@@ -667,18 +667,18 @@ pub fn reconstruct_sese_final_body(
                             .into_iter()
                             .filter(|target| Some(*target) != default_target)
                             .enumerate()
-                            .map(|(i, t)| DirSwitchCase {
+                            .map(|(i, t)| PreHirSwitchCase {
                                 values: vec![min_val + i as i64],
-                                body: vec![DirStmt::Goto(block_label(t))],
+                                body: vec![PreHirStmt::Goto(block_label(t))],
                             })
                             .collect()
                     };
-                    node_body.push(DirStmt::Switch {
+                    node_body.push(PreHirStmt::Switch {
                         expr,
                         cases,
                         default: default_target
                             .map(block_label)
-                            .map(DirStmt::Goto)
+                            .map(PreHirStmt::Goto)
                             .into_iter()
                             .collect(),
                     });

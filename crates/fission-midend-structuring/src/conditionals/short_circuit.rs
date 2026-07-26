@@ -6,14 +6,14 @@ use super::{
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
 use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_dir::{DirBinaryOp, DirStmt};
-use fission_midend_dir::util::{fold_logical_chain, negate_expr, simplify_logical_expr};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirStmt};
+use fission_midend_prehir::util::{fold_logical_chain, negate_expr, simplify_logical_expr};
 
 /// Dispatch short-circuit or / and-else / and patterns at `idx`.
 pub fn try_lower_short_circuit_if(
     host: &mut impl StructuringHost,
     idx: usize,
-) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
     if let Some(lowered) = try_lower_short_circuit_or(host, idx)? {
         return Ok(Some(lowered));
     }
@@ -30,12 +30,12 @@ pub fn try_lower_short_circuit_if(
 pub fn try_lower_short_circuit_and(
     host: &mut impl StructuringHost,
     idx: usize,
-) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
     let diag = structuring_diag_enabled();
     let mut conds = Vec::new();
     let mut current_idx = idx;
     let mut join_idx: Option<usize> = None;
-    let mut first_prefix: Vec<DirStmt> = Vec::new();
+    let mut first_prefix: Vec<PreHirStmt> = Vec::new();
 
     loop {
         let cond_prefix = host.lower_block_stmts(current_idx)?;
@@ -103,8 +103,8 @@ pub fn try_lower_short_circuit_and(
 
         host.bump_condition_fold_and(conds.len() - 1);
 
-        let stmt = DirStmt::If {
-            cond: simplify_logical_expr(fold_logical_chain(conds, DirBinaryOp::LogicalAnd)),
+        let stmt = PreHirStmt::If {
+            cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalAnd)),
             then_body,
             else_body: Vec::new(),
         };
@@ -114,7 +114,7 @@ pub fn try_lower_short_circuit_and(
         } else {
             let mut wrapped = first_prefix;
             wrapped.push(stmt);
-            return Ok(Some((DirStmt::Block(wrapped), skip_to)));
+            return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
         }
     }
 }
@@ -123,12 +123,12 @@ pub fn try_lower_short_circuit_and(
 pub fn try_lower_short_circuit_and_else(
     host: &mut impl StructuringHost,
     idx: usize,
-) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
     let diag = structuring_diag_enabled();
     let mut conds = Vec::new();
     let mut current_idx = idx;
     let mut else_idx: Option<usize> = None;
-    let mut first_prefix: Vec<DirStmt> = Vec::new();
+    let mut first_prefix: Vec<PreHirStmt> = Vec::new();
 
     loop {
         let cond_prefix = host.lower_block_stmts(current_idx)?;
@@ -205,8 +205,8 @@ pub fn try_lower_short_circuit_and_else(
         };
         host.bump_condition_fold_and(conds.len() - 1);
 
-        let stmt = DirStmt::If {
-            cond: simplify_logical_expr(fold_logical_chain(conds, DirBinaryOp::LogicalAnd)),
+        let stmt = PreHirStmt::If {
+            cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalAnd)),
             then_body,
             else_body,
         };
@@ -216,7 +216,7 @@ pub fn try_lower_short_circuit_and_else(
         } else {
             let mut wrapped = first_prefix;
             wrapped.push(stmt);
-            return Ok(Some((DirStmt::Block(wrapped), skip_to)));
+            return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
         }
     }
 }
@@ -225,7 +225,7 @@ pub fn try_lower_short_circuit_and_else(
 pub fn try_lower_short_circuit_or(
     host: &mut impl StructuringHost,
     idx: usize,
-) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
     let diag = structuring_diag_enabled();
 
     let first_prefix = host.lower_block_stmts(idx)?;
@@ -287,7 +287,7 @@ pub fn try_lower_short_circuit_or(
                     return Ok(None);
                 };
 
-                let stmt = DirStmt::If {
+                let stmt = PreHirStmt::If {
                     cond: conds[0].clone(),
                     then_body,
                     else_body: Vec::new(),
@@ -298,7 +298,7 @@ pub fn try_lower_short_circuit_or(
                 } else {
                     let mut wrapped = first_prefix;
                     wrapped.push(stmt);
-                    return Ok(Some((DirStmt::Block(wrapped), skip_to)));
+                    return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
                 }
             }
             let Some(exit) = shared_forward_linear_exit(host, idx, body_idx, false_entry_idx)?
@@ -324,8 +324,8 @@ pub fn try_lower_short_circuit_or(
             };
 
             host.bump_condition_fold_or(conds.len() - 1);
-            let stmt = DirStmt::If {
-                cond: simplify_logical_expr(fold_logical_chain(conds, DirBinaryOp::LogicalOr)),
+            let stmt = PreHirStmt::If {
+                cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalOr)),
                 then_body,
                 else_body: Vec::new(),
             };
@@ -335,7 +335,7 @@ pub fn try_lower_short_circuit_or(
             } else {
                 let mut wrapped = first_prefix;
                 wrapped.push(stmt);
-                return Ok(Some((DirStmt::Block(wrapped), skip_to)));
+                return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
             }
         }
 

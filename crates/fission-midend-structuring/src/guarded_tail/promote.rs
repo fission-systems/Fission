@@ -7,13 +7,13 @@ use super::types::*;
 use crate::cleanup::{collect_referenced_label_counts, normalize_guarded_tail_layout};
 use crate::host::StructuringHost;
 use crate::regions::RegionKind;
-use fission_midend_dir::{DirExpr, DirStmt};
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 use crate::HashMap;
 
 /// Promote all single-entry guarded-tail shapes in `body` (one pass).
 pub fn promote_single_entry_guarded_tail_regions(
     host: &mut impl StructuringHost,
-    body: &mut Vec<DirStmt>,
+    body: &mut Vec<PreHirStmt>,
 ) -> bool {
     let protected = host.lsda_landing_pad_labels();
     let (normalized, alias_rewrites) =
@@ -23,7 +23,7 @@ pub fn promote_single_entry_guarded_tail_regions(
     let mut changed = alias_rewrites > 0;
     let mut idx = 0usize;
     while idx < body.len() {
-        let DirStmt::If { cond, .. } = &body[idx] else {
+        let PreHirStmt::If { cond, .. } = &body[idx] else {
             idx += 1;
             continue;
         };
@@ -87,7 +87,7 @@ pub fn promote_single_entry_guarded_tail_regions(
 }
 
 /// Discover guarded-tail candidates for telemetry (no mutation of structure).
-pub fn discover_guarded_tail_candidates(host: &mut impl StructuringHost, body: &[DirStmt]) {
+pub fn discover_guarded_tail_candidates(host: &mut impl StructuringHost, body: &[PreHirStmt]) {
     let protected = host.lsda_landing_pad_labels();
     let (normalized, _) = normalize_guarded_tail_layout(body.to_vec(), &protected);
     host.discover_guarded_tail_candidates_in_body(&normalized);
@@ -96,7 +96,7 @@ pub fn discover_guarded_tail_candidates(host: &mut impl StructuringHost, body: &
 /// Iterate promotion until fixed point or iteration budget.
 pub fn promote_guarded_tail_regions_until_stable(
     host: &mut impl StructuringHost,
-    body: &mut Vec<DirStmt>,
+    body: &mut Vec<PreHirStmt>,
 ) {
     let mut iterations = 0;
     while promote_single_entry_guarded_tail_regions(host, body) {

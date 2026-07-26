@@ -1,7 +1,7 @@
+use crate::midend::ir::MlilPreviewError;
 use crate::midend::pass::{AnalysisStore, InvariantBasis, NirFunc, NirPass, PassResult};
 use crate::midend::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
-use crate::midend::ir::MlilPreviewError;
-use fission_midend_dir::DirStmt;
+use fission_midend_prehir::PreHirStmt;
 // ADR 0012: admission / SESE / collapse free-fns owned by midend-structuring.
 use fission_midend_structuring::{
     StructuringAdmissionInput, StructuringAdmissionReason, StructuringHost,
@@ -386,8 +386,8 @@ impl NirPass for OrphanGotoRepairPass {
                     .structuring_orphan_goto_unrepairable_count += 1;
 
                 // proof_first=true → try_switch_recovery on linear multiblock free-fn.
-                let fallback_result = build_linear_multiblock_body(ir.builder, true)
-                    .map_err(|e| e.to_string())?;
+                let fallback_result =
+                    build_linear_multiblock_body(ir.builder, true).map_err(|e| e.to_string())?;
 
                 let elapsed = ir
                     .builder

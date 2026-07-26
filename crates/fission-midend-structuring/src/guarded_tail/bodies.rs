@@ -15,9 +15,9 @@ use crate::regions::{
     RegionKind, RegionLegality, RegionRejectionReason,
 };
 use fission_midend_core::ir::{NirBindingOrigin, NirType};
-use fission_midend_dir::{DirExpr, DirLValue, DirStmt};
-use fission_midend_dir::util::expr::expr_type;
-use fission_midend_dir::util::{negate_expr, simplify_logical_expr, strip_casts};
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
+use fission_midend_prehir::util::expr::expr_type;
+use fission_midend_prehir::util::{negate_expr, simplify_logical_expr, strip_casts};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -52,11 +52,11 @@ pub enum StructuringCounter {
 
 pub fn canonicalize_interleaved_local_aliases(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
-        full_body: &[DirStmt],
+        body: &[PreHirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         referenced: &HashMap<String, usize>,
-    ) -> Result<(Vec<DirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
+    ) -> Result<(Vec<PreHirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
         let local_refs = crate::guarded_tail::pure_hir::local_goto_positions_by_label(body);
         let mut alias_redirects = HashMap::default();
         let mut canonicalized_local_nonfallthrough = 0usize;
@@ -64,7 +64,7 @@ pub fn canonicalize_interleaved_local_aliases(
         let segment_end = segment_start + body.len();
 
         for (idx, stmt) in body.iter().enumerate() {
-            let DirStmt::Label(label) = stmt else {
+            let PreHirStmt::Label(label) = stmt else {
                 continue;
             };
             let Some(goto_positions) = local_refs.get(label) else {
@@ -115,12 +115,12 @@ pub fn canonicalize_interleaved_local_aliases(
                         .any(|stmt| !is_ignorable_discovery_stmt(stmt))
                 });
             let next_label_idx =
-                (idx + 1..body.len()).find(|pos| matches!(body[*pos], DirStmt::Label(_)));
+                (idx + 1..body.len()).find(|pos| matches!(body[*pos], PreHirStmt::Label(_)));
             let payload_end = next_label_idx.unwrap_or(body.len());
             let segment = &body[idx + 1..payload_end];
             let allow_top_level_after_label_redirect = if let Some(next_label_idx) = next_label_idx
             {
-                if let DirStmt::Label(next_label) = &body[next_label_idx] {
+                if let PreHirStmt::Label(next_label) = &body[next_label_idx] {
                     nested_after_label_count == 0
                         && !blocking_top_level_after_positions.is_empty()
                         && blocking_top_level_after_positions
@@ -180,7 +180,7 @@ pub fn canonicalize_interleaved_local_aliases(
                 resolved.and_then(|resolved_label| {
                     // Prefer forward-chain resolution if it goes beyond immediate next
                     if let Some(next_label_idx) = next_label_idx {
-                        if let DirStmt::Label(next_label) = &body[next_label_idx] {
+                        if let PreHirStmt::Label(next_label) = &body[next_label_idx] {
                             if resolved_label != *label && resolved_label != next_label.as_str() {
                                 return Some(resolved_label);
                             }
@@ -197,7 +197,7 @@ pub fn canonicalize_interleaved_local_aliases(
             // Priority 2: Try immediate next-label redirect (only if forward-chain didn't apply)
             let immediate_next_redirect = if forward_chain_redirect.is_none() {
                 if let Some(next_label_idx) = next_label_idx {
-                    if let DirStmt::Label(next_label) = &body[next_label_idx] {
+                    if let PreHirStmt::Label(next_label) = &body[next_label_idx] {
                         if crate::guarded_tail::pure_hir::is_local_alias_forward_segment(segment, next_label)
                             || allow_top_level_after_label_redirect
                         {
@@ -337,7 +337,7 @@ pub fn canonicalize_interleaved_local_aliases(
                 if segment.iter().any(|stmt| {
                     matches!(
                         stmt,
-                        DirStmt::Goto(_) | DirStmt::Return(_) | DirStmt::Break | DirStmt::Continue
+                        PreHirStmt::Goto(_) | PreHirStmt::Return(_) | PreHirStmt::Break | PreHirStmt::Continue
                     )
                 }) {
                     return Err(GuardedTailCanonicalizationFailure::PayloadCrossesJoin);
@@ -348,7 +348,7 @@ pub fn canonicalize_interleaved_local_aliases(
             if segment.iter().any(|stmt| {
                 matches!(
                     stmt,
-                    DirStmt::Goto(_) | DirStmt::Return(_) | DirStmt::Break | DirStmt::Continue
+                    PreHirStmt::Goto(_) | PreHirStmt::Return(_) | PreHirStmt::Break | PreHirStmt::Continue
                 )
             }) {
                 return Err(GuardedTailCanonicalizationFailure::PayloadCrossesJoin);
@@ -373,14 +373,14 @@ pub fn canonicalize_interleaved_local_aliases(
         Ok((
             body.iter()
                 .filter_map(|stmt| match stmt {
-                    DirStmt::Goto(label) if alias_redirects.contains_key(label) => {
+                    PreHirStmt::Goto(label) if alias_redirects.contains_key(label) => {
                         match crate::guarded_tail::pure_hir::resolve_alias_redirect(label, &alias_redirects) {
-                            Some(resolved) if resolved != *label => Some(DirStmt::Goto(resolved)),
+                            Some(resolved) if resolved != *label => Some(PreHirStmt::Goto(resolved)),
                             Some(_) => Some(stmt.clone()),
                             None => None,
                         }
                     }
-                    DirStmt::Label(label) if alias_redirects.contains_key(label) => None,
+                    PreHirStmt::Label(label) if alias_redirects.contains_key(label) => None,
                     other => Some(other.clone()),
                 })
                 .collect(),
@@ -390,11 +390,11 @@ pub fn canonicalize_interleaved_local_aliases(
 
 pub fn canonicalize_guarded_tail_segment(
     host: &mut impl StructuringHost,
-        segment: &[DirStmt],
-        full_body: &[DirStmt],
+        segment: &[PreHirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         referenced: &HashMap<String, usize>,
-    ) -> Result<(Vec<DirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
+    ) -> Result<(Vec<PreHirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
         let mut flattened = Vec::new();
         crate::guarded_tail::pure_hir::flatten_guarded_tail_segment(segment, &mut flattened);
         let flatten_before_len = flattened.len();
@@ -466,7 +466,7 @@ pub fn canonicalize_guarded_tail_segment(
                 .iter()
                 .any(|stmt| !is_ignorable_discovery_stmt(stmt));
             match stmt {
-                DirStmt::Label(label) => {
+                PreHirStmt::Label(label) => {
                     if referenced.get(label).copied().unwrap_or(0) > 0 {
                         let local_ref_count = segment_ref_counts.get(label).copied().unwrap_or(0);
                         let total_ref_count = referenced.get(label).copied().unwrap_or(0);
@@ -543,13 +543,13 @@ pub fn canonicalize_guarded_tail_segment(
                         saw_gap_after_payload = true;
                     }
                 }
-                DirStmt::Block(body) if body.is_empty() => {
+                PreHirStmt::Block(body) if body.is_empty() => {
                     removed_any = true;
                     if saw_payload {
                         saw_gap_after_payload = true;
                     }
                 }
-                DirStmt::Return(_) => {
+                PreHirStmt::Return(_) => {
                     if saw_payload {
                         if trailing_has_non_ignorable {
                             return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
@@ -560,9 +560,9 @@ pub fn canonicalize_guarded_tail_segment(
                     }
                     canonical.push(stmt.clone());
                 }
-                DirStmt::Goto(_) => {
+                PreHirStmt::Goto(_) => {
                     if saw_payload {
-                        let DirStmt::Goto(target) = stmt else {
+                        let PreHirStmt::Goto(target) = stmt else {
                             unreachable!();
                         };
                         if let Some(return_stmt) =
@@ -577,26 +577,26 @@ pub fn canonicalize_guarded_tail_segment(
                         }
                         if flattened[..idx]
                             .iter()
-                            .any(|stmt| matches!(stmt, DirStmt::Label(_)))
+                            .any(|stmt| matches!(stmt, PreHirStmt::Label(_)))
                         {
                             return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
                         }
                         if full_body
                             .iter()
-                            .any(|stmt| matches!(stmt, DirStmt::Label(label) if label == target))
+                            .any(|stmt| matches!(stmt, PreHirStmt::Label(label) if label == target))
                         {
                             return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
                         }
                         if flattened
                             .iter()
-                            .any(|stmt| matches!(stmt, DirStmt::Label(label) if label == target))
+                            .any(|stmt| matches!(stmt, PreHirStmt::Label(label) if label == target))
                         {
                             return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
                         }
                     }
                     canonical.push(stmt.clone());
                 }
-                DirStmt::Break | DirStmt::Continue => {
+                PreHirStmt::Break | PreHirStmt::Continue => {
                     if saw_payload {
                         return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
                     }
@@ -628,11 +628,11 @@ pub fn canonicalize_guarded_tail_segment(
 
 pub fn try_build_guarded_tail_witness(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         idx: usize,
         referenced: &HashMap<String, usize>,
     ) -> Option<Result<RegionShapeWitness, GuardedTailWitnessRejection>> {
-        let DirStmt::If {
+        let PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -680,7 +680,7 @@ pub fn try_build_guarded_tail_witness(
             return Some(Err(GuardedTailWitnessRejection::NonCanonicalLayout));
         }
         let original_tail_end = (original_label_idx + 1..body.len())
-            .find(|pos| matches!(body.get(*pos), Some(DirStmt::Label(_))))
+            .find(|pos| matches!(body.get(*pos), Some(PreHirStmt::Label(_))))
             .unwrap_or(body.len());
         if original_tail_end < body.len()
             && body[original_label_idx + 1..original_tail_end]
@@ -823,7 +823,7 @@ pub fn try_build_guarded_tail_witness(
         }
 
         let tail_end = (label_idx + 1..body.len())
-            .find(|pos| matches!(body.get(*pos), Some(DirStmt::Label(_))))
+            .find(|pos| matches!(body.get(*pos), Some(PreHirStmt::Label(_))))
             .unwrap_or(body.len());
         if body[label_idx + 1..tail_end].is_empty() && label_idx + 1 != body.len() {
             if host.guarded_tail_trace_enabled() {
@@ -859,7 +859,7 @@ pub fn try_build_guarded_tail_witness(
 
 pub fn try_build_guarded_tail_trial(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         idx: usize,
         referenced: &HashMap<String, usize>,
     ) -> Option<Result<GuardedTailTrial, GuardedTailWitnessRejection>> {
@@ -894,7 +894,7 @@ pub fn try_build_guarded_tail_trial(
 
 pub fn verify_guarded_tail_trial(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         idx: usize,
         trial: &GuardedTailTrial,
     ) -> GuardedTailVerification {
@@ -1236,7 +1236,7 @@ pub fn verify_guarded_tail_trial(
 
 pub fn build_guarded_tail_execution_plan(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         idx: usize,
         trial: &GuardedTailTrial,
         verification: &GuardedTailVerification,
@@ -1317,25 +1317,25 @@ pub fn build_guarded_tail_execution_plan(
 
 pub fn execute_guarded_tail_plan(
     host: &mut impl StructuringHost,
-        body: &mut Vec<DirStmt>,
+        body: &mut Vec<PreHirStmt>,
         idx: usize,
         trial: GuardedTailTrial,
         plan: GuardedTailExecutionPlan,
-        cond: DirExpr,
+        cond: PreHirExpr,
     ) {
         let mut then_body = plan.rewritten_middle;
         let mut else_body = Vec::new();
         for merge in &plan.synthetic_merges {
-            then_body.push(DirStmt::Assign {
-                lhs: DirLValue::Var(merge.replacement_target.clone()),
+            then_body.push(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(merge.replacement_target.clone()),
                 rhs: merge.then_value.clone(),
             });
-            else_body.push(DirStmt::Assign {
-                lhs: DirLValue::Var(merge.replacement_target.clone()),
+            else_body.push(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(merge.replacement_target.clone()),
                 rhs: merge.else_value.clone(),
             });
         }
-        let replacement = DirStmt::If {
+        let replacement = PreHirStmt::If {
             cond: if trial.witness.keep_middle_when_cond_true {
                 cond
             } else {
@@ -1369,7 +1369,7 @@ pub fn execute_guarded_tail_plan(
             .map(|stmt| crate::guarded_tail::pure_hir::stmt_contains_goto_label(stmt, &label_name))
             .sum();
         if remaining_refs > 0 {
-            body.insert(idx + 1, DirStmt::Label(label_name));
+            body.insert(idx + 1, PreHirStmt::Label(label_name));
         }
 
         host.bump_structuring_counter(StructuringCounter::guarded_tail_promoted_count, (1) as usize);
@@ -1377,16 +1377,16 @@ pub fn execute_guarded_tail_plan(
     }
 
 pub fn discover_guarded_tail_candidates_in_body(
-    host: &mut impl StructuringHost, body: &[DirStmt]) {
+    host: &mut impl StructuringHost, body: &[PreHirStmt]) {
         for stmt in body {
             match stmt {
-                DirStmt::Block(inner)
-                | DirStmt::While { body: inner, .. }
-                | DirStmt::DoWhile { body: inner, .. }
-                | DirStmt::For { body: inner, .. } => {
+                PreHirStmt::Block(inner)
+                | PreHirStmt::While { body: inner, .. }
+                | PreHirStmt::DoWhile { body: inner, .. }
+                | PreHirStmt::For { body: inner, .. } => {
                     discover_guarded_tail_candidates_in_body(host, inner);
                 }
-                DirStmt::If {
+                PreHirStmt::If {
                     then_body,
                     else_body,
                     ..
@@ -1394,26 +1394,26 @@ pub fn discover_guarded_tail_candidates_in_body(
                     discover_guarded_tail_candidates_in_body(host, then_body);
                     discover_guarded_tail_candidates_in_body(host, else_body);
                 }
-                DirStmt::Switch { cases, default, .. } => {
+                PreHirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         discover_guarded_tail_candidates_in_body(host, &case.body);
                     }
                     discover_guarded_tail_candidates_in_body(host, default);
                 }
-                DirStmt::Assign { .. }
-                | DirStmt::VaStart { .. }
-                | DirStmt::Expr(_)
-                | DirStmt::Label(_)
-                | DirStmt::Goto(_)
-                | DirStmt::Return(_)
-                | DirStmt::Break
-                | DirStmt::Continue => {}
+                PreHirStmt::Assign { .. }
+                | PreHirStmt::VaStart { .. }
+                | PreHirStmt::Expr(_)
+                | PreHirStmt::Label(_)
+                | PreHirStmt::Goto(_)
+                | PreHirStmt::Return(_)
+                | PreHirStmt::Break
+                | PreHirStmt::Continue => {}
             }
         }
 
         let referenced = collect_referenced_label_counts(body);
         for idx in 0..body.len() {
-            let DirStmt::If { .. } = &body[idx] else {
+            let PreHirStmt::If { .. } = &body[idx] else {
                 continue;
             };
             let Some(trial) = try_build_guarded_tail_trial(host, body, idx, &referenced) else {
@@ -1453,13 +1453,13 @@ pub fn discover_guarded_tail_candidates_in_body(
 
 pub fn collect_guarded_tail_exported_bindings(
     host: &mut impl StructuringHost,
-        middle: &[DirStmt],
-        follow_tail: &[DirStmt],
+        middle: &[PreHirStmt],
+        follow_tail: &[PreHirStmt],
     ) -> Result<Vec<GuardedTailExportedBinding>, GuardedTailExecutionRejection> {
         let mut bindings = Vec::new();
         for (def_stmt_idx, stmt) in middle.iter().enumerate() {
-            let DirStmt::Assign {
-                lhs: DirLValue::Var(binding_name),
+            let PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(binding_name),
                 rhs,
             } = stmt
             else {
@@ -1548,8 +1548,8 @@ pub fn map_guarded_tail_canonicalization_rejection(reason: GuardedTailCanonicali
     }
 
 pub fn classify_must_emit_label_rejection(
-        _body: &[DirStmt],
-        _middle: &[DirStmt],
+        _body: &[PreHirStmt],
+        _middle: &[PreHirStmt],
         _if_idx: usize,
         _label_idx: usize,
         _label: &str,

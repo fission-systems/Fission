@@ -20,14 +20,14 @@ pub(crate) fn is_register_varnode(vn: &Varnode) -> bool {
     is_register_space_id(vn.space_id)
 }
 
-pub(crate) use fission_midend_structuring::{
-    CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey, IfLoweringBudget, LinearBodyCacheKey,
-    LinearExit, LoweredTerminator, SWITCH_CHAIN_PARSE_BUDGET_MAX,
-};
 /// Initial SESE recovery is a proof pass, not the final fallback renderer.
 /// Once proof-oriented recovery exceeds this ceiling, callers should fail
 /// closed and let the cheaper whole-function linear fallback render payloads.
 pub(crate) use fission_midend_structuring::SESE_REGION_PROOF_BUDGET_CALLS;
+pub(crate) use fission_midend_structuring::{
+    CONDITION_RECOVERY_SUBCALL_LIMIT, ConditionalTailKey, IfLoweringBudget, LinearBodyCacheKey,
+    LinearExit, LoweredTerminator, SWITCH_CHAIN_PARSE_BUDGET_MAX,
+};
 pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MIN: usize = 2048;
 pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_PER_BLOCK: usize = 32;
 pub(crate) const BRANCH_CONDITION_RECOVERY_BUDGET_MAX: usize = 32768;

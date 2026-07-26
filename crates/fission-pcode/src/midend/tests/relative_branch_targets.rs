@@ -523,9 +523,9 @@ fn preview_dual_absolute_cmov_clamp_chain_keeps_hi_bound() {
     let mentions_hi = code.contains("param_3") || code.contains("r8");
     let has_structure = code.contains("if") || code.contains('?');
     assert!(
-        mentions_hi || (has_structure && code.matches("if").count() + code.matches('?').count() >= 2),
+        mentions_hi
+            || (has_structure && code.matches("if").count() + code.matches('?').count() >= 2),
         "expected dual-bound clamp recovery, got:\n{code}"
     );
     let _ = (eax, ecx, edx, r8d, zf);
 }
-

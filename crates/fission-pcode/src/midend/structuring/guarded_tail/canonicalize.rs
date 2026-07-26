@@ -1,47 +1,63 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    fn top_level_guard_goto_signature(stmt: &DirStmt) -> Option<(&DirExpr, &str)> {
+    fn top_level_guard_goto_signature(stmt: &PreHirStmt) -> Option<(&PreHirExpr, &str)> {
         fission_midend_structuring::guarded_tail::pure_hir::top_level_guard_goto_signature(stmt)
     }
 
-    fn collapse_duplicate_top_level_guard_ladder(stmts: &mut Vec<DirStmt>) -> usize {
+    fn collapse_duplicate_top_level_guard_ladder(stmts: &mut Vec<PreHirStmt>) -> usize {
         fission_midend_structuring::guarded_tail::pure_hir::collapse_duplicate_top_level_guard_ladder(stmts)
     }
 
-    fn top_level_label_definition_count(body: &[DirStmt], label: &str) -> usize {
-        fission_midend_structuring::guarded_tail::pure_hir::top_level_label_definition_count(body, label)
+    fn top_level_label_definition_count(body: &[PreHirStmt], label: &str) -> usize {
+        fission_midend_structuring::guarded_tail::pure_hir::top_level_label_definition_count(
+            body, label,
+        )
     }
 
-    fn stmt_is_sink_safe_return_goto(stmt: &DirStmt, full_body: &[DirStmt]) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_sink_safe_return_goto(stmt, full_body)
+    fn stmt_is_sink_safe_return_goto(stmt: &PreHirStmt, full_body: &[PreHirStmt]) -> bool {
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_sink_safe_return_goto(
+            stmt, full_body,
+        )
     }
 
-    fn stmt_is_guard_cluster_trivial_gap(stmt: &DirStmt, full_body: &[DirStmt]) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_guard_cluster_trivial_gap(stmt, full_body)
+    fn stmt_is_guard_cluster_trivial_gap(stmt: &PreHirStmt, full_body: &[PreHirStmt]) -> bool {
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_guard_cluster_trivial_gap(
+            stmt, full_body,
+        )
     }
 
     fn stmt_is_sink_equivalent_after_label_gap(
-        stmt: &DirStmt,
-        full_body: &[DirStmt],
-        sink_return: &Option<DirExpr>,
+        stmt: &PreHirStmt,
+        full_body: &[PreHirStmt],
+        sink_return: &Option<PreHirExpr>,
     ) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_sink_equivalent_after_label_gap(stmt, full_body, sink_return)
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_sink_equivalent_after_label_gap(
+            stmt,
+            full_body,
+            sink_return,
+        )
     }
 
     fn local_after_label_ref_is_sink_equivalent(
-        body: &[DirStmt],
-        full_body: &[DirStmt],
+        body: &[PreHirStmt],
+        full_body: &[PreHirStmt],
         label: &str,
         label_idx: usize,
         after_label_pos: usize,
     ) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::local_after_label_ref_is_sink_equivalent(body, full_body, label, label_idx, after_label_pos)
+        fission_midend_structuring::guarded_tail::pure_hir::local_after_label_ref_is_sink_equivalent(
+            body,
+            full_body,
+            label,
+            label_idx,
+            after_label_pos,
+        )
     }
 
     fn count_sink_equivalent_top_level_after_label_refs(
-        body: &[DirStmt],
-        full_body: &[DirStmt],
+        body: &[PreHirStmt],
+        full_body: &[PreHirStmt],
         label: &str,
         label_idx: usize,
         top_level_after_positions: &[usize],
@@ -52,7 +68,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn top_level_after_label_ref_is_dead_post_return(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         after_label_pos: usize,
         label: &str,
     ) -> bool {
@@ -60,41 +76,53 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn factor_duplicate_top_level_guard_cluster_with_trivial_gap(
-        stmts: &mut Vec<DirStmt>,
-        full_body: &[DirStmt],
+        stmts: &mut Vec<PreHirStmt>,
+        full_body: &[PreHirStmt],
     ) -> usize {
         fission_midend_structuring::guarded_tail::pure_hir::factor_duplicate_top_level_guard_cluster_with_trivial_gap(stmts, full_body)
     }
 
-    fn stmt_is_guard_prefix_safe(stmt: &DirStmt) -> bool {
+    fn stmt_is_guard_prefix_safe(stmt: &PreHirStmt) -> bool {
         fission_midend_structuring::guarded_tail::pure_hir::stmt_is_guard_prefix_safe(stmt)
     }
 
     fn collapse_top_level_sink_to_return_goto_chain(
-        stmts: &mut [DirStmt],
-        full_body: &[DirStmt],
+        stmts: &mut [PreHirStmt],
+        full_body: &[PreHirStmt],
     ) -> usize {
         fission_midend_structuring::guarded_tail::pure_hir::collapse_top_level_sink_to_return_goto_chain(stmts, full_body)
     }
 
     pub(super) fn canonicalize_interleaved_local_aliases(
         &mut self,
-        body: &[DirStmt],
-        full_body: &[DirStmt],
+        body: &[PreHirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         referenced: &HashMap<String, usize>,
-    ) -> Result<(Vec<DirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
-        fission_midend_structuring::guarded_tail::canonicalize_interleaved_local_aliases(self, body, full_body, segment_start, referenced)
+    ) -> Result<(Vec<PreHirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
+        fission_midend_structuring::guarded_tail::canonicalize_interleaved_local_aliases(
+            self,
+            body,
+            full_body,
+            segment_start,
+            referenced,
+        )
     }
 
     pub(super) fn canonicalize_guarded_tail_segment(
         &mut self,
-        segment: &[DirStmt],
-        full_body: &[DirStmt],
+        segment: &[PreHirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         referenced: &HashMap<String, usize>,
-    ) -> Result<(Vec<DirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
-        fission_midend_structuring::guarded_tail::canonicalize_guarded_tail_segment(self, segment, full_body, segment_start, referenced)
+    ) -> Result<(Vec<PreHirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
+        fission_midend_structuring::guarded_tail::canonicalize_guarded_tail_segment(
+            self,
+            segment,
+            full_body,
+            segment_start,
+            referenced,
+        )
     }
 }
 
@@ -105,17 +133,17 @@ mod tests {
     #[test]
     fn collapse_duplicate_guard_ladder_identical_cond_target() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
 
         let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
@@ -126,10 +154,10 @@ mod tests {
 
     #[test]
     fn collapse_duplicate_guard_ladder_identical_deref_cond_target() {
-        let cond = DirExpr::Unary {
-            op: DirUnaryOp::Not,
-            expr: Box::new(DirExpr::Load {
-                ptr: Box::new(DirExpr::Var("p".to_string())),
+        let cond = PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr: Box::new(PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("p".to_string())),
                 ty: NirType::Int {
                     bits: 8,
                     signed: false,
@@ -138,17 +166,17 @@ mod tests {
             ty: NirType::Bool,
         };
         let mut body = vec![
-            DirStmt::If {
+            PreHirStmt::If {
                 cond: cond.clone(),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
-                then_body: vec![DirStmt::Goto("A".to_string())],
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
 
         let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
@@ -160,18 +188,18 @@ mod tests {
     #[test]
     fn collapse_duplicate_guard_ladder_allows_empty_block_gap() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Block(Vec::new()),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
 
         let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
@@ -183,14 +211,14 @@ mod tests {
     #[test]
     fn collapse_duplicate_guard_ladder_rejects_different_cond() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c1".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c1".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::If {
-                cond: DirExpr::Var("c2".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c2".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
         ];
@@ -204,14 +232,14 @@ mod tests {
     #[test]
     fn collapse_duplicate_guard_ladder_rejects_different_target() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L1".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L1".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L2".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L2".to_string())],
                 else_body: Vec::new(),
             },
         ];
@@ -225,24 +253,24 @@ mod tests {
     #[test]
     fn collapse_duplicate_guard_ladder_rejects_non_ignorable_gap() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("x".to_string()),
-                rhs: DirExpr::Load {
-                    ptr: Box::new(DirExpr::Var("p".to_string())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("p".to_string())),
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
             },
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("L".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("L".to_string())],
                 else_body: Vec::new(),
             },
         ];
@@ -256,22 +284,22 @@ mod tests {
     #[test]
     fn collapse_duplicate_guard_ladder_does_not_touch_nested_loop_body() {
         let mut body = vec![
-            DirStmt::While {
-                cond: DirExpr::Var("loop_c".to_string()),
+            PreHirStmt::While {
+                cond: PreHirExpr::Var("loop_c".to_string()),
                 body: vec![
-                    DirStmt::If {
-                        cond: DirExpr::Var("c".to_string()),
-                        then_body: vec![DirStmt::Goto("L".to_string())],
+                    PreHirStmt::If {
+                        cond: PreHirExpr::Var("c".to_string()),
+                        then_body: vec![PreHirStmt::Goto("L".to_string())],
                         else_body: Vec::new(),
                     },
-                    DirStmt::If {
-                        cond: DirExpr::Var("c".to_string()),
-                        then_body: vec![DirStmt::Goto("L".to_string())],
+                    PreHirStmt::If {
+                        cond: PreHirExpr::Var("c".to_string()),
+                        then_body: vec![PreHirStmt::Goto("L".to_string())],
                         else_body: Vec::new(),
                     },
                 ],
             },
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
 
         let removed = PreviewBuilder::collapse_duplicate_top_level_guard_ladder(&mut body);
@@ -283,9 +311,9 @@ mod tests {
     #[test]
     fn collapse_sink_to_return_chain_top_level_goto_to_return() {
         let mut body = vec![
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -293,18 +321,18 @@ mod tests {
             PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
 
         assert_eq!(rewritten, 1);
-        assert!(matches!(&body[0], DirStmt::Return(None)));
+        assert!(matches!(&body[0], PreHirStmt::Return(None)));
     }
 
     #[test]
     fn collapse_sink_to_return_chain_allows_pure_gap_hop() {
         let mut body = vec![
-            DirStmt::Goto("Lhop".to_string()),
-            DirStmt::Label("Lhop".to_string()),
-            DirStmt::Expr(DirExpr::Var("tmp".to_string())),
-            DirStmt::Assign {
-                lhs: DirLValue::Var("x".to_string()),
-                rhs: DirExpr::Const(
+            PreHirStmt::Goto("Lhop".to_string()),
+            PreHirStmt::Label("Lhop".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("tmp".to_string())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -312,9 +340,9 @@ mod tests {
                     },
                 ),
             },
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -322,20 +350,20 @@ mod tests {
             PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
 
         assert_eq!(rewritten, 1);
-        assert!(matches!(&body[0], DirStmt::Return(None)));
+        assert!(matches!(&body[0], PreHirStmt::Return(None)));
     }
 
     #[test]
     fn collapse_sink_to_return_chain_rejects_reentry() {
         let mut body = vec![
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("Lret".to_string())],
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("Lret".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -343,17 +371,17 @@ mod tests {
             PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
 
         assert_eq!(rewritten, 0);
-        assert!(matches!(&body[0], DirStmt::Goto(label) if label == "Lret"));
+        assert!(matches!(&body[0], PreHirStmt::Goto(label) if label == "Lret"));
     }
 
     #[test]
     fn collapse_sink_to_return_chain_rejects_ambiguous_target() {
         let mut body = vec![
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -361,20 +389,20 @@ mod tests {
             PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
 
         assert_eq!(rewritten, 0);
-        assert!(matches!(&body[0], DirStmt::Goto(label) if label == "Lret"));
+        assert!(matches!(&body[0], PreHirStmt::Goto(label) if label == "Lret"));
     }
 
     #[test]
     fn collapse_sink_to_return_chain_rejects_side_effectful_gap() {
         let mut body = vec![
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Expr(DirExpr::Call {
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Call {
                 target: "FUN_0x140001000".to_string(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
             }),
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -382,19 +410,19 @@ mod tests {
             PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
 
         assert_eq!(rewritten, 0);
-        assert!(matches!(&body[0], DirStmt::Goto(label) if label == "Lret"));
+        assert!(matches!(&body[0], PreHirStmt::Goto(label) if label == "Lret"));
     }
 
     #[test]
     fn collapse_sink_to_return_chain_rejects_loop_crossing() {
         let mut body = vec![
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::While {
-                cond: DirExpr::Var("loop_c".to_string()),
-                body: vec![DirStmt::Break],
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::While {
+                cond: PreHirExpr::Var("loop_c".to_string()),
+                body: vec![PreHirStmt::Break],
             },
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -402,25 +430,25 @@ mod tests {
             PreviewBuilder::collapse_top_level_sink_to_return_goto_chain(&mut body, &full_body);
 
         assert_eq!(rewritten, 0);
-        assert!(matches!(&body[0], DirStmt::Goto(label) if label == "Lret"));
+        assert!(matches!(&body[0], PreHirStmt::Goto(label) if label == "Lret"));
     }
 
     #[test]
     fn collapse_guard_cluster_allows_sink_safe_trivial_gap() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -431,7 +459,7 @@ mod tests {
         assert_eq!(removed, 1);
         assert_eq!(
             body.iter()
-                .filter(|stmt| matches!(stmt, DirStmt::If { .. }))
+                .filter(|stmt| matches!(stmt, PreHirStmt::If { .. }))
                 .count(),
             1
         );
@@ -440,21 +468,21 @@ mod tests {
     #[test]
     fn collapse_guard_cluster_allows_empty_block_and_sink_safe_gaps() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Block(Vec::new()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Block(Vec::new()),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -465,7 +493,7 @@ mod tests {
         assert_eq!(removed, 1);
         assert_eq!(
             body.iter()
-                .filter(|stmt| matches!(stmt, DirStmt::If { .. }))
+                .filter(|stmt| matches!(stmt, PreHirStmt::If { .. }))
                 .count(),
             1
         );
@@ -474,19 +502,19 @@ mod tests {
     #[test]
     fn collapse_guard_cluster_rejects_side_effectful_gap() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Expr(DirExpr::Call {
+            PreHirStmt::Expr(PreHirExpr::Call {
                 target: "FUN_0x140001000".to_string(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
             }),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
         ];
@@ -502,21 +530,21 @@ mod tests {
     #[test]
     fn collapse_guard_cluster_rejects_ambiguous_sink_gap() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -530,19 +558,19 @@ mod tests {
     #[test]
     fn collapse_guard_cluster_rejects_label_crossing_gap() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("mid".to_string()),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::Label("mid".to_string()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("A".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("A".to_string()),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -556,23 +584,23 @@ mod tests {
     #[test]
     fn collapse_guard_cluster_rejects_loop_crossing_sink_gap() {
         let mut body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Goto("Lloop".to_string()),
-            DirStmt::If {
-                cond: DirExpr::Var("c".to_string()),
-                then_body: vec![DirStmt::Goto("A".to_string())],
+            PreHirStmt::Goto("Lloop".to_string()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Goto("A".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("Lloop".to_string()),
-            DirStmt::While {
-                cond: DirExpr::Var("loop_c".to_string()),
-                body: vec![DirStmt::Break],
+            PreHirStmt::Label("Lloop".to_string()),
+            PreHirStmt::While {
+                cond: PreHirExpr::Var("loop_c".to_string()),
+                body: vec![PreHirStmt::Break],
             },
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
         let full_body = body.clone();
 
@@ -586,12 +614,12 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_accepts_same_return_sink() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Label("Lafter".to_string()),
-            DirStmt::Goto("L".to_string()),
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Label("Lafter".to_string()),
+            PreHirStmt::Goto("L".to_string()),
         ];
 
         let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
@@ -610,16 +638,16 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_accepts_empty_and_sink_safe_gap() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Label("Lafter".to_string()),
-            DirStmt::Goto("L".to_string()),
-            DirStmt::Block(Vec::new()),
-            DirStmt::Goto("Lhop".to_string()),
-            DirStmt::Label("Lhop".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Label("Lafter".to_string()),
+            PreHirStmt::Goto("L".to_string()),
+            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Goto("Lhop".to_string()),
+            PreHirStmt::Label("Lhop".to_string()),
+            PreHirStmt::Return(None),
         ];
 
         let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
@@ -638,11 +666,11 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_rejects_nested_after_ref() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Goto("L".to_string()),
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("L".to_string()),
         ];
 
         let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
@@ -661,12 +689,12 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_rejects_side_effectful_gap() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Goto("L".to_string()),
-            DirStmt::Expr(DirExpr::Call {
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("L".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Call {
                 target: "FUN_0x140002000".to_string(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -689,16 +717,16 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_rejects_ambiguous_sink_target() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Goto("L".to_string()),
-            DirStmt::Goto("Lamb".to_string()),
-            DirStmt::Label("Lamb".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Label("Lamb".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("L".to_string()),
+            PreHirStmt::Goto("Lamb".to_string()),
+            PreHirStmt::Label("Lamb".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Label("Lamb".to_string()),
+            PreHirStmt::Return(None),
         ];
 
         let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
@@ -717,12 +745,12 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_rejects_nonlocal_reentry() {
         let body = vec![
-            DirStmt::Goto("L".to_string()),
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Goto("L".to_string()),
+            PreHirStmt::Goto("L".to_string()),
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("L".to_string()),
         ];
 
         let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
@@ -741,16 +769,16 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_rejects_label_crossing_to_non_sink_join() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Goto("L".to_string()),
-            DirStmt::Goto("Lother".to_string()),
-            DirStmt::Label("Lother".to_string()),
-            DirStmt::Goto("Ltail".to_string()),
-            DirStmt::Label("Ltail".to_string()),
-            DirStmt::Return(Some(DirExpr::Const(
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("L".to_string()),
+            PreHirStmt::Goto("Lother".to_string()),
+            PreHirStmt::Label("Lother".to_string()),
+            PreHirStmt::Goto("Ltail".to_string()),
+            PreHirStmt::Label("Ltail".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 32,
@@ -775,11 +803,11 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_rejects_external_ref_ownership_change() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Goto("L".to_string()),
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("L".to_string()),
         ];
 
         let count = PreviewBuilder::count_sink_equivalent_top_level_after_label_refs(
@@ -798,14 +826,14 @@ mod tests {
     #[test]
     fn sink_equivalent_after_label_ref_rejects_different_terminal_sink() {
         let body = vec![
-            DirStmt::Label("L".to_string()),
-            DirStmt::Goto("Lret".to_string()),
-            DirStmt::Label("Lret".to_string()),
-            DirStmt::Return(None),
-            DirStmt::Goto("L".to_string()),
-            DirStmt::Goto("Lother".to_string()),
-            DirStmt::Label("Lother".to_string()),
-            DirStmt::Return(Some(DirExpr::Const(
+            PreHirStmt::Label("L".to_string()),
+            PreHirStmt::Goto("Lret".to_string()),
+            PreHirStmt::Label("Lret".to_string()),
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("L".to_string()),
+            PreHirStmt::Goto("Lother".to_string()),
+            PreHirStmt::Label("Lother".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 32,

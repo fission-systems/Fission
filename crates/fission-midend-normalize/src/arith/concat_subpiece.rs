@@ -6,9 +6,9 @@ use super::util::*;
 
 /// `Or(Shl(Shr(x, n), n), And(x, low_mask))` where `low_mask == (1<<n)-1`
 /// reassembles a SUBPIECE/CONCAT split back to `x` (optionally cast to `ty`).
-pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Or,
+pub fn recognize_humpty_dumpty_or(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Or,
         lhs,
         rhs,
         ty,
@@ -21,8 +21,8 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
         (high, low)
             if matches!(
                 high,
-                DirExpr::Binary {
-                    op: DirBinaryOp::Shl,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shl,
                     ..
                 }
             ) =>
@@ -32,8 +32,8 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
         (low, high)
             if matches!(
                 high,
-                DirExpr::Binary {
-                    op: DirBinaryOp::Shl,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shl,
                     ..
                 }
             ) =>
@@ -43,8 +43,8 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
         _ => return None,
     };
 
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shl,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
         lhs: shifted,
         rhs: shift_amt,
         ..
@@ -52,7 +52,7 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(n, _) = shift_amt.as_ref() else {
+    let PreHirExpr::Const(n, _) = shift_amt.as_ref() else {
         return None;
     };
     if *n <= 0 || *n >= 64 {
@@ -60,15 +60,15 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
     }
     let low_mask = full_mask_for_bits(*n as u32)?;
     let (src, mask_val) = match low {
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs: and_lhs,
             rhs: and_rhs,
             ..
         } => {
             let (x, m) = match (and_lhs.as_ref(), and_rhs.as_ref()) {
-                (x, DirExpr::Const(m, _)) => (x, *m),
-                (DirExpr::Const(m, _), x) => (x, *m),
+                (x, PreHirExpr::Const(m, _)) => (x, *m),
+                (PreHirExpr::Const(m, _), x) => (x, *m),
                 _ => return None,
             };
             if m != low_mask {
@@ -80,8 +80,8 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
     };
     let _ = mask_val;
 
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shr | DirBinaryOp::Sar,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
         lhs: shr_lhs,
         rhs: shr_amt,
         ..
@@ -89,7 +89,7 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(shr_n, _) = shr_amt.as_ref() else {
+    let PreHirExpr::Const(shr_n, _) = shr_amt.as_ref() else {
         return None;
     };
     if shr_n != n {
@@ -103,7 +103,7 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
     if source_ty == *ty {
         Some(src.clone())
     } else if matches!(source_ty, NirType::Unknown) || is_integer_type(&source_ty) {
-        Some(DirExpr::Cast {
+        Some(PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(src.clone()),
         })
@@ -113,21 +113,21 @@ pub fn recognize_humpty_dumpty_or(expr: &DirExpr) -> Option<DirExpr> {
 }
 
 /// `Cast(narrow, Or(humpty_pattern))` → `Cast(narrow, x)` (DumptyHump).
-pub fn recognize_dumpty_hump_cast(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Cast { ty, expr: inner } = expr else {
+pub fn recognize_dumpty_hump_cast(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Cast { ty, expr: inner } = expr else {
         return None;
     };
     let recombined = recognize_humpty_dumpty_or(inner)?;
-    Some(DirExpr::Cast {
+    Some(PreHirExpr::Cast {
         ty: ty.clone(),
         expr: Box::new(recombined),
     })
 }
 
 /// `Shl(And(x, mask), n)` where `mask << n == 0` → `Shl(Cast(w, x), n)` (DumptyHumpLate).
-pub fn recognize_dumpty_hump_late(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shl,
+pub fn recognize_dumpty_hump_late(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
         lhs,
         rhs: shift_amt,
         ty,
@@ -135,14 +135,14 @@ pub fn recognize_dumpty_hump_late(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(n, _) = shift_amt.as_ref() else {
+    let PreHirExpr::Const(n, _) = shift_amt.as_ref() else {
         return None;
     };
     if *n <= 0 || *n >= 64 {
         return None;
     }
-    let DirExpr::Binary {
-        op: DirBinaryOp::And,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::And,
         lhs: and_lhs,
         rhs: and_rhs,
         ..
@@ -151,17 +151,17 @@ pub fn recognize_dumpty_hump_late(expr: &DirExpr) -> Option<DirExpr> {
         return None;
     };
     let (src, mask) = match (and_lhs.as_ref(), and_rhs.as_ref()) {
-        (x, DirExpr::Const(m, _)) => (x, *m as u64),
-        (DirExpr::Const(m, _), x) => (x, *m as u64),
+        (x, PreHirExpr::Const(m, _)) => (x, *m as u64),
+        (PreHirExpr::Const(m, _), x) => (x, *m as u64),
         _ => return None,
     };
     if (mask as u64) >= (1u64 << *n) {
         return None;
     }
     let cast_ty = ty.clone();
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::Shl,
-        lhs: Box::new(DirExpr::Cast {
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
+        lhs: Box::new(PreHirExpr::Cast {
             ty: cast_ty.clone(),
             expr: Box::new(src.clone()),
         }),
@@ -171,9 +171,9 @@ pub fn recognize_dumpty_hump_late(expr: &DirExpr) -> Option<DirExpr> {
 }
 
 /// `Or(Shl(Cast(w, hi), n), Cast(w, lo))` with zero-extending casts → wide recombine (ConcatZext).
-pub fn recognize_concat_zext_or(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Or,
+pub fn recognize_concat_zext_or(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Or,
         lhs,
         rhs,
         ty,
@@ -184,24 +184,24 @@ pub fn recognize_concat_zext_or(expr: &DirExpr) -> Option<DirExpr> {
 
     let (hi_side, lo_side) = match (lhs.as_ref(), rhs.as_ref()) {
         (
-            DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 ..
             },
             lo,
         ) => (lhs.as_ref(), lo),
         (
             lo,
-            DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 ..
             },
         ) => (rhs.as_ref(), lhs.as_ref()),
         _ => return None,
     };
 
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shl,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
         lhs: hi_cast_expr,
         rhs: shift_amt,
         ..
@@ -209,7 +209,7 @@ pub fn recognize_concat_zext_or(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(n, _) = shift_amt.as_ref() else {
+    let PreHirExpr::Const(n, _) = shift_amt.as_ref() else {
         return None;
     };
     if *n <= 0 {
@@ -233,22 +233,22 @@ pub fn recognize_concat_zext_or(expr: &DirExpr) -> Option<DirExpr> {
     if wide_bits >= total_bits {
         return Some(hi_src.clone());
     }
-    Some(DirExpr::Cast {
+    Some(PreHirExpr::Cast {
         ty: ty.clone(),
         expr: Box::new(hi_src.clone()),
     })
 }
 
 /// `Cast(W, Cast(N, x))` with `W > N` and matching signedness → single cast (Piece2Zext/Sext).
-pub fn recognize_piece2_zext_sext(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Cast {
+pub fn recognize_piece2_zext_sext(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Cast {
         ty: outer_ty,
         expr: inner,
     } = expr
     else {
         return None;
     };
-    let DirExpr::Cast {
+    let PreHirExpr::Cast {
         ty: inner_ty,
         expr: source,
     } = inner.as_ref()
@@ -264,14 +264,14 @@ pub fn recognize_piece2_zext_sext(expr: &DirExpr) -> Option<DirExpr> {
     if !source_is_scalarish(&expr_type(source)) {
         return None;
     }
-    Some(DirExpr::Cast {
+    Some(PreHirExpr::Cast {
         ty: outer_ty.clone(),
         expr: source.clone(),
     })
 }
 
-fn peel_unsigned_zext_cast(expr: &DirExpr) -> Option<(DirExpr, NirType)> {
-    let DirExpr::Cast { ty, expr: inner } = expr else {
+fn peel_unsigned_zext_cast(expr: &PreHirExpr) -> Option<(PreHirExpr, NirType)> {
+    let PreHirExpr::Cast { ty, expr: inner } = expr else {
         return None;
     };
     let NirType::Int {
@@ -316,30 +316,30 @@ mod tests {
         }
     }
 
-    fn var(name: &str) -> DirExpr {
-        DirExpr::Var(name.to_string())
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
     }
 
     #[test]
     fn humpty_dumpty_reassembles_split_word() {
         let x = var("x");
-        let expr = DirExpr::Binary {
-            op: DirBinaryOp::Or,
-            lhs: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Shl,
-                lhs: Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Shr,
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shr,
                     lhs: Box::new(x.clone()),
-                    rhs: Box::new(DirExpr::Const(16, u32_ty())),
+                    rhs: Box::new(PreHirExpr::Const(16, u32_ty())),
                     ty: u32_ty(),
                 }),
-                rhs: Box::new(DirExpr::Const(16, u32_ty())),
+                rhs: Box::new(PreHirExpr::Const(16, u32_ty())),
                 ty: u32_ty(),
             }),
-            rhs: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::And,
+            rhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
                 lhs: Box::new(x.clone()),
-                rhs: Box::new(DirExpr::Const(0xffff, u32_ty())),
+                rhs: Box::new(PreHirExpr::Const(0xffff, u32_ty())),
                 ty: u32_ty(),
             }),
             ty: u32_ty(),
@@ -347,9 +347,9 @@ mod tests {
 
         let normalized = recognize_humpty_dumpty_or(&expr).expect("humpty");
         match normalized {
-            DirExpr::Var(name) => assert_eq!(name, "x"),
-            DirExpr::Cast { expr, .. } => {
-                assert!(matches!(expr.as_ref(), DirExpr::Var(name) if name == "x"));
+            PreHirExpr::Var(name) => assert_eq!(name, "x"),
+            PreHirExpr::Cast { expr, .. } => {
+                assert!(matches!(expr.as_ref(), PreHirExpr::Var(name) if name == "x"));
             }
             other => panic!("unexpected humpty result: {other:?}"),
         }
@@ -357,9 +357,9 @@ mod tests {
 
     #[test]
     fn piece2_zext_collapses_nested_unsigned_casts() {
-        let expr = DirExpr::Cast {
+        let expr = PreHirExpr::Cast {
             ty: u64_ty(),
-            expr: Box::new(DirExpr::Cast {
+            expr: Box::new(PreHirExpr::Cast {
                 ty: u32_ty(),
                 expr: Box::new(var("x")),
             }),
@@ -367,7 +367,7 @@ mod tests {
         let normalized = recognize_piece2_zext_sext(&expr).expect("piece2zext");
         assert_eq!(
             normalized,
-            DirExpr::Cast {
+            PreHirExpr::Cast {
                 ty: u64_ty(),
                 expr: Box::new(var("x")),
             }

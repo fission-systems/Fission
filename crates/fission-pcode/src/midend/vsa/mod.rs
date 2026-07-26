@@ -1,2 +1,2 @@
 //! Re-export VSA from midend-core.
-pub use fission_midend_dir::vsa::*;
+pub use fission_midend_prehir::vsa::*;

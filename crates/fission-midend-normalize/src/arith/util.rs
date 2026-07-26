@@ -37,39 +37,39 @@ pub fn full_mask_for_type(ty: &NirType) -> Option<i64> {
     int_type_bits(ty).and_then(full_mask_for_bits)
 }
 
-pub fn is_full_mask_const(expr: &DirExpr, ty: &NirType) -> bool {
-    let DirExpr::Const(value, _) = expr else {
+pub fn is_full_mask_const(expr: &PreHirExpr, ty: &NirType) -> bool {
+    let PreHirExpr::Const(value, _) = expr else {
         return false;
     };
     full_mask_for_type(ty).is_some_and(|mask| mask == *value)
 }
 
-pub fn is_zero_const(expr: &DirExpr) -> bool {
-    matches!(expr, DirExpr::Const(0, _))
+pub fn is_zero_const(expr: &PreHirExpr) -> bool {
+    matches!(expr, PreHirExpr::Const(0, _))
 }
 
-pub fn is_one_const(expr: &DirExpr) -> bool {
-    matches!(expr, DirExpr::Const(1, _))
+pub fn is_one_const(expr: &PreHirExpr) -> bool {
+    matches!(expr, PreHirExpr::Const(1, _))
 }
 
-pub fn is_negative_one_const(expr: &DirExpr) -> bool {
-    matches!(expr, DirExpr::Const(-1, _))
+pub fn is_negative_one_const(expr: &PreHirExpr) -> bool {
+    matches!(expr, PreHirExpr::Const(-1, _))
 }
 
-pub fn bool_false_expr() -> DirExpr {
-    DirExpr::Const(0, NirType::Bool)
+pub fn bool_false_expr() -> PreHirExpr {
+    PreHirExpr::Const(0, NirType::Bool)
 }
 
-pub fn bool_true_expr() -> DirExpr {
-    DirExpr::Const(1, NirType::Bool)
+pub fn bool_true_expr() -> PreHirExpr {
+    PreHirExpr::Const(1, NirType::Bool)
 }
 
-pub fn is_bool_false_expr(expr: &DirExpr) -> bool {
-    matches!(expr, DirExpr::Const(0, NirType::Bool))
+pub fn is_bool_false_expr(expr: &PreHirExpr) -> bool {
+    matches!(expr, PreHirExpr::Const(0, NirType::Bool))
 }
 
-pub fn is_bool_true_expr(expr: &DirExpr) -> bool {
-    matches!(expr, DirExpr::Const(1, NirType::Bool))
+pub fn is_bool_true_expr(expr: &PreHirExpr) -> bool {
+    matches!(expr, PreHirExpr::Const(1, NirType::Bool))
 }
 
 pub fn is_integer_type(ty: &NirType) -> bool {

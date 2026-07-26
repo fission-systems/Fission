@@ -32,7 +32,7 @@ pub use pcode::*;
 // Re-export midend surface (public names historically exported via `nir`).
 pub use midend::{
     AdmissionClass, CallEdgeKind, CallEffectSummarySource, CallSummary, CallTargetProvenance,
-    CallTargetRef, CallingConvention, DirExpr, DirFunction, DirStmt, FormatFamily, HirExpr,
+    CallTargetRef, CallingConvention, PreHirExpr, PreHirFunction, PreHirStmt, FormatFamily, HirExpr,
     HirFunction, HirStmt,
     IndirectControlClassification, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,
     NirAdmissionFacts, NirBindingOrigin, NirBlock, NirBuildStats, NirCallEffectSummary,
@@ -43,13 +43,13 @@ pub use midend::{
     PrintProfile, ProcedureSummary, PseudocodeLayer, RecoveryMode, RegisterNamer, StackSlotId,
     StructuringBudgetClass, StructuringEngineKind, StructuringFailureKind, StructuringOutcome,
     StructuringReasonFamily, TargetProfile, WrapperClass, infer_entry_register_param_arity,
-    nir_admission_facts_from_pcode, parse_call_target_address, print_dir_function,
+    nir_admission_facts_from_pcode, parse_call_target_address, print_prehir_function,
     render_contracted_wrapper_summary, render_mlil_preview,
     render_mlil_preview_with_binary_and_context,
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
     render_nir_with_context, seed_nir_render_options, structuring_outcome_for_signature,
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
-    take_last_dir_snapshot, take_last_hir_function_snapshot, take_last_layered_pseudocode,
+    take_last_prehir_snapshot, take_last_hir_function_snapshot, take_last_layered_pseudocode,
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,
 };

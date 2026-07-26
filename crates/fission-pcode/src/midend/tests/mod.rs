@@ -1,25 +1,28 @@
 use super::*;
 use crate::pcode::{PcodeBasicBlock, PcodeOp};
 
-/// Test-only helper: several `midend/tests` files build a `DirStmt` fixture
+/// Test-only helper: several `midend/tests` files build a `PreHirStmt` fixture
 /// (the shape a normalize/structuring pass actually consumes) and want to
 /// assert on its rendered text via the real printer, which is `HirStmt`-
-/// typed. Converts via `dir_stmt_to_hir_stmt` rather than duplicating
-/// `print_stmt` for `DirStmt`.
+/// typed. Converts via `prehir_stmt_to_hir_stmt` rather than duplicating
+/// `print_stmt` for `PreHirStmt`.
 #[allow(dead_code)]
-pub(super) fn print_dir_stmt(stmt: &fission_midend_dir::DirStmt) -> String {
-    print_stmt(&fission_midend_dir::ir::dir_stmt_to_hir_stmt(stmt.clone()))
+pub(super) fn print_dir_stmt(stmt: &fission_midend_prehir::PreHirStmt) -> String {
+    print_stmt(&fission_midend_prehir::ir::prehir_stmt_to_hir_stmt(
+        stmt.clone(),
+    ))
 }
 
 /// Same rationale as [`print_dir_stmt`], for whole-function fixtures.
 #[allow(dead_code)]
-pub(super) fn print_dir_function(func: &fission_midend_dir::DirFunction) -> String {
-    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(func.body.clone());
+pub(super) fn print_prehir_function(func: &fission_midend_prehir::PreHirFunction) -> String {
+    let hir_body = fission_midend_prehir::ir::prehir_stmts_to_hir_stmts(func.body.clone());
     print_hir_function(&func.clone().into_hir_function(hir_body))
 }
 
 mod bootstrap_x86;
 mod calling_convention;
+mod clamp_dump;
 mod entry_param_promotion;
 mod normalize_arith;
 mod normalize_defuse;
@@ -27,7 +30,6 @@ mod normalize_flag_recovery;
 mod normalize_slots;
 mod relative_branch_targets;
 mod signum_struct;
-mod clamp_dump;
 mod snapshot_printer;
 mod structuring_conditionals;
 mod structuring_guarded_tail;

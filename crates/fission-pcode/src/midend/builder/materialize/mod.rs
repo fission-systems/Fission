@@ -12,8 +12,8 @@ pub(super) mod test_support;
 mod trace;
 
 pub(in crate::midend::builder) use self::contracts::MaterializeOwnerRepartition;
-pub(in crate::midend::builder) use self::loop_carried::LoopCarriedDefinitionProof;
 use self::contracts::*;
+pub(in crate::midend::builder) use self::loop_carried::LoopCarriedDefinitionProof;
 use self::scans::DefinitionReachesReturnProof;
 
 struct SameBlockRegisterJoinProof {
@@ -22,33 +22,33 @@ struct SameBlockRegisterJoinProof {
 }
 
 impl<'a> PreviewBuilder<'a> {
-    fn collect_var_names_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
+    fn collect_var_names_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
         match expr {
-            DirExpr::Var(name) => {
+            PreHirExpr::Var(name) => {
                 vars.insert(name.clone());
             }
-            DirExpr::Cast { expr, .. }
-            | DirExpr::Unary { expr, .. }
-            | DirExpr::Load { ptr: expr, .. }
-            | DirExpr::PtrOffset { base: expr, .. }
-            | DirExpr::FieldAccess { base: expr, .. }
-            | DirExpr::AggregateCopy { src: expr, .. } => {
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. } => {
                 Self::collect_var_names_in_expr(expr, vars);
             }
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 Self::collect_var_names_in_expr(lhs, vars);
                 Self::collect_var_names_in_expr(rhs, vars);
             }
-            DirExpr::Call { args, .. } => {
+            PreHirExpr::Call { args, .. } => {
                 for arg in args {
                     Self::collect_var_names_in_expr(arg, vars);
                 }
             }
-            DirExpr::Index { base, index, .. } => {
+            PreHirExpr::Index { base, index, .. } => {
                 Self::collect_var_names_in_expr(base, vars);
                 Self::collect_var_names_in_expr(index, vars);
             }
-            DirExpr::Select {
+            PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -58,30 +58,30 @@ impl<'a> PreviewBuilder<'a> {
                 Self::collect_var_names_in_expr(then_expr, vars);
                 Self::collect_var_names_in_expr(else_expr, vars);
             }
-            DirExpr::Const(_, _) | DirExpr::AddressOfGlobal(_) => {}
+            PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
         }
     }
 
-    fn rhs_is_load_derived_value(&self, expr: &DirExpr) -> bool {
+    fn rhs_is_load_derived_value(&self, expr: &PreHirExpr) -> bool {
         match expr {
-            DirExpr::Load { .. } => true,
-            DirExpr::Var(name) => self.load_value_bindings.contains(name),
-            DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
+            PreHirExpr::Load { .. } => true,
+            PreHirExpr::Var(name) => self.load_value_bindings.contains(name),
+            PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
                 self.rhs_is_load_derived_value(expr)
             }
-            DirExpr::Binary { lhs, rhs, .. } => {
+            PreHirExpr::Binary { lhs, rhs, .. } => {
                 self.rhs_is_load_derived_value(lhs) || self.rhs_is_load_derived_value(rhs)
             }
-            DirExpr::Call { args, .. } => {
+            PreHirExpr::Call { args, .. } => {
                 args.iter().any(|arg| self.rhs_is_load_derived_value(arg))
             }
-            DirExpr::PtrOffset { base, .. }
-            | DirExpr::FieldAccess { base, .. }
-            | DirExpr::AggregateCopy { src: base, .. } => self.rhs_is_load_derived_value(base),
-            DirExpr::Index { base, index, .. } => {
+            PreHirExpr::PtrOffset { base, .. }
+            | PreHirExpr::FieldAccess { base, .. }
+            | PreHirExpr::AggregateCopy { src: base, .. } => self.rhs_is_load_derived_value(base),
+            PreHirExpr::Index { base, index, .. } => {
                 self.rhs_is_load_derived_value(base) || self.rhs_is_load_derived_value(index)
             }
-            DirExpr::Select {
+            PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -91,37 +91,37 @@ impl<'a> PreviewBuilder<'a> {
                     || self.rhs_is_load_derived_value(then_expr)
                     || self.rhs_is_load_derived_value(else_expr)
             }
-            DirExpr::Const(_, _) | DirExpr::AddressOfGlobal(_) => false,
+            PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => false,
         }
     }
 
-    fn record_load_value_roles(&mut self, lhs_name: &str, rhs: &DirExpr) {
-        fn visit(this: &mut PreviewBuilder<'_>, expr: &DirExpr) {
+    fn record_load_value_roles(&mut self, lhs_name: &str, rhs: &PreHirExpr) {
+        fn visit(this: &mut PreviewBuilder<'_>, expr: &PreHirExpr) {
             match expr {
-                DirExpr::Load { ptr, .. } => {
+                PreHirExpr::Load { ptr, .. } => {
                     let mut ptr_vars = HashSet::default();
                     PreviewBuilder::collect_var_names_in_expr(ptr, &mut ptr_vars);
                     this.load_address_bindings.extend(ptr_vars);
                     visit(this, ptr);
                 }
-                DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => visit(this, expr),
-                DirExpr::Binary { lhs, rhs, .. } => {
+                PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => visit(this, expr),
+                PreHirExpr::Binary { lhs, rhs, .. } => {
                     visit(this, lhs);
                     visit(this, rhs);
                 }
-                DirExpr::Call { args, .. } => {
+                PreHirExpr::Call { args, .. } => {
                     for arg in args {
                         visit(this, arg);
                     }
                 }
-                DirExpr::PtrOffset { base, .. }
-                | DirExpr::FieldAccess { base, .. }
-                | DirExpr::AggregateCopy { src: base, .. } => visit(this, base),
-                DirExpr::Index { base, index, .. } => {
+                PreHirExpr::PtrOffset { base, .. }
+                | PreHirExpr::FieldAccess { base, .. }
+                | PreHirExpr::AggregateCopy { src: base, .. } => visit(this, base),
+                PreHirExpr::Index { base, index, .. } => {
                     visit(this, base);
                     visit(this, index);
                 }
-                DirExpr::Select {
+                PreHirExpr::Select {
                     cond,
                     then_expr,
                     else_expr,
@@ -131,7 +131,7 @@ impl<'a> PreviewBuilder<'a> {
                     visit(this, then_expr);
                     visit(this, else_expr);
                 }
-                DirExpr::Var(_) | DirExpr::Const(_, _) | DirExpr::AddressOfGlobal(_) => {}
+                PreHirExpr::Var(_) | PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
             }
         }
 
@@ -145,7 +145,7 @@ impl<'a> PreviewBuilder<'a> {
     fn materialized_lhs_conflicts_with_load_address_role(
         &self,
         lhs_name: &str,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> bool {
         self.load_address_bindings.contains(lhs_name)
             && self.rhs_is_load_derived_value(rhs)
@@ -419,7 +419,7 @@ impl<'a> PreviewBuilder<'a> {
         let name = self.next_unused_temp_binding_name(&type_from_size(ret_reg.size, false));
         self.temps.insert(
             name.clone(),
-            DirBinding {
+            PreHirBinding {
                 name: name.clone(),
                 ty: type_from_size(ret_reg.size, false),
                 surface_type_name: None,
@@ -434,7 +434,7 @@ impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend) fn lower_block_stmts(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
-    ) -> Result<Vec<DirStmt>, MlilPreviewError> {
+    ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
         let block_idx = self.pcode_block_idx(block.index as usize);
         if let Some(cached) = self.lowered_block_stmts_cache.get(&block_idx) {
             return Ok(cached.clone());
@@ -478,7 +478,7 @@ impl<'a> PreviewBuilder<'a> {
         start_idx: usize,
         end_idx: usize,
         terminator_index: Option<usize>,
-    ) -> Result<Vec<DirStmt>, MlilPreviewError> {
+    ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
         let mut body = Vec::new();
         let block_idx = self.lowering_block_index(block);
         let mut op_idx = start_idx;
@@ -525,8 +525,8 @@ impl<'a> PreviewBuilder<'a> {
                     let cond = self.with_lowering_site(site, |this| {
                         this.lower_varnode(&op.inputs[1], &mut HashSet::default())
                     })?;
-                    let inverted_cond = DirExpr::Unary {
-                        op: DirUnaryOp::Not,
+                    let inverted_cond = PreHirExpr::Unary {
+                        op: PreHirUnaryOp::Not,
                         expr: Box::new(cond),
                         ty: NirType::Bool,
                     };
@@ -548,7 +548,7 @@ impl<'a> PreviewBuilder<'a> {
                             eprintln!("[DIAG]   cmov_body[{i}]={stmt:?}");
                         }
                     }
-                    body.push(DirStmt::If {
+                    body.push(PreHirStmt::If {
                         cond: inverted_cond,
                         then_body: nested_body,
                         else_body: Vec::new(),
@@ -574,7 +574,7 @@ impl<'a> PreviewBuilder<'a> {
             let site = LoweringSite { block_idx, op_idx };
             let maybe_stmt = self.with_lowering_site(
                 site,
-                |this| -> Result<Option<DirStmt>, MlilPreviewError> {
+                |this| -> Result<Option<PreHirStmt>, MlilPreviewError> {
                     let mut visiting = HashSet::default();
                     match op.opcode {
                         PcodeOpcode::Store => {
@@ -604,13 +604,13 @@ impl<'a> PreviewBuilder<'a> {
                                     &op.inputs[1],
                                     store_ty.clone(),
                                 ) {
-                                DirLValue::Var(slot_name)
+                                PreHirLValue::Var(slot_name)
                             } else if let Some(global_lvalue) =
                                 this.try_global_memory_lvalue(op, &op.inputs[1], store_ty.clone())
                             {
                                 global_lvalue
                             } else {
-                                DirLValue::Deref {
+                                PreHirLValue::Deref {
                                     ptr: Box::new(
                                         this.lower_varnode(&op.inputs[1], &mut HashSet::default())
                                             .map_err(|err| {
@@ -634,7 +634,7 @@ impl<'a> PreviewBuilder<'a> {
                                     &op.inputs[2],
                                 )? {
                                 expr
-                            } else if let DirLValue::Var(slot_name) = &lhs
+                            } else if let PreHirLValue::Var(slot_name) = &lhs
                                 && let Some(expr) = this.stack_home_accumulator_store_rhs(
                                     block,
                                     op_idx,
@@ -660,14 +660,14 @@ impl<'a> PreviewBuilder<'a> {
                             // If the lowered RHS is float-typed but the lvalue
                             // was sized as int (copy/zext chain), align Deref ty.
                             let lhs = match lhs {
-                                DirLValue::Deref { ptr, ty }
+                                PreHirLValue::Deref { ptr, ty }
                                     if matches!(
                                         (expr_type(&rhs), &ty),
                                         (NirType::Float { bits: rb }, NirType::Int { bits: ib, .. })
                                             if rb == *ib
                                     ) =>
                                 {
-                                    DirLValue::Deref {
+                                    PreHirLValue::Deref {
                                         ptr,
                                         ty: expr_type(&rhs),
                                     }
@@ -675,7 +675,7 @@ impl<'a> PreviewBuilder<'a> {
                                 other => other,
                             };
                             let _ = store_ty;
-                            Ok(Some(DirStmt::Assign { lhs, rhs }))
+                            Ok(Some(PreHirStmt::Assign { lhs, rhs }))
                         }
                         PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
                             if this.call_is_return_target_artifact(block, op_idx)
@@ -707,11 +707,12 @@ impl<'a> PreviewBuilder<'a> {
                                 if op.opcode != PcodeOpcode::CallOther
                                     && this.call_result_is_observed(block, op_idx)
                                 {
-                                    let lhs =
-                                        DirLValue::Var(this.ensure_call_result_binding(site, op));
-                                    Ok(Some(DirStmt::Assign { lhs, rhs: expr }))
+                                    let lhs = PreHirLValue::Var(
+                                        this.ensure_call_result_binding(site, op),
+                                    );
+                                    Ok(Some(PreHirStmt::Assign { lhs, rhs: expr }))
                                 } else {
-                                    Ok(Some(DirStmt::Expr(expr)))
+                                    Ok(Some(PreHirStmt::Expr(expr)))
                                 }
                             } else {
                                 this.maybe_materialize_output_stmt(
@@ -764,7 +765,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         op: &PcodeOp,
-    ) -> Result<Option<DirStmt>, MlilPreviewError> {
+    ) -> Result<Option<PreHirStmt>, MlilPreviewError> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
@@ -1131,8 +1132,8 @@ impl<'a> PreviewBuilder<'a> {
                 rhs,
             ));
         }
-        let lhs = DirLValue::Var(lhs_name);
-        Ok(Some(DirStmt::Assign { lhs, rhs }))
+        let lhs = PreHirLValue::Var(lhs_name);
+        Ok(Some(PreHirStmt::Assign { lhs, rhs }))
     }
 
     /// Reuse a prior materialization of the same register in this block.
@@ -1309,7 +1310,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> Option<(String, u32)> {
         if output.is_constant
             || !is_unique_space_id(output.space_id)
@@ -1334,7 +1335,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(consumer_output) = consumer_op.output.as_ref() else {
                 continue;
             };
-            let consumer_rhs = DirExpr::Var("producer".to_string());
+            let consumer_rhs = PreHirExpr::Var("producer".to_string());
             let Some((name, binding_size)) = self.live_register_lhs_name_for_safe_missing_merge(
                 block,
                 consumer_idx,
@@ -1359,7 +1360,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         op: &PcodeOp,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
         replacement_plan: ReplacementValuePlan,
     ) -> Option<(String, u32)> {
         if replacement_plan.rejection_reason()
@@ -1431,25 +1432,25 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn rhs_is_safe_scalar_live_register_merge(expr: &DirExpr) -> bool {
+    fn rhs_is_safe_scalar_live_register_merge(expr: &PreHirExpr) -> bool {
         match expr {
-            DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(..) => true,
-            DirExpr::Cast { ty, expr } | DirExpr::Unary { ty, expr, .. } => {
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => true,
+            PreHirExpr::Cast { ty, expr } | PreHirExpr::Unary { ty, expr, .. } => {
                 Self::type_is_scalar_live_register_merge(ty)
                     && Self::rhs_is_safe_scalar_live_register_merge(expr)
             }
-            DirExpr::Binary { ty, lhs, rhs, .. } => {
+            PreHirExpr::Binary { ty, lhs, rhs, .. } => {
                 Self::type_is_scalar_live_register_merge(ty)
                     && Self::rhs_is_safe_scalar_live_register_merge(lhs)
                     && Self::rhs_is_safe_scalar_live_register_merge(rhs)
             }
-            DirExpr::Call { .. }
-            | DirExpr::Load { .. }
-            | DirExpr::PtrOffset { .. }
-            | DirExpr::Index { .. }
-            | DirExpr::AggregateCopy { .. }
-            | DirExpr::FieldAccess { .. }
-            | DirExpr::Select { .. } => false,
+            PreHirExpr::Call { .. }
+            | PreHirExpr::Load { .. }
+            | PreHirExpr::PtrOffset { .. }
+            | PreHirExpr::Index { .. }
+            | PreHirExpr::AggregateCopy { .. }
+            | PreHirExpr::FieldAccess { .. }
+            | PreHirExpr::Select { .. } => false,
         }
     }
 
@@ -1462,7 +1463,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> Option<String> {
         let block_idx = self.lowering_block_index(block);
         let key = VarnodeKey::from(output);
@@ -1528,7 +1529,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> Option<String> {
         // Allow full-width registers (size == pointer_size) and also the 32-bit primary
         // return register (e.g. EAX in x86-64, size=4, offset=0). In x86-64, a 32-bit
@@ -1673,7 +1674,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> Option<String> {
         if !self.is_conditional_loop_exit_accumulator_shape_candidate(block, output)
             || !Self::rhs_is_safe_scalar_live_register_merge(rhs)
@@ -1817,7 +1818,7 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(binding) = self.temps.get_mut(&binding.name)
             && binding.initializer.is_none()
         {
-            binding.initializer = Some(DirExpr::Const(0, type_from_size(output.size, false)));
+            binding.initializer = Some(PreHirExpr::Const(0, type_from_size(output.size, false)));
         }
         let predecessor_addrs = preds
             .iter()
@@ -1981,8 +1982,8 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block_addr: u64,
         op: &PcodeOp,
-        rhs: DirExpr,
-    ) -> DirExpr {
+        rhs: PreHirExpr,
+    ) -> PreHirExpr {
         if !matches!(
             self.options.calling_convention,
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
@@ -2001,7 +2002,7 @@ impl<'a> PreviewBuilder<'a> {
             return rhs;
         }
         match rhs {
-            DirExpr::Binary {
+            PreHirExpr::Binary {
                 op: binary_op,
                 lhs,
                 rhs,
@@ -2021,7 +2022,7 @@ impl<'a> PreviewBuilder<'a> {
                     op.inputs.get(1),
                     *rhs,
                 );
-                DirExpr::Binary {
+                PreHirExpr::Binary {
                     op: binary_op,
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
@@ -2038,8 +2039,8 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         op_seq: u32,
         input: Option<&Varnode>,
-        expr: DirExpr,
-    ) -> DirExpr {
+        expr: PreHirExpr,
+    ) -> PreHirExpr {
         let Some(input) = input else {
             return expr;
         };
@@ -2072,7 +2073,7 @@ impl<'a> PreviewBuilder<'a> {
             );
             return expr;
         }
-        if matches!(&expr, DirExpr::Var(name) if name == live_name) {
+        if matches!(&expr, PreHirExpr::Var(name) if name == live_name) {
             return expr;
         }
         if let Err(join_reason) =
@@ -2094,7 +2095,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.ensure_live_register_binding(live_name, self.options.pointer_size);
         self.trace_block_entry_accumulator_read_merge_accepted(block_idx, op_seq, input, live_name);
-        DirExpr::Var(live_name.to_string())
+        PreHirExpr::Var(live_name.to_string())
     }
 
     fn block_entry_partial_gpr_incoming_expr(
@@ -2103,7 +2104,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         op_seq: u32,
         input: &Varnode,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         if input.is_constant
             || input.size >= self.options.pointer_size
             || !is_register_space_id(input.space_id)
@@ -2257,7 +2258,7 @@ impl<'a> PreviewBuilder<'a> {
                     constant_val: 0,
                 },
                 input,
-                DirExpr::Var(live_name.to_string()),
+                PreHirExpr::Var(live_name.to_string()),
             );
             self.trace_block_entry_partial_gpr_merge_accepted(
                 block_idx,
@@ -2368,7 +2369,7 @@ impl<'a> PreviewBuilder<'a> {
         requested: &Varnode,
         depth: usize,
         visiting: &mut HashSet<usize>,
-    ) -> Result<DirExpr, &'static str> {
+    ) -> Result<PreHirExpr, &'static str> {
         if depth > 8 || (pred_idx == target_idx && depth > 0) || !visiting.insert(pred_idx) {
             return Err("ambiguous_predecessor_path");
         }
@@ -2453,7 +2454,7 @@ impl<'a> PreviewBuilder<'a> {
         pred_idx: usize,
         def_idx: usize,
         requested: &Varnode,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let block_addr = self.pcode.blocks.get(pred_idx)?.start_address;
         let op = self.pcode.blocks.get(pred_idx)?.ops.get(def_idx)?.clone();
         let output = op.output.as_ref()?;
@@ -2463,7 +2464,7 @@ impl<'a> PreviewBuilder<'a> {
         let expr = self
             .materialized_vns
             .get(&MaterializedVarnodeKey::new(output, &op))
-            .map(|name| DirExpr::Var(name.clone()))
+            .map(|name| PreHirExpr::Var(name.clone()))
             .or_else(|| {
                 self.with_lowering_site(
                     LoweringSite {
@@ -2482,12 +2483,12 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         output: &Varnode,
         requested: &Varnode,
-        expr: DirExpr,
-    ) -> DirExpr {
+        expr: PreHirExpr,
+    ) -> PreHirExpr {
         if VarnodeKey::from(output) == VarnodeKey::from(requested) {
             return expr;
         }
-        DirExpr::Cast {
+        PreHirExpr::Cast {
             ty: type_from_size(requested.size, false),
             expr: Box::new(expr),
         }
@@ -2497,7 +2498,7 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         block_idx: usize,
         input: &Varnode,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let key = VarnodeKey::from(input);
         let binding = self
             .explicit_merge_bindings
@@ -2541,11 +2542,11 @@ impl<'a> PreviewBuilder<'a> {
                     .map(|(candidate_key, name)| (candidate_key.clone(), name))
             })?;
         let (candidate_key, binding_name) = binding;
-        let expr = DirExpr::Var(binding_name.clone());
+        let expr = PreHirExpr::Var(binding_name.clone());
         if candidate_key.size == key.size {
             Some(expr)
         } else {
-            Some(DirExpr::Cast {
+            Some(PreHirExpr::Cast {
                 ty: type_from_size(input.size, false),
                 expr: Box::new(expr),
             })
@@ -2825,7 +2826,7 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         slot_name: &str,
         value: &Varnode,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         if op.opcode != PcodeOpcode::Store
             || !matches!(
                 self.options.calling_convention,
@@ -2897,7 +2898,7 @@ impl<'a> PreviewBuilder<'a> {
         value: &Varnode,
         live_name: &str,
         family_idx: usize,
-    ) -> Option<DirExpr> {
+    ) -> Option<PreHirExpr> {
         let block_idx = self.lowering_block_index(block);
         let Some((loop_body, store_is_loop_header)) =
             self.stack_home_accumulator_loop_context(block_idx)
@@ -3005,12 +3006,12 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(binding) = self.temps.get_mut(live_name)
             && binding.initializer.is_none()
         {
-            binding.initializer = Some(DirExpr::Const(
+            binding.initializer = Some(PreHirExpr::Const(
                 0,
                 type_from_size(self.options.pointer_size, false),
             ));
         }
-        Some(DirExpr::Var(live_name.to_string()))
+        Some(PreHirExpr::Var(live_name.to_string()))
     }
 
     fn loop_header_external_predecessors_seed_zero(
@@ -3685,7 +3686,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block_addr: u64,
         op: &PcodeOp,
-    ) -> Result<Option<DirExpr>, MlilPreviewError> {
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
         let Some(output) = &op.output else {
             return Ok(None);
         };
@@ -3737,7 +3738,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> bool {
         // ABI primary return storage is live-out past RET even when no same-block
         // p-code op reads it (Return varnode is the return *address*).
@@ -3797,7 +3798,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> ReplacementValuePlan {
         self.telemetry
             .materialization
@@ -3859,7 +3860,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> ReplacementValuePlan {
         if self.output_has_nonlocal_use(block, op_idx, output) {
             let rejection_reason =
@@ -3959,7 +3960,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         terminator_index: Option<usize>,
         output: &Varnode,
-        rhs: &DirExpr,
+        rhs: &PreHirExpr,
     ) -> ReplacementValuePlan {
         if Self::copy_overwrite_restart_enabled() {
             if let Some(proof) = self.can_restart_def_window_at_copy_overwrite(

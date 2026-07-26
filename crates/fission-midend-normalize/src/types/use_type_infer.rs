@@ -3,7 +3,7 @@ use super::super::analysis::defuse::DefinitionDependencyMap;
 ///
 /// `apply_type_inference_pass` (type_infer.rs) propagates types forward from
 /// *definition* sites: if `x = (int32)...` then `x.ty = Int32`.  It cannot
-/// infer types from *use* sites because `expr_type(DirExpr::Var(_)) = Unknown`.
+/// infer types from *use* sites because `expr_type(PreHirExpr::Var(_)) = Unknown`.
 ///
 /// This pass performs the complementary backward-direction inference:
 ///
@@ -17,7 +17,7 @@ use super::super::analysis::defuse::DefinitionDependencyMap;
 ///    - `Return(Var(x))` + known function return type → x gets the return type
 ///    - `Assign rhs = Cast(T, Var(x))` → x gets type T (the cast source)
 ///
-/// 2. Merge all collected constraints into `DirBinding.ty` for locals and
+/// 2. Merge all collected constraints into `PreHirBinding.ty` for locals and
 ///    params that are still `Unknown`.  Constraints are only *strengthened*
 ///    (Unknown → Ptr → Int with signedness), never weakened.
 ///
@@ -63,7 +63,7 @@ struct ByteIndexAccumulatorEvidence {
 
 type TypeStateSignature = (NirType, Vec<(String, NirType)>, Vec<(String, NirType)>);
 
-fn type_state_signature(func: &DirFunction) -> TypeStateSignature {
+fn type_state_signature(func: &PreHirFunction) -> TypeStateSignature {
     (
         func.return_type.clone(),
         func.params
@@ -79,7 +79,7 @@ fn type_state_signature(func: &DirFunction) -> TypeStateSignature {
 
 /// Accumulate use-site constraints for all named variables in `stmts`.
 fn collect_constraints(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     return_type: &NirType,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
@@ -89,26 +89,26 @@ fn collect_constraints(
     }
 }
 
-fn collect_binding_use_roles(stmts: &[DirStmt], out: &mut HashMap<String, BindingUseRole>) {
+fn collect_binding_use_roles(stmts: &[PreHirStmt], out: &mut HashMap<String, BindingUseRole>) {
     for stmt in stmts {
         collect_binding_use_roles_stmt(stmt, out);
     }
 }
 
-fn collect_binding_use_roles_stmt(stmt: &DirStmt, out: &mut HashMap<String, BindingUseRole>) {
+fn collect_binding_use_roles_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, BindingUseRole>) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             collect_binding_use_roles_lvalue(lhs, out);
             collect_binding_use_roles_expr(rhs, out);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             collect_binding_use_roles_expr(expr, out);
         }
-        DirStmt::VaStart { va_list, .. } => collect_binding_use_roles_expr(va_list, out),
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => collect_binding_use_roles_expr(va_list, out),
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             collect_binding_use_roles(body, out);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -117,7 +117,7 @@ fn collect_binding_use_roles_stmt(stmt: &DirStmt, out: &mut HashMap<String, Bind
             collect_binding_use_roles(then_body, out);
             collect_binding_use_roles(else_body, out);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -134,7 +134,7 @@ fn collect_binding_use_roles_stmt(stmt: &DirStmt, out: &mut HashMap<String, Bind
             }
             collect_binding_use_roles(body, out);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -145,38 +145,38 @@ fn collect_binding_use_roles_stmt(stmt: &DirStmt, out: &mut HashMap<String, Bind
             }
             collect_binding_use_roles(default, out);
         }
-        DirStmt::Return(None)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
-fn collect_binding_use_roles_lvalue(lhs: &DirLValue, out: &mut HashMap<String, BindingUseRole>) {
+fn collect_binding_use_roles_lvalue(lhs: &PreHirLValue, out: &mut HashMap<String, BindingUseRole>) {
     match lhs {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => mark_address_role(ptr, out),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => mark_address_role(ptr, out),
+        PreHirLValue::Index { base, index, .. } => {
             mark_address_role(base, out);
             collect_binding_use_roles_expr(index, out);
         }
-        DirLValue::FieldAccess { base, .. } => mark_address_role(base, out),
+        PreHirLValue::FieldAccess { base, .. } => mark_address_role(base, out),
     }
 }
 
-fn collect_binding_use_roles_expr(expr: &DirExpr, out: &mut HashMap<String, BindingUseRole>) {
+fn collect_binding_use_roles_expr(expr: &PreHirExpr, out: &mut HashMap<String, BindingUseRole>) {
     match expr {
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
-        DirExpr::Cast { ty, expr } => {
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Cast { ty, expr } => {
             if matches!(ty, NirType::Int { .. } | NirType::Bool) {
                 mark_scalar_role(expr, out);
             } else {
                 collect_binding_use_roles_expr(expr, out);
             }
         }
-        DirExpr::Unary { expr, .. } => mark_scalar_role(expr, out),
-        DirExpr::Binary { op, lhs, rhs, .. } => {
+        PreHirExpr::Unary { expr, .. } => mark_scalar_role(expr, out),
+        PreHirExpr::Binary { op, lhs, rhs, .. } => {
             if role_scalar_op(*op) {
                 mark_scalar_role(lhs, out);
                 mark_scalar_role(rhs, out);
@@ -185,7 +185,7 @@ fn collect_binding_use_roles_expr(expr: &DirExpr, out: &mut HashMap<String, Bind
                 collect_binding_use_roles_expr(rhs, out);
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -195,57 +195,57 @@ fn collect_binding_use_roles_expr(expr: &DirExpr, out: &mut HashMap<String, Bind
             collect_binding_use_roles_expr(then_expr, out);
             collect_binding_use_roles_expr(else_expr, out);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_binding_use_roles_expr(arg, out);
             }
         }
-        DirExpr::Load { ptr, .. } => mark_address_role(ptr, out),
-        DirExpr::PtrOffset { base, .. }
-        | DirExpr::FieldAccess { base, .. }
-        | DirExpr::AggregateCopy { src: base, .. } => mark_address_role(base, out),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Load { ptr, .. } => mark_address_role(ptr, out),
+        PreHirExpr::PtrOffset { base, .. }
+        | PreHirExpr::FieldAccess { base, .. }
+        | PreHirExpr::AggregateCopy { src: base, .. } => mark_address_role(base, out),
+        PreHirExpr::Index { base, index, .. } => {
             mark_address_role(base, out);
             collect_binding_use_roles_expr(index, out);
         }
     }
 }
 
-fn mark_address_role(expr: &DirExpr, out: &mut HashMap<String, BindingUseRole>) {
+fn mark_address_role(expr: &PreHirExpr, out: &mut HashMap<String, BindingUseRole>) {
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             out.entry(name.clone()).or_default().address_use = true;
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => mark_address_role(expr, out),
-        DirExpr::Index { base, .. } => mark_address_role(base, out),
-        DirExpr::Binary { .. }
-        | DirExpr::Select { .. }
-        | DirExpr::Call { .. }
-        | DirExpr::Load { .. }
-        | DirExpr::Const(_, _)
-        | DirExpr::AddressOfGlobal(_) => collect_binding_use_roles_expr(expr, out),
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => mark_address_role(expr, out),
+        PreHirExpr::Index { base, .. } => mark_address_role(base, out),
+        PreHirExpr::Binary { .. }
+        | PreHirExpr::Select { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::Load { .. }
+        | PreHirExpr::Const(_, _)
+        | PreHirExpr::AddressOfGlobal(_) => collect_binding_use_roles_expr(expr, out),
     }
 }
 
-fn mark_scalar_role(expr: &DirExpr, out: &mut HashMap<String, BindingUseRole>) {
+fn mark_scalar_role(expr: &PreHirExpr, out: &mut HashMap<String, BindingUseRole>) {
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             out.entry(name.clone()).or_default().scalar_use = true;
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => mark_scalar_role(expr, out),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => mark_scalar_role(expr, out),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             mark_scalar_role(lhs, out);
             mark_scalar_role(rhs, out);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -255,55 +255,55 @@ fn mark_scalar_role(expr: &DirExpr, out: &mut HashMap<String, BindingUseRole>) {
             mark_scalar_role(then_expr, out);
             mark_scalar_role(else_expr, out);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 mark_scalar_role(arg, out);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             mark_scalar_role(base, out);
             mark_scalar_role(index, out);
         }
-        DirExpr::Load { ptr, .. } => mark_address_role(ptr, out),
-        DirExpr::Const(_, _) | DirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::Load { ptr, .. } => mark_address_role(ptr, out),
+        PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
     }
 }
 
-fn role_scalar_op(op: DirBinaryOp) -> bool {
+fn role_scalar_op(op: PreHirBinaryOp) -> bool {
     matches!(
         op,
-        DirBinaryOp::Add
-            | DirBinaryOp::Sub
-            | DirBinaryOp::Mul
-            | DirBinaryOp::Div
-            | DirBinaryOp::Mod
-            | DirBinaryOp::And
-            | DirBinaryOp::Or
-            | DirBinaryOp::Xor
-            | DirBinaryOp::Shl
-            | DirBinaryOp::Shr
-            | DirBinaryOp::Sar
-            | DirBinaryOp::Eq
-            | DirBinaryOp::Ne
-            | DirBinaryOp::Lt
-            | DirBinaryOp::Le
-            | DirBinaryOp::Gt
-            | DirBinaryOp::Ge
-            | DirBinaryOp::SLt
-            | DirBinaryOp::SLe
-            | DirBinaryOp::SGt
-            | DirBinaryOp::SGe
+        PreHirBinaryOp::Add
+            | PreHirBinaryOp::Sub
+            | PreHirBinaryOp::Mul
+            | PreHirBinaryOp::Div
+            | PreHirBinaryOp::Mod
+            | PreHirBinaryOp::And
+            | PreHirBinaryOp::Or
+            | PreHirBinaryOp::Xor
+            | PreHirBinaryOp::Shl
+            | PreHirBinaryOp::Shr
+            | PreHirBinaryOp::Sar
+            | PreHirBinaryOp::Eq
+            | PreHirBinaryOp::Ne
+            | PreHirBinaryOp::Lt
+            | PreHirBinaryOp::Le
+            | PreHirBinaryOp::Gt
+            | PreHirBinaryOp::Ge
+            | PreHirBinaryOp::SLt
+            | PreHirBinaryOp::SLe
+            | PreHirBinaryOp::SGt
+            | PreHirBinaryOp::SGe
     )
 }
 
 fn collect_constraints_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     return_type: &NirType,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             // Use-site on the lhs: Deref/Index require the base to be a pointer.
             collect_constraints_lvalue(lhs, out);
             collect_assignment_copy_constraints(lhs, rhs, known_binding_types, out);
@@ -312,13 +312,13 @@ fn collect_constraints_stmt(
             // Recurse into rhs for nested uses.
             collect_constraints_expr(rhs, return_type, known_binding_types, out);
         }
-        DirStmt::Expr(expr) => {
+        PreHirStmt::Expr(expr) => {
             collect_constraints_expr(expr, return_type, known_binding_types, out);
         }
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             collect_constraints(body, return_type, known_binding_types, out);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -327,15 +327,15 @@ fn collect_constraints_stmt(
             collect_constraints(then_body, return_type, known_binding_types, out);
             collect_constraints(else_body, return_type, known_binding_types, out);
         }
-        DirStmt::While { cond, body } => {
+        PreHirStmt::While { cond, body } => {
             collect_constraints_expr(cond, return_type, known_binding_types, out);
             collect_constraints(body, return_type, known_binding_types, out);
         }
-        DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::DoWhile { body, cond } => {
             collect_constraints(body, return_type, known_binding_types, out);
             collect_constraints_expr(cond, return_type, known_binding_types, out);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -352,7 +352,7 @@ fn collect_constraints_stmt(
             }
             collect_constraints(body, return_type, known_binding_types, out);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -363,11 +363,11 @@ fn collect_constraints_stmt(
             }
             collect_constraints(default, return_type, known_binding_types, out);
         }
-        DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Return(Some(expr)) => {
             // If the function's return type is already known and the expression
             // is a bare variable, constrain that variable to the return type.
             if *return_type != NirType::Unknown {
-                if let DirExpr::Var(name) = expr {
+                if let PreHirExpr::Var(name) = expr {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Exact(return_type.clone()));
@@ -380,18 +380,18 @@ fn collect_constraints_stmt(
 }
 
 fn collect_assignment_copy_constraints(
-    lhs: &DirLValue,
-    rhs: &DirExpr,
+    lhs: &PreHirLValue,
+    rhs: &PreHirExpr,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     match lhs {
-        DirLValue::Var(lhs_name) => {
+        PreHirLValue::Var(lhs_name) => {
             // Reverse-propagate non-pointer legacy constraints only. Pointer
             // equality is owned by the operation-edge TypeFlow solver, which
             // carries evidence strength and lock boundaries.
             if let Some(lhs_ty) = known_binding_types.get(lhs_name) {
-                if let DirExpr::Var(rhs_name) = rhs {
+                if let PreHirExpr::Var(rhs_name) = rhs {
                     match lhs_ty {
                         NirType::Ptr(_) => {}
                         other => {
@@ -413,7 +413,7 @@ fn collect_assignment_copy_constraints(
                 }
             }
 
-            if let DirExpr::Var(rhs_name) = rhs {
+            if let PreHirExpr::Var(rhs_name) = rhs {
                 if let Some(rhs_ty) = known_binding_types.get(rhs_name) {
                     out.entry(lhs_name.clone())
                         .or_default()
@@ -421,31 +421,31 @@ fn collect_assignment_copy_constraints(
                 }
             }
 
-            if let DirExpr::AddressOfGlobal(_) = rhs {
+            if let PreHirExpr::AddressOfGlobal(_) = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(NirType::Unknown));
             }
 
-            if let DirExpr::PtrOffset { .. } | DirExpr::FieldAccess { .. } = rhs {
+            if let PreHirExpr::PtrOffset { .. } | PreHirExpr::FieldAccess { .. } = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(NirType::Unknown));
             }
 
-            if let DirExpr::Load { ty, .. } = rhs {
+            if let PreHirExpr::Load { ty, .. } = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(ty.clone()));
             }
 
-            if let DirExpr::Index { elem_ty, .. } = rhs {
+            if let PreHirExpr::Index { elem_ty, .. } = rhs {
                 out.entry(lhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(elem_ty.clone()));
             }
 
-            if let DirExpr::Cast {
+            if let PreHirExpr::Cast {
                 ty: NirType::Ptr(pointee),
                 ..
             } = rhs
@@ -455,20 +455,20 @@ fn collect_assignment_copy_constraints(
                     .push(UseConstraint::Ptr(pointee.as_ref().clone()));
             }
         }
-        DirLValue::Deref { ty, .. } => {
-            if let DirExpr::Var(rhs_name) = rhs {
+        PreHirLValue::Deref { ty, .. } => {
+            if let PreHirExpr::Var(rhs_name) = rhs {
                 out.entry(rhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(ty.clone()));
             }
         }
-        DirLValue::Index { base, elem_ty, .. } => {
-            if let DirExpr::Var(rhs_name) = rhs {
+        PreHirLValue::Index { base, elem_ty, .. } => {
+            if let PreHirExpr::Var(rhs_name) = rhs {
                 out.entry(rhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(elem_ty.clone()));
             }
-            if let DirExpr::Var(base_name) = base.as_ref() {
+            if let PreHirExpr::Var(base_name) = base.as_ref() {
                 if matches!(elem_ty, NirType::Float { .. }) {
                     out.entry(base_name.clone())
                         .or_default()
@@ -476,8 +476,8 @@ fn collect_assignment_copy_constraints(
                 }
             }
         }
-        DirLValue::FieldAccess { ty, .. } => {
-            if let DirExpr::Var(rhs_name) = rhs {
+        PreHirLValue::FieldAccess { ty, .. } => {
+            if let PreHirExpr::Var(rhs_name) = rhs {
                 out.entry(rhs_name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(ty.clone()));
@@ -487,7 +487,7 @@ fn collect_assignment_copy_constraints(
 }
 
 fn collect_pointer_assignment_base_constraints(
-    rhs: &DirExpr,
+    rhs: &PreHirExpr,
     ptr_ty: &NirType,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
@@ -499,24 +499,24 @@ fn collect_pointer_assignment_base_constraints(
         // Reverse a plain copy only while the source is unknown. A known source
         // can belong to an earlier scalar role while the destination acquired
         // its pointer type from a later register-reuse definition.
-        DirExpr::Var(name)
+        PreHirExpr::Var(name)
             if matches!(known_binding_types.get(name), None | Some(NirType::Unknown)) =>
         {
             out.entry(name.clone())
                 .or_default()
                 .push(UseConstraint::Ptr(pointee.as_ref().clone()));
         }
-        DirExpr::Var(_) => {}
-        DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(_) => {}
+        PreHirExpr::AddressOfGlobal(name) => {
             out.entry(name.clone())
                 .or_default()
                 .push(UseConstraint::Ptr(pointee.as_ref().clone()));
         }
-        DirExpr::Cast { expr, .. } => {
+        PreHirExpr::Cast { expr, .. } => {
             collect_pointer_assignment_base_constraints(expr, ptr_ty, known_binding_types, out);
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -526,26 +526,26 @@ fn collect_pointer_assignment_base_constraints(
             // Do not treat an integer cast of a bare variable as an offset; it
             // can be an integerized pointer base.
             if expr_is_numeric_offset_with_types(rhs.as_ref(), known_binding_types) {
-                if let DirExpr::Var(name) = strip_casts_unary(lhs.as_ref()) {
+                if let PreHirExpr::Var(name) = strip_casts_unary(lhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Ptr(pointee.as_ref().clone()));
                 }
             }
             if expr_is_numeric_offset_with_types(lhs.as_ref(), known_binding_types) {
-                if let DirExpr::Var(name) = strip_casts_unary(rhs.as_ref()) {
+                if let PreHirExpr::Var(name) = strip_casts_unary(rhs.as_ref()) {
                     out.entry(name.clone())
                         .or_default()
                         .push(UseConstraint::Ptr(pointee.as_ref().clone()));
                 }
             }
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             ..
         } => {
-            if let DirExpr::Var(name) = lhs.as_ref() {
+            if let PreHirExpr::Var(name) = lhs.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(pointee.as_ref().clone()));
@@ -555,9 +555,9 @@ fn collect_pointer_assignment_base_constraints(
     }
 }
 
-fn strip_casts_unary(expr: &DirExpr) -> &DirExpr {
+fn strip_casts_unary(expr: &PreHirExpr) -> &PreHirExpr {
     let mut cur = expr;
-    while let DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } = cur {
+    while let PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } = cur {
         cur = expr.as_ref();
     }
     cur
@@ -566,29 +566,29 @@ fn strip_casts_unary(expr: &DirExpr) -> &DirExpr {
 /// Integer offset in pointer arithmetic: const, index vars, scaled index.
 /// An integer cast of a bare variable is not sufficient offset evidence; it can
 /// be a pointer base forced through integer ALU.
-fn expr_is_numeric_offset(expr: &DirExpr) -> bool {
+fn expr_is_numeric_offset(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Const(_, _) => true,
-        DirExpr::Var(_) => true,
-        DirExpr::Cast {
+        PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Var(_) => true,
+        PreHirExpr::Cast {
             ty: NirType::Int { .. },
             expr: inner,
         } => match inner.as_ref() {
-            DirExpr::Const(_, _) => true,
-            DirExpr::Binary { .. } => expr_is_numeric_offset(inner),
+            PreHirExpr::Const(_, _) => true,
+            PreHirExpr::Binary { .. } => expr_is_numeric_offset(inner),
             // Bare var cast to int is ambiguous (often ptr-to-int for end calc).
-            DirExpr::Var(_) => false,
+            PreHirExpr::Var(_) => false,
             other => expr_is_numeric_offset(other),
         },
-        DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => expr_is_numeric_offset(expr),
-        DirExpr::Binary {
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => expr_is_numeric_offset(expr),
+        PreHirExpr::Binary {
             op:
-                DirBinaryOp::Add
-                | DirBinaryOp::Sub
-                | DirBinaryOp::Mul
-                | DirBinaryOp::Shl
-                | DirBinaryOp::Shr
-                | DirBinaryOp::Sar,
+                PreHirBinaryOp::Add
+                | PreHirBinaryOp::Sub
+                | PreHirBinaryOp::Mul
+                | PreHirBinaryOp::Shl
+                | PreHirBinaryOp::Shr
+                | PreHirBinaryOp::Sar,
             lhs,
             rhs,
             ..
@@ -598,32 +598,32 @@ fn expr_is_numeric_offset(expr: &DirExpr) -> bool {
 }
 
 fn expr_is_numeric_offset_with_types(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     known_binding_types: &HashMap<String, NirType>,
 ) -> bool {
     match expr {
-        DirExpr::Var(name) => !matches!(known_binding_types.get(name), Some(NirType::Ptr(_))),
-        DirExpr::Cast {
+        PreHirExpr::Var(name) => !matches!(known_binding_types.get(name), Some(NirType::Ptr(_))),
+        PreHirExpr::Cast {
             ty: NirType::Int { .. },
             expr: inner,
         } => match inner.as_ref() {
-            DirExpr::Var(name) => matches!(
+            PreHirExpr::Var(name) => matches!(
                 known_binding_types.get(name),
                 Some(NirType::Int { .. } | NirType::Bool)
             ),
             _ => expr_is_numeric_offset_with_types(inner, known_binding_types),
         },
-        DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
             expr_is_numeric_offset_with_types(expr, known_binding_types)
         }
-        DirExpr::Binary {
+        PreHirExpr::Binary {
             op:
-                DirBinaryOp::Add
-                | DirBinaryOp::Sub
-                | DirBinaryOp::Mul
-                | DirBinaryOp::Shl
-                | DirBinaryOp::Shr
-                | DirBinaryOp::Sar,
+                PreHirBinaryOp::Add
+                | PreHirBinaryOp::Sub
+                | PreHirBinaryOp::Mul
+                | PreHirBinaryOp::Shl
+                | PreHirBinaryOp::Shr
+                | PreHirBinaryOp::Sar,
             lhs,
             rhs,
             ..
@@ -635,7 +635,7 @@ fn expr_is_numeric_offset_with_types(
     }
 }
 
-fn expr_is_pointer_offset_like(expr: &DirExpr) -> bool {
+fn expr_is_pointer_offset_like(expr: &PreHirExpr) -> bool {
     expr_is_numeric_offset(expr)
 }
 
@@ -646,28 +646,28 @@ fn copy_constraint_from_type(ty: &NirType) -> UseConstraint {
     }
 }
 
-fn collect_copy_alias_sources(stmts: &[DirStmt], out: &mut HashMap<String, HashSet<String>>) {
+fn collect_copy_alias_sources(stmts: &[PreHirStmt], out: &mut HashMap<String, HashSet<String>>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 rhs,
             } => {
                 let mut source = rhs;
-                while let DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } = source {
+                while let PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } = source {
                     source = expr.as_ref();
                 }
-                if let DirExpr::Var(source_name) = source {
+                if let PreHirExpr::Var(source_name) = source {
                     out.entry(name.clone())
                         .or_default()
                         .insert(source_name.clone());
                 }
             }
-            DirStmt::Block(body) | DirStmt::While { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } => {
                 collect_copy_alias_sources(body, out);
             }
-            DirStmt::DoWhile { body, .. } => collect_copy_alias_sources(body, out),
-            DirStmt::If {
+            PreHirStmt::DoWhile { body, .. } => collect_copy_alias_sources(body, out),
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -675,7 +675,7 @@ fn collect_copy_alias_sources(stmts: &[DirStmt], out: &mut HashMap<String, HashS
                 collect_copy_alias_sources(then_body, out);
                 collect_copy_alias_sources(else_body, out);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -686,26 +686,26 @@ fn collect_copy_alias_sources(stmts: &[DirStmt], out: &mut HashMap<String, HashS
                 }
                 collect_copy_alias_sources(body, out);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_copy_alias_sources(&case.body, out);
                 }
                 collect_copy_alias_sources(default, out);
             }
-            DirStmt::Assign { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Return(_)
-            | DirStmt::VaStart { .. }
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
 }
 
 fn propagate_logical_shift_constraints_through_aliases(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     constraints: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     let mut aliases = HashMap::default();
@@ -741,27 +741,27 @@ fn propagate_logical_shift_constraints_through_aliases(
 }
 
 /// Collect pointer constraints from lvalue use sites.
-fn collect_constraints_lvalue(lhs: &DirLValue, out: &mut HashMap<String, Vec<UseConstraint>>) {
+fn collect_constraints_lvalue(lhs: &PreHirLValue, out: &mut HashMap<String, Vec<UseConstraint>>) {
     match lhs {
-        DirLValue::Deref { ptr, ty } => {
+        PreHirLValue::Deref { ptr, ty } => {
             // Storing through *ptr → ptr must be Ptr(ty).
-            if let DirExpr::Var(name) = ptr.as_ref() {
+            if let PreHirExpr::Var(name) = ptr.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(ty.clone()));
             }
         }
-        DirLValue::Index { base, elem_ty, .. } => {
+        PreHirLValue::Index { base, elem_ty, .. } => {
             // base[idx] → base is Ptr(elem_ty).
-            if let DirExpr::Var(name) = base.as_ref() {
+            if let PreHirExpr::Var(name) = base.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(elem_ty.clone()));
             }
         }
-        DirLValue::Var(_) => {}
-        DirLValue::FieldAccess { base, ty, .. } => {
-            if let DirExpr::Var(name) = base.as_ref() {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::FieldAccess { base, ty, .. } => {
+            if let PreHirExpr::Var(name) = base.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(ty.clone()));
@@ -772,12 +772,12 @@ fn collect_constraints_lvalue(lhs: &DirLValue, out: &mut HashMap<String, Vec<Use
 
 /// Collect `Cast(T, Var(x))` → x: T constraints.
 fn collect_constraints_cast_source(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
-    if let DirExpr::Cast { ty, expr: inner } = expr {
-        if let DirExpr::Var(name) = inner.as_ref() {
+    if let PreHirExpr::Cast { ty, expr: inner } = expr {
+        if let PreHirExpr::Var(name) = inner.as_ref() {
             // The variable is being cast; constrain it to the source type of the
             // cast.
             match ty {
@@ -795,8 +795,8 @@ fn collect_constraints_cast_source(
             }
         }
         if matches!(ty, NirType::Int { .. })
-            && let DirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref()
-            && matches!(op, DirBinaryOp::Add | DirBinaryOp::Sub | DirBinaryOp::Mul)
+            && let PreHirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref()
+            && matches!(op, PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Mul)
         {
             collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
         }
@@ -805,15 +805,15 @@ fn collect_constraints_cast_source(
 
 /// Recurse into an expression and collect use-site constraints.
 fn collect_constraints_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     return_type: &NirType,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     match expr {
-        DirExpr::Load { ptr, ty } => {
+        PreHirExpr::Load { ptr, ty } => {
             // Loading through *ptr → ptr is Ptr(ty).
-            if let DirExpr::Var(name) = ptr.as_ref() {
+            if let PreHirExpr::Var(name) = ptr.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(ty.clone()));
@@ -821,25 +821,25 @@ fn collect_constraints_expr(
             // Recurse into the pointer expression itself.
             collect_constraints_expr(ptr, return_type, known_binding_types, out);
         }
-        DirExpr::Binary { op, lhs, rhs, ty } => {
+        PreHirExpr::Binary { op, lhs, rhs, ty } => {
             match op {
                 // Signed comparison → operands are signed integers.  The
                 // comparison expression itself is Bool, so operand width must
                 // come from an actual operand or an existing binding type.
-                DirBinaryOp::SLt | DirBinaryOp::SLe | DirBinaryOp::SGt | DirBinaryOp::SGe => {
+                PreHirBinaryOp::SLt | PreHirBinaryOp::SLe | PreHirBinaryOp::SGt | PreHirBinaryOp::SGe => {
                     collect_compare_constraints(lhs, rhs, ty, known_binding_types, true, out)
                 }
                 // Unsigned comparison → operands are unsigned integers.
-                DirBinaryOp::Lt | DirBinaryOp::Le | DirBinaryOp::Gt | DirBinaryOp::Ge => {
+                PreHirBinaryOp::Lt | PreHirBinaryOp::Le | PreHirBinaryOp::Gt | PreHirBinaryOp::Ge => {
                     collect_compare_constraints(lhs, rhs, ty, known_binding_types, false, out)
                 }
                 // Arithmetic right-shift: the left operand must be a signed integer.
                 // `x >> k` where `>>` is Sar (arithmetic) means x is signed.
-                DirBinaryOp::Sar => {
+                PreHirBinaryOp::Sar => {
                     let bits = nir_type_bits(ty)
                         .or_else(|| expr_int_bits(lhs.as_ref(), known_binding_types))
                         .unwrap_or(32);
-                    if let DirExpr::Var(name) = lhs.as_ref() {
+                    if let PreHirExpr::Var(name) = lhs.as_ref() {
                         out.entry(name.clone())
                             .or_default()
                             .push(UseConstraint::Signed { bits });
@@ -852,25 +852,25 @@ fn collect_constraints_expr(
                 //
                 // Do not also run `collect_arithmetic_result_constraints` with a signed
                 // result ty — that would re-push Signed and cancel the demotion.
-                DirBinaryOp::Shr => {
+                PreHirBinaryOp::Shr => {
                     let bits = nir_type_bits(ty)
                         .or_else(|| expr_int_bits(lhs.as_ref(), known_binding_types))
                         .unwrap_or(32);
-                    if let DirExpr::Var(name) = lhs.as_ref() {
+                    if let PreHirExpr::Var(name) = lhs.as_ref() {
                         out.entry(name.clone())
                             .or_default()
                             .push(UseConstraint::LogicalShiftUnsigned { bits });
                     }
                 }
-                DirBinaryOp::Add
-                | DirBinaryOp::Sub
-                | DirBinaryOp::Mul
-                | DirBinaryOp::Div
-                | DirBinaryOp::Mod
-                | DirBinaryOp::And
-                | DirBinaryOp::Or
-                | DirBinaryOp::Xor
-                | DirBinaryOp::Shl => {
+                PreHirBinaryOp::Add
+                | PreHirBinaryOp::Sub
+                | PreHirBinaryOp::Mul
+                | PreHirBinaryOp::Div
+                | PreHirBinaryOp::Mod
+                | PreHirBinaryOp::And
+                | PreHirBinaryOp::Or
+                | PreHirBinaryOp::Xor
+                | PreHirBinaryOp::Shl => {
                     collect_arithmetic_result_constraints(lhs, rhs, ty, known_binding_types, out);
                 }
                 _ => {}
@@ -878,14 +878,14 @@ fn collect_constraints_expr(
             collect_constraints_expr(lhs, return_type, known_binding_types, out);
             collect_constraints_expr(rhs, return_type, known_binding_types, out);
         }
-        DirExpr::Unary { expr: inner, .. } => {
+        PreHirExpr::Unary { expr: inner, .. } => {
             collect_constraints_expr(inner, return_type, known_binding_types, out);
         }
-        DirExpr::Cast { expr: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. } => {
             collect_constraints_cast_source(expr, known_binding_types, out);
             collect_constraints_expr(inner, return_type, known_binding_types, out);
         }
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             if let Some(name) = indirect_call_target_binding_name(target) {
                 out.entry(name.to_owned())
                     .or_default()
@@ -895,29 +895,29 @@ fn collect_constraints_expr(
                 collect_constraints_expr(arg, return_type, known_binding_types, out);
             }
         }
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
-            if let DirExpr::Var(base_name) = base.as_ref() {
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
+            if let PreHirExpr::Var(base_name) = base.as_ref() {
                 out.entry(base_name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(NirType::Unknown));
             }
             collect_constraints_expr(base, return_type, known_binding_types, out);
         }
-        DirExpr::AggregateCopy { src: base, .. } => {
+        PreHirExpr::AggregateCopy { src: base, .. } => {
             collect_constraints_expr(base, return_type, known_binding_types, out);
         }
-        DirExpr::Index {
+        PreHirExpr::Index {
             base,
             index,
             elem_ty,
         } => {
             // base[index] → base is Ptr(elem_ty).
-            if let DirExpr::Var(name) = base.as_ref() {
+            if let PreHirExpr::Var(name) = base.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(elem_ty.clone()));
             }
-            if let DirExpr::Var(name) = index.as_ref() {
+            if let PreHirExpr::Var(name) = index.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Exact(NirType::Int {
@@ -928,7 +928,7 @@ fn collect_constraints_expr(
             collect_constraints_expr(base, return_type, known_binding_types, out);
             collect_constraints_expr(index, return_type, known_binding_types, out);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -938,13 +938,13 @@ fn collect_constraints_expr(
             collect_constraints_expr(then_expr, return_type, known_binding_types, out);
             collect_constraints_expr(else_expr, return_type, known_binding_types, out);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 }
 
 fn collect_compare_constraints(
-    lhs: &DirExpr,
-    rhs: &DirExpr,
+    lhs: &PreHirExpr,
+    rhs: &PreHirExpr,
     result_ty: &NirType,
     known_binding_types: &HashMap<String, NirType>,
     signed: bool,
@@ -957,12 +957,12 @@ fn collect_compare_constraints(
         .or_else(|| expr_int_bits(lhs, known_binding_types))
         .or_else(|| nir_type_bits(result_ty));
 
-    if let (DirExpr::Var(name), Some(bits)) = (lhs, lhs_bits) {
+    if let (PreHirExpr::Var(name), Some(bits)) = (lhs, lhs_bits) {
         out.entry(name.clone())
             .or_default()
             .push(compare_constraint(bits, signed));
     }
-    if let (DirExpr::Var(name), Some(bits)) = (rhs, rhs_bits) {
+    if let (PreHirExpr::Var(name), Some(bits)) = (rhs, rhs_bits) {
         out.entry(name.clone())
             .or_default()
             .push(compare_constraint(bits, signed));
@@ -978,8 +978,8 @@ fn compare_constraint(bits: u32, signed: bool) -> UseConstraint {
 }
 
 fn collect_arithmetic_result_constraints(
-    lhs: &DirExpr,
-    rhs: &DirExpr,
+    lhs: &PreHirExpr,
+    rhs: &PreHirExpr,
     result_ty: &NirType,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
@@ -1003,30 +1003,30 @@ fn collect_arithmetic_result_constraints(
 }
 
 fn collect_float_operand_constraint(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     bits: u32,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
     let float_ty = NirType::Float { bits };
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             out.entry(name.clone())
                 .or_default()
                 .push(UseConstraint::Exact(float_ty));
         }
-        DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
             collect_float_operand_constraint(expr, bits, out);
         }
-        DirExpr::Load { ptr, .. } => {
-            if let DirExpr::Var(name) = ptr.as_ref() {
+        PreHirExpr::Load { ptr, .. } => {
+            if let PreHirExpr::Var(name) = ptr.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(float_ty));
             }
             collect_float_operand_constraint(ptr, bits, out);
         }
-        DirExpr::Index { base, .. } => {
-            if let DirExpr::Var(name) = base.as_ref() {
+        PreHirExpr::Index { base, .. } => {
+            if let PreHirExpr::Var(name) = base.as_ref() {
                 out.entry(name.clone())
                     .or_default()
                     .push(UseConstraint::Ptr(float_ty));
@@ -1038,13 +1038,13 @@ fn collect_float_operand_constraint(
 }
 
 fn collect_arithmetic_operand_constraint(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     result_bits: u32,
     signed: bool,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut HashMap<String, Vec<UseConstraint>>,
 ) {
-    let DirExpr::Var(name) = expr else {
+    let PreHirExpr::Var(name) = expr else {
         return;
     };
     if expr_int_bits(expr, known_binding_types) != Some(result_bits) {
@@ -1063,58 +1063,58 @@ fn is_byte_pointer_type(ty: &NirType) -> bool {
     matches!(ty, NirType::Ptr(pointee) if is_byte_int_type(pointee.as_ref()))
 }
 
-fn is_byte_expr(expr: &DirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
+fn is_byte_expr(expr: &PreHirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             known_binding_types.get(name).is_some_and(is_byte_int_type)
         }
-        DirExpr::Const(value, ty) => is_byte_int_type(ty) || (0..=0xff).contains(value),
-        DirExpr::Load { ty, .. }
-        | DirExpr::Index { elem_ty: ty, .. }
-        | DirExpr::FieldAccess { ty, .. } => is_byte_int_type(ty),
-        DirExpr::Cast { ty, expr } => {
+        PreHirExpr::Const(value, ty) => is_byte_int_type(ty) || (0..=0xff).contains(value),
+        PreHirExpr::Load { ty, .. }
+        | PreHirExpr::Index { elem_ty: ty, .. }
+        | PreHirExpr::FieldAccess { ty, .. } => is_byte_int_type(ty),
+        PreHirExpr::Cast { ty, expr } => {
             is_byte_int_type(ty) || is_byte_expr(expr, known_binding_types)
         }
         _ => false,
     }
 }
 
-fn is_byte_pointer_expr(expr: &DirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
+fn is_byte_pointer_expr(expr: &PreHirExpr, known_binding_types: &HashMap<String, NirType>) -> bool {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => known_binding_types
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => known_binding_types
             .get(name)
             .is_some_and(is_byte_pointer_type),
-        DirExpr::Cast { ty, expr } => {
+        PreHirExpr::Cast { ty, expr } => {
             is_byte_pointer_type(ty) || is_byte_pointer_expr(expr, known_binding_types)
         }
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             is_byte_pointer_expr(base, known_binding_types)
         }
         _ => false,
     }
 }
 
-fn expr_is_var(expr: &DirExpr, name: &str) -> bool {
-    matches!(expr, DirExpr::Var(var_name) if var_name == name)
+fn expr_is_var(expr: &PreHirExpr, name: &str) -> bool {
+    matches!(expr, PreHirExpr::Var(var_name) if var_name == name)
 }
 
 fn is_byte_accumulator_update(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     name: &str,
     known_binding_types: &HashMap<String, NirType>,
 ) -> bool {
-    let DirExpr::Binary { op, lhs, rhs, .. } = expr else {
+    let PreHirExpr::Binary { op, lhs, rhs, .. } = expr else {
         return false;
     };
     matches!(
         op,
-        DirBinaryOp::Add | DirBinaryOp::Sub | DirBinaryOp::Xor | DirBinaryOp::And | DirBinaryOp::Or
+        PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Xor | PreHirBinaryOp::And | PreHirBinaryOp::Or
     ) && ((expr_is_var(lhs, name) && is_byte_expr(rhs, known_binding_types))
         || (expr_is_var(rhs, name) && is_byte_expr(lhs, known_binding_types)))
 }
 
 fn collect_byte_index_accumulator_evidence(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     name: &str,
     known_binding_types: &HashMap<String, NirType>,
     evidence: &mut ByteIndexAccumulatorEvidence,
@@ -1125,14 +1125,14 @@ fn collect_byte_index_accumulator_evidence(
 }
 
 fn collect_byte_index_accumulator_evidence_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     name: &str,
     known_binding_types: &HashMap<String, NirType>,
     evidence: &mut ByteIndexAccumulatorEvidence,
 ) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
-            let self_def = matches!(lhs, DirLValue::Var(lhs_name) if lhs_name == name);
+        PreHirStmt::Assign { lhs, rhs } => {
+            let self_def = matches!(lhs, PreHirLValue::Var(lhs_name) if lhs_name == name);
             if self_def {
                 evidence.def_count += 1;
                 if is_byte_expr(rhs, known_binding_types) {
@@ -1165,13 +1165,13 @@ fn collect_byte_index_accumulator_evidence_stmt(
                 );
             }
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             collect_byte_index_accumulator_evidence_expr(expr, name, known_binding_types, evidence);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             collect_byte_index_accumulator_evidence(body, name, known_binding_types, evidence);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1180,7 +1180,7 @@ fn collect_byte_index_accumulator_evidence_stmt(
             collect_byte_index_accumulator_evidence(then_body, name, known_binding_types, evidence);
             collect_byte_index_accumulator_evidence(else_body, name, known_binding_types, evidence);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -1212,7 +1212,7 @@ fn collect_byte_index_accumulator_evidence_stmt(
             }
             collect_byte_index_accumulator_evidence(body, name, known_binding_types, evidence);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -1228,7 +1228,7 @@ fn collect_byte_index_accumulator_evidence_stmt(
             }
             collect_byte_index_accumulator_evidence(default, name, known_binding_types, evidence);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             collect_byte_index_accumulator_evidence_expr(
                 va_list,
                 name,
@@ -1236,26 +1236,26 @@ fn collect_byte_index_accumulator_evidence_stmt(
                 evidence,
             );
         }
-        DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Return(None)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
 fn collect_byte_index_accumulator_evidence_lvalue(
-    lhs: &DirLValue,
+    lhs: &PreHirLValue,
     name: &str,
     known_binding_types: &HashMap<String, NirType>,
     evidence: &mut ByteIndexAccumulatorEvidence,
 ) {
     match lhs {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } | DirLValue::FieldAccess { base: ptr, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } | PreHirLValue::FieldAccess { base: ptr, .. } => {
             collect_byte_index_accumulator_evidence_expr(ptr, name, known_binding_types, evidence);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             collect_byte_index_accumulator_evidence_expr(base, name, known_binding_types, evidence);
             collect_byte_index_accumulator_evidence_expr(
                 index,
@@ -1268,21 +1268,21 @@ fn collect_byte_index_accumulator_evidence_lvalue(
 }
 
 fn collect_byte_index_accumulator_evidence_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     name: &str,
     known_binding_types: &HashMap<String, NirType>,
     evidence: &mut ByteIndexAccumulatorEvidence,
 ) {
     match expr {
-        DirExpr::Var(var_name) | DirExpr::AddressOfGlobal(var_name) if var_name == name => {
+        PreHirExpr::Var(var_name) | PreHirExpr::AddressOfGlobal(var_name) if var_name == name => {
             evidence.disallowed_uses += 1;
         }
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             collect_byte_index_accumulator_evidence_expr(
                 inner,
                 name,
@@ -1290,27 +1290,27 @@ fn collect_byte_index_accumulator_evidence_expr(
                 evidence,
             );
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } if expr_is_var(lhs, name) && is_byte_pointer_expr(rhs, known_binding_types) => {
             evidence.byte_pointer_offset_uses += 1;
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } if expr_is_var(rhs, name) && is_byte_pointer_expr(lhs, known_binding_types) => {
             evidence.byte_pointer_offset_uses += 1;
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             collect_byte_index_accumulator_evidence_expr(lhs, name, known_binding_types, evidence);
             collect_byte_index_accumulator_evidence_expr(rhs, name, known_binding_types, evidence);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_byte_index_accumulator_evidence_expr(
                     arg,
@@ -1320,7 +1320,7 @@ fn collect_byte_index_accumulator_evidence_expr(
                 );
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             collect_byte_index_accumulator_evidence_expr(base, name, known_binding_types, evidence);
             collect_byte_index_accumulator_evidence_expr(
                 index,
@@ -1329,7 +1329,7 @@ fn collect_byte_index_accumulator_evidence_expr(
                 evidence,
             );
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1349,11 +1349,11 @@ fn collect_byte_index_accumulator_evidence_expr(
                 evidence,
             );
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 }
 
-fn narrow_byte_index_accumulators(func: &mut DirFunction) -> bool {
+fn narrow_byte_index_accumulators(func: &mut PreHirFunction) -> bool {
     let known_binding_types = collect_known_binding_types(func);
     let mut changed = false;
     for binding in &mut func.locals {
@@ -1396,21 +1396,21 @@ fn narrow_byte_index_accumulators(func: &mut DirFunction) -> bool {
     changed
 }
 
-fn expr_int_bits(expr: &DirExpr, known_binding_types: &HashMap<String, NirType>) -> Option<u32> {
+fn expr_int_bits(expr: &PreHirExpr, known_binding_types: &HashMap<String, NirType>) -> Option<u32> {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             known_binding_types.get(name).and_then(nir_type_bits)
         }
-        DirExpr::Const(_, ty)
-        | DirExpr::Unary { ty, .. }
-        | DirExpr::Call { ty, .. }
-        | DirExpr::Load { ty, .. }
-        | DirExpr::Index { elem_ty: ty, .. }
-        | DirExpr::Cast { ty, .. }
-        | DirExpr::Select { ty, .. }
-        | DirExpr::FieldAccess { ty, .. } => nir_type_bits(ty),
-        DirExpr::Binary { ty, .. } => nir_type_bits(ty),
-        DirExpr::PtrOffset { .. } | DirExpr::AggregateCopy { .. } => None,
+        PreHirExpr::Const(_, ty)
+        | PreHirExpr::Unary { ty, .. }
+        | PreHirExpr::Call { ty, .. }
+        | PreHirExpr::Load { ty, .. }
+        | PreHirExpr::Index { elem_ty: ty, .. }
+        | PreHirExpr::Cast { ty, .. }
+        | PreHirExpr::Select { ty, .. }
+        | PreHirExpr::FieldAccess { ty, .. } => nir_type_bits(ty),
+        PreHirExpr::Binary { ty, .. } => nir_type_bits(ty),
+        PreHirExpr::PtrOffset { .. } | PreHirExpr::AggregateCopy { .. } => None,
     }
 }
 
@@ -1442,7 +1442,7 @@ fn nir_type_bits(ty: &NirType) -> Option<u32> {
     }
 }
 
-fn collect_known_binding_types(func: &DirFunction) -> HashMap<String, NirType> {
+fn collect_known_binding_types(func: &PreHirFunction) -> HashMap<String, NirType> {
     let mut known = HashMap::default();
     for binding in func.locals.iter().chain(func.params.iter()) {
         if binding.ty != NirType::Unknown {
@@ -1453,11 +1453,11 @@ fn collect_known_binding_types(func: &DirFunction) -> HashMap<String, NirType> {
 }
 
 fn return_expr_type(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     known_binding_types: &HashMap<String, NirType>,
 ) -> Option<NirType> {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             known_binding_types.get(name).cloned()
         }
         other => {
@@ -1468,7 +1468,7 @@ fn return_expr_type(
 }
 
 fn collect_value_return_types(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     known_binding_types: &HashMap<String, NirType>,
     out: &mut Vec<NirType>,
 ) -> usize {
@@ -1480,25 +1480,25 @@ fn collect_value_return_types(
 }
 
 fn collect_value_return_types_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     known_binding_types: &HashMap<String, NirType>,
     out: &mut Vec<NirType>,
 ) -> usize {
     match stmt {
-        DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Return(Some(expr)) => {
             if let Some(ty) = return_expr_type(expr, known_binding_types) {
                 out.push(ty);
             }
             1
         }
-        DirStmt::Return(None) => 0,
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. }
-        | DirStmt::For { body: stmts, .. } => {
+        PreHirStmt::Return(None) => 0,
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. }
+        | PreHirStmt::For { body: stmts, .. } => {
             collect_value_return_types(stmts, known_binding_types, out)
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -1506,7 +1506,7 @@ fn collect_value_return_types_stmt(
             collect_value_return_types(then_body, known_binding_types, out)
                 + collect_value_return_types(else_body, known_binding_types, out)
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             let mut value_return_count = 0usize;
             for case in cases {
                 value_return_count +=
@@ -1518,7 +1518,7 @@ fn collect_value_return_types_stmt(
     }
 }
 
-fn promote_return_signedness_from_returns(func: &mut DirFunction) -> bool {
+fn promote_return_signedness_from_returns(func: &mut PreHirFunction) -> bool {
     if func.surface_return_type_name.is_some() {
         return false;
     }
@@ -1557,7 +1557,7 @@ fn promote_return_signedness_from_returns(func: &mut DirFunction) -> bool {
     }
 }
 
-fn promote_unknown_call_return_type(func: &mut DirFunction) -> bool {
+fn promote_unknown_call_return_type(func: &mut PreHirFunction) -> bool {
     if func.surface_return_type_name.is_some() || func.return_type != NirType::Unknown {
         return false;
     }
@@ -1575,7 +1575,7 @@ fn promote_unknown_call_return_type(func: &mut DirFunction) -> bool {
     true
 }
 
-fn native_unsigned_word_type(func: &DirFunction) -> NirType {
+fn native_unsigned_word_type(func: &PreHirFunction) -> NirType {
     NirType::Int {
         bits: if func.is_64bit { 64 } else { 32 },
         signed: false,
@@ -1583,7 +1583,7 @@ fn native_unsigned_word_type(func: &DirFunction) -> NirType {
 }
 
 fn collect_unknown_call_returns(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     value_return_count: &mut usize,
     unknown_call_return_count: &mut usize,
 ) {
@@ -1593,24 +1593,24 @@ fn collect_unknown_call_returns(
 }
 
 fn collect_unknown_call_returns_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     value_return_count: &mut usize,
     unknown_call_return_count: &mut usize,
 ) {
     match stmt {
-        DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Return(Some(expr)) => {
             *value_return_count += 1;
             if is_unknown_call_result(expr) {
                 *unknown_call_return_count += 1;
             }
         }
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. }
-        | DirStmt::For { body: stmts, .. } => {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. }
+        | PreHirStmt::For { body: stmts, .. } => {
             collect_unknown_call_returns(stmts, value_return_count, unknown_call_return_count);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -1618,7 +1618,7 @@ fn collect_unknown_call_returns_stmt(
             collect_unknown_call_returns(then_body, value_return_count, unknown_call_return_count);
             collect_unknown_call_returns(else_body, value_return_count, unknown_call_return_count);
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 collect_unknown_call_returns(
                     &case.body,
@@ -1628,51 +1628,51 @@ fn collect_unknown_call_returns_stmt(
             }
             collect_unknown_call_returns(default, value_return_count, unknown_call_return_count);
         }
-        DirStmt::Assign { .. }
-        | DirStmt::VaStart { .. }
-        | DirStmt::Expr(_)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Return(None)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
-fn is_unknown_call_result(expr: &DirExpr) -> bool {
+fn is_unknown_call_result(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Call { ty, .. } => *ty == NirType::Unknown,
-        DirExpr::Cast { expr, ty } if *ty == NirType::Unknown => is_unknown_call_result(expr),
+        PreHirExpr::Call { ty, .. } => *ty == NirType::Unknown,
+        PreHirExpr::Cast { expr, ty } if *ty == NirType::Unknown => is_unknown_call_result(expr),
         _ => false,
     }
 }
 
-fn count_var_uses_expr(expr: &DirExpr, out: &mut HashMap<String, usize>) {
+fn count_var_uses_expr(expr: &PreHirExpr, out: &mut HashMap<String, usize>) {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             *out.entry(name.clone()).or_default() += 1;
         }
-        DirExpr::Const(_, _) => {}
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => count_var_uses_expr(expr, out),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => count_var_uses_expr(expr, out),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             count_var_uses_expr(lhs, out);
             count_var_uses_expr(rhs, out);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 count_var_uses_expr(arg, out);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             count_var_uses_expr(base, out);
             count_var_uses_expr(index, out);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1685,33 +1685,33 @@ fn count_var_uses_expr(expr: &DirExpr, out: &mut HashMap<String, usize>) {
     }
 }
 
-fn count_var_uses_lvalue(lhs: &DirLValue, out: &mut HashMap<String, usize>) {
+fn count_var_uses_lvalue(lhs: &PreHirLValue, out: &mut HashMap<String, usize>) {
     match lhs {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => count_var_uses_expr(ptr, out),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => count_var_uses_expr(ptr, out),
+        PreHirLValue::Index { base, index, .. } => {
             count_var_uses_expr(base, out);
             count_var_uses_expr(index, out);
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             count_var_uses_expr(base, out);
         }
     }
 }
 
-fn count_var_uses_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>) {
+fn count_var_uses_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, usize>) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             count_var_uses_lvalue(lhs, out);
             count_var_uses_expr(rhs, out);
         }
-        DirStmt::VaStart { va_list, .. } | DirStmt::Expr(va_list) => {
+        PreHirStmt::VaStart { va_list, .. } | PreHirStmt::Expr(va_list) => {
             count_var_uses_expr(va_list, out);
         }
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. } => count_var_uses_stmts(stmts, out),
-        DirStmt::If {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. } => count_var_uses_stmts(stmts, out),
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1720,7 +1720,7 @@ fn count_var_uses_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>) {
             count_var_uses_stmts(then_body, out);
             count_var_uses_stmts(else_body, out);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -1737,7 +1737,7 @@ fn count_var_uses_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>) {
             }
             count_var_uses_stmts(body, out);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -1748,43 +1748,43 @@ fn count_var_uses_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>) {
             }
             count_var_uses_stmts(default, out);
         }
-        DirStmt::Return(Some(expr)) => count_var_uses_expr(expr, out),
-        DirStmt::Return(None)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Return(Some(expr)) => count_var_uses_expr(expr, out),
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
-fn count_var_uses_stmts(stmts: &[DirStmt], out: &mut HashMap<String, usize>) {
+fn count_var_uses_stmts(stmts: &[PreHirStmt], out: &mut HashMap<String, usize>) {
     for stmt in stmts {
         count_var_uses_stmt(stmt, out);
     }
 }
 
-fn store_value_var_name(expr: &DirExpr) -> Option<&str> {
+fn store_value_var_name(expr: &PreHirExpr) -> Option<&str> {
     match expr {
-        DirExpr::Var(name) => Some(name.as_str()),
-        DirExpr::Cast { expr, .. } => store_value_var_name(expr),
+        PreHirExpr::Var(name) => Some(name.as_str()),
+        PreHirExpr::Cast { expr, .. } => store_value_var_name(expr),
         _ => None,
     }
 }
 
-fn count_store_value_uses_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>) {
+fn count_store_value_uses_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, usize>) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Deref { .. } | DirLValue::Index { .. },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref { .. } | PreHirLValue::Index { .. },
             rhs,
         } => {
             if let Some(name) = store_value_var_name(rhs) {
                 *out.entry(name.to_owned()).or_default() += 1;
             }
         }
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. } => count_store_value_uses_stmts(stmts, out),
-        DirStmt::If {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. } => count_store_value_uses_stmts(stmts, out),
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -1792,7 +1792,7 @@ fn count_store_value_uses_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>)
             count_store_value_uses_stmts(then_body, out);
             count_store_value_uses_stmts(else_body, out);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(init) = init {
@@ -1803,30 +1803,30 @@ fn count_store_value_uses_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>)
             }
             count_store_value_uses_stmts(body, out);
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 count_store_value_uses_stmts(&case.body, out);
             }
             count_store_value_uses_stmts(default, out);
         }
-        DirStmt::Assign { .. }
-        | DirStmt::VaStart { .. }
-        | DirStmt::Expr(_)
-        | DirStmt::Return(_)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
-fn count_store_value_uses_stmts(stmts: &[DirStmt], out: &mut HashMap<String, usize>) {
+fn count_store_value_uses_stmts(stmts: &[PreHirStmt], out: &mut HashMap<String, usize>) {
     for stmt in stmts {
         count_store_value_uses_stmt(stmt, out);
     }
 }
 
-fn promote_store_value_only_unsigned_params(func: &mut DirFunction) -> bool {
+fn promote_store_value_only_unsigned_params(func: &mut PreHirFunction) -> bool {
     let mut all_uses = HashMap::default();
     count_var_uses_stmts(&func.body, &mut all_uses);
     let mut store_value_uses = HashMap::default();
@@ -1859,67 +1859,67 @@ fn promote_store_value_only_unsigned_params(func: &mut DirFunction) -> bool {
     changed
 }
 
-fn wrapping_narrow_op(op: DirBinaryOp) -> bool {
+fn wrapping_narrow_op(op: PreHirBinaryOp) -> bool {
     matches!(
         op,
-        DirBinaryOp::Add
-            | DirBinaryOp::Sub
-            | DirBinaryOp::Mul
-            | DirBinaryOp::And
-            | DirBinaryOp::Or
-            | DirBinaryOp::Xor
+        PreHirBinaryOp::Add
+            | PreHirBinaryOp::Sub
+            | PreHirBinaryOp::Mul
+            | PreHirBinaryOp::And
+            | PreHirBinaryOp::Or
+            | PreHirBinaryOp::Xor
     )
 }
 
 fn collect_wrapping_narrow_return_vars(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     context_bits: u32,
     out: &mut HashMap<String, usize>,
 ) {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             *out.entry(name.clone()).or_default() += 1;
         }
-        DirExpr::Cast { ty, expr } => {
+        PreHirExpr::Cast { ty, expr } => {
             let bits = nir_type_bits(ty).unwrap_or(context_bits).min(context_bits);
             collect_wrapping_narrow_return_vars(expr, bits, out);
         }
-        DirExpr::Unary {
-            op: DirUnaryOp::Neg,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Neg,
             expr,
             ..
         } => collect_wrapping_narrow_return_vars(expr, context_bits, out),
-        DirExpr::Binary { op, lhs, rhs, .. } if wrapping_narrow_op(*op) => {
+        PreHirExpr::Binary { op, lhs, rhs, .. } if wrapping_narrow_op(*op) => {
             collect_wrapping_narrow_return_vars(lhs, context_bits, out);
             collect_wrapping_narrow_return_vars(rhs, context_bits, out);
         }
-        DirExpr::Const(_, _)
-        | DirExpr::Unary { .. }
-        | DirExpr::Binary { .. }
-        | DirExpr::Call { .. }
-        | DirExpr::Load { .. }
-        | DirExpr::PtrOffset { .. }
-        | DirExpr::Index { .. }
-        | DirExpr::Select { .. }
-        | DirExpr::FieldAccess { .. }
-        | DirExpr::AggregateCopy { .. } => {}
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::Unary { .. }
+        | PreHirExpr::Binary { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::Load { .. }
+        | PreHirExpr::PtrOffset { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::Select { .. }
+        | PreHirExpr::FieldAccess { .. }
+        | PreHirExpr::AggregateCopy { .. } => {}
     }
 }
 
 fn collect_wrapping_narrow_return_vars_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     return_bits: u32,
     out: &mut HashMap<String, usize>,
 ) {
     match stmt {
-        DirStmt::Return(Some(expr)) => collect_wrapping_narrow_return_vars(expr, return_bits, out),
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. }
-        | DirStmt::For { body: stmts, .. } => {
+        PreHirStmt::Return(Some(expr)) => collect_wrapping_narrow_return_vars(expr, return_bits, out),
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. }
+        | PreHirStmt::For { body: stmts, .. } => {
             collect_wrapping_narrow_return_vars_stmts(stmts, return_bits, out)
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -1927,7 +1927,7 @@ fn collect_wrapping_narrow_return_vars_stmt(
             collect_wrapping_narrow_return_vars_stmts(then_body, return_bits, out);
             collect_wrapping_narrow_return_vars_stmts(else_body, return_bits, out);
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 collect_wrapping_narrow_return_vars_stmts(&case.body, return_bits, out);
             }
@@ -1938,7 +1938,7 @@ fn collect_wrapping_narrow_return_vars_stmt(
 }
 
 fn collect_wrapping_narrow_return_vars_stmts(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     return_bits: u32,
     out: &mut HashMap<String, usize>,
 ) {
@@ -1947,7 +1947,7 @@ fn collect_wrapping_narrow_return_vars_stmts(
     }
 }
 
-fn narrow_integer_params_from_wrapping_return_uses(func: &mut DirFunction) -> bool {
+fn narrow_integer_params_from_wrapping_return_uses(func: &mut PreHirFunction) -> bool {
     let NirType::Int {
         bits: return_bits,
         signed: return_signed,
@@ -1998,7 +1998,7 @@ fn narrow_integer_params_from_wrapping_return_uses(func: &mut DirFunction) -> bo
 /// The merge is monotone: types only move from weaker to stronger:
 /// `Unknown < Int(unsigned) < Int(signed) < Ptr(Unknown) < Ptr(known)`.
 /// An existing `Known` type is NEVER overwritten.
-fn merge_constraint(binding: &mut DirBinding, constraint: &UseConstraint) -> bool {
+fn merge_constraint(binding: &mut PreHirBinding, constraint: &UseConstraint) -> bool {
     if binding.surface_type_name.is_some() {
         return false;
     }
@@ -2154,7 +2154,7 @@ fn has_exact_scalar_constraint(constraints: Option<&Vec<UseConstraint>>) -> bool
 }
 
 fn restore_scalar_only_pointer_locals(
-    func: &mut DirFunction,
+    func: &mut PreHirFunction,
     constraints: &HashMap<String, Vec<UseConstraint>>,
 ) -> bool {
     let mut roles = HashMap::<String, BindingUseRole>::default();
@@ -2190,7 +2190,7 @@ fn restore_scalar_only_pointer_locals(
 }
 
 fn should_skip_pointer_constraint_for_scalar_local(
-    binding: &DirBinding,
+    binding: &PreHirBinding,
     constraint: &UseConstraint,
     roles: &HashMap<String, BindingUseRole>,
     address_contributors: &HashMap<String, NirType>,
@@ -2222,7 +2222,7 @@ fn should_skip_pointer_constraint_for_scalar_local(
 ///
 /// Iterates to convergence (typically 1–2 rounds).  Returns `true` if any
 /// binding type changed.
-pub fn apply_use_driven_type_infer_pass(func: &mut DirFunction) -> bool {
+pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
     let before = type_state_signature(func);
     let dependencies = DefinitionDependencyMap::build(&func.body);
     let mut flow_changed = false;
@@ -2283,8 +2283,8 @@ pub fn apply_use_driven_type_infer_pass(func: &mut DirFunction) -> bool {
 mod tests {
     use crate::prelude::*;
 
-    fn make_binding(name: &str) -> DirBinding {
-        DirBinding {
+    fn make_binding(name: &str) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_owned(),
             ty: NirType::Unknown,
             surface_type_name: None,
@@ -2293,8 +2293,8 @@ mod tests {
         }
     }
 
-    fn make_typed_binding(name: &str, ty: NirType, origin: NirBindingOrigin) -> DirBinding {
-        DirBinding {
+    fn make_typed_binding(name: &str, ty: NirType, origin: NirBindingOrigin) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_owned(),
             ty,
             surface_type_name: None,
@@ -2303,8 +2303,8 @@ mod tests {
         }
     }
 
-    fn make_func(locals: Vec<DirBinding>, body: Vec<DirStmt>, return_type: NirType) -> DirFunction {
-        DirFunction {
+    fn make_func(locals: Vec<PreHirBinding>, body: Vec<PreHirStmt>, return_type: NirType) -> PreHirFunction {
+        PreHirFunction {
             name: "test".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![],
@@ -2325,20 +2325,20 @@ mod tests {
             signed: false,
         };
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("a".to_owned()),
-                rhs: DirExpr::Index {
-                    base: Box::new(DirExpr::Var("p".to_owned())),
-                    index: Box::new(DirExpr::Const(0, uint_ty.clone())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("a".to_owned()),
+                rhs: PreHirExpr::Index {
+                    base: Box::new(PreHirExpr::Var("p".to_owned())),
+                    index: Box::new(PreHirExpr::Const(0, uint_ty.clone())),
                     elem_ty: uint_ty.clone(),
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("prod".to_owned()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Mul,
-                    lhs: Box::new(DirExpr::Var("a".to_owned())),
-                    rhs: Box::new(DirExpr::Var("b".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("prod".to_owned()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(PreHirExpr::Var("a".to_owned())),
+                    rhs: Box::new(PreHirExpr::Var("b".to_owned())),
                     ty: float_ty.clone(),
                 },
             },
@@ -2391,20 +2391,20 @@ mod tests {
         };
         let uint_ptr = NirType::Ptr(Box::new(uint_ty.clone()));
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("param_home".to_owned()),
-                rhs: DirExpr::Var("out".to_owned()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("param_home".to_owned()),
+                rhs: PreHirExpr::Var("out".to_owned()),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("store_ptr".to_owned()),
-                rhs: DirExpr::Var("param_home".to_owned()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("store_ptr".to_owned()),
+                rhs: PreHirExpr::Var("param_home".to_owned()),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Deref {
-                    ptr: Box::new(DirExpr::Var("store_ptr".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("store_ptr".to_owned())),
                     ty: uint_ty,
                 },
-                rhs: DirExpr::Var("value".to_owned()),
+                rhs: PreHirExpr::Var("value".to_owned()),
             },
         ];
         let mut func = make_func(
@@ -2445,10 +2445,10 @@ mod tests {
     /// Load { ptr: Var("p"), ty: uint32 } → p: Ptr(uint32)
     #[test]
     fn infers_ptr_from_load() {
-        let body = vec![DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_owned()),
-            rhs: DirExpr::Load {
-                ptr: Box::new(DirExpr::Var("p".to_owned())),
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_owned()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("p".to_owned())),
                 ty: NirType::Int {
                     bits: 32,
                     signed: false,
@@ -2483,31 +2483,31 @@ mod tests {
         };
         let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("idx".to_owned()),
-                rhs: DirExpr::Load {
-                    ptr: Box::new(DirExpr::Var("p".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("idx".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("p".to_owned())),
                     ty: u8_ty.clone(),
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("idx".to_owned()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Add,
-                    lhs: Box::new(DirExpr::Var("idx".to_owned())),
-                    rhs: Box::new(DirExpr::Load {
-                        ptr: Box::new(DirExpr::Var("q".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("idx".to_owned()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("idx".to_owned())),
+                    rhs: Box::new(PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("q".to_owned())),
                         ty: u8_ty.clone(),
                     }),
                     ty: u32_ty.clone(),
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("cursor".to_owned()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Add,
-                    lhs: Box::new(DirExpr::Var("p".to_owned())),
-                    rhs: Box::new(DirExpr::Var("idx".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cursor".to_owned()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("p".to_owned())),
+                    rhs: Box::new(PreHirExpr::Var("idx".to_owned())),
                     ty: byte_ptr_ty.clone(),
                 },
             },
@@ -2544,12 +2544,12 @@ mod tests {
             signed: false,
         };
         let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty));
-        let body = vec![DirStmt::Assign {
-            lhs: DirLValue::Var("cursor".to_owned()),
-            rhs: DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Var("p".to_owned())),
-                rhs: Box::new(DirExpr::Var("idx".to_owned())),
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("cursor".to_owned()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("p".to_owned())),
+                rhs: Box::new(PreHirExpr::Var("idx".to_owned())),
                 ty: byte_ptr_ty.clone(),
             },
         }];
@@ -2583,14 +2583,14 @@ mod tests {
             signed: false,
         };
         let ptr_ty = NirType::Ptr(Box::new(u32_ty));
-        let body = vec![DirStmt::Assign {
-            lhs: DirLValue::Var("end".to_owned()),
-            rhs: DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Var("base".to_owned())),
-                rhs: Box::new(DirExpr::Cast {
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("end".to_owned()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("base".to_owned())),
+                rhs: Box::new(PreHirExpr::Cast {
                     ty: u64_ty.clone(),
-                    expr: Box::new(DirExpr::Var("count".to_owned())),
+                    expr: Box::new(PreHirExpr::Var("count".to_owned())),
                 }),
                 ty: ptr_ty.clone(),
             },
@@ -2626,21 +2626,21 @@ mod tests {
         };
         let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("alias".to_owned()),
-                rhs: DirExpr::Var("input".to_owned()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("alias".to_owned()),
+                rhs: PreHirExpr::Var("input".to_owned()),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("cursor".to_owned()),
-                rhs: DirExpr::Cast {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cursor".to_owned()),
+                rhs: PreHirExpr::Cast {
                     ty: ptr_ty.clone(),
-                    expr: Box::new(DirExpr::Var("alias".to_owned())),
+                    expr: Box::new(PreHirExpr::Var("alias".to_owned())),
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("value".to_owned()),
-                rhs: DirExpr::Load {
-                    ptr: Box::new(DirExpr::Var("cursor".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("value".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("cursor".to_owned())),
                     ty: u8_ty,
                 },
             },
@@ -2676,19 +2676,19 @@ mod tests {
         };
         let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty));
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("p".to_owned()),
-                rhs: DirExpr::Cast {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("p".to_owned()),
+                rhs: PreHirExpr::Cast {
                     ty: byte_ptr_ty.clone(),
-                    expr: Box::new(DirExpr::Var("x".to_owned())),
+                    expr: Box::new(PreHirExpr::Var("x".to_owned())),
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("sum".to_owned()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Add,
-                    lhs: Box::new(DirExpr::Var("x".to_owned())),
-                    rhs: Box::new(DirExpr::Const(1, u64_ty.clone())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("sum".to_owned()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("x".to_owned())),
+                    rhs: Box::new(PreHirExpr::Const(1, u64_ty.clone())),
                     ty: u64_ty.clone(),
                 },
             },
@@ -2721,7 +2721,7 @@ mod tests {
             signed: false,
         };
         let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty));
-        let body = vec![DirStmt::Return(Some(DirExpr::Var("acc".to_owned())))];
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Var("acc".to_owned())))];
         let mut func = make_func(
             vec![make_typed_binding(
                 "acc",
@@ -2740,15 +2740,15 @@ mod tests {
     /// Deref store lhs: *p = val → p: Ptr(val_ty)
     #[test]
     fn infers_ptr_from_deref_store() {
-        let body = vec![DirStmt::Assign {
-            lhs: DirLValue::Deref {
-                ptr: Box::new(DirExpr::Var("p".to_owned())),
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("p".to_owned())),
                 ty: NirType::Int {
                     bits: 64,
                     signed: false,
                 },
             },
-            rhs: DirExpr::Const(
+            rhs: PreHirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 64,
@@ -2770,11 +2770,11 @@ mod tests {
     /// SLt comparison → operand is signed int
     #[test]
     fn infers_signed_from_slt() {
-        let body = vec![DirStmt::If {
-            cond: DirExpr::Binary {
-                op: DirBinaryOp::SLt,
-                lhs: Box::new(DirExpr::Var("a".to_owned())),
-                rhs: Box::new(DirExpr::Const(
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::SLt,
+                lhs: Box::new(PreHirExpr::Var("a".to_owned())),
+                rhs: Box::new(PreHirExpr::Const(
                     0,
                     NirType::Int {
                         bits: 32,
@@ -2799,11 +2799,11 @@ mod tests {
 
     #[test]
     fn unknown_call_only_value_returns_promote_native_word_return_type() {
-        let body = vec![DirStmt::Return(Some(DirExpr::Call {
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Call {
             target: "param_1".to_owned(),
             args: vec![
-                DirExpr::Var("param_2".to_owned()),
-                DirExpr::Var("param_3".to_owned()),
+                PreHirExpr::Var("param_2".to_owned()),
+                PreHirExpr::Var("param_3".to_owned()),
             ],
             ty: NirType::Unknown,
         }))];
@@ -2822,11 +2822,11 @@ mod tests {
 
     #[test]
     fn call_target_use_promotes_binding_to_pointer() {
-        let body = vec![DirStmt::Return(Some(DirExpr::Call {
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Call {
             target: "((code *)param_1)".to_owned(),
             args: vec![
-                DirExpr::Var("param_2".to_owned()),
-                DirExpr::Var("param_3".to_owned()),
+                PreHirExpr::Var("param_2".to_owned()),
+                PreHirExpr::Var("param_3".to_owned()),
             ],
             ty: NirType::Unknown,
         }))];
@@ -2868,14 +2868,14 @@ mod tests {
 
     #[test]
     fn unknown_call_return_promotion_requires_all_value_returns_to_be_calls() {
-        let body = vec![DirStmt::If {
-            cond: DirExpr::Var("flag".to_owned()),
-            then_body: vec![DirStmt::Return(Some(DirExpr::Call {
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Var("flag".to_owned()),
+            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Call {
                 target: "param_1".to_owned(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
             }))],
-            else_body: vec![DirStmt::Return(Some(DirExpr::Var("fallback".to_owned())))],
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("fallback".to_owned())))],
         }];
         let mut func = make_func(Vec::new(), body, NirType::Unknown);
         func.is_64bit = false;
@@ -2890,17 +2890,17 @@ mod tests {
             bits: 32,
             signed: false,
         };
-        let body = vec![DirStmt::If {
-            cond: DirExpr::Binary {
-                op: DirBinaryOp::SLt,
-                lhs: Box::new(DirExpr::Var("a".to_owned())),
-                rhs: Box::new(DirExpr::Var("b".to_owned())),
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::SLt,
+                lhs: Box::new(PreHirExpr::Var("a".to_owned())),
+                rhs: Box::new(PreHirExpr::Var("b".to_owned())),
                 ty: NirType::Bool,
             },
-            then_body: vec![DirStmt::Return(Some(DirExpr::Var("b".to_owned())))],
-            else_body: vec![DirStmt::Return(Some(DirExpr::Var("a".to_owned())))],
+            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("b".to_owned())))],
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("a".to_owned())))],
         }];
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "signed_max".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![
@@ -2932,12 +2932,12 @@ mod tests {
             bits: 32,
             signed: true,
         };
-        let body = vec![DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_owned()),
-            rhs: DirExpr::Binary {
-                op: DirBinaryOp::Shr,
-                lhs: Box::new(DirExpr::Var("x".to_owned())),
-                rhs: Box::new(DirExpr::Const(
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_owned()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(PreHirExpr::Var("x".to_owned())),
+                rhs: Box::new(PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -2947,7 +2947,7 @@ mod tests {
                 ty: i32_ty.clone(),
             },
         }];
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "count_bits".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![make_typed_binding(
@@ -2988,21 +2988,21 @@ mod tests {
             signed: false,
         };
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("shifted".into()),
-                rhs: DirExpr::Var("count".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("shifted".into()),
+                rhs: PreHirExpr::Var("count".into()),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("shifted".into()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Shr,
-                    lhs: Box::new(DirExpr::Var("shifted".into())),
-                    rhs: Box::new(DirExpr::Const(1, u64_ty.clone())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("shifted".into()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shr,
+                    lhs: Box::new(PreHirExpr::Var("shifted".into())),
+                    rhs: Box::new(PreHirExpr::Const(1, u64_ty.clone())),
                     ty: i64_ty.clone(),
                 },
             },
         ];
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "test".into(),
             params: vec![make_typed_binding(
                 "count",
@@ -3034,13 +3034,13 @@ mod tests {
             bits: 32,
             signed: true,
         };
-        let body = vec![DirStmt::Return(Some(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Var("a".to_owned())),
-            rhs: Box::new(DirExpr::Var("b".to_owned())),
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("a".to_owned())),
+            rhs: Box::new(PreHirExpr::Var("b".to_owned())),
             ty: i32_ty.clone(),
         }))];
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "add".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![
@@ -3069,16 +3069,16 @@ mod tests {
             bits: 32,
             signed: true,
         };
-        let body = vec![DirStmt::Return(Some(DirExpr::Cast {
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Cast {
             ty: i32_ty.clone(),
-            expr: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Var("a".to_owned())),
-                rhs: Box::new(DirExpr::Var("b".to_owned())),
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("a".to_owned())),
+                rhs: Box::new(PreHirExpr::Var("b".to_owned())),
                 ty: u32_ty.clone(),
             }),
         }))];
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "add".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![
@@ -3107,7 +3107,7 @@ mod tests {
             bits: 32,
             signed: false,
         };
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "add32".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![
@@ -3117,10 +3117,10 @@ mod tests {
             locals: vec![],
             return_type: u32_ty.clone(),
             surface_return_type_name: None,
-            body: vec![DirStmt::Return(Some(DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Var("param_1".to_owned())),
-                rhs: Box::new(DirExpr::Var("param_2".to_owned())),
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("param_1".to_owned())),
+                rhs: Box::new(PreHirExpr::Var("param_2".to_owned())),
                 ty: u64_ty,
             }))],
             ..Default::default()
@@ -3141,7 +3141,7 @@ mod tests {
             bits: 32,
             signed: false,
         };
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "add32_with_call".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![make_typed_binding(
@@ -3153,12 +3153,12 @@ mod tests {
             return_type: u32_ty,
             surface_return_type_name: None,
             body: vec![
-                DirStmt::Expr(DirExpr::Call {
+                PreHirStmt::Expr(PreHirExpr::Call {
                     target: "observe64".to_owned(),
-                    args: vec![DirExpr::Var("param_1".to_owned())],
+                    args: vec![PreHirExpr::Var("param_1".to_owned())],
                     ty: NirType::Unknown,
                 }),
-                DirStmt::Return(Some(DirExpr::Var("param_1".to_owned()))),
+                PreHirStmt::Return(Some(PreHirExpr::Var("param_1".to_owned()))),
             ],
             ..Default::default()
         };
@@ -3177,7 +3177,7 @@ mod tests {
             bits: 32,
             signed: true,
         };
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "fill".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![
@@ -3191,12 +3191,12 @@ mod tests {
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Assign {
-                lhs: DirLValue::Deref {
-                    ptr: Box::new(DirExpr::Var("param_1".to_owned())),
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("param_1".to_owned())),
                     ty: u32_ty.clone(),
                 },
-                rhs: DirExpr::Var("param_2".to_owned()),
+                rhs: PreHirExpr::Var("param_2".to_owned()),
             }],
             ..Default::default()
         };
@@ -3211,7 +3211,7 @@ mod tests {
             bits: 32,
             signed: false,
         };
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "fill_guarded".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![
@@ -3226,22 +3226,22 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                DirStmt::If {
-                    cond: DirExpr::Binary {
-                        op: DirBinaryOp::Lt,
-                        lhs: Box::new(DirExpr::Var("param_2".to_owned())),
-                        rhs: Box::new(DirExpr::Const(10, u32_ty.clone())),
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Lt,
+                        lhs: Box::new(PreHirExpr::Var("param_2".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(10, u32_ty.clone())),
                         ty: NirType::Bool,
                     },
                     then_body: Vec::new(),
                     else_body: Vec::new(),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Deref {
-                        ptr: Box::new(DirExpr::Var("param_1".to_owned())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::Var("param_1".to_owned())),
                         ty: u32_ty.clone(),
                     },
-                    rhs: DirExpr::Var("param_2".to_owned()),
+                    rhs: PreHirExpr::Var("param_2".to_owned()),
                 },
             ],
             ..Default::default()
@@ -3253,11 +3253,11 @@ mod tests {
 
     #[test]
     fn signed_compare_without_width_evidence_does_not_invent_type() {
-        let body = vec![DirStmt::If {
-            cond: DirExpr::Binary {
-                op: DirBinaryOp::SLt,
-                lhs: Box::new(DirExpr::Var("a".to_owned())),
-                rhs: Box::new(DirExpr::Var("b".to_owned())),
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::SLt,
+                lhs: Box::new(PreHirExpr::Var("a".to_owned())),
+                rhs: Box::new(PreHirExpr::Var("b".to_owned())),
                 ty: NirType::Bool,
             },
             then_body: vec![],
@@ -3275,11 +3275,11 @@ mod tests {
 
     #[test]
     fn signed_compare_uses_constant_width_evidence() {
-        let body = vec![DirStmt::If {
-            cond: DirExpr::Binary {
-                op: DirBinaryOp::SLt,
-                lhs: Box::new(DirExpr::Var("a".to_owned())),
-                rhs: Box::new(DirExpr::Const(
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::SLt,
+                lhs: Box::new(PreHirExpr::Var("a".to_owned())),
+                rhs: Box::new(PreHirExpr::Const(
                     0,
                     NirType::Int {
                         bits: 16,
@@ -3305,7 +3305,7 @@ mod tests {
     /// Return(Var("r")) + known return_type → r gets return_type
     #[test]
     fn infers_type_from_return_context() {
-        let body = vec![DirStmt::Return(Some(DirExpr::Var("r".to_owned())))];
+        let body = vec![PreHirStmt::Return(Some(PreHirExpr::Var("r".to_owned())))];
         let ret_ty = NirType::Int {
             bits: 32,
             signed: true,
@@ -3322,19 +3322,19 @@ mod tests {
             signed: false,
         };
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("p".to_owned()),
-                rhs: DirExpr::Var("param_1".to_owned()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("p".to_owned()),
+                rhs: PreHirExpr::Var("param_1".to_owned()),
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Deref {
-                    ptr: Box::new(DirExpr::Var("p".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("p".to_owned())),
                     ty: uint_ty.clone(),
                 },
-                rhs: DirExpr::Const(7, uint_ty.clone()),
+                rhs: PreHirExpr::Const(7, uint_ty.clone()),
             },
         ];
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "copy_ptr".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![make_typed_binding(
@@ -3366,29 +3366,29 @@ mod tests {
             signed: false,
         };
         let body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("p".to_owned()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Add,
-                    lhs: Box::new(DirExpr::Var("param_1".to_owned())),
-                    rhs: Box::new(DirExpr::Binary {
-                        op: DirBinaryOp::Mul,
-                        lhs: Box::new(DirExpr::Var("idx".to_owned())),
-                        rhs: Box::new(DirExpr::Const(4, u64_ty.clone())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("p".to_owned()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("param_1".to_owned())),
+                    rhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Mul,
+                        lhs: Box::new(PreHirExpr::Var("idx".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(4, u64_ty.clone())),
                         ty: u64_ty.clone(),
                     }),
                     ty: u64_ty,
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Deref {
-                    ptr: Box::new(DirExpr::Var("p".to_owned())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("p".to_owned())),
                     ty: uint_ty.clone(),
                 },
-                rhs: DirExpr::Const(7, uint_ty.clone()),
+                rhs: PreHirExpr::Const(7, uint_ty.clone()),
             },
         ];
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "scaled_ptr".to_owned(),
             int_param_offsets: Vec::new(),
             params: vec![make_typed_binding(

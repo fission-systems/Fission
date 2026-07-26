@@ -18,12 +18,12 @@ use crate::HashMap;
 type LoadCache = HashMap<AliasKey, String>;
 
 /// Apply RLE to the function.  Returns `true` if any `Load` was replaced.
-pub fn apply_redundant_load_elimination(func: &mut DirFunction) -> bool {
+pub fn apply_redundant_load_elimination(func: &mut PreHirFunction) -> bool {
     let mut cache = LoadCache::default();
     rle_stmts(&mut func.body, &mut cache)
 }
 
-fn rle_stmts(stmts: &mut Vec<DirStmt>, cache: &mut LoadCache) -> bool {
+fn rle_stmts(stmts: &mut Vec<PreHirStmt>, cache: &mut LoadCache) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         if rle_stmt(stmt, cache) {
@@ -33,35 +33,35 @@ fn rle_stmts(stmts: &mut Vec<DirStmt>, cache: &mut LoadCache) -> bool {
     changed
 }
 
-fn rle_stmt(stmt: &mut DirStmt, cache: &mut LoadCache) -> bool {
+fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             rewrite_loads_in_expr(rhs, cache, &mut changed);
             match lhs {
-                DirLValue::Deref { ptr, ty } => {
+                PreHirLValue::Deref { ptr, ty } => {
                     let key = alias_key_for_pointer_expr(ptr, nir_byte_size(ty));
                     if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                     {
                         cache.remove(&key);
                     }
                 }
-                DirLValue::FieldAccess { base, ty, .. } => {
+                PreHirLValue::FieldAccess { base, ty, .. } => {
                     let key = alias_key_for_pointer_expr(base, nir_byte_size(ty));
                     if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                     {
                         cache.remove(&key);
                     }
                 }
-                DirLValue::Index { base, elem_ty, .. } => {
+                PreHirLValue::Index { base, elem_ty, .. } => {
                     let key = alias_key_for_pointer_expr(base, nir_byte_size(elem_ty));
                     if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                     {
                         cache.remove(&key);
                     }
                 }
-                DirLValue::Var(name) => {
-                    if let DirExpr::Load { ptr, ty } = &*rhs {
+                PreHirLValue::Var(name) => {
+                    if let PreHirExpr::Load { ptr, ty } = &*rhs {
                         let key = alias_key_for_pointer_expr(ptr.as_ref(), nir_byte_size(&ty));
                         if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
                         {
@@ -71,14 +71,14 @@ fn rle_stmt(stmt: &mut DirStmt, cache: &mut LoadCache) -> bool {
                 }
             }
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             rewrite_loads_in_expr(va_list, cache, &mut changed);
         }
-        DirStmt::Expr(e) | DirStmt::Return(Some(e)) => {
+        PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => {
             rewrite_loads_in_expr(e, cache, &mut changed);
         }
-        DirStmt::Return(None) => {}
-        DirStmt::If {
+        PreHirStmt::Return(None) => {}
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -94,7 +94,7 @@ fn rle_stmt(stmt: &mut DirStmt, cache: &mut LoadCache) -> bool {
             }
             cache.clear();
         }
-        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
             rewrite_loads_in_expr(cond, cache, &mut changed);
             let mut inner = LoadCache::default();
             if rle_stmts(body, &mut inner) {
@@ -102,7 +102,7 @@ fn rle_stmt(stmt: &mut DirStmt, cache: &mut LoadCache) -> bool {
             }
             cache.clear();
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -127,7 +127,7 @@ fn rle_stmt(stmt: &mut DirStmt, cache: &mut LoadCache) -> bool {
             }
             cache.clear();
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -145,52 +145,52 @@ fn rle_stmt(stmt: &mut DirStmt, cache: &mut LoadCache) -> bool {
             }
             cache.clear();
         }
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             if rle_stmts(body, cache) {
                 changed = true;
             }
         }
-        DirStmt::Label(_) | DirStmt::Goto(_) | DirStmt::Break | DirStmt::Continue => {}
+        PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {}
     }
     changed
 }
 
-fn rewrite_loads_in_expr(expr: &mut DirExpr, cache: &LoadCache, changed: &mut bool) {
+fn rewrite_loads_in_expr(expr: &mut PreHirExpr, cache: &LoadCache, changed: &mut bool) {
     match expr {
-        DirExpr::Load { ptr, ty } => {
+        PreHirExpr::Load { ptr, ty } => {
             let size = nir_byte_size(&ty);
             let key = alias_key_for_pointer_expr(ptr, size);
             if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
             {
                 if let Some(v) = cache.get(&key) {
-                    *expr = DirExpr::Var(v.clone());
+                    *expr = PreHirExpr::Var(v.clone());
                     *changed = true;
                     return;
                 }
             }
             rewrite_loads_in_expr(ptr.as_mut(), cache, changed);
         }
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             rewrite_loads_in_expr(inner.as_mut(), cache, changed)
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             rewrite_loads_in_expr(lhs.as_mut(), cache, changed);
             rewrite_loads_in_expr(rhs.as_mut(), cache, changed);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 rewrite_loads_in_expr(a, cache, changed);
             }
         }
-        DirExpr::PtrOffset { base, .. } => rewrite_loads_in_expr(base.as_mut(), cache, changed),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::PtrOffset { base, .. } => rewrite_loads_in_expr(base.as_mut(), cache, changed),
+        PreHirExpr::Index { base, index, .. } => {
             rewrite_loads_in_expr(base.as_mut(), cache, changed);
             rewrite_loads_in_expr(index.as_mut(), cache, changed);
         }
-        DirExpr::AggregateCopy { src, .. } => rewrite_loads_in_expr(src.as_mut(), cache, changed),
-        DirExpr::Select {
+        PreHirExpr::AggregateCopy { src, .. } => rewrite_loads_in_expr(src.as_mut(), cache, changed),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -200,6 +200,6 @@ fn rewrite_loads_in_expr(expr: &mut DirExpr, cache: &LoadCache, changed: &mut bo
             rewrite_loads_in_expr(then_expr.as_mut(), cache, changed);
             rewrite_loads_in_expr(else_expr.as_mut(), cache, changed);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 }

@@ -7,11 +7,11 @@
 /// This pass connects the existing `fission-signatures` Windows API database
 /// to the Fission type inference pipeline:
 ///
-/// 1. Walk every `DirStmt::Assign { rhs: Call { target, args } }` and
-///    `DirStmt::Expr(Call { target, args })`.
+/// 1. Walk every `PreHirStmt::Assign { rhs: Call { target, args } }` and
+///    `PreHirStmt::Expr(Call { target, args })`.
 /// 2. Look up `target` in the signatures API type provider.
 /// 3. For the return value: if there is a receiver binding (the lhs `Var` of
-///    the Assign), update `DirBinding.ty` to the resolved return type.
+///    the Assign), update `PreHirBinding.ty` to the resolved return type.
 /// 4. For each argument: if the argument is a `Var(x)` and the corresponding
 ///    parameter has a concrete type, update the binding for `x`.
 /// 5. Indirect/unknown calls (target not in DB) are silently skipped.
@@ -42,7 +42,7 @@
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
-use fission_midend_dir::util::rename_vars_in_stmts;
+use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_midend_core::wave_stats::{
     add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
     add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
@@ -211,7 +211,7 @@ fn resolve_return_ty(ret_type_str: &str) -> Option<NirType> {
 /// Follows the same monotone strengthening logic as `use_type_infer`:
 /// Unknown can be replaced by anything; a concrete type is only replaced if the
 /// candidate is strictly more informative (pointer vs. integer, or known vs. unknown).
-fn tighten_binding_ty(binding: &mut DirBinding, candidate: &NirType) -> bool {
+fn tighten_binding_ty(binding: &mut PreHirBinding, candidate: &NirType) -> bool {
     if binding.ty == *candidate {
         return false;
     }
@@ -284,7 +284,7 @@ fn is_generic_binding_name(name: &str) -> bool {
     )
 }
 
-fn is_renameable_generic_binding(binding: &DirBinding) -> bool {
+fn is_renameable_generic_binding(binding: &PreHirBinding) -> bool {
     is_generic_binding_name(&binding.name)
         && !matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_)))
 }
@@ -331,7 +331,7 @@ fn register_name_candidate(
 }
 
 fn apply_binding_surface_renames(
-    func: &mut DirFunction,
+    func: &mut PreHirFunction,
     rename_candidates: HashMap<String, String>,
     conflicts: &HashSet<String>,
 ) -> usize {
@@ -373,23 +373,23 @@ fn apply_binding_surface_renames(
     renames.len()
 }
 
-fn rewrite_call_targets_stmts(stmts: &mut [DirStmt], rewrites: &HashMap<String, String>) -> bool {
+fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<String, String>) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
+            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
                 changed |= rewrite_call_targets_expr(rhs, rewrites);
             }
-            DirStmt::VaStart { va_list, .. } => {
+            PreHirStmt::VaStart { va_list, .. } => {
                 changed |= rewrite_call_targets_expr(va_list, rewrites)
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 changed |= rewrite_call_targets_stmts(body, rewrites);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -400,7 +400,7 @@ fn rewrite_call_targets_stmts(stmts: &mut [DirStmt], rewrites: &HashMap<String, 
                 }
                 changed |= rewrite_call_targets_stmts(default, rewrites);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -409,20 +409,20 @@ fn rewrite_call_targets_stmts(stmts: &mut [DirStmt], rewrites: &HashMap<String, 
                 changed |= rewrite_call_targets_stmts(then_body, rewrites);
                 changed |= rewrite_call_targets_stmts(else_body, rewrites);
             }
-            DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(None)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     changed
 }
 
-fn rewrite_call_targets_expr(expr: &mut DirExpr, rewrites: &HashMap<String, String>) -> bool {
+fn rewrite_call_targets_expr(expr: &mut PreHirExpr, rewrites: &HashMap<String, String>) -> bool {
     let mut changed = false;
     match expr {
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             if let Some(replacement) = rewrites.get(target) {
                 *target = replacement.clone();
                 changed = true;
@@ -431,23 +431,23 @@ fn rewrite_call_targets_expr(expr: &mut DirExpr, rewrites: &HashMap<String, Stri
                 changed |= rewrite_call_targets_expr(arg, rewrites);
             }
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= rewrite_call_targets_expr(lhs, rewrites);
             changed |= rewrite_call_targets_expr(rhs, rewrites);
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
             changed |= rewrite_call_targets_expr(expr, rewrites);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= rewrite_call_targets_expr(base, rewrites);
             changed |= rewrite_call_targets_expr(index, rewrites);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -457,7 +457,7 @@ fn rewrite_call_targets_expr(expr: &mut DirExpr, rewrites: &HashMap<String, Stri
             changed |= rewrite_call_targets_expr(then_expr, rewrites);
             changed |= rewrite_call_targets_expr(else_expr, rewrites);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
     changed
 }
@@ -536,7 +536,7 @@ fn is_known_variadic_runtime_symbol(target: &str) -> bool {
 /// resolves a constant matching `options.global_names` -- which
 /// `NirRenderOptions::from_loaded_binary` (`fission-midend-core/src/ir/
 /// options.rs`) pre-populates with every extracted `.rdata` string,
-/// already wrapped in quotes and escaped -- to `DirExpr::AddressOfGlobal(
+/// already wrapped in quotes and escaped -- to `PreHirExpr::AddressOfGlobal(
 /// "\"...\"")`. [`arg_var_name`] (used by [`collect_callsites_stmts`]
 /// already, for the unrelated existing per-parameter typing above) already
 /// captures `AddressOfGlobal` names verbatim, so the quoted format-string
@@ -552,7 +552,7 @@ fn is_known_variadic_runtime_symbol(target: &str) -> bool {
 /// `char*`, not `wchar_t*`, per the ANSI convention -- a correctness trap
 /// not worth the risk without a dedicated fixture to validate against).
 fn apply_variadic_printf_format_string_arg_types(
-    func: &mut DirFunction,
+    func: &mut PreHirFunction,
     callsites: &[(Option<String>, String, Vec<Option<String>>)],
 ) -> bool {
     // The call-site argument variable is often just a same-block temp
@@ -615,7 +615,7 @@ fn apply_variadic_printf_format_string_arg_types(
 /// (its conservatism is appropriate for its many other, less-certain
 /// callers); this local override is scoped to just this one, narrow,
 /// high-confidence case.
-fn apply_variadic_printf_arg_ty(binding: &mut DirBinding, candidate: &NirType) -> bool {
+fn apply_variadic_printf_arg_ty(binding: &mut PreHirBinding, candidate: &NirType) -> bool {
     if tighten_binding_ty(binding, candidate) {
         return true;
     }
@@ -632,7 +632,7 @@ fn apply_variadic_printf_arg_ty(binding: &mut DirBinding, candidate: &NirType) -
 /// transitive copy-source too, so a refinement on a call-site temp
 /// reaches the real originating parameter/local it was copied from.
 fn apply_variadic_printf_arg_ty_transitively(
-    func: &mut DirFunction,
+    func: &mut PreHirFunction,
     copy_sources: &HashMap<String, String>,
     arg_var: &str,
     ty: &NirType,
@@ -657,19 +657,19 @@ fn apply_variadic_printf_arg_ty_transitively(
 /// Single-hop `target = source` (bare `Var`-to-`Var`) copy map, used by
 /// [`apply_variadic_printf_arg_ty_transitively`] to trace a call-site
 /// argument temp back to its real originating binding.
-fn collect_copy_sources(stmts: &[DirStmt], out: &mut HashMap<String, String>) {
+fn collect_copy_sources(stmts: &[PreHirStmt], out: &mut HashMap<String, String>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(target),
-                rhs: DirExpr::Var(source),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(target),
+                rhs: PreHirExpr::Var(source),
             } => {
                 out.insert(target.clone(), source.clone());
             }
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 collect_copy_sources(body, out);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -677,7 +677,7 @@ fn collect_copy_sources(stmts: &[DirStmt], out: &mut HashMap<String, String>) {
                 collect_copy_sources(then_body, out);
                 collect_copy_sources(else_body, out);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
@@ -688,7 +688,7 @@ fn collect_copy_sources(stmts: &[DirStmt], out: &mut HashMap<String, String>) {
                 }
                 collect_copy_sources(body, out);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_copy_sources(&case.body, out);
                 }
@@ -853,7 +853,7 @@ fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirType>> {
 /// updates argument/receiver bindings with the resolved types.
 ///
 /// Returns `true` if any binding type was updated.
-pub fn apply_callsite_type_prop_pass(func: &mut DirFunction) -> bool {
+pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     // Build a lookup map from binding name to index in func.locals / func.params.
     let mut changed = false;
     let mut rename_candidates = HashMap::<String, String>::default();
@@ -1033,25 +1033,25 @@ fn exact_arity_for_target(
 }
 
 fn prune_known_api_call_args_stmts(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> usize {
     let mut pruned = 0usize;
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
+            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
                 pruned += prune_known_api_call_args_expr(rhs, summaries);
             }
-            DirStmt::VaStart { va_list, .. } => {
+            PreHirStmt::VaStart { va_list, .. } => {
                 pruned += prune_known_api_call_args_expr(va_list, summaries);
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 pruned += prune_known_api_call_args_stmts(body, summaries);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -1062,7 +1062,7 @@ fn prune_known_api_call_args_stmts(
                 }
                 pruned += prune_known_api_call_args_stmts(default, summaries);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -1071,23 +1071,23 @@ fn prune_known_api_call_args_stmts(
                 pruned += prune_known_api_call_args_stmts(then_body, summaries);
                 pruned += prune_known_api_call_args_stmts(else_body, summaries);
             }
-            DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(None)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     pruned
 }
 
 fn prune_known_api_call_args_expr(
-    expr: &mut DirExpr,
+    expr: &mut PreHirExpr,
     summaries: &indexmap::IndexMap<String, CallSummary>,
 ) -> usize {
     let mut pruned = 0usize;
     match expr {
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             for arg in args.iter_mut() {
                 pruned += prune_known_api_call_args_expr(arg, summaries);
             }
@@ -1099,23 +1099,23 @@ fn prune_known_api_call_args_expr(
                 pruned += removed;
             }
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             pruned += prune_known_api_call_args_expr(lhs, summaries);
             pruned += prune_known_api_call_args_expr(rhs, summaries);
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
             pruned += prune_known_api_call_args_expr(expr, summaries);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             pruned += prune_known_api_call_args_expr(base, summaries);
             pruned += prune_known_api_call_args_expr(index, summaries);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1125,28 +1125,28 @@ fn prune_known_api_call_args_expr(
             pruned += prune_known_api_call_args_expr(then_expr, summaries);
             pruned += prune_known_api_call_args_expr(else_expr, summaries);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
     pruned
 }
 
-fn prune_self_call_args_stmts(stmts: &mut [DirStmt], func_name: &str, arity: usize) -> usize {
+fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: usize) -> usize {
     let mut pruned = 0usize;
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
+            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
                 pruned += prune_self_call_args_expr(rhs, func_name, arity);
             }
-            DirStmt::VaStart { va_list, .. } => {
+            PreHirStmt::VaStart { va_list, .. } => {
                 pruned += prune_self_call_args_expr(va_list, func_name, arity);
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 pruned += prune_self_call_args_stmts(body, func_name, arity);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -1157,7 +1157,7 @@ fn prune_self_call_args_stmts(stmts: &mut [DirStmt], func_name: &str, arity: usi
                 }
                 pruned += prune_self_call_args_stmts(default, func_name, arity);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -1166,20 +1166,20 @@ fn prune_self_call_args_stmts(stmts: &mut [DirStmt], func_name: &str, arity: usi
                 pruned += prune_self_call_args_stmts(then_body, func_name, arity);
                 pruned += prune_self_call_args_stmts(else_body, func_name, arity);
             }
-            DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(None)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     pruned
 }
 
-fn prune_self_call_args_expr(expr: &mut DirExpr, func_name: &str, arity: usize) -> usize {
+fn prune_self_call_args_expr(expr: &mut PreHirExpr, func_name: &str, arity: usize) -> usize {
     let mut pruned = 0usize;
     match expr {
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             for arg in args.iter_mut() {
                 pruned += prune_self_call_args_expr(arg, func_name, arity);
             }
@@ -1189,23 +1189,23 @@ fn prune_self_call_args_expr(expr: &mut DirExpr, func_name: &str, arity: usize) 
                 pruned += removed;
             }
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             pruned += prune_self_call_args_expr(lhs, func_name, arity);
             pruned += prune_self_call_args_expr(rhs, func_name, arity);
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
             pruned += prune_self_call_args_expr(expr, func_name, arity);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             pruned += prune_self_call_args_expr(base, func_name, arity);
             pruned += prune_self_call_args_expr(index, func_name, arity);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1215,30 +1215,30 @@ fn prune_self_call_args_expr(expr: &mut DirExpr, func_name: &str, arity: usize) 
             pruned += prune_self_call_args_expr(then_expr, func_name, arity);
             pruned += prune_self_call_args_expr(else_expr, func_name, arity);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
     pruned
 }
 
 fn binding_by_name_mut<'a>(
-    bindings: &'a mut Vec<DirBinding>,
+    bindings: &'a mut Vec<PreHirBinding>,
     name: &str,
-) -> Option<&'a mut DirBinding> {
+) -> Option<&'a mut PreHirBinding> {
     bindings.iter_mut().find(|b| b.name == name)
 }
 
 /// Extract the plain variable name from a Call argument expression (if it's
 /// `Var(x)` or `Cast(_, Var(x))`).  Returns `None` for complex expressions.
-fn arg_var_name(expr: &DirExpr) -> Option<String> {
+fn arg_var_name(expr: &PreHirExpr) -> Option<String> {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => Some(name.clone()),
-        DirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => Some(name.clone()),
+        PreHirExpr::Cast { expr: inner, .. } => arg_var_name(inner),
         _ => None,
     }
 }
 
 fn collect_callsites_stmts(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     out: &mut Vec<(Option<String>, String, Vec<Option<String>>)>,
 ) {
     for stmt in stmts {
@@ -1247,14 +1247,14 @@ fn collect_callsites_stmts(
 }
 
 fn collect_callsites_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     out: &mut Vec<(Option<String>, String, Vec<Option<String>>)>,
 ) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
-            if let DirExpr::Call { target, args, .. } = rhs {
+        PreHirStmt::Assign { lhs, rhs } => {
+            if let PreHirExpr::Call { target, args, .. } = rhs {
                 let recv = match lhs {
-                    DirLValue::Var(name) => Some(name.clone()),
+                    PreHirLValue::Var(name) => Some(name.clone()),
                     _ => None,
                 };
                 let arg_vars = args.iter().map(arg_var_name).collect();
@@ -1263,15 +1263,15 @@ fn collect_callsites_stmt(
             // Also recurse in case call appears inside a more complex rhs.
             collect_callsites_expr(rhs, out);
         }
-        DirStmt::Expr(expr) => {
-            if let DirExpr::Call { target, args, .. } = expr {
+        PreHirStmt::Expr(expr) => {
+            if let PreHirExpr::Call { target, args, .. } = expr {
                 let arg_vars = args.iter().map(arg_var_name).collect();
                 out.push((None, target.clone(), arg_vars));
             }
         }
-        DirStmt::Return(Some(expr)) => collect_callsites_expr(expr, out),
-        DirStmt::Block(body) => collect_callsites_stmts(body, out),
-        DirStmt::If {
+        PreHirStmt::Return(Some(expr)) => collect_callsites_expr(expr, out),
+        PreHirStmt::Block(body) => collect_callsites_stmts(body, out),
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1280,11 +1280,11 @@ fn collect_callsites_stmt(
             collect_callsites_stmts(then_body, out);
             collect_callsites_stmts(else_body, out);
         }
-        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
             collect_callsites_expr(cond, out);
             collect_callsites_stmts(body, out);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -1301,7 +1301,7 @@ fn collect_callsites_stmt(
             }
             collect_callsites_stmts(body, out);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -1317,30 +1317,30 @@ fn collect_callsites_stmt(
 }
 
 fn collect_callsites_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     out: &mut Vec<(Option<String>, String, Vec<Option<String>>)>,
 ) {
     match expr {
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             let arg_vars = args.iter().map(arg_var_name).collect();
             out.push((None, target.clone(), arg_vars));
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             collect_callsites_expr(lhs, out);
             collect_callsites_expr(rhs, out);
         }
-        DirExpr::Cast { expr: inner, .. } | DirExpr::Unary { expr: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. } | PreHirExpr::Unary { expr: inner, .. } => {
             collect_callsites_expr(inner, out);
         }
-        DirExpr::Load { ptr, .. } => collect_callsites_expr(ptr, out),
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::Load { ptr, .. } => collect_callsites_expr(ptr, out),
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             collect_callsites_expr(base, out)
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             collect_callsites_expr(base, out);
             collect_callsites_expr(index, out);
         }
-        DirExpr::AggregateCopy { src, .. } => collect_callsites_expr(src, out),
+        PreHirExpr::AggregateCopy { src, .. } => collect_callsites_expr(src, out),
         _ => {}
     }
 }
@@ -1352,8 +1352,8 @@ mod tests {
     // prelude via parent
     use fission_core::CallingConvention;
 
-    fn unknown_binding(name: &str, origin: Option<NirBindingOrigin>) -> DirBinding {
-        DirBinding {
+    fn unknown_binding(name: &str, origin: Option<NirBindingOrigin>) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_string(),
             ty: NirType::Unknown,
             surface_type_name: None,
@@ -1364,7 +1364,7 @@ mod tests {
 
     #[test]
     fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![unknown_binding(
@@ -1377,11 +1377,11 @@ mod tests {
             )],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "GetWindowRect".to_string(),
                 args: vec![
-                    DirExpr::Var("param_1".to_string()),
-                    DirExpr::Var("local_2".to_string()),
+                    PreHirExpr::Var("param_1".to_string()),
+                    PreHirExpr::Var("local_2".to_string()),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1399,14 +1399,14 @@ mod tests {
 
     #[test]
     fn callsite_type_prop_rewrites_target_through_wrapper_summary() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "wrapper_foo".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -1454,7 +1454,7 @@ mod tests {
 
         assert!(apply_callsite_type_prop_pass(&mut func));
         match &func.body[0] {
-            DirStmt::Expr(DirExpr::Call { target, .. }) => {
+            PreHirStmt::Expr(PreHirExpr::Call { target, .. }) => {
                 assert_eq!(target, "MessageBoxA");
             }
             other => panic!("unexpected stmt: {other:?}"),
@@ -1464,7 +1464,7 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_extra_args_only_for_exact_api_signature() {
         reset_normalize_wave_stats();
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
@@ -1472,24 +1472,24 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                DirStmt::Expr(DirExpr::Call {
+                PreHirStmt::Expr(PreHirExpr::Call {
                     target: "MessageBoxA".to_string(),
                     args: vec![
-                        DirExpr::Const(0, NirType::Unknown),
-                        DirExpr::Const(1, NirType::Unknown),
-                        DirExpr::Const(2, NirType::Unknown),
-                        DirExpr::Const(3, NirType::Unknown),
-                        DirExpr::Const(4, NirType::Unknown),
-                        DirExpr::Const(5, NirType::Unknown),
+                        PreHirExpr::Const(0, NirType::Unknown),
+                        PreHirExpr::Const(1, NirType::Unknown),
+                        PreHirExpr::Const(2, NirType::Unknown),
+                        PreHirExpr::Const(3, NirType::Unknown),
+                        PreHirExpr::Const(4, NirType::Unknown),
+                        PreHirExpr::Const(5, NirType::Unknown),
                     ],
                     ty: NirType::Unknown,
                 }),
-                DirStmt::Expr(DirExpr::Call {
+                PreHirStmt::Expr(PreHirExpr::Call {
                     target: "unresolved_target".to_string(),
                     args: vec![
-                        DirExpr::Const(0, NirType::Unknown),
-                        DirExpr::Const(1, NirType::Unknown),
-                        DirExpr::Const(2, NirType::Unknown),
+                        PreHirExpr::Const(0, NirType::Unknown),
+                        PreHirExpr::Const(1, NirType::Unknown),
+                        PreHirExpr::Const(2, NirType::Unknown),
                     ],
                     ty: NirType::Unknown,
                 }),
@@ -1508,11 +1508,11 @@ mod tests {
         assert_eq!(stats.call_prototype_signature_missing_count, 0);
         assert_eq!(stats.call_prototype_wrapper_resolved_count, 0);
         match &func.body[0] {
-            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 4),
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => assert_eq!(args.len(), 4),
             other => panic!("unexpected first stmt: {other:?}"),
         }
         match &func.body[1] {
-            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 3),
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => assert_eq!(args.len(), 3),
             other => panic!("unexpected second stmt: {other:?}"),
         }
     }
@@ -1520,22 +1520,22 @@ mod tests {
     #[test]
     fn callsite_type_prop_keeps_extra_args_for_known_variadic_runtime_symbol() {
         reset_normalize_wave_stats();
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "printf".to_string(),
                 args: vec![
-                    DirExpr::Const(0, NirType::Unknown),
-                    DirExpr::Const(1, NirType::Unknown),
-                    DirExpr::Const(2, NirType::Unknown),
-                    DirExpr::Const(3, NirType::Unknown),
-                    DirExpr::Const(4, NirType::Unknown),
-                    DirExpr::Const(5, NirType::Unknown),
+                    PreHirExpr::Const(0, NirType::Unknown),
+                    PreHirExpr::Const(1, NirType::Unknown),
+                    PreHirExpr::Const(2, NirType::Unknown),
+                    PreHirExpr::Const(3, NirType::Unknown),
+                    PreHirExpr::Const(4, NirType::Unknown),
+                    PreHirExpr::Const(5, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1578,7 +1578,7 @@ mod tests {
         let stats = take_normalize_wave_stats();
         assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 0);
         match &func.body[0] {
-            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 6),
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => assert_eq!(args.len(), 6),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }
@@ -1608,18 +1608,18 @@ mod tests {
             }
         }
 
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![
-                DirBinding {
+                PreHirBinding {
                     name: "param_1".to_string(),
                     ty: generic_uint(32),
                     surface_type_name: None,
                     origin: Some(NirBindingOrigin::ParamIndex(0)),
                     initializer: None,
                 },
-                DirBinding {
+                PreHirBinding {
                     name: "param_2".to_string(),
                     ty: generic_uint(64),
                     surface_type_name: None,
@@ -1628,14 +1628,14 @@ mod tests {
                 },
             ],
             locals: vec![
-                DirBinding {
+                PreHirBinding {
                     name: "arg_tmp".to_string(),
                     ty: generic_uint(32),
                     surface_type_name: None,
                     origin: Some(NirBindingOrigin::Temp),
                     initializer: None,
                 },
-                DirBinding {
+                PreHirBinding {
                     name: "arg_tmp2".to_string(),
                     ty: generic_uint(64),
                     surface_type_name: None,
@@ -1646,20 +1646,20 @@ mod tests {
             return_type: NirType::Unknown,
             surface_return_type_name: None,
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("arg_tmp".to_string()),
-                    rhs: DirExpr::Var("param_1".to_string()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("arg_tmp".to_string()),
+                    rhs: PreHirExpr::Var("param_1".to_string()),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("arg_tmp2".to_string()),
-                    rhs: DirExpr::Var("param_2".to_string()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("arg_tmp2".to_string()),
+                    rhs: PreHirExpr::Var("param_2".to_string()),
                 },
-                DirStmt::Expr(DirExpr::Call {
+                PreHirStmt::Expr(PreHirExpr::Call {
                     target: "printf".to_string(),
                     args: vec![
-                        DirExpr::AddressOfGlobal("\"value=%d name=%s\\n\"".to_string()),
-                        DirExpr::Var("arg_tmp".to_string()),
-                        DirExpr::Var("arg_tmp2".to_string()),
+                        PreHirExpr::AddressOfGlobal("\"value=%d name=%s\\n\"".to_string()),
+                        PreHirExpr::Var("arg_tmp".to_string()),
+                        PreHirExpr::Var("arg_tmp2".to_string()),
                     ],
                     ty: NirType::Unknown,
                 }),
@@ -1696,10 +1696,10 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_self_recursive_args_to_function_arity() {
         reset_normalize_wave_stats();
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "fib".to_string(),
             int_param_offsets: Vec::new(),
-            params: vec![DirBinding {
+            params: vec![PreHirBinding {
                 name: "param_1".to_string(),
                 ty: NirType::Int {
                     bits: 32,
@@ -1712,13 +1712,13 @@ mod tests {
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "fib".to_string(),
                 args: vec![
-                    DirExpr::Const(1, NirType::Unknown),
-                    DirExpr::Const(2, NirType::Unknown),
-                    DirExpr::Const(3, NirType::Unknown),
-                    DirExpr::Const(4, NirType::Unknown),
+                    PreHirExpr::Const(1, NirType::Unknown),
+                    PreHirExpr::Const(2, NirType::Unknown),
+                    PreHirExpr::Const(3, NirType::Unknown),
+                    PreHirExpr::Const(4, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1734,7 +1734,7 @@ mod tests {
         assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 0);
         assert_eq!(stats.call_signature_refined_count, 3);
         match &func.body[0] {
-            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }
@@ -1742,21 +1742,21 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_wrapper_args_after_resolving_import_summary() {
         reset_normalize_wave_stats();
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "wrapper_message_box".to_string(),
                 args: vec![
-                    DirExpr::Const(0, NirType::Unknown),
-                    DirExpr::Const(1, NirType::Unknown),
-                    DirExpr::Const(2, NirType::Unknown),
-                    DirExpr::Const(3, NirType::Unknown),
-                    DirExpr::Const(4, NirType::Unknown),
+                    PreHirExpr::Const(0, NirType::Unknown),
+                    PreHirExpr::Const(1, NirType::Unknown),
+                    PreHirExpr::Const(2, NirType::Unknown),
+                    PreHirExpr::Const(3, NirType::Unknown),
+                    PreHirExpr::Const(4, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1808,7 +1808,7 @@ mod tests {
         assert_eq!(stats.call_prototype_signature_missing_count, 0);
         assert_eq!(stats.call_prototype_unknown_target_kept_count, 0);
         match &func.body[0] {
-            DirStmt::Expr(DirExpr::Call { target, args, .. }) => {
+            PreHirStmt::Expr(PreHirExpr::Call { target, args, .. }) => {
                 assert_eq!(target, "MessageBoxA");
                 assert_eq!(args.len(), 4);
             }
@@ -1819,19 +1819,19 @@ mod tests {
     #[test]
     fn callsite_type_prop_prunes_locked_internal_callee_arity() {
         reset_normalize_wave_stats();
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "recursive_fib".to_string(),
                 args: vec![
-                    DirExpr::Const(0, NirType::Unknown),
-                    DirExpr::Const(1, NirType::Unknown),
-                    DirExpr::Const(2, NirType::Unknown),
+                    PreHirExpr::Const(0, NirType::Unknown),
+                    PreHirExpr::Const(1, NirType::Unknown),
+                    PreHirExpr::Const(2, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1874,7 +1874,7 @@ mod tests {
         let stats = take_normalize_wave_stats();
         assert_eq!(stats.call_prototype_exact_api_arity_pruned_count, 2);
         match &func.body[0] {
-            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => assert_eq!(args.len(), 1),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }
@@ -1882,18 +1882,18 @@ mod tests {
     #[test]
     fn callsite_type_prop_keeps_args_when_summary_signature_missing() {
         reset_normalize_wave_stats();
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "known_without_signature".to_string(),
                 args: vec![
-                    DirExpr::Const(0, NirType::Unknown),
-                    DirExpr::Const(1, NirType::Unknown),
+                    PreHirExpr::Const(0, NirType::Unknown),
+                    PreHirExpr::Const(1, NirType::Unknown),
                 ],
                 ty: NirType::Unknown,
             })],
@@ -1939,7 +1939,7 @@ mod tests {
         assert_eq!(stats.call_prototype_signature_missing_count, 1);
         assert_eq!(stats.call_prototype_unknown_target_kept_count, 0);
         match &func.body[0] {
-            DirStmt::Expr(DirExpr::Call { args, .. }) => assert_eq!(args.len(), 2),
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => assert_eq!(args.len(), 2),
             other => panic!("unexpected stmt: {other:?}"),
         }
     }

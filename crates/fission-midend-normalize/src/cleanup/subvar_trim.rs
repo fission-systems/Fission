@@ -1,9 +1,9 @@
 use crate::prelude::*;
 use crate::analysis::defuse::DefUseMap;
-use fission_midend_dir::util::expr_type;
+use fission_midend_prehir::util::expr_type;
 use crate::HashMap;
 
-pub fn apply_subvar_trim_pass(func: &mut DirFunction) -> bool {
+pub fn apply_subvar_trim_pass(func: &mut PreHirFunction) -> bool {
     let mut assignments = HashMap::default();
     find_all_assignments(&func.body, &mut assignments);
 
@@ -30,25 +30,25 @@ fn int_type_bits(ty: &NirType) -> Option<u32> {
     }
 }
 
-fn get_expr_type(expr: &DirExpr, local_types: &HashMap<String, NirType>) -> NirType {
+fn get_expr_type(expr: &PreHirExpr, local_types: &HashMap<String, NirType>) -> NirType {
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             if let Some(ty) = local_types.get(name) {
                 ty.clone()
             } else {
                 NirType::Unknown
             }
         }
-        DirExpr::Cast { ty, .. } => ty.clone(),
+        PreHirExpr::Cast { ty, .. } => ty.clone(),
         _ => expr_type(expr),
     }
 }
 
-fn find_all_assignments(stmts: &[DirStmt], assignments: &mut HashMap<String, Vec<DirExpr>>) {
+fn find_all_assignments(stmts: &[PreHirStmt], assignments: &mut HashMap<String, Vec<PreHirExpr>>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 rhs,
             } => {
                 assignments
@@ -56,10 +56,10 @@ fn find_all_assignments(stmts: &[DirStmt], assignments: &mut HashMap<String, Vec
                     .or_default()
                     .push(rhs.clone());
             }
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 find_all_assignments(body, assignments);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -70,7 +70,7 @@ fn find_all_assignments(stmts: &[DirStmt], assignments: &mut HashMap<String, Vec
                 }
                 find_all_assignments(body, assignments);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -78,7 +78,7 @@ fn find_all_assignments(stmts: &[DirStmt], assignments: &mut HashMap<String, Vec
                 find_all_assignments(then_body, assignments);
                 find_all_assignments(else_body, assignments);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     find_all_assignments(&case.body, assignments);
                 }
@@ -90,8 +90,8 @@ fn find_all_assignments(stmts: &[DirStmt], assignments: &mut HashMap<String, Vec
 }
 
 fn simplify_stmts(
-    stmts: &mut [DirStmt],
-    assignments: &HashMap<String, Vec<DirExpr>>,
+    stmts: &mut [PreHirStmt],
+    assignments: &HashMap<String, Vec<PreHirExpr>>,
     defuse: &DefUseMap,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
@@ -103,24 +103,24 @@ fn simplify_stmts(
 }
 
 fn simplify_stmt(
-    stmt: &mut DirStmt,
-    assignments: &HashMap<String, Vec<DirExpr>>,
+    stmt: &mut PreHirStmt,
+    assignments: &HashMap<String, Vec<PreHirExpr>>,
     defuse: &DefUseMap,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             changed |= simplify_expr(rhs, assignments, defuse, local_types);
             changed |= simplify_lvalue(lhs, assignments, defuse, local_types);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr, assignments, defuse, local_types);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body, assignments, defuse, local_types);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -137,7 +137,7 @@ fn simplify_stmt(
             }
             changed |= simplify_stmts(body, assignments, defuse, local_types);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -146,7 +146,7 @@ fn simplify_stmt(
             changed |= simplify_stmts(then_body, assignments, defuse, local_types);
             changed |= simplify_stmts(else_body, assignments, defuse, local_types);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -157,7 +157,7 @@ fn simplify_stmt(
             }
             changed |= simplify_stmts(default, assignments, defuse, local_types);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list, assignments, defuse, local_types);
         }
         _ => {}
@@ -166,22 +166,22 @@ fn simplify_stmt(
 }
 
 fn simplify_lvalue(
-    lval: &mut DirLValue,
-    assignments: &HashMap<String, Vec<DirExpr>>,
+    lval: &mut PreHirLValue,
+    assignments: &HashMap<String, Vec<PreHirExpr>>,
     defuse: &DefUseMap,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     match lval {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => {
             changed |= simplify_expr(ptr, assignments, defuse, local_types);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             changed |= simplify_expr(base, assignments, defuse, local_types);
             changed |= simplify_expr(index, assignments, defuse, local_types);
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             changed |= simplify_expr(base, assignments, defuse, local_types);
         }
     }
@@ -189,8 +189,8 @@ fn simplify_lvalue(
 }
 
 fn simplify_expr(
-    expr: &mut DirExpr,
-    assignments: &HashMap<String, Vec<DirExpr>>,
+    expr: &mut PreHirExpr,
+    assignments: &HashMap<String, Vec<PreHirExpr>>,
     defuse: &DefUseMap,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
@@ -198,24 +198,24 @@ fn simplify_expr(
 
     // Recurse first bottom-up
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= simplify_expr(inner, assignments, defuse, local_types);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= simplify_expr(lhs, assignments, defuse, local_types);
             changed |= simplify_expr(rhs, assignments, defuse, local_types);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= simplify_expr(arg, assignments, defuse, local_types);
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -225,29 +225,29 @@ fn simplify_expr(
             changed |= simplify_expr(then_expr, assignments, defuse, local_types);
             changed |= simplify_expr(else_expr, assignments, defuse, local_types);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= simplify_expr(base, assignments, defuse, local_types);
             changed |= simplify_expr(index, assignments, defuse, local_types);
         }
         _ => {}
     }
 
-    if let DirExpr::Cast {
+    if let PreHirExpr::Cast {
         ty: target_ty,
         expr: inner_cast_expr,
     } = expr
     {
-        if let DirExpr::Var(name) = inner_cast_expr.as_ref() {
+        if let PreHirExpr::Var(name) = inner_cast_expr.as_ref() {
             if let Some(exprs) = assignments.get(name) {
                 if exprs.len() == 1 {
                     let def_expr = &exprs[0];
                     let use_count = defuse.use_count.get(name).copied().unwrap_or(0);
-                    let is_safe_to_dup = matches!(def_expr, DirExpr::Var(_) | DirExpr::Const(_, _))
+                    let is_safe_to_dup = matches!(def_expr, PreHirExpr::Var(_) | PreHirExpr::Const(_, _))
                         || use_count <= 1;
 
                     if is_safe_to_dup {
                         // Pattern 1: (target_ty)(intermediate_ty)inner_expr  where inner_expr: target_ty
-                        if let DirExpr::Cast {
+                        if let PreHirExpr::Cast {
                             expr: inner_val, ..
                         } = def_expr
                         {
@@ -259,8 +259,8 @@ fn simplify_expr(
                         }
 
                         // Pattern 2: (target_ty)(val & mask)  where mask == full_mask(target_ty)
-                        if let DirExpr::Binary {
-                            op: DirBinaryOp::And,
+                        if let PreHirExpr::Binary {
+                            op: PreHirBinaryOp::And,
                             lhs: and_lhs,
                             rhs: and_rhs,
                             ..
@@ -269,9 +269,9 @@ fn simplify_expr(
                             let target_width = int_type_bits(target_ty);
                             if let Some(w) = target_width {
                                 let expected_mask = (1_i64 << w).wrapping_sub(1);
-                                if let DirExpr::Const(mask_val, _) = and_rhs.as_ref() {
+                                if let PreHirExpr::Const(mask_val, _) = and_rhs.as_ref() {
                                     if *mask_val == expected_mask {
-                                        *expr = DirExpr::Cast {
+                                        *expr = PreHirExpr::Cast {
                                             ty: target_ty.clone(),
                                             expr: and_lhs.clone(),
                                         };

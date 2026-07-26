@@ -60,7 +60,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn guarded_tail_trace_emit_snapshot(
         prefix: &str,
-        stmts: &[DirStmt],
+        stmts: &[PreHirStmt],
         max_lines: usize,
     ) {
         let take_n = stmts.len().min(max_lines.max(1));
@@ -97,8 +97,8 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn classify_must_emit_label_rejection(
-        _body: &[DirStmt],
-        _middle: &[DirStmt],
+        _body: &[PreHirStmt],
+        _middle: &[PreHirStmt],
         _if_idx: usize,
         _label_idx: usize,
         _label: &str,
@@ -185,7 +185,10 @@ impl<'a> PreviewBuilder<'a> {
         self.record_blockgraph_region_proof(&proof);
     }
 
-    pub(crate) fn mark_guarded_tail_witness_rejection(&mut self, reason: GuardedTailWitnessRejection) {
+    pub(crate) fn mark_guarded_tail_witness_rejection(
+        &mut self,
+        reason: GuardedTailWitnessRejection,
+    ) {
         match reason {
             GuardedTailWitnessRejection::MissingTerminalJoin => {
                 self.telemetry
@@ -337,15 +340,14 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(crate) fn promote_single_entry_guarded_tail_regions(
         &mut self,
-        body: &mut Vec<DirStmt>,
+        body: &mut Vec<PreHirStmt>,
     ) -> bool {
         fission_midend_structuring::promote_single_entry_guarded_tail_regions(self, body)
     }
 
-    pub(crate) fn discover_guarded_tail_candidates(&mut self, body: &[DirStmt]) {
+    pub(crate) fn discover_guarded_tail_candidates(&mut self, body: &[PreHirStmt]) {
         fission_midend_structuring::discover_guarded_tail_candidates(self, body)
     }
-
 
     pub(crate) fn accept_structured_region(
         &mut self,
@@ -374,32 +376,32 @@ impl<'a> PreviewBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::midend::{DirExpr, DirStmt, DirUnaryOp, NirType};
+    use crate::midend::{NirType, PreHirExpr, PreHirStmt, PreHirUnaryOp};
 
     #[test]
     fn must_emit_label_internalizes_same_guard_family_nested_before_owner() {
         let body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("join".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::If {
-                cond: DirExpr::Unary {
-                    op: DirUnaryOp::Not,
-                    expr: Box::new(DirExpr::Var("cond".to_string())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![DirStmt::Goto("join".to_string())],
+                then_body: vec![PreHirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Goto("join".to_string()),
-            DirStmt::Label("join".to_string()),
-            DirStmt::Goto("end".to_string()),
-            DirStmt::Label("end".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("join".to_string()),
+            PreHirStmt::Label("join".to_string()),
+            PreHirStmt::Goto("end".to_string()),
+            PreHirStmt::Label("end".to_string()),
+            PreHirStmt::Return(None),
         ];
-        let middle = vec![DirStmt::Goto("join".to_string())];
+        let middle = vec![PreHirStmt::Goto("join".to_string())];
 
         let rejection =
             PreviewBuilder::classify_must_emit_label_rejection(&body, &middle, 1, 3, "join", 1, 1);
@@ -410,27 +412,27 @@ mod tests {
     #[test]
     fn must_emit_label_rejects_unrelated_nested_before_owner() {
         let body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("outer".to_string()),
-                then_body: vec![DirStmt::Goto("join".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("outer".to_string()),
+                then_body: vec![PreHirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::If {
-                cond: DirExpr::Unary {
-                    op: DirUnaryOp::Not,
-                    expr: Box::new(DirExpr::Var("cond".to_string())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![DirStmt::Goto("join".to_string())],
+                then_body: vec![PreHirStmt::Goto("join".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Goto("join".to_string()),
-            DirStmt::Label("join".to_string()),
-            DirStmt::Goto("end".to_string()),
-            DirStmt::Label("end".to_string()),
-            DirStmt::Return(None),
+            PreHirStmt::Goto("join".to_string()),
+            PreHirStmt::Label("join".to_string()),
+            PreHirStmt::Goto("end".to_string()),
+            PreHirStmt::Label("end".to_string()),
+            PreHirStmt::Return(None),
         ];
-        let middle = vec![DirStmt::Goto("join".to_string())];
+        let middle = vec![PreHirStmt::Goto("join".to_string())];
 
         let rejection =
             PreviewBuilder::classify_must_emit_label_rejection(&body, &middle, 1, 3, "join", 1, 1);

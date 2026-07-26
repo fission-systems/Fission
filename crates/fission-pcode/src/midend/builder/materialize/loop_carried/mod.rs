@@ -47,8 +47,8 @@ impl<'a> PreviewBuilder<'a> {
             // Anonymous preheader seed: keep for non-primary-return GPRs so the
             // stride update reuses the seeded binding. Primary-return full
             // registers may still prefer stack-param identity below.
-            let may_prefer_stack = output.size >= 4
-                && self.register_namer().is_primary_return_register(output);
+            let may_prefer_stack =
+                output.size >= 4 && self.register_namer().is_primary_return_register(output);
             if !may_prefer_stack {
                 return Some(name);
             }
@@ -57,8 +57,8 @@ impl<'a> PreviewBuilder<'a> {
             if !Self::is_anonymous_temp_binding_name(&name) {
                 return Some(name);
             }
-            let may_prefer_stack = output.size >= 4
-                && self.register_namer().is_primary_return_register(output);
+            let may_prefer_stack =
+                output.size >= 4 && self.register_namer().is_primary_return_register(output);
             if !may_prefer_stack {
                 return Some(name);
             }
@@ -120,8 +120,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             (Some(_), Some(hw)) if !prefer_stack_over_hw => {
                 // Prefer preheader seed (incl. anonymous) over bare hw.
-                if let Some(name) =
-                    self.prior_materialized_loop_carried_output_name(output, proof)
+                if let Some(name) = self.prior_materialized_loop_carried_output_name(output, proof)
                 {
                     return Some(name);
                 }
@@ -135,8 +134,7 @@ impl<'a> PreviewBuilder<'a> {
             (Some(stack), _) => return Some(stack),
             (None, Some(hw)) => {
                 // Same: seeded binding beats unbound hardware identity.
-                if let Some(name) =
-                    self.prior_materialized_loop_carried_output_name(output, proof)
+                if let Some(name) = self.prior_materialized_loop_carried_output_name(output, proof)
                 {
                     return Some(name);
                 }
@@ -254,7 +252,12 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         for &bidx in &loop_body_idxs {
-            let op_count = self.pcode.blocks.get(bidx).map(|b| b.ops.len()).unwrap_or(0);
+            let op_count = self
+                .pcode
+                .blocks
+                .get(bidx)
+                .map(|b| b.ops.len())
+                .unwrap_or(0);
             for op_idx in 0..op_count {
                 if bidx == site.block_idx && op_idx == site.op_idx {
                     continue;

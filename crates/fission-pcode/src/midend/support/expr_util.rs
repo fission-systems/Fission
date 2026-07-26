@@ -1,20 +1,20 @@
 use super::*;
 
-pub(crate) fn expr_type(expr: &DirExpr) -> NirType {
+pub(crate) fn expr_type(expr: &PreHirExpr) -> NirType {
     match expr {
-        DirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
-        DirExpr::Var(_) => NirType::Unknown,
-        DirExpr::Const(_, ty)
-        | DirExpr::Unary { ty, .. }
-        | DirExpr::Binary { ty, .. }
-        | DirExpr::Select { ty, .. }
-        | DirExpr::Call { ty, .. }
-        | DirExpr::Load { ty, .. }
-        | DirExpr::FieldAccess { ty, .. }
-        | DirExpr::Index { elem_ty: ty, .. } => ty.clone(),
-        DirExpr::Cast { ty, .. } => ty.clone(),
-        DirExpr::PtrOffset { .. } => NirType::Ptr(Box::new(NirType::Unknown)),
-        DirExpr::AggregateCopy { size, .. } => NirType::Aggregate {
+        PreHirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),
+        PreHirExpr::Var(_) => NirType::Unknown,
+        PreHirExpr::Const(_, ty)
+        | PreHirExpr::Unary { ty, .. }
+        | PreHirExpr::Binary { ty, .. }
+        | PreHirExpr::Select { ty, .. }
+        | PreHirExpr::Call { ty, .. }
+        | PreHirExpr::Load { ty, .. }
+        | PreHirExpr::FieldAccess { ty, .. }
+        | PreHirExpr::Index { elem_ty: ty, .. } => ty.clone(),
+        PreHirExpr::Cast { ty, .. } => ty.clone(),
+        PreHirExpr::PtrOffset { .. } => NirType::Ptr(Box::new(NirType::Unknown)),
+        PreHirExpr::AggregateCopy { size, .. } => NirType::Aggregate {
             size: *size,
             fields: vec![],
         },
@@ -30,40 +30,40 @@ pub(crate) fn is_pure_intrinsic_call(target: &str) -> bool {
 /// Distinct p-code ops often collapse onto one binding name; emitting the
 /// resulting self-assign adds noise without evaluation order or value change.
 /// Cast / load / call RHS are never treated as identity.
-pub(crate) fn is_identity_var_assign(lhs: &DirLValue, rhs: &DirExpr) -> bool {
+pub(crate) fn is_identity_var_assign(lhs: &PreHirLValue, rhs: &PreHirExpr) -> bool {
     matches!(
         (lhs, rhs),
-        (DirLValue::Var(a), DirExpr::Var(b)) if a == b
+        (PreHirLValue::Var(a), PreHirExpr::Var(b)) if a == b
     )
 }
 
-pub(crate) fn is_identity_var_assign_stmt(stmt: &DirStmt) -> bool {
+pub(crate) fn is_identity_var_assign_stmt(stmt: &PreHirStmt) -> bool {
     matches!(
         stmt,
-        DirStmt::Assign { lhs, rhs } if is_identity_var_assign(lhs, rhs)
+        PreHirStmt::Assign { lhs, rhs } if is_identity_var_assign(lhs, rhs)
     )
 }
 
-pub(crate) fn expr_has_side_effecting_call(expr: &DirExpr) -> bool {
+pub(crate) fn expr_has_side_effecting_call(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             !is_pure_intrinsic_call(target) || args.iter().any(expr_has_side_effecting_call)
         }
-        DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
             expr_has_side_effecting_call(expr)
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_has_side_effecting_call(lhs) || expr_has_side_effecting_call(rhs)
         }
-        DirExpr::Load { ptr, .. } => expr_has_side_effecting_call(ptr),
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::Load { ptr, .. } => expr_has_side_effecting_call(ptr),
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             expr_has_side_effecting_call(base)
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             expr_has_side_effecting_call(base) || expr_has_side_effecting_call(index)
         }
-        DirExpr::AggregateCopy { src, .. } => expr_has_side_effecting_call(src),
-        DirExpr::Select {
+        PreHirExpr::AggregateCopy { src, .. } => expr_has_side_effecting_call(src),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -73,7 +73,7 @@ pub(crate) fn expr_has_side_effecting_call(expr: &DirExpr) -> bool {
                 || expr_has_side_effecting_call(then_expr)
                 || expr_has_side_effecting_call(else_expr)
         }
-        DirExpr::Var(_, ..) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, ..) => false,
+        PreHirExpr::Var(_, ..) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, ..) => false,
     }
 }
 
@@ -83,24 +83,27 @@ mod tests {
 
     #[test]
     fn identity_var_assign_detects_pure_self_copy_only() {
-        let lhs = DirLValue::Var("uVar1".into());
+        let lhs = PreHirLValue::Var("uVar1".into());
         assert!(is_identity_var_assign(
             &lhs,
-            &DirExpr::Var("uVar1".into())
+            &PreHirExpr::Var("uVar1".into())
         ));
         assert!(!is_identity_var_assign(
             &lhs,
-            &DirExpr::Var("uVar2".into())
+            &PreHirExpr::Var("uVar2".into())
         ));
         assert!(!is_identity_var_assign(
             &lhs,
-            &DirExpr::Binary {
-                op: crate::midend::DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Var("uVar1".into())),
-                rhs: Box::new(DirExpr::Const(1, NirType::Int {
-                    bits: 32,
-                    signed: true
-                })),
+            &PreHirExpr::Binary {
+                op: crate::midend::PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("uVar1".into())),
+                rhs: Box::new(PreHirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true
+                    }
+                )),
                 ty: NirType::Int {
                     bits: 32,
                     signed: true
@@ -109,16 +112,15 @@ mod tests {
         ));
         assert!(!is_identity_var_assign(
             &lhs,
-            &DirExpr::Call {
+            &PreHirExpr::Call {
                 target: "f".into(),
                 args: vec![],
                 ty: NirType::Unknown,
             }
         ));
-        assert!(is_identity_var_assign_stmt(&DirStmt::Assign {
-            lhs: DirLValue::Var("rbx".into()),
-            rhs: DirExpr::Var("rbx".into()),
+        assert!(is_identity_var_assign_stmt(&PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("rbx".into()),
+            rhs: PreHirExpr::Var("rbx".into()),
         }));
     }
 }
-

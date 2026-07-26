@@ -22,9 +22,9 @@ pub(crate) use crate::midend::{
 };
 
 /// HIR-side counterpart to `crate::midend::support::expr_util::expr_type`
-/// (which is DIR-typed, used by builder) -- `render` consumes the final
-/// structured `HirFunction`, never `DirExpr`, so it needs its own
-/// `&HirExpr`-typed twin rather than depending on builder's Dir-side copy.
+/// (which is PreHIR-typed, used by builder) -- `render` consumes the final
+/// structured `HirFunction`, never `PreHirExpr`, so it needs its own
+/// `&HirExpr`-typed twin rather than depending on builder's PreHIR-side copy.
 pub(crate) fn expr_type(expr: &HirExpr) -> NirType {
     match expr {
         HirExpr::AddressOfGlobal(_) => NirType::Ptr(Box::new(NirType::Unknown)),

@@ -303,8 +303,13 @@ pub(super) fn same_block_forward_branch_target_op_idx(
     //   block_k+1 @ 0x4016a2: pop/ret
     let limit = end_idx.min(block.ops.len());
     if from_op_idx + 1 < limit
-        && search.iter().all(|candidate| candidate.address == from_addr)
-        && !block.ops.iter().any(|candidate| candidate.address == target_addr)
+        && search
+            .iter()
+            .all(|candidate| candidate.address == from_addr)
+        && !block
+            .ops
+            .iter()
+            .any(|candidate| candidate.address == target_addr)
     {
         return Some(limit);
     }
@@ -356,52 +361,58 @@ pub(super) fn block_label(address: u64) -> String {
     }
 }
 
-pub(super) fn fold_logical_chain(mut exprs: Vec<DirExpr>, op: DirBinaryOp) -> DirExpr {
+pub(super) fn fold_logical_chain(mut exprs: Vec<PreHirExpr>, op: PreHirBinaryOp) -> PreHirExpr {
     debug_assert!(matches!(
         op,
-        DirBinaryOp::LogicalAnd | DirBinaryOp::LogicalOr
+        PreHirBinaryOp::LogicalAnd | PreHirBinaryOp::LogicalOr
     ));
     if exprs.is_empty() {
-        return DirExpr::Const(
-            if op == DirBinaryOp::LogicalAnd { 1 } else { 0 },
+        return PreHirExpr::Const(
+            if op == PreHirBinaryOp::LogicalAnd {
+                1
+            } else {
+                0
+            },
             NirType::Bool,
         );
     }
     let first = exprs.remove(0);
-    exprs.into_iter().fold(first, |lhs, rhs| DirExpr::Binary {
-        op,
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        ty: NirType::Bool,
-    })
+    exprs
+        .into_iter()
+        .fold(first, |lhs, rhs| PreHirExpr::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: NirType::Bool,
+        })
 }
 
-pub(super) fn negate_expr(expr: DirExpr) -> DirExpr {
+pub(super) fn negate_expr(expr: PreHirExpr) -> PreHirExpr {
     match expr {
-        DirExpr::Unary {
-            op: DirUnaryOp::Not,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
             expr,
             ..
         } => *expr,
-        other => DirExpr::Unary {
-            op: DirUnaryOp::Not,
+        other => PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
             expr: Box::new(other),
             ty: NirType::Bool,
         },
     }
 }
 
-pub(super) fn strip_casts(expr: &DirExpr) -> DirExpr {
+pub(super) fn strip_casts(expr: &PreHirExpr) -> PreHirExpr {
     match expr {
-        DirExpr::Cast { expr, .. } => strip_casts(expr),
+        PreHirExpr::Cast { expr, .. } => strip_casts(expr),
         other => other.clone(),
     }
 }
 
-pub(super) fn simplify_logical_expr(expr: DirExpr) -> DirExpr {
+pub(super) fn simplify_logical_expr(expr: PreHirExpr) -> PreHirExpr {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::LogicalAnd,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalAnd,
             lhs,
             rhs,
             ty,
@@ -410,22 +421,22 @@ pub(super) fn simplify_logical_expr(expr: DirExpr) -> DirExpr {
             let rhs = Box::new(simplify_logical_expr(*rhs));
 
             if let (
-                DirExpr::Unary {
-                    op: DirUnaryOp::Not,
+                PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
                     expr: inner_lhs,
                     ..
                 },
-                DirExpr::Unary {
-                    op: DirUnaryOp::Not,
+                PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
                     expr: inner_rhs,
                     ..
                 },
             ) = (&*lhs, &*rhs)
             {
-                return DirExpr::Unary {
-                    op: DirUnaryOp::Not,
-                    expr: Box::new(DirExpr::Binary {
-                        op: DirBinaryOp::LogicalOr,
+                return PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::LogicalOr,
                         lhs: inner_lhs.clone(),
                         rhs: inner_rhs.clone(),
                         ty,
@@ -434,15 +445,15 @@ pub(super) fn simplify_logical_expr(expr: DirExpr) -> DirExpr {
                 };
             }
 
-            DirExpr::Binary {
-                op: DirBinaryOp::LogicalAnd,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
                 lhs,
                 rhs,
                 ty,
             }
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::LogicalOr,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalOr,
             lhs,
             rhs,
             ty,
@@ -451,22 +462,22 @@ pub(super) fn simplify_logical_expr(expr: DirExpr) -> DirExpr {
             let rhs = Box::new(simplify_logical_expr(*rhs));
 
             if let (
-                DirExpr::Unary {
-                    op: DirUnaryOp::Not,
+                PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
                     expr: inner_lhs,
                     ..
                 },
-                DirExpr::Unary {
-                    op: DirUnaryOp::Not,
+                PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
                     expr: inner_rhs,
                     ..
                 },
             ) = (&*lhs, &*rhs)
             {
-                return DirExpr::Unary {
-                    op: DirUnaryOp::Not,
-                    expr: Box::new(DirExpr::Binary {
-                        op: DirBinaryOp::LogicalAnd,
+                return PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::LogicalAnd,
                         lhs: inner_lhs.clone(),
                         rhs: inner_rhs.clone(),
                         ty,
@@ -475,14 +486,14 @@ pub(super) fn simplify_logical_expr(expr: DirExpr) -> DirExpr {
                 };
             }
 
-            DirExpr::Binary {
-                op: DirBinaryOp::LogicalOr,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalOr,
                 lhs,
                 rhs,
                 ty,
             }
         }
-        DirExpr::Unary { op, expr, ty } => DirExpr::Unary {
+        PreHirExpr::Unary { op, expr, ty } => PreHirExpr::Unary {
             op,
             expr: Box::new(simplify_logical_expr(*expr)),
             ty,
@@ -599,7 +610,12 @@ mod same_block_forward_tests {
             successors: vec![4],
             ops: vec![
                 op(0, 0x401698, PcodeOpcode::Copy, vec![]),
-                op(1, 0x40169f, PcodeOpcode::CBranch, vec![target.clone(), cond]),
+                op(
+                    1,
+                    0x40169f,
+                    PcodeOpcode::CBranch,
+                    vec![target.clone(), cond],
+                ),
                 PcodeOp {
                     seq_num: 2,
                     opcode: PcodeOpcode::Copy,

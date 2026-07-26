@@ -26,12 +26,14 @@ impl CollapseDriver {
         rule: CollapseRule,
         idx: usize,
         follow: Option<usize>,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         // CollapseRule is already the midend-structuring type (re-export).
         fission_midend_structuring::apply_collapse_rule(builder, rule, idx, follow)
     }
 
-    pub(crate) fn run(builder: &mut PreviewBuilder<'_>) -> Result<Vec<DirStmt>, MlilPreviewError> {
+    pub(crate) fn run(
+        builder: &mut PreviewBuilder<'_>,
+    ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
         use crate::midend::pass::{
             AnalysisStore, EarlyReturnPass, IrreducibleReductionPass, NirFunc,
             OrphanGotoRepairPass, PassManager, RepeatMode, SeseStructuringPass,

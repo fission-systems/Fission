@@ -34,38 +34,45 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn expr_is_pure_value(expr: &DirExpr) -> bool {
+    pub(super) fn expr_is_pure_value(expr: &PreHirExpr) -> bool {
         fission_midend_structuring::guarded_tail::pure_hir::expr_is_pure_value(expr)
     }
 
-    pub(super) fn stmt_is_pure_value_expr(stmt: &DirStmt) -> bool {
+    pub(super) fn stmt_is_pure_value_expr(stmt: &PreHirStmt) -> bool {
         fission_midend_structuring::guarded_tail::pure_hir::stmt_is_pure_value_expr(stmt)
     }
 
-    pub(super) fn stmt_is_pure_value_assign(stmt: &DirStmt) -> bool {
+    pub(super) fn stmt_is_pure_value_assign(stmt: &PreHirStmt) -> bool {
         fission_midend_structuring::guarded_tail::pure_hir::stmt_is_pure_value_assign(stmt)
     }
 
     #[cfg(test)]
-    pub(super) fn test_expr_is_pure_value(expr: &DirExpr) -> bool {
+    pub(super) fn test_expr_is_pure_value(expr: &PreHirExpr) -> bool {
         Self::expr_is_pure_value(expr)
     }
 
-    fn stmt_is_alias_forward_safe(stmt: &DirStmt, label: &str, next_label: &str) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_alias_forward_safe(stmt, label, next_label)
+    fn stmt_is_alias_forward_safe(stmt: &PreHirStmt, label: &str, next_label: &str) -> bool {
+        fission_midend_structuring::guarded_tail::pure_hir::stmt_is_alias_forward_safe(
+            stmt, label, next_label,
+        )
     }
 
     pub(super) fn classify_external_alias_ref_sites(
-        full_body: &[DirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
     ) -> (usize, usize, usize) {
-        fission_midend_structuring::guarded_tail::pure_hir::classify_external_alias_ref_sites(full_body, segment_start, segment_end, label)
+        fission_midend_structuring::guarded_tail::pure_hir::classify_external_alias_ref_sites(
+            full_body,
+            segment_start,
+            segment_end,
+            label,
+        )
     }
 
     pub(super) fn classify_external_alias_ref_sites_detailed(
-        full_body: &[DirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
@@ -73,45 +80,58 @@ impl<'a> PreviewBuilder<'a> {
         fission_midend_structuring::guarded_tail::pure_hir::classify_external_alias_ref_sites_detailed(full_body, segment_start, segment_end, label)
     }
 
-    pub(super) fn stmt_contains_goto_label(stmt: &DirStmt, label: &str) -> usize {
+    pub(super) fn stmt_contains_goto_label(stmt: &PreHirStmt, label: &str) -> usize {
         fission_midend_structuring::guarded_tail::pure_hir::stmt_contains_goto_label(stmt, label)
     }
 
     pub(super) fn are_all_external_refs_top_level_goto(
-        full_body: &[DirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
     ) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::are_all_external_refs_top_level_goto(full_body, segment_start, segment_end, label)
+        fission_midend_structuring::guarded_tail::pure_hir::are_all_external_refs_top_level_goto(
+            full_body,
+            segment_start,
+            segment_end,
+            label,
+        )
     }
 
     pub(super) fn classify_alias_ref_sites(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         label_idx: usize,
         label: &str,
     ) -> (usize, usize, usize) {
-        fission_midend_structuring::guarded_tail::pure_hir::classify_alias_ref_sites(body, label_idx, label)
+        fission_midend_structuring::guarded_tail::pure_hir::classify_alias_ref_sites(
+            body, label_idx, label,
+        )
     }
 
-    fn stmt_is_pure_nested_single_branch_goto_to_label(stmt: &DirStmt, label: &str) -> bool {
+    fn stmt_is_pure_nested_single_branch_goto_to_label(stmt: &PreHirStmt, label: &str) -> bool {
         fission_midend_structuring::guarded_tail::pure_hir::stmt_is_pure_nested_single_branch_goto_to_label(stmt, label)
     }
 
-    fn classify_nested_before_nonlocal_payload(stmt: &DirStmt, label: &str) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::classify_nested_before_nonlocal_payload(stmt, label)
+    fn classify_nested_before_nonlocal_payload(stmt: &PreHirStmt, label: &str) -> bool {
+        fission_midend_structuring::guarded_tail::pure_hir::classify_nested_before_nonlocal_payload(
+            stmt, label,
+        )
     }
 
     fn classify_nested_before_alias_witnesses(
-        full_body: &[DirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         label: &str,
     ) -> Vec<NestedBeforeAliasWitness> {
-        fission_midend_structuring::guarded_tail::pure_hir::classify_nested_before_alias_witnesses(full_body, segment_start, label)
+        fission_midend_structuring::guarded_tail::pure_hir::classify_nested_before_alias_witnesses(
+            full_body,
+            segment_start,
+            label,
+        )
     }
 
     pub(super) fn build_nested_before_alias_ownership_proof(
-        full_body: &[DirStmt],
+        full_body: &[PreHirStmt],
         segment_start: usize,
         segment_end: usize,
         label: &str,
@@ -120,16 +140,20 @@ impl<'a> PreviewBuilder<'a> {
         fission_midend_structuring::guarded_tail::pure_hir::build_nested_before_alias_ownership_proof(full_body, segment_start, segment_end, label, raw_nested_before)
     }
 
-    pub(super) fn local_goto_positions_by_label(body: &[DirStmt]) -> HashMap<String, Vec<usize>> {
+    pub(super) fn local_goto_positions_by_label(
+        body: &[PreHirStmt],
+    ) -> HashMap<String, Vec<usize>> {
         fission_midend_structuring::guarded_tail::pure_hir::local_goto_positions_by_label(body)
     }
 
-    pub(super) fn is_local_alias_forward_segment(segment: &[DirStmt], next_label: &str) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::is_local_alias_forward_segment(segment, next_label)
+    pub(super) fn is_local_alias_forward_segment(segment: &[PreHirStmt], next_label: &str) -> bool {
+        fission_midend_structuring::guarded_tail::pure_hir::is_local_alias_forward_segment(
+            segment, next_label,
+        )
     }
 
     pub(super) fn is_local_alias_forward_segment_with_after_label_refs(
-        segment: &[DirStmt],
+        segment: &[PreHirStmt],
         label: &str,
         next_label: &str,
     ) -> bool {
@@ -137,44 +161,61 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn inferred_alias_forward_target_with_after_label_refs(
-        segment: &[DirStmt],
+        segment: &[PreHirStmt],
         label: &str,
     ) -> Option<String> {
         fission_midend_structuring::guarded_tail::pure_hir::inferred_alias_forward_target_with_after_label_refs(segment, label)
     }
 
-    pub(super) fn is_trivial_join_forward_segment(segment: &[DirStmt], next_label: &str) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::is_trivial_join_forward_segment(segment, next_label)
+    pub(super) fn is_trivial_join_forward_segment(
+        segment: &[PreHirStmt],
+        next_label: &str,
+    ) -> bool {
+        fission_midend_structuring::guarded_tail::pure_hir::is_trivial_join_forward_segment(
+            segment, next_label,
+        )
     }
 
     pub(super) fn is_trivial_join_forward_or_pure_segment(
-        segment: &[DirStmt],
+        segment: &[PreHirStmt],
         next_label: &str,
     ) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::is_trivial_join_forward_or_pure_segment(segment, next_label)
+        fission_midend_structuring::guarded_tail::pure_hir::is_trivial_join_forward_or_pure_segment(
+            segment, next_label,
+        )
     }
 
     pub(super) fn is_pure_multi_goto_gap_to_label(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         goto_positions: &[usize],
         label_idx: usize,
         label: &str,
     ) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::is_pure_multi_goto_gap_to_label(body, goto_positions, label_idx, label)
+        fission_midend_structuring::guarded_tail::pure_hir::is_pure_multi_goto_gap_to_label(
+            body,
+            goto_positions,
+            label_idx,
+            label,
+        )
     }
 
     pub(super) fn count_top_level_goto_refs_in_range(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         label: &str,
         start_exclusive: usize,
         end_exclusive: usize,
     ) -> usize {
-        fission_midend_structuring::guarded_tail::pure_hir::count_top_level_goto_refs_in_range(body, label, start_exclusive, end_exclusive)
+        fission_midend_structuring::guarded_tail::pure_hir::count_top_level_goto_refs_in_range(
+            body,
+            label,
+            start_exclusive,
+            end_exclusive,
+        )
     }
 
     pub(crate) fn resolve_terminal_join_target_impl(
         &mut self,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         anchor_idx: usize,
         target_label: &str,
         referenced: &HashMap<String, usize>,
@@ -189,10 +230,10 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             let label_idx = (anchor_idx + 1..body.len()).find(
-                |pos| matches!(body.get(*pos), Some(DirStmt::Label(label)) if label == &current),
+                |pos| matches!(body.get(*pos), Some(PreHirStmt::Label(label)) if label == &current),
             )?;
             let next_label_idx =
-                (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], DirStmt::Label(_)));
+                (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], PreHirStmt::Label(_)));
             let Some(next_label_idx) = next_label_idx else {
                 if rewrites > 0 {
                     self.telemetry
@@ -201,7 +242,7 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 return Some((current, label_idx));
             };
-            let DirStmt::Label(next_label) = &body[next_label_idx] else {
+            let PreHirStmt::Label(next_label) = &body[next_label_idx] else {
                 unreachable!();
             };
             let segment = &body[label_idx + 1..next_label_idx];
@@ -238,38 +279,49 @@ impl<'a> PreviewBuilder<'a> {
         fission_midend_structuring::guarded_tail::pure_hir::resolve_alias_redirect(label, redirects)
     }
 
-    pub(super) fn count_goto_refs_in_stmt(stmt: &DirStmt, out: &mut HashMap<String, usize>) {
+    pub(super) fn count_goto_refs_in_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, usize>) {
         fission_midend_structuring::guarded_tail::pure_hir::count_goto_refs_in_stmt(stmt, out)
     }
 
-    pub(super) fn goto_ref_counts(body: &[DirStmt]) -> HashMap<String, usize> {
+    pub(super) fn goto_ref_counts(body: &[PreHirStmt]) -> HashMap<String, usize> {
         fission_midend_structuring::guarded_tail::pure_hir::goto_ref_counts(body)
     }
 
-    pub(super) fn rewrite_goto_label_in_stmt(stmt: &mut DirStmt, from: &str, to: &str) {
-        fission_midend_structuring::guarded_tail::pure_hir::rewrite_goto_label_in_stmt(stmt, from, to)
+    pub(super) fn rewrite_goto_label_in_stmt(stmt: &mut PreHirStmt, from: &str, to: &str) {
+        fission_midend_structuring::guarded_tail::pure_hir::rewrite_goto_label_in_stmt(
+            stmt, from, to,
+        )
     }
 
-    pub(super) fn rewrite_goto_label_in_stmts(stmts: &mut [DirStmt], from: &str, to: &str) {
-        fission_midend_structuring::guarded_tail::pure_hir::rewrite_goto_label_in_stmts(stmts, from, to)
+    pub(super) fn rewrite_goto_label_in_stmts(stmts: &mut [PreHirStmt], from: &str, to: &str) {
+        fission_midend_structuring::guarded_tail::pure_hir::rewrite_goto_label_in_stmts(
+            stmts, from, to,
+        )
     }
 
     pub(super) fn terminalizable_join_alias_target(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         label_idx: usize,
     ) -> Option<(String, usize)> {
-        fission_midend_structuring::guarded_tail::pure_hir::terminalizable_join_alias_target(body, label_idx)
+        fission_midend_structuring::guarded_tail::pure_hir::terminalizable_join_alias_target(
+            body, label_idx,
+        )
     }
 
     pub(super) fn resolve_terminal_tail_exit_stmt(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         target_label: &str,
-    ) -> Option<DirStmt> {
-        fission_midend_structuring::guarded_tail::pure_hir::resolve_terminal_tail_exit_stmt(body, target_label)
+    ) -> Option<PreHirStmt> {
+        fission_midend_structuring::guarded_tail::pure_hir::resolve_terminal_tail_exit_stmt(
+            body,
+            target_label,
+        )
     }
 
-    pub(super) fn flatten_guarded_tail_segment(segment: &[DirStmt], out: &mut Vec<DirStmt>) {
-        fission_midend_structuring::guarded_tail::pure_hir::flatten_guarded_tail_segment(segment, out)
+    pub(super) fn flatten_guarded_tail_segment(segment: &[PreHirStmt], out: &mut Vec<PreHirStmt>) {
+        fission_midend_structuring::guarded_tail::pure_hir::flatten_guarded_tail_segment(
+            segment, out,
+        )
     }
 }
 
@@ -280,31 +332,31 @@ mod tests {
     #[test]
     fn nested_before_alias_ownership_internalizes_same_guard_family_ref() {
         let body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("reg".to_string()),
-                then_body: vec![DirStmt::Goto("block_tail".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("reg".to_string()),
+                then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Expr(DirExpr::Var("middle".to_string())),
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("block_mid".to_string())],
+            PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Goto("block_mid".to_string()),
-            DirStmt::Label("block_mid".to_string()),
-            DirStmt::If {
-                cond: DirExpr::Unary {
-                    op: DirUnaryOp::Not,
-                    expr: Box::new(DirExpr::Var("cond".to_string())),
+            PreHirStmt::Goto("block_mid".to_string()),
+            PreHirStmt::Label("block_mid".to_string()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![DirStmt::Goto("block_tail".to_string())],
+                then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Goto("block_tail".to_string()),
-            DirStmt::Label("block_tail".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Goto("block_tail".to_string()),
+            PreHirStmt::Label("block_tail".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ];
 
         let proof =
@@ -325,22 +377,22 @@ mod tests {
     #[test]
     fn nested_before_alias_ownership_internalizes_paired_boundary_refs() {
         let body = vec![
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("join0".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Expr(DirExpr::Var("payload".to_string())),
-            DirStmt::If {
-                cond: DirExpr::Var("cond".to_string()),
-                then_body: vec![DirStmt::Goto("join0".to_string())],
+            PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("join0".to_string()),
-            DirStmt::Expr(DirExpr::Var("body".to_string())),
-            DirStmt::Goto("terminal".to_string()),
-            DirStmt::Label("terminal".to_string()),
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Label("join0".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("body".to_string())),
+            PreHirStmt::Goto("terminal".to_string()),
+            PreHirStmt::Label("terminal".to_string()),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ];
 
         let proof =

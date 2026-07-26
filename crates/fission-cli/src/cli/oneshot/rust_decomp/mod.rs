@@ -36,11 +36,9 @@ struct RustSleighRender {
     code: String,
     code_nir: Option<String>,
     code_hir: Option<String>,
-    /// The flattened, goto/label-based DIR snapshot structuring received as
-    /// input, rendered as text -- only captured/rendered when the caller
-    /// asked for it (`decomp --dir`), since `take_last_dir_snapshot` +
-    /// `print_dir_function` is extra work over the normal NIR/HIR path.
-    code_dir: Option<String>,
+    /// The flattened, goto/label-based PreHIR snapshot structuring received
+    /// as input. It is only captured when requested (`decomp --prehir`).
+    code_prehir: Option<String>,
     fell_back: bool,
     fallback_reason: Option<String>,
     build_stats: Option<fission_decompiler::NirBuildStats>,
@@ -53,7 +51,7 @@ fn render_with_rust_sleigh(
     facts: &fission_static::analysis::decomp::facts::FactStore,
     func: &FunctionInfo,
     timeout_ms: Option<u64>,
-    want_dir: bool,
+    want_prehir: bool,
 ) -> Result<RustSleighRender, FissionError> {
     let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
     config.nir_timeout_ms = timeout_ms;
@@ -71,10 +69,10 @@ fn render_with_rust_sleigh(
     // Must read the thread-local snapshot immediately after the decompile
     // call above and before any other decompile runs on this thread (the
     // hook is overwritten on every call) -- see
-    // `fission_pcode::take_last_dir_snapshot`'s own doc comment.
-    let code_dir = if want_dir {
-        fission_decompiler::take_last_dir_snapshot()
-            .map(|dir| fission_decompiler::print_dir_function(&dir))
+    // `fission_pcode::take_last_prehir_snapshot`'s own doc comment.
+    let code_prehir = if want_prehir {
+        fission_decompiler::take_last_prehir_snapshot()
+            .map(|dir| fission_decompiler::print_prehir_function(&dir))
     } else {
         None
     };
@@ -83,7 +81,7 @@ fn render_with_rust_sleigh(
         code: result.code,
         code_nir: result.code_nir,
         code_hir: result.code_hir,
-        code_dir,
+        code_prehir,
         fell_back: result.fell_back,
         fallback_reason: result.fallback_reason,
         build_stats: result.build_stats,
@@ -169,7 +167,7 @@ pub(crate) fn render_one_function_inner(
 ) -> FunctionRenderResult {
     let start = std::time::Instant::now();
 
-    match render_with_rust_sleigh(binary, facts, func, config.timeout_ms, config.dir) {
+    match render_with_rust_sleigh(binary, facts, func, config.timeout_ms, config.prehir) {
         Ok(rendered) => {
             let decomp_sec = start.elapsed().as_secs_f64();
             let code = apply_output_filters(&rendered.code, config);
@@ -181,7 +179,7 @@ pub(crate) fn render_one_function_inner(
             // No fallback for DIR -- absent means "not requested" or "not
             // captured" (e.g. decompile fell back before structuring ran),
             // not "same as the default layer".
-            let code_dir = filter_optional(rendered.code_dir, config);
+            let code_prehir = filter_optional(rendered.code_prehir, config);
 
             let record = CliRustDecompileRecord {
                 func: func.clone(),
@@ -190,7 +188,7 @@ pub(crate) fn render_one_function_inner(
                     code,
                     code_nir: Some(code_nir),
                     code_hir: Some(code_hir),
-                    code_dir,
+                    code_prehir,
                     fell_back: rendered.fell_back,
                     fallback_reason: rendered.fallback_reason,
                     build_stats: rendered.build_stats.clone(),
@@ -311,7 +309,7 @@ fn run_with_functions(
         requested_address: cli.address,
         timeout_ms: cli.timeout_ms,
         layer,
-        dir: cli.dir,
+        prehir: cli.prehir,
     };
     let stack_size_bytes = workers::resolve_decomp_stack_size_bytes();
     let available_parallelism = std::thread::available_parallelism()

@@ -3,17 +3,17 @@ use crate::midend::structuring::SccAnalysis;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn internalized_guard_family_nested_before_refs_for_join_owner(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         if_idx: usize,
         label: &str,
-        candidate_cond: &DirExpr,
+        candidate_cond: &PreHirExpr,
     ) -> usize {
         fission_midend_structuring::guarded_tail::pure_hir::internalized_guard_family_nested_before_refs_for_join_owner(body, if_idx, label, candidate_cond)
     }
 
     pub(super) fn surviving_label_refs_after_guarded_tail_promotion(
-        body: &[DirStmt],
-        middle: &[DirStmt],
+        body: &[PreHirStmt],
+        middle: &[PreHirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
@@ -22,7 +22,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn trailing_middle_fallthrough_equivalent_refs(
-        middle: &[DirStmt],
+        middle: &[PreHirStmt],
         label: &str,
     ) -> usize {
         fission_midend_structuring::guarded_tail::pure_hir::trailing_middle_fallthrough_equivalent_refs(middle, label)
@@ -31,43 +31,55 @@ impl<'a> PreviewBuilder<'a> {
     /// True when the middle segment is only join glue: empty blocks, labels, and `Goto(label)`.
     /// Such segments impose no semantic work beyond reaching the join label; all `Goto` refs are
     /// fallthrough-equivalent for promotion bookkeeping (matches Ghidra-style join chains).
-    pub(super) fn middle_is_join_label_only_glue(middle: &[DirStmt], label: &str) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::middle_is_join_label_only_glue(middle, label)
+    pub(super) fn middle_is_join_label_only_glue(middle: &[PreHirStmt], label: &str) -> bool {
+        fission_midend_structuring::guarded_tail::pure_hir::middle_is_join_label_only_glue(
+            middle, label,
+        )
     }
 
     /// Subtract trailing duplicate `Goto(label)` hops, or zero when the whole middle is join glue.
     pub(super) fn effective_middle_refs_for_promotion(
-        middle: &[DirStmt],
+        middle: &[PreHirStmt],
         label: &str,
         middle_refs: usize,
     ) -> usize {
-        fission_midend_structuring::guarded_tail::pure_hir::effective_middle_refs_for_promotion(middle, label, middle_refs)
+        fission_midend_structuring::guarded_tail::pure_hir::effective_middle_refs_for_promotion(
+            middle,
+            label,
+            middle_refs,
+        )
     }
 
     pub(super) fn outside_refs_preserve_forward_owner(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
     ) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::outside_refs_preserve_forward_owner(body, if_idx, label_idx, label)
+        fission_midend_structuring::guarded_tail::pure_hir::outside_refs_preserve_forward_owner(
+            body, if_idx, label_idx, label,
+        )
     }
 
     pub(super) fn outside_refs_are_elidable_next_flow(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
     ) -> bool {
-        fission_midend_structuring::guarded_tail::pure_hir::outside_refs_are_elidable_next_flow(body, if_idx, label_idx, label)
+        fission_midend_structuring::guarded_tail::pure_hir::outside_refs_are_elidable_next_flow(
+            body, if_idx, label_idx, label,
+        )
     }
 
     pub(super) fn find_top_level_label_after(
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         start_idx: usize,
         label: &str,
     ) -> Option<usize> {
-        fission_midend_structuring::guarded_tail::pure_hir::find_top_level_label_after(body, start_idx, label)
+        fission_midend_structuring::guarded_tail::pure_hir::find_top_level_label_after(
+            body, start_idx, label,
+        )
     }
 
     pub(super) fn is_nontrivial_internal_target_entry(&self, idx: usize) -> bool {

@@ -35,28 +35,28 @@ use crate::HashMap;
 /// Traverse and statically resolve indirect calls in a function.
 ///
 /// Returns `true` if any indirect calls were successfully rewritten to direct calls.
-pub fn apply_deindirect_pass(func: &mut DirFunction) -> bool {
+pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
 
     // 1. Gather all local variable initializers representing constants or global symbol addresses.
     // This allows resolving variables whose values are established at local definition sites.
-    let mut const_initializers = HashMap::<String, DirExpr>::default();
+    let mut const_initializers = HashMap::<String, PreHirExpr>::default();
     for local in &func.locals {
         if let Some(initializer) = &local.initializer {
             match initializer {
-                DirExpr::Const(val, ty) => {
-                    const_initializers.insert(local.name.clone(), DirExpr::Const(*val, ty.clone()));
+                PreHirExpr::Const(val, ty) => {
+                    const_initializers.insert(local.name.clone(), PreHirExpr::Const(*val, ty.clone()));
                 }
-                DirExpr::Cast { expr, .. } => {
-                    if let DirExpr::Const(val, ty) = expr.as_ref() {
+                PreHirExpr::Cast { expr, .. } => {
+                    if let PreHirExpr::Const(val, ty) = expr.as_ref() {
                         const_initializers
-                            .insert(local.name.clone(), DirExpr::Const(*val, ty.clone()));
+                            .insert(local.name.clone(), PreHirExpr::Const(*val, ty.clone()));
                     }
                 }
-                DirExpr::AddressOfGlobal(global_name) => {
+                PreHirExpr::AddressOfGlobal(global_name) => {
                     const_initializers.insert(
                         local.name.clone(),
-                        DirExpr::AddressOfGlobal(global_name.clone()),
+                        PreHirExpr::AddressOfGlobal(global_name.clone()),
                     );
                 }
                 _ => {}
@@ -81,28 +81,28 @@ pub fn apply_deindirect_pass(func: &mut DirFunction) -> bool {
 }
 
 fn deindirect_in_stmt(
-    stmt: &mut DirStmt,
-    initializers: &HashMap<String, DirExpr>,
+    stmt: &mut PreHirStmt,
+    initializers: &HashMap<String, PreHirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             changed |= deindirect_in_lvalue(lhs, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(rhs, initializers, addr_to_symbol);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             changed |= deindirect_in_expr(va_list, initializers, addr_to_symbol);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= deindirect_in_expr(expr, initializers, addr_to_symbol);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             for s in body.iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             update,
             cond,
@@ -121,7 +121,7 @@ fn deindirect_in_stmt(
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -134,7 +134,7 @@ fn deindirect_in_stmt(
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -155,44 +155,44 @@ fn deindirect_in_stmt(
 }
 
 fn deindirect_in_lvalue(
-    lhs: &mut DirLValue,
-    initializers: &HashMap<String, DirExpr>,
+    lhs: &mut PreHirLValue,
+    initializers: &HashMap<String, PreHirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, .. } => deindirect_in_expr(ptr, initializers, addr_to_symbol),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => deindirect_in_expr(ptr, initializers, addr_to_symbol),
+        PreHirLValue::Index { base, index, .. } => {
             let mut changed = deindirect_in_expr(base, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(index, initializers, addr_to_symbol);
             changed
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             deindirect_in_expr(base, initializers, addr_to_symbol)
         }
     }
 }
 
 fn deindirect_in_expr(
-    expr: &mut DirExpr,
-    initializers: &HashMap<String, DirExpr>,
+    expr: &mut PreHirExpr,
+    initializers: &HashMap<String, PreHirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> bool {
     let mut changed = false;
 
     // 1. Process sub-expressions first to normalize targets nested in complexes.
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= deindirect_in_expr(inner, initializers, addr_to_symbol);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= deindirect_in_expr(lhs, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(rhs, initializers, addr_to_symbol);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -202,33 +202,33 @@ fn deindirect_in_expr(
             changed |= deindirect_in_expr(then_expr, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(else_expr, initializers, addr_to_symbol);
         }
-        DirExpr::PtrOffset { base, .. } => {
+        PreHirExpr::PtrOffset { base, .. } => {
             changed |= deindirect_in_expr(base, initializers, addr_to_symbol);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= deindirect_in_expr(base, initializers, addr_to_symbol);
             changed |= deindirect_in_expr(index, initializers, addr_to_symbol);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args.iter_mut() {
                 changed |= deindirect_in_expr(arg, initializers, addr_to_symbol);
             }
         }
-        DirExpr::Load { ptr, .. } => {
+        PreHirExpr::Load { ptr, .. } => {
             changed |= deindirect_in_expr(ptr, initializers, addr_to_symbol);
         }
         _ => {}
     }
 
     // 2. Try to resolve __fission_callind_opaque in the current expression.
-    if let DirExpr::Call { target, args, ty } = expr {
+    if let PreHirExpr::Call { target, args, ty } = expr {
         if target == "__fission_callind_opaque" && !args.is_empty() {
             let fn_ptr = &args[0];
             if let Some(resolved_symbol) = resolve_call_target(fn_ptr, initializers, addr_to_symbol)
             {
                 // Found a static direct target symbol. Re-write the call!
                 let remaining_args = args[1..].to_vec();
-                *expr = DirExpr::Call {
+                *expr = PreHirExpr::Call {
                     target: resolved_symbol,
                     args: remaining_args,
                     ty: ty.clone(),
@@ -242,13 +242,13 @@ fn deindirect_in_expr(
 }
 
 fn resolve_call_target(
-    fn_ptr: &DirExpr,
-    initializers: &HashMap<String, DirExpr>,
+    fn_ptr: &PreHirExpr,
+    initializers: &HashMap<String, PreHirExpr>,
     addr_to_symbol: &HashMap<u64, String>,
 ) -> Option<String> {
     match fn_ptr {
         // Direct constant address.
-        DirExpr::Const(addr, _) => {
+        PreHirExpr::Const(addr, _) => {
             let target_addr = *addr as u64;
             if let Some(symbol) = addr_to_symbol.get(&target_addr) {
                 return Some(symbol.clone());
@@ -258,18 +258,18 @@ fn resolve_call_target(
             }
         }
         // Pointer cast const.
-        DirExpr::Cast { expr: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. } => {
             return resolve_call_target(inner, initializers, addr_to_symbol);
         }
         // Direct global symbol.
-        DirExpr::AddressOfGlobal(symbol_name) => {
+        PreHirExpr::AddressOfGlobal(symbol_name) => {
             return Some(symbol_name.clone());
         }
         // Load through a known IAT slot address: *(IAT_addr).
         // This is the pattern emitted by x86-64 Sleigh for `CALL qword ptr [IAT_addr]`
         // where the IAT slot address is a statically known constant.
-        DirExpr::Load { ptr, .. } => {
-            if let DirExpr::Const(iat_addr, _) = ptr.as_ref() {
+        PreHirExpr::Load { ptr, .. } => {
+            if let PreHirExpr::Const(iat_addr, _) = ptr.as_ref() {
                 let slot_addr = *iat_addr as u64;
                 if let Some(symbol) = addr_to_symbol.get(&slot_addr) {
                     return Some(symbol.clone());
@@ -277,9 +277,9 @@ fn resolve_call_target(
             }
         }
         // Local variable reference, trace to its definition initializer.
-        DirExpr::Var(var_name) => {
+        PreHirExpr::Var(var_name) => {
             if let Some(init_expr) = initializers.get(var_name) {
-                if let DirExpr::Var(next_var) = init_expr {
+                if let PreHirExpr::Var(next_var) = init_expr {
                     if next_var == var_name {
                         return None;
                     }

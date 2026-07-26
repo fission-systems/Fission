@@ -1,4 +1,4 @@
-//! Re-export DIR-side variable renaming helpers from midend-core -- only
+//! Re-export PreHIR-side variable renaming helpers from midend-core -- only
 //! `builder` uses this module, never `render` (confirmed: no
 //! `var_rename::` reference anywhere under `src/render/`).
-pub use fission_midend_dir::util::var_rename::*;
+pub use fission_midend_prehir::util::var_rename::*;

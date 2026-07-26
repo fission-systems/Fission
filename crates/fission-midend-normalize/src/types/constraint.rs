@@ -5,7 +5,7 @@ use crate::{HashMap, HashSet};
 ///
 /// Discovers struct and array structures by propagating constraints algebraically
 /// (using a fixed-point solver) forward and backward along the dataflow graph.
-pub fn apply_type_constraint_propagation(func: &mut DirFunction) -> bool {
+pub fn apply_type_constraint_propagation(func: &mut PreHirFunction) -> bool {
     // 1. Initialize constraints for each local and parameter variable
     let mut var_types = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
@@ -67,7 +67,7 @@ pub fn apply_type_constraint_propagation(func: &mut DirFunction) -> bool {
                     loop_changed = true;
                 }
                 // Back-propagation to RHS variable if RHS is a variable
-                if let DirExpr::Var(rhs_name) = rhs {
+                if let PreHirExpr::Var(rhs_name) = rhs {
                     let prev_rhs_ty = var_types.get(rhs_name).cloned().unwrap_or(NirType::Unknown);
                     if unified != prev_rhs_ty {
                         var_types.insert(rhs_name.clone(), unified.clone());
@@ -75,8 +75,8 @@ pub fn apply_type_constraint_propagation(func: &mut DirFunction) -> bool {
                     }
                 }
                 // Back-propagation to Deref pointer variable if RHS is a Load
-                if let DirExpr::Load { ptr, .. } = rhs {
-                    if let DirExpr::Var(ptr_var) = ptr.as_ref() {
+                if let PreHirExpr::Load { ptr, .. } = rhs {
+                    if let PreHirExpr::Var(ptr_var) = ptr.as_ref() {
                         let prev_ptr_ty =
                             var_types.get(ptr_var).cloned().unwrap_or(NirType::Unknown);
                         let ptr_constraint = NirType::Ptr(Box::new(unified.clone()));
@@ -95,7 +95,7 @@ pub fn apply_type_constraint_propagation(func: &mut DirFunction) -> bool {
     changed |= loop_changed;
 
     // 4. Update types of local and parameter bindings
-    let update_binding = |binding: &mut DirBinding| -> bool {
+    let update_binding = |binding: &mut PreHirBinding| -> bool {
         if let Some(solved_ty) = var_types.get(&binding.name) {
             if *solved_ty != NirType::Unknown && binding.ty != *solved_ty {
                 binding.ty = solved_ty.clone();
@@ -132,34 +132,34 @@ fn type_byte_size(ty: &NirType) -> Option<u32> {
 }
 
 fn collect_constraints(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     field_accesses: &mut HashMap<String, HashMap<u32, NirType>>,
-    assignments: &mut Vec<(String, DirExpr)>,
+    assignments: &mut Vec<(String, PreHirExpr)>,
 ) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
-                if let DirLValue::Var(lhs_name) = lhs {
+            PreHirStmt::Assign { lhs, rhs } => {
+                if let PreHirLValue::Var(lhs_name) = lhs {
                     assignments.push((lhs_name.clone(), rhs.clone()));
                 }
                 collect_constraints_expr(rhs, field_accesses);
                 collect_constraints_lvalue(lhs, field_accesses);
             }
-            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 collect_constraints_expr(expr, field_accesses);
             }
-            DirStmt::Block(body) => {
+            PreHirStmt::Block(body) => {
                 collect_constraints(body, field_accesses, assignments);
             }
-            DirStmt::While { cond, body } => {
+            PreHirStmt::While { cond, body } => {
                 collect_constraints_expr(cond, field_accesses);
                 collect_constraints(body, field_accesses, assignments);
             }
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 collect_constraints(body, field_accesses, assignments);
                 collect_constraints_expr(cond, field_accesses);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -184,7 +184,7 @@ fn collect_constraints(
                 }
                 collect_constraints(body, field_accesses, assignments);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -193,7 +193,7 @@ fn collect_constraints(
                 collect_constraints(then_body, field_accesses, assignments);
                 collect_constraints(else_body, field_accesses, assignments);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -210,13 +210,13 @@ fn collect_constraints(
 }
 
 fn collect_constraints_lvalue(
-    lhs: &DirLValue,
+    lhs: &PreHirLValue,
     field_accesses: &mut HashMap<String, HashMap<u32, NirType>>,
 ) {
     match lhs {
-        DirLValue::Deref { ptr, ty } => {
-            if let DirExpr::PtrOffset { base, offset } = ptr.as_ref() {
-                if let DirExpr::Var(base_name) = base.as_ref() {
+        PreHirLValue::Deref { ptr, ty } => {
+            if let PreHirExpr::PtrOffset { base, offset } = ptr.as_ref() {
+                if let PreHirExpr::Var(base_name) = base.as_ref() {
                     field_accesses
                         .entry(base_name.clone())
                         .or_default()
@@ -225,7 +225,7 @@ fn collect_constraints_lvalue(
             }
             collect_constraints_expr(ptr, field_accesses);
         }
-        DirLValue::Index {
+        PreHirLValue::Index {
             base,
             index,
             elem_ty: _,
@@ -238,13 +238,13 @@ fn collect_constraints_lvalue(
 }
 
 fn collect_constraints_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     field_accesses: &mut HashMap<String, HashMap<u32, NirType>>,
 ) {
     match expr {
-        DirExpr::Load { ptr, ty } => {
-            if let DirExpr::PtrOffset { base, offset } = ptr.as_ref() {
-                if let DirExpr::Var(base_name) = base.as_ref() {
+        PreHirExpr::Load { ptr, ty } => {
+            if let PreHirExpr::PtrOffset { base, offset } = ptr.as_ref() {
+                if let PreHirExpr::Var(base_name) = base.as_ref() {
                     field_accesses
                         .entry(base_name.clone())
                         .or_default()
@@ -253,17 +253,17 @@ fn collect_constraints_expr(
             }
             collect_constraints_expr(ptr, field_accesses);
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => {
             collect_constraints_expr(expr, field_accesses);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             collect_constraints_expr(lhs, field_accesses);
             collect_constraints_expr(rhs, field_accesses);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -273,12 +273,12 @@ fn collect_constraints_expr(
             collect_constraints_expr(then_expr, field_accesses);
             collect_constraints_expr(else_expr, field_accesses);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_constraints_expr(arg, field_accesses);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             collect_constraints_expr(base, field_accesses);
             collect_constraints_expr(index, field_accesses);
         }
@@ -286,18 +286,18 @@ fn collect_constraints_expr(
     }
 }
 
-fn get_expr_type(expr: &DirExpr, var_types: &HashMap<String, NirType>) -> NirType {
+fn get_expr_type(expr: &PreHirExpr, var_types: &HashMap<String, NirType>) -> NirType {
     match expr {
-        DirExpr::Var(name) => var_types.get(name).cloned().unwrap_or(NirType::Unknown),
-        DirExpr::Const(_, ty) => ty.clone(),
-        DirExpr::Cast { ty, .. } => ty.clone(),
-        DirExpr::Unary { ty, .. } => ty.clone(),
-        DirExpr::Binary { ty, .. } => ty.clone(),
-        DirExpr::Select { ty, .. } => ty.clone(),
-        DirExpr::Call { ty, .. } => ty.clone(),
-        DirExpr::Load { ty, .. } => ty.clone(),
-        DirExpr::Index { elem_ty, .. } => elem_ty.clone(),
-        DirExpr::PtrOffset { base, .. } => {
+        PreHirExpr::Var(name) => var_types.get(name).cloned().unwrap_or(NirType::Unknown),
+        PreHirExpr::Const(_, ty) => ty.clone(),
+        PreHirExpr::Cast { ty, .. } => ty.clone(),
+        PreHirExpr::Unary { ty, .. } => ty.clone(),
+        PreHirExpr::Binary { ty, .. } => ty.clone(),
+        PreHirExpr::Select { ty, .. } => ty.clone(),
+        PreHirExpr::Call { ty, .. } => ty.clone(),
+        PreHirExpr::Load { ty, .. } => ty.clone(),
+        PreHirExpr::Index { elem_ty, .. } => elem_ty.clone(),
+        PreHirExpr::PtrOffset { base, .. } => {
             let base_ty = get_expr_type(base, var_types);
             if let NirType::Ptr(inner) = base_ty {
                 NirType::Ptr(inner)
@@ -364,28 +364,28 @@ fn unify_types(t1: &NirType, t2: &NirType) -> Option<NirType> {
     }
 }
 
-fn update_ast_types(stmts: &mut [DirStmt], var_types: &HashMap<String, NirType>) {
+fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirType>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
+            PreHirStmt::Assign { lhs, rhs } => {
                 update_ast_lvalue(lhs, var_types);
                 update_ast_expr(rhs, var_types);
             }
-            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 update_ast_expr(expr, var_types);
             }
-            DirStmt::Block(body) => {
+            PreHirStmt::Block(body) => {
                 update_ast_types(body, var_types);
             }
-            DirStmt::While { cond, body } => {
+            PreHirStmt::While { cond, body } => {
                 update_ast_expr(cond, var_types);
                 update_ast_types(body, var_types);
             }
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 update_ast_types(body, var_types);
                 update_ast_expr(cond, var_types);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -402,7 +402,7 @@ fn update_ast_types(stmts: &mut [DirStmt], var_types: &HashMap<String, NirType>)
                 }
                 update_ast_types(body, var_types);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -411,7 +411,7 @@ fn update_ast_types(stmts: &mut [DirStmt], var_types: &HashMap<String, NirType>)
                 update_ast_types(then_body, var_types);
                 update_ast_types(else_body, var_types);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -427,16 +427,16 @@ fn update_ast_types(stmts: &mut [DirStmt], var_types: &HashMap<String, NirType>)
     }
 }
 
-fn update_ast_lvalue(lhs: &mut DirLValue, var_types: &HashMap<String, NirType>) {
+fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType>) {
     match lhs {
-        DirLValue::Deref { ptr, ty } => {
+        PreHirLValue::Deref { ptr, ty } => {
             update_ast_expr(ptr, var_types);
             let ptr_ty = get_expr_type(ptr, var_types);
             if let NirType::Ptr(inner) = ptr_ty {
                 *ty = *inner;
             }
         }
-        DirLValue::Index {
+        PreHirLValue::Index {
             base,
             index,
             elem_ty,
@@ -452,26 +452,26 @@ fn update_ast_lvalue(lhs: &mut DirLValue, var_types: &HashMap<String, NirType>) 
     }
 }
 
-fn update_ast_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) {
+fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) {
     match expr {
-        DirExpr::Load { ptr, ty } => {
+        PreHirExpr::Load { ptr, ty } => {
             update_ast_expr(ptr, var_types);
             let ptr_ty = get_expr_type(ptr, var_types);
             if let NirType::Ptr(inner) = ptr_ty {
                 *ty = *inner;
             }
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => {
             update_ast_expr(expr, var_types);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             update_ast_expr(lhs, var_types);
             update_ast_expr(rhs, var_types);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -481,12 +481,12 @@ fn update_ast_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) {
             update_ast_expr(then_expr, var_types);
             update_ast_expr(else_expr, var_types);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 update_ast_expr(arg, var_types);
             }
         }
-        DirExpr::Index {
+        PreHirExpr::Index {
             base,
             index,
             elem_ty,

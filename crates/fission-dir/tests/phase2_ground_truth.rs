@@ -1,0 +1,169 @@
+//! Phase 2 demo: decompile a real corpus function, then drive the real
+//! `fission-emulator::Emulator` to actually call the compiled function with
+//! concrete arguments and compare its real return value against both PreHIR's
+//! and HIR's concrete evaluation. This is the tier `scripts/quality/
+//! prehir_hir_check.py` and Phase 1's `diff_prehir_hir` can't provide on their
+//! own -- a real, non-decompiler-derived ground truth.
+
+use fission_dir::report::VerifyOutcome;
+use fission_dir::{EmulatorHarness, check_ground_truth, decompile_one, default_samples};
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_midend_core::ir::HirStmt;
+use fission_static::analysis::decomp::facts::FactStore;
+use std::path::PathBuf;
+
+fn corpus_binary(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fission-benchmark/corpus/dev/binaries/c")
+        .join(name)
+}
+
+#[test]
+fn count_bits_matches_real_machine_code() {
+    let path = corpus_binary("control_flow_gcc_O0.exe");
+    if !path.exists() {
+        eprintln!("skipping: corpus binary not found at {}", path.display());
+        return;
+    }
+    let binary = LoadedBinary::from_file(&path).expect("load binary");
+    let facts = FactStore::from_binary(&binary);
+    let func = FunctionInfo {
+        name: "count_bits".to_string(),
+        address: 0x140001530,
+        ..Default::default()
+    };
+
+    let pair = decompile_one(&binary, &facts, &func).expect("decompile_one");
+    let samples = default_samples(pair.hir.params.len());
+
+    let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
+    let outcome = check_ground_truth(
+        &mut harness,
+        func.address,
+        &pair.prehir,
+        &pair.hir,
+        &samples,
+    );
+
+    match outcome {
+        VerifyOutcome::Equivalent { checked } => {
+            assert!(
+                checked > 0,
+                "expected at least one sample groundable against the emulator"
+            );
+        }
+        other => panic!(
+            "expected count_bits PreHIR/HIR to match the real emulator's return value, got {other:?}"
+        ),
+    }
+}
+
+/// Proves ground-truth checking has teeth: a HIR body that's been corrupted
+/// to always return 0 (as if a structuring bug had collapsed the whole
+/// accumulator loop away) still evaluates "successfully" (it's a valid,
+/// evaluable tree -- `diff_prehir_hir` alone can't tell it's wrong except by
+/// disagreeing with PreHIR), but the real emulator's ground truth catches it
+/// for any input where the real answer isn't 0.
+#[test]
+fn corrupted_hir_is_caught_against_real_machine_code() {
+    let path = corpus_binary("control_flow_gcc_O0.exe");
+    if !path.exists() {
+        eprintln!("skipping: corpus binary not found at {}", path.display());
+        return;
+    }
+    let binary = LoadedBinary::from_file(&path).expect("load binary");
+    let facts = FactStore::from_binary(&binary);
+    let func = FunctionInfo {
+        name: "count_bits".to_string(),
+        address: 0x140001530,
+        ..Default::default()
+    };
+
+    let pair = decompile_one(&binary, &facts, &func).expect("decompile_one");
+    let mut corrupted_hir = pair.hir.clone();
+    corrupted_hir.body = vec![HirStmt::Return(Some(
+        fission_midend_core::ir::HirExpr::Const(0, corrupted_hir.return_type.clone()),
+    ))];
+
+    let samples = default_samples(pair.hir.params.len());
+    let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
+    let outcome = check_ground_truth(
+        &mut harness,
+        func.address,
+        &pair.prehir,
+        &corrupted_hir,
+        &samples,
+    );
+
+    match outcome {
+        VerifyOutcome::Diverged(divs) => {
+            assert!(!divs.is_empty(), "expected at least one real divergence");
+            // Any nonzero-arg sample should diverge (real count_bits(x) != 0
+            // for x with any set bit; corrupted HIR always returns 0).
+            let found = divs
+                .iter()
+                .any(|d| d.hir_result == Some(0) && d.emulator_result != Some(0));
+            assert!(
+                found,
+                "expected a hir=0-vs-real-machine-nonzero divergence, got {divs:?}"
+            );
+        }
+        other => {
+            panic!("expected the corrupted HIR to diverge from real machine code, got {other:?}")
+        }
+    }
+}
+
+/// Regression test for the real bug this session's manual `clamp`
+/// investigation found via this exact tier: a 3-argument, `-O0`-compiled
+/// function whose prologue spills its register args to stack home slots
+/// (needing `EmulatorHarness`'s Win64 shadow-space reservation), where one
+/// arg is negative (needing `fission-emulator`'s JIT to sign-extend a
+/// narrower-than-register operand before a signed comparison -- see
+/// `jit::compiler::tests::signed_ops_on_narrow_negative_memory_operand_are_
+/// correct` in `fission-emulator` for the unit-level regression). Both
+/// fixes land in this one real-corpus function.
+#[test]
+fn clamp_matches_real_machine_code_including_negative_args() {
+    let path = corpus_binary("control_flow_gcc_O0.exe");
+    if !path.exists() {
+        eprintln!("skipping: corpus binary not found at {}", path.display());
+        return;
+    }
+    let binary = LoadedBinary::from_file(&path).expect("load binary");
+    let facts = FactStore::from_binary(&binary);
+    let func = FunctionInfo {
+        name: "clamp".to_string(),
+        address: 0x14000155f,
+        ..Default::default()
+    };
+
+    let pair = decompile_one(&binary, &facts, &func).expect("decompile_one");
+    let samples = default_samples(pair.hir.params.len());
+    assert!(
+        samples.iter().any(|s| s.iter().any(|&v| v < 0)),
+        "default_samples should include negative args -- otherwise this test can't catch the bug it's for"
+    );
+
+    let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
+    let outcome = check_ground_truth(
+        &mut harness,
+        func.address,
+        &pair.prehir,
+        &pair.hir,
+        &samples,
+    );
+
+    match outcome {
+        VerifyOutcome::Equivalent { checked } => {
+            assert!(
+                checked > 0,
+                "expected at least one sample groundable against the emulator"
+            );
+        }
+        other => panic!(
+            "expected clamp (including negative args) to match the real emulator's return \
+             value, got {other:?}"
+        ),
+    }
+}

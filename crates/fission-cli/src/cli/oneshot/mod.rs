@@ -167,9 +167,9 @@ fn run_oneshot_inner(parsed: ParsedOneShotArgs) -> Result<()> {
     Ok(())
 }
 
-/// Heavy, opt-in "deep verify" over `fission-verify`: concrete DIR/HIR
+/// Heavy, opt-in "deep verify" over `fission-dir`: concrete PreHIR/HIR
 /// diffing, emulator-grounded ground truth, and solver-backed symbolic
-/// equivalence. Distinct from `scripts/quality/dir_hir_check.py`, which
+/// equivalence. Distinct from `scripts/quality/prehir_hir_check.py`, which
 /// stays the fast, cheap, no-solver/no-emulator structural heuristic run
 /// routinely across the whole corpus -- this command spins up a real
 /// emulator and/or solver per function and is meant for targeted
@@ -191,7 +191,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
         ..Default::default()
     };
 
-    let pair = fission_verify::decompile_one(&binary, &facts, &func)
+    let pair = fission_dir::decompile_one(&binary, &facts, &func)
         .with_context(|| format!("failed to decompile function at 0x{:x}", args.addr))?;
 
     let run_concrete = matches!(args.tier, VerifyTierArg::Concrete | VerifyTierArg::All);
@@ -201,18 +201,18 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
     let mut out = serde_json::Map::new();
 
     if run_concrete {
-        let samples = fission_verify::default_samples(pair.hir.params.len());
-        let outcome = fission_verify::diff_dir_hir(&pair.dir, &pair.hir, &samples);
+        let samples = fission_dir::default_samples(pair.hir.params.len());
+        let outcome = fission_dir::diff_prehir_hir(&pair.prehir, &pair.hir, &samples);
         report_tier("concrete", &format!("{outcome:?}"), args.json, &mut out);
     }
     if run_ground_truth {
-        let samples = fission_verify::default_samples(pair.hir.params.len());
-        match fission_verify::EmulatorHarness::build(&args.binary, Some(args.max_inst)) {
+        let samples = fission_dir::default_samples(pair.hir.params.len());
+        match fission_dir::EmulatorHarness::build(&args.binary, Some(args.max_inst)) {
             Ok(mut harness) => {
-                let outcome = fission_verify::check_ground_truth(
+                let outcome = fission_dir::check_ground_truth(
                     &mut harness,
                     func.address,
-                    &pair.dir,
+                    &pair.prehir,
                     &pair.hir,
                     &samples,
                 );
@@ -224,13 +224,13 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
         }
     }
     if run_symbolic {
-        let outcome = fission_verify::check_symbolic_equivalence(&pair.dir, &pair.hir);
+        let outcome = fission_dir::check_symbolic_equivalence(&pair.prehir, &pair.hir);
         let desc = match outcome {
-            fission_verify::symbolic::SymbolicOutcome::Equivalent => "Equivalent (proved, Unsat)".to_string(),
-            fission_verify::symbolic::SymbolicOutcome::Diverged(cx) => {
+            fission_dir::symbolic::SymbolicOutcome::Equivalent => "Equivalent (proved, Unsat)".to_string(),
+            fission_dir::symbolic::SymbolicOutcome::Diverged(cx) => {
                 format!("Diverged (solver counterexample args={:?})", cx.args)
             }
-            fission_verify::symbolic::SymbolicOutcome::Unsupported(reason) => {
+            fission_dir::symbolic::SymbolicOutcome::Unsupported(reason) => {
                 format!("Unsupported({reason})")
             }
         };

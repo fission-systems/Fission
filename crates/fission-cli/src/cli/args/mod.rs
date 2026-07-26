@@ -181,10 +181,10 @@ pub struct ServeCliArgs {
     pub host: String,
 }
 
-/// Which verification tier(s) to run -- see `fission-verify`'s crate doc.
+/// Which verification tier(s) to run -- see `fission-dir`'s crate doc.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum VerifyTierArg {
-    /// Concrete DIR-vs-HIR diffing (no solver, no emulator).
+    /// Concrete PreHIR-vs-HIR transition diagnostic (no solver, no emulator).
     Concrete,
     /// Emulator-grounded ground truth (real machine code as oracle).
     GroundTruth,
@@ -867,7 +867,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.include_nonuser_functions = decomp.include_nonuser_functions;
                     args.profile = decomp.profile;
                     args.layer = decomp.layer;
-                    args.dir = decomp.dir;
+                    args.prehir = decomp.prehir;
                     args.engine = decomp.engine;
                     args.compiler_id = decomp.compiler_id;
                     args.timeout_ms = decomp.timeout_ms;
@@ -985,7 +985,12 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 }
                 CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
-                CliCommand::Serve(s) => return ParsedInvocation::Serve { port: s.port, host: s.host },
+                CliCommand::Serve(s) => {
+                    return ParsedInvocation::Serve {
+                        port: s.port,
+                        host: s.host,
+                    };
+                }
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
             };
@@ -1024,6 +1029,7 @@ mod tests {
             ParsedInvocation::Ai(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Serve { .. } => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1038,6 +1044,7 @@ mod tests {
             ParsedInvocation::Ai(_) => panic!("legacy parser cannot emit AI"),
             ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
+            ParsedInvocation::Serve { .. } => panic!("legacy parser cannot emit serve"),
         }
     }
 
@@ -1320,6 +1327,15 @@ mod tests {
             parsed.args.function_discovery_profile,
             Some(FunctionDiscoveryProfileArg::Conservative)
         );
+    }
+
+    #[test]
+    fn canonical_decomp_accepts_prehir_name_and_legacy_dir_alias() {
+        for flag in ["--prehir", "--dir"] {
+            let parsed =
+                parse_canonical(&["fission_cli", "decomp", "bin.exe", "--addr", "0x1400", flag]);
+            assert!(parsed.args.prehir, "{flag} should request PreHIR output");
+        }
     }
 
     #[test]

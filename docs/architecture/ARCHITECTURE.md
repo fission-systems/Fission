@@ -1,11 +1,15 @@
 # Fission Architecture
 
-Updated: 2026-04-15
+Updated: 2026-07-26
 
 ## Ownership
 
-- Semantic owner: `fission-pcode`
-- Structuring owner: `fission-pcode::nir::structuring`
+- Executable semantic foundation: `fission-pcode` P-code
+- Pre-structure AST substrate: `fission-midend-prehir`
+- Static normalization: `fission-midend-normalize`
+- Structuring owner: `fission-midend-structuring` plus the
+  `fission-pcode::midend::structuring` host
+- Validated reconstruction product: `fission-dir`
 - Orchestration owner: `fission-decompiler`
 - Facts and native preparation owner: `fission-static`
 - Printer surfaces: consume-only
@@ -16,6 +20,29 @@ it must not be used as a semantic repair layer or as justification for
 approximate P-code success.
 
 ## Decompiler Layers
+
+### Dual reconstruction products
+
+Fission has one executable semantic foundation and two sibling product paths:
+
+```text
+Machine code → validated P-code foundation
+                   ├── static builder → PreHIR → normalize/structure → HIR
+                   └── DIR reconstructor → concrete/symbolic validation
+                                         → candidate + assurance report
+```
+
+HIR remains the default scalable decompile product. DIR is experimental and
+selective; it is not a layer above HIR. A DIR candidate may be seeded from HIR
+or PreHIR, but equivalence is stated against the identified P-code foundation.
+The first native backend admits pure, contiguous single-block integer regions,
+executes foundation observations with the emulator, and uses the solver for a
+universal proof or replayable counterexample. Until the foundation carries
+SLEIGH address-space classes, the caller must explicitly admit non-memory value
+spaces and the report remains conditionally proven on that classification.
+Memory, calls, control flow, and overlapping varnodes remain explicit
+unsupported boundaries.
+See ADR 0014.
 
 ### `fission-pcode`
 

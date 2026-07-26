@@ -1,13 +1,13 @@
 use super::util::*;
 use crate::prelude::*;
 
-pub fn canonicalize_flag_intrinsics(expr: &DirExpr) -> Option<DirExpr> {
+pub fn canonicalize_flag_intrinsics(expr: &PreHirExpr) -> Option<PreHirExpr> {
     canonicalize_flag_intrinsic_call(expr)
         .or_else(|| canonicalize_sborrow_compare(expr))
         .or_else(|| canonicalize_arm_compound_flag_condition(expr))
 }
 
-pub fn normalize_boolean_logic(expr: &DirExpr) -> Option<DirExpr> {
+pub fn normalize_boolean_logic(expr: &PreHirExpr) -> Option<PreHirExpr> {
     fold_signed_zero_or_negative(expr)
         .or_else(|| fold_signed_zero_or_positive(expr))
         .or_else(|| normalize_boolean_logic_core(expr))
@@ -15,9 +15,9 @@ pub fn normalize_boolean_logic(expr: &DirExpr) -> Option<DirExpr> {
 
 /// `(x == 0 || x < 0)` / either order → `x <= 0` (signed compares only).
 /// Measured on power-class loops that test `exp > 0` as `!(exp == 0 || exp < 0)`.
-fn fold_signed_zero_or_negative(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::LogicalOr | DirBinaryOp::Or,
+fn fold_signed_zero_or_negative(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::LogicalOr | PreHirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -37,18 +37,18 @@ fn fold_signed_zero_or_negative(expr: &DirExpr) -> Option<DirExpr> {
     };
     let ty = expr_type(&x);
     // Original arm used SLt so signed order is intended.
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::SLe,
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::SLe,
         lhs: Box::new(x),
-        rhs: Box::new(DirExpr::Const(0, ty)),
+        rhs: Box::new(PreHirExpr::Const(0, ty)),
         ty: NirType::Bool,
     })
 }
 
 /// `(x == 0 || x > 0)` with signed SGt → `x >= 0` (SGe).
-fn fold_signed_zero_or_positive(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::LogicalOr | DirBinaryOp::Or,
+fn fold_signed_zero_or_positive(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::LogicalOr | PreHirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -67,17 +67,17 @@ fn fold_signed_zero_or_positive(expr: &DirExpr) -> Option<DirExpr> {
         _ => return None,
     };
     let ty = expr_type(&x);
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::SGe,
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::SGe,
         lhs: Box::new(x),
-        rhs: Box::new(DirExpr::Const(0, ty)),
+        rhs: Box::new(PreHirExpr::Const(0, ty)),
         ty: NirType::Bool,
     })
 }
 
-fn is_eq_zero_of(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Eq,
+fn is_eq_zero_of(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Eq,
         lhs,
         rhs,
         ..
@@ -94,9 +94,9 @@ fn is_eq_zero_of(expr: &DirExpr) -> Option<DirExpr> {
     }
 }
 
-fn is_signed_lt_zero_of(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::SLt,
+fn is_signed_lt_zero_of(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::SLt,
         lhs,
         rhs,
         ..
@@ -111,9 +111,9 @@ fn is_signed_lt_zero_of(expr: &DirExpr) -> Option<DirExpr> {
     }
 }
 
-fn is_signed_gt_zero_of(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::SGt,
+fn is_signed_gt_zero_of(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::SGt,
         lhs,
         rhs,
         ..
@@ -128,34 +128,34 @@ fn is_signed_gt_zero_of(expr: &DirExpr) -> Option<DirExpr> {
     }
 }
 
-fn normalize_boolean_logic_core(expr: &DirExpr) -> Option<DirExpr> {
+fn normalize_boolean_logic_core(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Eq,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
             Some(bool_true_expr())
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
             Some(bool_false_expr())
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) && matches!(expr_type(lhs), NirType::Bool) => {
             Some((**lhs).clone())
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
             lhs,
             rhs,
             ..
@@ -163,16 +163,16 @@ fn normalize_boolean_logic_core(expr: &DirExpr) -> Option<DirExpr> {
             // `0 != bool` → bool
             Some((**rhs).clone())
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Eq,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) && matches!(expr_type(lhs), NirType::Bool) => {
             Some(negate_expr((**lhs).clone()))
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Eq,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
             lhs,
             rhs,
             ..
@@ -180,56 +180,56 @@ fn normalize_boolean_logic_core(expr: &DirExpr) -> Option<DirExpr> {
             // `0 == (a < 0)` → `!(a < 0)` → further folds to `a >= 0`
             Some(negate_expr((**rhs).clone()))
         }
-        DirExpr::Unary {
-            op: DirUnaryOp::Not,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
             expr,
             ..
         } => match expr.as_ref() {
-            DirExpr::Unary {
-                op: DirUnaryOp::Not,
+            PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
                 expr: inner,
                 ..
             } => Some((**inner).clone()),
-            DirExpr::Binary {
-                op: DirBinaryOp::LogicalAnd,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
                 lhs,
                 rhs,
                 ..
-            } => Some(DirExpr::Binary {
-                op: DirBinaryOp::LogicalOr,
+            } => Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalOr,
                 lhs: Box::new(negate_expr((**lhs).clone())),
                 rhs: Box::new(negate_expr((**rhs).clone())),
                 ty: NirType::Bool,
             }),
-            DirExpr::Binary {
-                op: DirBinaryOp::LogicalOr,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalOr,
                 lhs,
                 rhs,
                 ..
-            } => Some(DirExpr::Binary {
-                op: DirBinaryOp::LogicalAnd,
+            } => Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
                 lhs: Box::new(negate_expr((**lhs).clone())),
                 rhs: Box::new(negate_expr((**rhs).clone())),
                 ty: NirType::Bool,
             }),
             // Negate comparison operators: !(a == b) → a != b, !(a < b) → b <= a, etc.
-            DirExpr::Binary { op, lhs, rhs, ty } => {
+            PreHirExpr::Binary { op, lhs, rhs, ty } => {
                 let negated_op = match op {
-                    DirBinaryOp::Eq => Some(DirBinaryOp::Ne),
-                    DirBinaryOp::Ne => Some(DirBinaryOp::Eq),
+                    PreHirBinaryOp::Eq => Some(PreHirBinaryOp::Ne),
+                    PreHirBinaryOp::Ne => Some(PreHirBinaryOp::Eq),
                     // !(a < b)  →  b <= a
-                    DirBinaryOp::Lt => None, // handled below with swapped operands
-                    DirBinaryOp::Le => None,
-                    DirBinaryOp::Gt => None,
-                    DirBinaryOp::Ge => None,
-                    DirBinaryOp::SLt => None,
-                    DirBinaryOp::SLe => None,
-                    DirBinaryOp::SGt => None,
-                    DirBinaryOp::SGe => None,
+                    PreHirBinaryOp::Lt => None, // handled below with swapped operands
+                    PreHirBinaryOp::Le => None,
+                    PreHirBinaryOp::Gt => None,
+                    PreHirBinaryOp::Ge => None,
+                    PreHirBinaryOp::SLt => None,
+                    PreHirBinaryOp::SLe => None,
+                    PreHirBinaryOp::SGt => None,
+                    PreHirBinaryOp::SGe => None,
                     _ => None,
                 };
                 if let Some(op2) = negated_op {
-                    return Some(DirExpr::Binary {
+                    return Some(PreHirExpr::Binary {
                         op: op2,
                         lhs: lhs.clone(),
                         rhs: rhs.clone(),
@@ -242,50 +242,50 @@ fn normalize_boolean_logic_core(expr: &DirExpr) -> Option<DirExpr> {
                 // !(a <s b) →  b <=s a
                 // !(a <=s b) → b <s a
                 match op {
-                    DirBinaryOp::Lt => Some(DirExpr::Binary {
-                        op: DirBinaryOp::Le,
+                    PreHirBinaryOp::Lt => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Le,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    DirBinaryOp::Le => Some(DirExpr::Binary {
-                        op: DirBinaryOp::Lt,
+                    PreHirBinaryOp::Le => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Lt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    DirBinaryOp::Gt => Some(DirExpr::Binary {
-                        op: DirBinaryOp::Ge,
+                    PreHirBinaryOp::Gt => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Ge,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    DirBinaryOp::Ge => Some(DirExpr::Binary {
-                        op: DirBinaryOp::Gt,
+                    PreHirBinaryOp::Ge => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Gt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    DirBinaryOp::SLt => Some(DirExpr::Binary {
-                        op: DirBinaryOp::SLe,
+                    PreHirBinaryOp::SLt => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SLe,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    DirBinaryOp::SLe => Some(DirExpr::Binary {
-                        op: DirBinaryOp::SLt,
+                    PreHirBinaryOp::SLe => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SLt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    DirBinaryOp::SGt => Some(DirExpr::Binary {
-                        op: DirBinaryOp::SGe,
+                    PreHirBinaryOp::SGt => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SGe,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
                     }),
-                    DirBinaryOp::SGe => Some(DirExpr::Binary {
-                        op: DirBinaryOp::SGt,
+                    PreHirBinaryOp::SGe => Some(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SGt,
                         lhs: rhs.clone(),
                         rhs: lhs.clone(),
                         ty: ty.clone(),
@@ -295,8 +295,8 @@ fn normalize_boolean_logic_core(expr: &DirExpr) -> Option<DirExpr> {
             }
             _ => None,
         },
-        DirExpr::Binary {
-            op: DirBinaryOp::LogicalAnd,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalAnd,
             lhs,
             rhs,
             ..
@@ -313,8 +313,8 @@ fn normalize_boolean_logic_core(expr: &DirExpr) -> Option<DirExpr> {
                 None
             }
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::LogicalOr,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalOr,
             lhs,
             rhs,
             ..
@@ -341,23 +341,23 @@ enum SignedDiffSignTest {
     Positive,
 }
 
-fn canonicalize_flag_intrinsic_call(expr: &DirExpr) -> Option<DirExpr> {
+fn canonicalize_flag_intrinsic_call(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        DirExpr::Call { target, args, .. } if target == "__carry" => {
+        PreHirExpr::Call { target, args, .. } if target == "__carry" => {
             canonicalize_carry_intrinsic_call(args)
         }
-        DirExpr::Call { target, args, .. } if target == "__scarry" || target == "__sborrow" => {
+        PreHirExpr::Call { target, args, .. } if target == "__scarry" || target == "__sborrow" => {
             canonicalize_zero_fold_flag_call(args)
         }
         _ => None,
     }
 }
 
-fn canonicalize_carry_intrinsic_call(args: &[DirExpr]) -> Option<DirExpr> {
+fn canonicalize_carry_intrinsic_call(args: &[PreHirExpr]) -> Option<PreHirExpr> {
     let [lhs, rhs] = args else {
         return None;
     };
-    let DirExpr::Const(value, _) = rhs else {
+    let PreHirExpr::Const(value, _) = rhs else {
         return None;
     };
     if *value == 0 {
@@ -365,9 +365,9 @@ fn canonicalize_carry_intrinsic_call(args: &[DirExpr]) -> Option<DirExpr> {
     }
     let bits = int_type_bits(&expr_type(rhs)).or_else(|| int_type_bits(&expr_type(lhs)))?;
     let threshold = wrap_negated_const(*value, bits)?;
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::Le,
-        lhs: Box::new(DirExpr::Const(
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Le,
+        lhs: Box::new(PreHirExpr::Const(
             threshold,
             NirType::Int {
                 bits,
@@ -379,16 +379,16 @@ fn canonicalize_carry_intrinsic_call(args: &[DirExpr]) -> Option<DirExpr> {
     })
 }
 
-fn canonicalize_zero_fold_flag_call(args: &[DirExpr]) -> Option<DirExpr> {
+fn canonicalize_zero_fold_flag_call(args: &[PreHirExpr]) -> Option<PreHirExpr> {
     let [_, rhs] = args else {
         return None;
     };
     is_zero_const(rhs).then_some(bool_false_expr())
 }
 
-fn canonicalize_sborrow_compare(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: op @ (DirBinaryOp::Eq | DirBinaryOp::Ne),
+fn canonicalize_sborrow_compare(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: op @ (PreHirBinaryOp::Eq | PreHirBinaryOp::Ne),
         lhs,
         rhs,
         ..
@@ -406,14 +406,14 @@ fn canonicalize_sborrow_compare(expr: &DirExpr) -> Option<DirExpr> {
     };
 
     let (cmp_lhs, cmp_rhs, cmp_op) = match (op, sign_test) {
-        (DirBinaryOp::Ne, SignedDiffSignTest::Negative) => (a.clone(), b.clone(), DirBinaryOp::SLt),
-        (DirBinaryOp::Ne, SignedDiffSignTest::Positive) => (b.clone(), a.clone(), DirBinaryOp::SLt),
-        (DirBinaryOp::Eq, SignedDiffSignTest::Positive) => (a.clone(), b.clone(), DirBinaryOp::SLe),
-        (DirBinaryOp::Eq, SignedDiffSignTest::Negative) => (b.clone(), a.clone(), DirBinaryOp::SLe),
+        (PreHirBinaryOp::Ne, SignedDiffSignTest::Negative) => (a.clone(), b.clone(), PreHirBinaryOp::SLt),
+        (PreHirBinaryOp::Ne, SignedDiffSignTest::Positive) => (b.clone(), a.clone(), PreHirBinaryOp::SLt),
+        (PreHirBinaryOp::Eq, SignedDiffSignTest::Positive) => (a.clone(), b.clone(), PreHirBinaryOp::SLe),
+        (PreHirBinaryOp::Eq, SignedDiffSignTest::Negative) => (b.clone(), a.clone(), PreHirBinaryOp::SLe),
         _ => return None,
     };
 
-    Some(DirExpr::Binary {
+    Some(PreHirExpr::Binary {
         op: cmp_op,
         lhs: Box::new(cmp_lhs),
         rhs: Box::new(cmp_rhs),
@@ -421,8 +421,8 @@ fn canonicalize_sborrow_compare(expr: &DirExpr) -> Option<DirExpr> {
     })
 }
 
-fn match_sborrow_call(expr: &DirExpr) -> Option<(&DirExpr, &DirExpr)> {
-    let DirExpr::Call { target, args, .. } = expr else {
+fn match_sborrow_call(expr: &PreHirExpr) -> Option<(&PreHirExpr, &PreHirExpr)> {
+    let PreHirExpr::Call { target, args, .. } = expr else {
         return None;
     };
     if target != "__sborrow" {
@@ -435,12 +435,12 @@ fn match_sborrow_call(expr: &DirExpr) -> Option<(&DirExpr, &DirExpr)> {
 }
 
 fn match_signed_diff_sign_test(
-    expr: &DirExpr,
-    a: &DirExpr,
-    b: &DirExpr,
+    expr: &PreHirExpr,
+    a: &PreHirExpr,
+    b: &PreHirExpr,
 ) -> Option<SignedDiffSignTest> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::SLt,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::SLt,
         lhs,
         rhs,
         ..
@@ -457,16 +457,16 @@ fn match_signed_diff_sign_test(
     None
 }
 
-fn matches_signed_difference(expr: &DirExpr, a: &DirExpr, b: &DirExpr) -> bool {
+fn matches_signed_difference(expr: &PreHirExpr, a: &PreHirExpr, b: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         } => lhs.as_ref() == a && rhs.as_ref() == b,
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -475,15 +475,15 @@ fn matches_signed_difference(expr: &DirExpr, a: &DirExpr, b: &DirExpr) -> bool {
     }
 }
 
-fn matches_negated_expr(expr: &DirExpr, inner: &DirExpr) -> bool {
+fn matches_negated_expr(expr: &PreHirExpr, inner: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Unary {
-            op: DirUnaryOp::Neg,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Neg,
             expr,
             ..
         } => expr.as_ref() == inner,
-        DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ..
@@ -502,34 +502,34 @@ fn is_truthy_condition_type(ty: &NirType) -> bool {
     )
 }
 
-pub fn canonicalize_condition_expr(expr: &DirExpr) -> Option<DirExpr> {
+pub fn canonicalize_condition_expr(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne | DirBinaryOp::Eq,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne | PreHirBinaryOp::Eq,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => {
             let is_eq = matches!(
                 expr,
-                DirExpr::Binary {
-                    op: DirBinaryOp::Eq,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
                     ..
                 }
             );
             match lhs.as_ref() {
-                DirExpr::Binary {
-                    op: inner_op @ (DirBinaryOp::Sub | DirBinaryOp::Xor),
+                PreHirExpr::Binary {
+                    op: inner_op @ (PreHirBinaryOp::Sub | PreHirBinaryOp::Xor),
                     lhs: inner_lhs,
                     rhs: inner_rhs,
                     ty: inner_ty,
                 } => {
                     let new_op = if is_eq {
-                        DirBinaryOp::Eq
+                        PreHirBinaryOp::Eq
                     } else {
-                        DirBinaryOp::Ne
+                        PreHirBinaryOp::Ne
                     };
-                    return Some(DirExpr::Binary {
+                    return Some(PreHirExpr::Binary {
                         op: new_op,
                         lhs: inner_lhs.clone(),
                         rhs: inner_rhs.clone(),
@@ -552,9 +552,9 @@ pub fn canonicalize_condition_expr(expr: &DirExpr) -> Option<DirExpr> {
     }
 }
 
-pub fn canonicalize_arm_compound_flag_condition(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::LogicalAnd,
+pub fn canonicalize_arm_compound_flag_condition(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::LogicalAnd,
         lhs,
         rhs,
         ..
@@ -567,8 +567,8 @@ pub fn canonicalize_arm_compound_flag_condition(expr: &DirExpr) -> Option<DirExp
     if let Some((ne_a, ne_b)) = match_ne_comparison(lhs) {
         if let Some((sle_a, sle_b)) = match_sle_comparison(rhs) {
             if (ne_a == sle_a && ne_b == sle_b) || (ne_a == sle_b && ne_b == sle_a) {
-                return Some(DirExpr::Binary {
-                    op: DirBinaryOp::SLt,
+                return Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::SLt,
                     lhs: Box::new(sle_a.clone()),
                     rhs: Box::new(sle_b.clone()),
                     ty: NirType::Bool,
@@ -579,8 +579,8 @@ pub fn canonicalize_arm_compound_flag_condition(expr: &DirExpr) -> Option<DirExp
     if let Some((ne_a, ne_b)) = match_ne_comparison(rhs) {
         if let Some((sle_a, sle_b)) = match_sle_comparison(lhs) {
             if (ne_a == sle_a && ne_b == sle_b) || (ne_a == sle_b && ne_b == sle_a) {
-                return Some(DirExpr::Binary {
-                    op: DirBinaryOp::SLt,
+                return Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::SLt,
                     lhs: Box::new(sle_a.clone()),
                     rhs: Box::new(sle_b.clone()),
                     ty: NirType::Bool,
@@ -592,17 +592,17 @@ pub fn canonicalize_arm_compound_flag_condition(expr: &DirExpr) -> Option<DirExp
     None
 }
 
-fn match_ne_comparison<'a>(expr: &'a DirExpr) -> Option<(&'a DirExpr, &'a DirExpr)> {
+fn match_ne_comparison<'a>(expr: &'a PreHirExpr) -> Option<(&'a PreHirExpr, &'a PreHirExpr)> {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } => {
             if is_zero_const(rhs.as_ref()) {
-                if let DirExpr::Binary {
-                    op: DirBinaryOp::Sub,
+                if let PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Sub,
                     lhs: inner_lhs,
                     rhs: inner_rhs,
                     ..
@@ -617,16 +617,16 @@ fn match_ne_comparison<'a>(expr: &'a DirExpr) -> Option<(&'a DirExpr, &'a DirExp
     }
 }
 
-fn match_sle_comparison<'a>(expr: &'a DirExpr) -> Option<(&'a DirExpr, &'a DirExpr)> {
+fn match_sle_comparison<'a>(expr: &'a PreHirExpr) -> Option<(&'a PreHirExpr, &'a PreHirExpr)> {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::SLe,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::SLe,
             lhs,
             rhs,
             ..
         } => Some((lhs.as_ref(), rhs.as_ref())),
-        DirExpr::Binary {
-            op: op @ (DirBinaryOp::Eq | DirBinaryOp::Ne),
+        PreHirExpr::Binary {
+            op: op @ (PreHirBinaryOp::Eq | PreHirBinaryOp::Ne),
             lhs,
             rhs,
             ..
@@ -638,9 +638,9 @@ fn match_sle_comparison<'a>(expr: &'a DirExpr) -> Option<(&'a DirExpr, &'a DirEx
             } else {
                 return None;
             };
-            if *op == DirBinaryOp::Eq && sign_test == SignedDiffSignTest::Positive {
+            if *op == PreHirBinaryOp::Eq && sign_test == SignedDiffSignTest::Positive {
                 Some((a, b))
-            } else if *op == DirBinaryOp::Eq && sign_test == SignedDiffSignTest::Negative {
+            } else if *op == PreHirBinaryOp::Eq && sign_test == SignedDiffSignTest::Negative {
                 Some((b, a))
             } else {
                 None

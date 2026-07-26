@@ -1,7 +1,7 @@
 //! Call-site arity constraints for static callee symbols (intra-build merge hook).
 //!
 //! Walks all `Call` expressions and records `max(args.len())` per callee name string.
-//! Downstream pipelines can merge [`DirFunction::callee_observed_max_arity`] across functions
+//! Downstream pipelines can merge [`PreHirFunction::callee_observed_max_arity`] across functions
 //! for interprocedural lower bounds (sound: never under-estimate arity).
 //!
 //! Broader **call-graph SCC + lattice fixpoint** propagation of pointer/integer types belongs
@@ -13,7 +13,7 @@ use fission_midend_core::ir::{
     MemoryEffectRegion, NirType, PrototypeSummary, SummarySoundness, WrapperClass,
     parse_call_target_address,
 };
-use fission_midend_dir::{DirExpr, DirFunction, DirStmt};
+use fission_midend_prehir::{PreHirExpr, PreHirFunction, PreHirStmt};
 use indexmap::IndexMap;
 
 use fission_midend_core::wave_stats::{
@@ -166,34 +166,34 @@ fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize
 }
 
 fn scan_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     arity_map: &mut IndexMap<String, usize>,
     summary_map: &mut IndexMap<String, CallSummary>,
 ) {
     match expr {
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             merge_arity(arity_map, target, args.len());
             merge_summary(summary_map, target, args.len());
             for a in args {
                 scan_expr(a, arity_map, summary_map);
             }
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => scan_expr(expr, arity_map, summary_map),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => scan_expr(expr, arity_map, summary_map),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             scan_expr(lhs, arity_map, summary_map);
             scan_expr(rhs, arity_map, summary_map);
         }
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             scan_expr(base, arity_map, summary_map)
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             scan_expr(base, arity_map, summary_map);
             scan_expr(index, arity_map, summary_map);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -203,24 +203,24 @@ fn scan_expr(
             scan_expr(then_expr, arity_map, summary_map);
             scan_expr(else_expr, arity_map, summary_map);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 }
 
 fn scan_stmts(
-    body: &[DirStmt],
+    body: &[PreHirStmt],
     arity_map: &mut IndexMap<String, usize>,
     summary_map: &mut IndexMap<String, CallSummary>,
 ) {
     for stmt in body {
         match stmt {
-            DirStmt::Assign { rhs, .. } => scan_expr(rhs, arity_map, summary_map),
-            DirStmt::Expr(e) => scan_expr(e, arity_map, summary_map),
-            DirStmt::Block(stmts)
-            | DirStmt::While { body: stmts, .. }
-            | DirStmt::DoWhile { body: stmts, .. }
-            | DirStmt::For { body: stmts, .. } => scan_stmts(stmts, arity_map, summary_map),
-            DirStmt::Switch {
+            PreHirStmt::Assign { rhs, .. } => scan_expr(rhs, arity_map, summary_map),
+            PreHirStmt::Expr(e) => scan_expr(e, arity_map, summary_map),
+            PreHirStmt::Block(stmts)
+            | PreHirStmt::While { body: stmts, .. }
+            | PreHirStmt::DoWhile { body: stmts, .. }
+            | PreHirStmt::For { body: stmts, .. } => scan_stmts(stmts, arity_map, summary_map),
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -231,7 +231,7 @@ fn scan_stmts(
                 }
                 scan_stmts(default, arity_map, summary_map);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -240,13 +240,13 @@ fn scan_stmts(
                 scan_stmts(then_body, arity_map, summary_map);
                 scan_stmts(else_body, arity_map, summary_map);
             }
-            DirStmt::Return(Some(e)) => scan_expr(e, arity_map, summary_map),
+            PreHirStmt::Return(Some(e)) => scan_expr(e, arity_map, summary_map),
             _ => {}
         }
     }
 }
 
-pub fn apply_interproc_callsite_arity_pass(func: &mut DirFunction) -> bool {
+pub fn apply_interproc_callsite_arity_pass(func: &mut PreHirFunction) -> bool {
     let mut fresh = IndexMap::new();
     let mut summaries = IndexMap::new();
     scan_stmts(&func.body, &mut fresh, &mut summaries);
@@ -360,11 +360,11 @@ pub fn apply_interproc_callsite_arity_pass(func: &mut DirFunction) -> bool {
 mod tests {
     use super::*;
 // prelude via parent
-    use fission_midend_dir::DirBinding;
+    use fission_midend_prehir::PreHirBinding;
     use fission_core::CallingConvention;
 
-    fn empty_binding(name: &str) -> DirBinding {
-        DirBinding {
+    fn empty_binding(name: &str) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_string(),
             ty: NirType::Unknown,
             surface_type_name: None,
@@ -375,14 +375,14 @@ mod tests {
 
     #[test]
     fn interproc_summary_marks_zero_arity_as_non_escaping() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "caller".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                 target: "FUN_0x140001000".to_string(),
                 args: vec![],
                 ty: NirType::Unknown,
@@ -400,16 +400,16 @@ mod tests {
 
     #[test]
     fn interproc_summary_detects_simple_wrapper_shape() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "wrapper".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![empty_binding("param_1")],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Return(Some(DirExpr::Call {
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Call {
                 target: "sub_140010000".to_string(),
-                args: vec![DirExpr::Var("param_1".to_string())],
+                args: vec![PreHirExpr::Var("param_1".to_string())],
                 ty: NirType::Unknown,
             }))],
             calling_convention: CallingConvention::default(),

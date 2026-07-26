@@ -17,7 +17,7 @@ pub(super) struct MemorySlotKey {
 #[derive(Debug, Clone)]
 struct MemorySlotCandidate {
     key: MemorySlotKey,
-    base: DirExpr,
+    base: PreHirExpr,
     offset: i64,
     elem_ty: NirType,
     count: usize,
@@ -27,16 +27,16 @@ struct MemorySlotCandidate {
 #[derive(Debug, Clone)]
 struct MemorySlotPattern {
     key: MemorySlotKey,
-    base: DirExpr,
+    base: PreHirExpr,
     elem_ty: NirType,
-    index: Option<DirExpr>,
+    index: Option<PreHirExpr>,
 }
 
 #[derive(Debug, Default, Clone)]
 struct AddressParts {
-    base: Option<DirExpr>,
+    base: Option<PreHirExpr>,
     const_offset: i64,
-    scaled_index: Option<(DirExpr, i64)>,
+    scaled_index: Option<(PreHirExpr, i64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +53,7 @@ struct MemorySlotFamilyKey {
     stride: i64,
 }
 
-pub fn normalize_binding_initializers(bindings: &mut [DirBinding]) {
+pub fn normalize_binding_initializers(bindings: &mut [PreHirBinding]) {
     for binding in bindings {
         if let Some(initializer) = &mut binding.initializer {
             normalize_expr(initializer);
@@ -61,15 +61,15 @@ pub fn normalize_binding_initializers(bindings: &mut [DirBinding]) {
     }
 }
 
-pub fn apply_memory_slot_surfacing(func: &mut DirFunction) -> bool {
+pub fn apply_memory_slot_surfacing(func: &mut PreHirFunction) -> bool {
     apply_memory_slot_surfacing_with_mode(func, false)
 }
 
-pub fn apply_memory_slot_surfacing_cheap(func: &mut DirFunction) -> bool {
+pub fn apply_memory_slot_surfacing_cheap(func: &mut PreHirFunction) -> bool {
     apply_memory_slot_surfacing_with_mode(func, true)
 }
 
-fn apply_memory_slot_surfacing_with_mode(func: &mut DirFunction, cheap_only: bool) -> bool {
+fn apply_memory_slot_surfacing_with_mode(func: &mut PreHirFunction, cheap_only: bool) -> bool {
     let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::default();
     collect_memory_slot_candidates(func, &mut candidates);
     let alias_defs = collect_single_var_aliases(&func.body);
@@ -143,14 +143,14 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut DirFunction, cheap_only: boo
             },
         );
         let derived_origin = derive_slot_alias_origin(func, &display_base);
-        promoted_bindings.push(DirBinding {
+        promoted_bindings.push(PreHirBinding {
             name: alias,
             ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
             surface_type_name: slot_surface_type_name(&display_base, func, &inventory),
             origin: derived_origin,
-            initializer: Some(DirExpr::Cast {
+            initializer: Some(PreHirExpr::Cast {
                 ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
-                expr: Box::new(DirExpr::PtrOffset {
+                expr: Box::new(PreHirExpr::PtrOffset {
                     base: Box::new(display_base),
                     offset: candidate.offset,
                 }),
@@ -167,11 +167,11 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut DirFunction, cheap_only: boo
 }
 
 fn slot_surface_type_name(
-    base: &DirExpr,
-    func: &DirFunction,
+    base: &PreHirExpr,
+    func: &PreHirFunction,
     inventory: &super::typed_facts::TypedFactInventory,
 ) -> Option<String> {
-    let DirExpr::Var(name) = base else {
+    let PreHirExpr::Var(name) = base else {
         return None;
     };
     if let Some(object_facts) = inventory.objects.get(name)
@@ -186,20 +186,20 @@ fn slot_surface_type_name(
         .and_then(|binding| binding.surface_type_name.clone())
 }
 
-fn collect_single_var_aliases(stmts: &[DirStmt]) -> HashMap<String, DirExpr> {
+fn collect_single_var_aliases(stmts: &[PreHirStmt]) -> HashMap<String, PreHirExpr> {
     let mut counts = HashMap::<String, usize>::default();
-    let mut defs = HashMap::<String, DirExpr>::default();
+    let mut defs = HashMap::<String, PreHirExpr>::default();
 
     fn visit_stmt(
-        stmt: &DirStmt,
+        stmt: &PreHirStmt,
         counts: &mut HashMap<String, usize>,
-        defs: &mut HashMap<String, DirExpr>,
+        defs: &mut HashMap<String, PreHirExpr>,
     ) {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 rhs,
-            } if matches!(rhs, DirExpr::Var(_)) => {
+            } if matches!(rhs, PreHirExpr::Var(_)) => {
                 let entry = counts.entry(name.clone()).or_insert(0);
                 *entry += 1;
                 if *entry == 1 {
@@ -208,12 +208,12 @@ fn collect_single_var_aliases(stmts: &[DirStmt]) -> HashMap<String, DirExpr> {
                     defs.remove(name);
                 }
             }
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 for nested in body {
                     visit_stmt(nested, counts, defs);
                 }
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -225,7 +225,7 @@ fn collect_single_var_aliases(stmts: &[DirStmt]) -> HashMap<String, DirExpr> {
                     visit_stmt(nested, counts, defs);
                 }
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init.as_deref() {
@@ -238,7 +238,7 @@ fn collect_single_var_aliases(stmts: &[DirStmt]) -> HashMap<String, DirExpr> {
                     visit_stmt(nested, counts, defs);
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     for nested in &case.body {
                         visit_stmt(nested, counts, defs);
@@ -248,14 +248,14 @@ fn collect_single_var_aliases(stmts: &[DirStmt]) -> HashMap<String, DirExpr> {
                     visit_stmt(nested, counts, defs);
                 }
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_) => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_) => {}
         }
     }
 
@@ -266,20 +266,20 @@ fn collect_single_var_aliases(stmts: &[DirStmt]) -> HashMap<String, DirExpr> {
 }
 
 fn resolve_slot_alias_base(
-    func: &DirFunction,
-    alias_defs: &HashMap<String, DirExpr>,
-    base: &DirExpr,
-) -> DirExpr {
+    func: &PreHirFunction,
+    alias_defs: &HashMap<String, PreHirExpr>,
+    base: &PreHirExpr,
+) -> PreHirExpr {
     fn resolve_var(
-        func: &DirFunction,
-        alias_defs: &HashMap<String, DirExpr>,
+        func: &PreHirFunction,
+        alias_defs: &HashMap<String, PreHirExpr>,
         name: &str,
         depth: usize,
-    ) -> DirExpr {
+    ) -> PreHirExpr {
         if depth >= 8 {
-            return DirExpr::Var(name.to_string());
+            return PreHirExpr::Var(name.to_string());
         }
-        if let Some(DirExpr::Var(other)) = alias_defs.get(name)
+        if let Some(PreHirExpr::Var(other)) = alias_defs.get(name)
             && other != name
         {
             return resolve_var(func, alias_defs, other, depth + 1);
@@ -291,23 +291,23 @@ fn resolve_slot_alias_base(
             .find(|binding| binding.name == name)
             .and_then(|binding| binding.initializer.as_ref());
         let Some(initializer) = maybe_initializer else {
-            return DirExpr::Var(name.to_string());
+            return PreHirExpr::Var(name.to_string());
         };
         match initializer {
-            DirExpr::Var(other) if other != name => resolve_var(func, alias_defs, other, depth + 1),
-            _ => DirExpr::Var(name.to_string()),
+            PreHirExpr::Var(other) if other != name => resolve_var(func, alias_defs, other, depth + 1),
+            _ => PreHirExpr::Var(name.to_string()),
         }
     }
 
     match base {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             resolve_var(func, alias_defs, name, 0)
         }
-        DirExpr::Cast { ty, expr } => DirExpr::Cast {
+        PreHirExpr::Cast { ty, expr } => PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(resolve_slot_alias_base(func, alias_defs, expr)),
         },
-        DirExpr::PtrOffset { base, offset } => DirExpr::PtrOffset {
+        PreHirExpr::PtrOffset { base, offset } => PreHirExpr::PtrOffset {
             base: Box::new(resolve_slot_alias_base(func, alias_defs, base)),
             offset: *offset,
         },
@@ -315,9 +315,9 @@ fn resolve_slot_alias_base(
     }
 }
 
-fn derive_slot_alias_origin(func: &DirFunction, base: &DirExpr) -> Option<NirBindingOrigin> {
+fn derive_slot_alias_origin(func: &PreHirFunction, base: &PreHirExpr) -> Option<NirBindingOrigin> {
     match base {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => func
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => func
             .params
             .iter()
             .chain(func.locals.iter())
@@ -329,23 +329,23 @@ fn derive_slot_alias_origin(func: &DirFunction, base: &DirExpr) -> Option<NirBin
                 }
                 _ => None,
             }),
-        DirExpr::Cast { expr, .. } => derive_slot_alias_origin(func, expr),
-        DirExpr::PtrOffset { base, .. } => derive_slot_alias_origin(func, base),
+        PreHirExpr::Cast { expr, .. } => derive_slot_alias_origin(func, expr),
+        PreHirExpr::PtrOffset { base, .. } => derive_slot_alias_origin(func, base),
         _ => None,
     }
 }
 
 fn is_surface_stable_slot_display_base(
-    func: &DirFunction,
+    func: &PreHirFunction,
     inventory: &super::typed_facts::TypedFactInventory,
-    base: &DirExpr,
+    base: &PreHirExpr,
     offset: i64,
 ) -> bool {
     if offset != 0 {
         return true;
     }
     match base {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             if is_cheap_slot_base(base) || slot_surface_type_name(base, func, inventory).is_some() {
                 return true;
             }
@@ -359,10 +359,10 @@ fn is_surface_stable_slot_display_base(
             }
             !looks_like_synthetic_temp_name(name)
         }
-        DirExpr::Cast { expr, .. } => {
+        PreHirExpr::Cast { expr, .. } => {
             is_surface_stable_slot_display_base(func, inventory, expr, offset)
         }
-        DirExpr::PtrOffset {
+        PreHirExpr::PtrOffset {
             base,
             offset: base_offset,
         } => {
@@ -390,16 +390,16 @@ fn is_cheap_slot_candidate(candidate: &MemorySlotCandidate) -> bool {
             .is_none_or(|stride| stride == i64::from(candidate.key.access_size))
 }
 
-fn is_cheap_slot_base(expr: &DirExpr) -> bool {
+fn is_cheap_slot_base(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             matches!(
                 name.as_str(),
                 "esp" | "ebp" | "rsp" | "rbp" | "eax" | "ecx" | "edx" | "ebx" | "esi" | "edi"
             ) || name.starts_with("param_")
                 || name.starts_with("local_")
         }
-        DirExpr::Cast { expr, .. } => is_cheap_slot_base(expr),
+        PreHirExpr::Cast { expr, .. } => is_cheap_slot_base(expr),
         _ => false,
     }
 }
@@ -415,7 +415,7 @@ fn memory_slot_family_key(key: &MemorySlotKey) -> MemorySlotFamilyKey {
 }
 
 fn collect_memory_slot_candidates(
-    func: &DirFunction,
+    func: &PreHirFunction,
     candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
 ) {
     for (first_seen, access) in collect_partitioned_memory_accesses(&func.body)
@@ -447,29 +447,29 @@ fn collect_memory_slot_candidates(
 }
 
 fn rewrite_memory_slot_stmts(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     aliases: &HashMap<MemorySlotKey, MemorySlotAlias>,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
+            PreHirStmt::Assign { lhs, rhs } => {
                 changed |= rewrite_memory_slot_lvalue(lhs, aliases);
                 changed |= rewrite_memory_slot_expr(rhs, aliases);
             }
-            DirStmt::VaStart { va_list, .. } => {
+            PreHirStmt::VaStart { va_list, .. } => {
                 changed |= rewrite_memory_slot_expr(va_list, aliases);
             }
-            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 changed |= rewrite_memory_slot_expr(expr, aliases);
             }
-            DirStmt::Block(stmts)
-            | DirStmt::While { body: stmts, .. }
-            | DirStmt::DoWhile { body: stmts, .. }
-            | DirStmt::For { body: stmts, .. } => {
+            PreHirStmt::Block(stmts)
+            | PreHirStmt::While { body: stmts, .. }
+            | PreHirStmt::DoWhile { body: stmts, .. }
+            | PreHirStmt::For { body: stmts, .. } => {
                 changed |= rewrite_memory_slot_stmts(stmts, aliases);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -480,7 +480,7 @@ fn rewrite_memory_slot_stmts(
                 }
                 changed |= rewrite_memory_slot_stmts(default, aliases);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -489,36 +489,36 @@ fn rewrite_memory_slot_stmts(
                 changed |= rewrite_memory_slot_stmts(then_body, aliases);
                 changed |= rewrite_memory_slot_stmts(else_body, aliases);
             }
-            DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(None)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     changed
 }
 
 fn rewrite_memory_slot_lvalue(
-    lhs: &mut DirLValue,
+    lhs: &mut PreHirLValue,
     aliases: &HashMap<MemorySlotKey, MemorySlotAlias>,
 ) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, ty } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, ty } => {
             let changed = rewrite_memory_slot_expr(ptr, aliases);
             if let Some(pattern) = parse_memory_slot_pattern(ptr, ty)
                 && let Some(alias) = aliases.get(&pattern.key)
             {
                 *lhs = if let Some(index) = pattern.index {
-                    DirLValue::Index {
-                        base: Box::new(DirExpr::Var(alias.alias.clone())),
+                    PreHirLValue::Index {
+                        base: Box::new(PreHirExpr::Var(alias.alias.clone())),
                         index: Box::new(index),
                         elem_ty: alias.elem_ty.clone(),
                     }
                 } else {
-                    DirLValue::Deref {
-                        ptr: Box::new(DirExpr::Var(alias.alias.clone())),
+                    PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::Var(alias.alias.clone())),
                         ty: alias.elem_ty.clone(),
                     }
                 };
@@ -526,63 +526,63 @@ fn rewrite_memory_slot_lvalue(
             }
             changed
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             let mut changed = rewrite_memory_slot_expr(base, aliases);
             changed |= rewrite_memory_slot_expr(index, aliases);
             changed
         }
-        DirLValue::FieldAccess { base, .. } => rewrite_memory_slot_expr(base, aliases),
+        PreHirLValue::FieldAccess { base, .. } => rewrite_memory_slot_expr(base, aliases),
     }
 }
 
 fn rewrite_memory_slot_expr(
-    expr: &mut DirExpr,
+    expr: &mut PreHirExpr,
     aliases: &HashMap<MemorySlotKey, MemorySlotAlias>,
 ) -> bool {
     let mut changed = false;
     match expr {
-        DirExpr::Load { ptr, ty } => {
+        PreHirExpr::Load { ptr, ty } => {
             changed |= rewrite_memory_slot_expr(ptr, aliases);
             if let Some(pattern) = parse_memory_slot_pattern(ptr, ty)
                 && let Some(alias) = aliases.get(&pattern.key)
             {
                 *expr = if let Some(index) = pattern.index {
-                    DirExpr::Index {
-                        base: Box::new(DirExpr::Var(alias.alias.clone())),
+                    PreHirExpr::Index {
+                        base: Box::new(PreHirExpr::Var(alias.alias.clone())),
                         index: Box::new(index),
                         elem_ty: ty.clone(),
                     }
                 } else {
-                    DirExpr::Load {
-                        ptr: Box::new(DirExpr::Var(alias.alias.clone())),
+                    PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var(alias.alias.clone())),
                         ty: ty.clone(),
                     }
                 };
                 return true;
             }
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => {
             changed |= rewrite_memory_slot_expr(expr, aliases);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= rewrite_memory_slot_expr(lhs, aliases);
             changed |= rewrite_memory_slot_expr(rhs, aliases);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= rewrite_memory_slot_expr(arg, aliases);
             }
         }
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             changed |= rewrite_memory_slot_expr(base, aliases);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= rewrite_memory_slot_expr(base, aliases);
             changed |= rewrite_memory_slot_expr(index, aliases);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -592,12 +592,12 @@ fn rewrite_memory_slot_expr(
             changed |= rewrite_memory_slot_expr(then_expr, aliases);
             changed |= rewrite_memory_slot_expr(else_expr, aliases);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
     changed
 }
 
-fn parse_memory_slot_pattern(ptr: &DirExpr, elem_ty: &NirType) -> Option<MemorySlotPattern> {
+fn parse_memory_slot_pattern(ptr: &PreHirExpr, elem_ty: &NirType) -> Option<MemorySlotPattern> {
     let access_size = type_byte_size(elem_ty)?;
     let elem_size = i64::from(access_size);
     let mut parts = AddressParts::default();
@@ -627,23 +627,23 @@ fn parse_memory_slot_pattern(ptr: &DirExpr, elem_ty: &NirType) -> Option<MemoryS
     })
 }
 
-fn collect_address_parts(expr: &DirExpr, parts: &mut AddressParts, sign: i64) -> Option<()> {
+fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64) -> Option<()> {
     match expr {
-        DirExpr::Const(value, _) => {
+        PreHirExpr::Const(value, _) => {
             parts.const_offset += sign * *value;
             Some(())
         }
-        DirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
-        DirExpr::PtrOffset { base, offset } => {
+        PreHirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
+        PreHirExpr::PtrOffset { base, offset } => {
             parts.const_offset += sign * *offset;
             collect_address_parts(base, parts, sign)
         }
-        DirExpr::FieldAccess { base, offset, .. } => {
+        PreHirExpr::FieldAccess { base, offset, .. } => {
             parts.const_offset += sign * i64::from(*offset);
             collect_address_parts(base, parts, sign)
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -651,8 +651,8 @@ fn collect_address_parts(expr: &DirExpr, parts: &mut AddressParts, sign: i64) ->
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, sign)
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
@@ -660,27 +660,27 @@ fn collect_address_parts(expr: &DirExpr, parts: &mut AddressParts, sign: i64) ->
             collect_address_parts(lhs, parts, sign)?;
             collect_address_parts(rhs, parts, -sign)
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ..
         } => {
-            if let DirExpr::Const(value, _) = lhs.as_ref() {
+            if let PreHirExpr::Const(value, _) = lhs.as_ref() {
                 return add_scaled_index_expr(parts, rhs, sign * *value);
             }
-            if let DirExpr::Const(value, _) = rhs.as_ref() {
+            if let PreHirExpr::Const(value, _) = rhs.as_ref() {
                 return add_scaled_index_expr(parts, lhs, sign * *value);
             }
             add_base_expr(parts, expr.clone(), sign)
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Shl,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
             lhs,
             rhs,
             ..
         } => {
-            let DirExpr::Const(shift, _) = rhs.as_ref() else {
+            let PreHirExpr::Const(shift, _) = rhs.as_ref() else {
                 return add_base_expr(parts, expr.clone(), sign);
             };
             if *shift < 0 || *shift > 30 {
@@ -692,8 +692,8 @@ fn collect_address_parts(expr: &DirExpr, parts: &mut AddressParts, sign: i64) ->
     }
 }
 
-fn add_scaled_index_expr(parts: &mut AddressParts, expr: &DirExpr, stride: i64) -> Option<()> {
-    if let DirExpr::Const(value, _) = expr {
+fn add_scaled_index_expr(parts: &mut AddressParts, expr: &PreHirExpr, stride: i64) -> Option<()> {
+    if let PreHirExpr::Const(value, _) = expr {
         parts.const_offset += stride * *value;
         return Some(());
     }
@@ -704,20 +704,20 @@ fn add_scaled_index_expr(parts: &mut AddressParts, expr: &DirExpr, stride: i64) 
     add_scaled_index(parts, expr.clone(), stride)
 }
 
-fn extract_index_bias(expr: &DirExpr) -> Option<(DirExpr, i64)> {
+fn extract_index_bias(expr: &PreHirExpr) -> Option<(PreHirExpr, i64)> {
     match expr {
-        DirExpr::Cast { expr, .. } => extract_index_bias(expr),
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Cast { expr, .. } => extract_index_bias(expr),
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } => {
-            if let DirExpr::Const(value, _) = lhs.as_ref() {
+            if let PreHirExpr::Const(value, _) = lhs.as_ref() {
                 let (index, bias) = extract_index_bias(rhs)?;
                 return Some((index, bias + *value));
             }
-            if let DirExpr::Const(value, _) = rhs.as_ref() {
+            if let PreHirExpr::Const(value, _) = rhs.as_ref() {
                 let (index, bias) = extract_index_bias(lhs)?;
                 return Some((index, bias + *value));
             }
@@ -727,13 +727,13 @@ fn extract_index_bias(expr: &DirExpr) -> Option<(DirExpr, i64)> {
                 None
             }
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         } => {
-            if let DirExpr::Const(value, _) = rhs.as_ref() {
+            if let PreHirExpr::Const(value, _) = rhs.as_ref() {
                 let (index, bias) = extract_index_bias(lhs)?;
                 return Some((index, bias - *value));
             }
@@ -748,8 +748,8 @@ fn extract_index_bias(expr: &DirExpr) -> Option<(DirExpr, i64)> {
     }
 }
 
-fn add_base_expr(parts: &mut AddressParts, expr: DirExpr, sign: i64) -> Option<()> {
-    if sign != 1 || matches!(expr, DirExpr::Const(_, _)) {
+fn add_base_expr(parts: &mut AddressParts, expr: PreHirExpr, sign: i64) -> Option<()> {
+    if sign != 1 || matches!(expr, PreHirExpr::Const(_, _)) {
         return None;
     }
     match &parts.base {
@@ -762,7 +762,7 @@ fn add_base_expr(parts: &mut AddressParts, expr: DirExpr, sign: i64) -> Option<(
     }
 }
 
-fn add_scaled_index(parts: &mut AddressParts, expr: DirExpr, stride: i64) -> Option<()> {
+fn add_scaled_index(parts: &mut AddressParts, expr: PreHirExpr, stride: i64) -> Option<()> {
     if stride <= 0 || expr_has_side_effects(&expr) {
         return None;
     }

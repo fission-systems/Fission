@@ -2100,7 +2100,7 @@ mod tests {
         }
     }
 
-    /// Regression test for a real bug found via `fission-verify`'s
+    /// Regression test for a real bug found via `fission-dir`'s
     /// emulator-grounded ground-truth tier: a *narrower-than-register*
     /// (`dword`) negative operand in a signed comparison used to evaluate
     /// wrong, because `load_vn!` always zero-extends into the I64

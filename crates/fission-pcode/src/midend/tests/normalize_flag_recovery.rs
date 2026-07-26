@@ -1,6 +1,6 @@
 /// Unit tests for the x86 EFLAGS condition-code recovery pass.
 ///
-/// Each test builds an `DirFunction` that contains:
+/// Each test builds an `PreHirFunction` that contains:
 ///   - One or more flag-variable assignments (`cf = …`, `zf = …`, etc.)
 ///   - A branch condition (`if (flag_expr) { … }`) that references those flags
 ///
@@ -10,8 +10,8 @@ use super::*;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn flag_binding(name: &str) -> DirBinding {
-    DirBinding {
+fn flag_binding(name: &str) -> PreHirBinding {
+    PreHirBinding {
         name: name.to_string(),
         ty: NirType::Bool,
         surface_type_name: None,
@@ -20,8 +20,8 @@ fn flag_binding(name: &str) -> DirBinding {
     }
 }
 
-fn bool_binding(name: &str) -> DirBinding {
-    DirBinding {
+fn bool_binding(name: &str) -> PreHirBinding {
+    PreHirBinding {
         name: name.to_string(),
         ty: NirType::Bool,
         surface_type_name: None,
@@ -30,8 +30,8 @@ fn bool_binding(name: &str) -> DirBinding {
     }
 }
 
-fn i32_binding(name: &str) -> DirBinding {
-    DirBinding {
+fn i32_binding(name: &str) -> PreHirBinding {
+    PreHirBinding {
         name: name.to_string(),
         ty: NirType::Int {
             bits: 32,
@@ -43,8 +43,8 @@ fn i32_binding(name: &str) -> DirBinding {
     }
 }
 
-fn u32_binding(name: &str) -> DirBinding {
-    DirBinding {
+fn u32_binding(name: &str) -> PreHirBinding {
+    PreHirBinding {
         name: name.to_string(),
         ty: NirType::Int {
             bits: 32,
@@ -56,12 +56,12 @@ fn u32_binding(name: &str) -> DirBinding {
     }
 }
 
-fn var(name: &str) -> DirExpr {
-    DirExpr::Var(name.to_string())
+fn var(name: &str) -> PreHirExpr {
+    PreHirExpr::Var(name.to_string())
 }
 
-fn b_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr) -> DirExpr {
-    DirExpr::Binary {
+fn b_binary(op: PreHirBinaryOp, lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+    PreHirExpr::Binary {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
@@ -69,23 +69,23 @@ fn b_binary(op: DirBinaryOp, lhs: DirExpr, rhs: DirExpr) -> DirExpr {
     }
 }
 
-fn b_not(expr: DirExpr) -> DirExpr {
-    DirExpr::Unary {
-        op: DirUnaryOp::Not,
+fn b_not(expr: PreHirExpr) -> PreHirExpr {
+    PreHirExpr::Unary {
+        op: PreHirUnaryOp::Not,
         expr: Box::new(expr),
         ty: NirType::Bool,
     }
 }
 
-fn assign(name: &str, rhs: DirExpr) -> DirStmt {
-    DirStmt::Assign {
-        lhs: DirLValue::Var(name.to_string()),
+fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
+    PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(name.to_string()),
         rhs,
     }
 }
 
-fn sborrow_call(a: DirExpr, b: DirExpr) -> DirExpr {
-    DirExpr::Call {
+fn sborrow_call(a: PreHirExpr, b: PreHirExpr) -> PreHirExpr {
+    PreHirExpr::Call {
         target: "__sborrow".to_string(),
         args: vec![a, b],
         ty: NirType::Bool,
@@ -93,17 +93,17 @@ fn sborrow_call(a: DirExpr, b: DirExpr) -> DirExpr {
 }
 
 fn make_flag_func(
-    flag_assigns: Vec<DirStmt>,
-    cond: DirExpr,
-    locals: Vec<DirBinding>,
-) -> DirFunction {
+    flag_assigns: Vec<PreHirStmt>,
+    cond: PreHirExpr,
+    locals: Vec<PreHirBinding>,
+) -> PreHirFunction {
     let mut body = flag_assigns;
-    body.push(DirStmt::If {
+    body.push(PreHirStmt::If {
         cond,
-        then_body: vec![DirStmt::Return(Some(var("a")))],
-        else_body: vec![DirStmt::Return(Some(var("b")))],
+        then_body: vec![PreHirStmt::Return(Some(var("a")))],
+        else_body: vec![PreHirStmt::Return(Some(var("b")))],
     });
-    DirFunction {
+    PreHirFunction {
         name: "test_flag_recovery".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![i32_binding("a"), i32_binding("b")],
@@ -125,14 +125,14 @@ fn flag_recovery_jne_not_zf_becomes_ne() {
     // zf = (a == b)
     // if (!zf) { return a; } else { return b; }
     // →  if (a != b) { return a; } else { return b; }
-    let zf_def = b_binary(DirBinaryOp::Eq, var("a"), var("b"));
+    let zf_def = b_binary(PreHirBinaryOp::Eq, var("a"), var("b"));
     let mut func = make_flag_func(
         vec![assign("zf", zf_def)],
         b_not(var("zf")),
         vec![flag_binding("zf")],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("a != b") || code.contains("b != a"),
         "expected 'a != b' after flag recovery, got:\n{code}"
@@ -150,14 +150,14 @@ fn flag_recovery_je_zf_becomes_eq() {
     // zf = (a == b)
     // if (zf) { return a; } else { return b; }
     // →  if (a == b) { return a; } else { return b; }
-    let zf_def = b_binary(DirBinaryOp::Eq, var("a"), var("b"));
+    let zf_def = b_binary(PreHirBinaryOp::Eq, var("a"), var("b"));
     let mut func = make_flag_func(
         vec![assign("zf", zf_def)],
         var("zf"),
         vec![flag_binding("zf")],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("a == b") || code.contains("b == a"),
         "expected 'a == b' after flag recovery, got:\n{code}"
@@ -176,8 +176,8 @@ fn flag_recovery_jl_sf_ne_of_becomes_slt() {
     // of = __sborrow(a, b)
     // if (sf != of) { return a; } else { return b; }
     // →  if (a < b) { return a; } else { return b; }  [signed]
-    let diff = DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+    let diff = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs: Box::new(var("a")),
         rhs: Box::new(var("b")),
         ty: NirType::Int {
@@ -186,9 +186,9 @@ fn flag_recovery_jl_sf_ne_of_becomes_slt() {
         },
     };
     let sf_def = b_binary(
-        DirBinaryOp::SLt,
+        PreHirBinaryOp::SLt,
         diff,
-        DirExpr::Const(
+        PreHirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -197,14 +197,14 @@ fn flag_recovery_jl_sf_ne_of_becomes_slt() {
         ),
     );
     let of_def = sborrow_call(var("a"), var("b"));
-    let cond = b_binary(DirBinaryOp::Ne, var("sf"), var("of"));
+    let cond = b_binary(PreHirBinaryOp::Ne, var("sf"), var("of"));
     let mut func = make_flag_func(
         vec![assign("sf", sf_def), assign("of", of_def)],
         cond,
         vec![flag_binding("sf"), flag_binding("of"), i32_binding("diff")],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("a < b") || code.contains("(int)a < (int)b"),
         "expected 'a < b' (signed) after flag recovery, got:\n{code}"
@@ -223,8 +223,8 @@ fn flag_recovery_jge_sf_eq_of_becomes_sge() {
     // if (sf == of) { return a; } else { return b; }
     // →  if (!(a < b)) { return a; } else { return b; }
     //    normalized: if (b <= a) or equivalent form
-    let diff = DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+    let diff = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs: Box::new(var("a")),
         rhs: Box::new(var("b")),
         ty: NirType::Int {
@@ -233,9 +233,9 @@ fn flag_recovery_jge_sf_eq_of_becomes_sge() {
         },
     };
     let sf_def = b_binary(
-        DirBinaryOp::SLt,
+        PreHirBinaryOp::SLt,
         diff,
-        DirExpr::Const(
+        PreHirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -244,14 +244,14 @@ fn flag_recovery_jge_sf_eq_of_becomes_sge() {
         ),
     );
     let of_def = sborrow_call(var("a"), var("b"));
-    let cond = b_binary(DirBinaryOp::Eq, var("sf"), var("of"));
+    let cond = b_binary(PreHirBinaryOp::Eq, var("sf"), var("of"));
     let mut func = make_flag_func(
         vec![assign("sf", sf_def), assign("of", of_def)],
         cond,
         vec![flag_binding("sf"), flag_binding("of")],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     // a >= b signed: either "b <= a" (SLe), "!(a < b)", or similar form
     let has_sge = code.contains("b <= a")
         || code.contains("b <=(int) a")
@@ -274,9 +274,9 @@ fn flag_recovery_jge_sf_eq_of_becomes_sge() {
 fn flag_recovery_jle_becomes_signed_le() {
     // zf = (a == b), of = __sborrow(a, b), cond = zf || (sf != of)
     // → if (a <= b) signed
-    let zf_def = b_binary(DirBinaryOp::Eq, var("a"), var("b"));
-    let diff = DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+    let zf_def = b_binary(PreHirBinaryOp::Eq, var("a"), var("b"));
+    let diff = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs: Box::new(var("a")),
         rhs: Box::new(var("b")),
         ty: NirType::Int {
@@ -285,9 +285,9 @@ fn flag_recovery_jle_becomes_signed_le() {
         },
     };
     let sf_def = b_binary(
-        DirBinaryOp::SLt,
+        PreHirBinaryOp::SLt,
         diff,
-        DirExpr::Const(
+        PreHirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -296,8 +296,8 @@ fn flag_recovery_jle_becomes_signed_le() {
         ),
     );
     let of_def = sborrow_call(var("a"), var("b"));
-    let sf_ne_of = b_binary(DirBinaryOp::Ne, var("sf"), var("of"));
-    let cond = b_binary(DirBinaryOp::LogicalOr, var("zf"), sf_ne_of);
+    let sf_ne_of = b_binary(PreHirBinaryOp::Ne, var("sf"), var("of"));
+    let cond = b_binary(PreHirBinaryOp::LogicalOr, var("zf"), sf_ne_of);
     let mut func = make_flag_func(
         vec![
             assign("zf", zf_def),
@@ -308,7 +308,7 @@ fn flag_recovery_jle_becomes_signed_le() {
         vec![flag_binding("zf"), flag_binding("sf"), flag_binding("of")],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     // a <= b signed may print as "a <= b", "!(b < a)", or an equivalent form.
     let has_sle = code.contains("a <= b")
         || code.contains("a <=(int) b")
@@ -333,9 +333,9 @@ fn flag_recovery_jg_becomes_signed_gt() {
     // of = __sborrow(a, b)
     // if (!zf && sf == of) { return a; } else { return b; }
     // →  if (b < a) { return a; } else { return b; }  [signed]
-    let zf_def = b_binary(DirBinaryOp::Eq, var("a"), var("b"));
-    let diff = DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+    let zf_def = b_binary(PreHirBinaryOp::Eq, var("a"), var("b"));
+    let diff = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs: Box::new(var("a")),
         rhs: Box::new(var("b")),
         ty: NirType::Int {
@@ -344,9 +344,9 @@ fn flag_recovery_jg_becomes_signed_gt() {
         },
     };
     let sf_def = b_binary(
-        DirBinaryOp::SLt,
+        PreHirBinaryOp::SLt,
         diff,
-        DirExpr::Const(
+        PreHirExpr::Const(
             0,
             NirType::Int {
                 bits: 32,
@@ -356,8 +356,8 @@ fn flag_recovery_jg_becomes_signed_gt() {
     );
     let of_def = sborrow_call(var("a"), var("b"));
     // !zf && (sf == of)
-    let sf_eq_of = b_binary(DirBinaryOp::Eq, var("sf"), var("of"));
-    let cond = b_binary(DirBinaryOp::LogicalAnd, b_not(var("zf")), sf_eq_of);
+    let sf_eq_of = b_binary(PreHirBinaryOp::Eq, var("sf"), var("of"));
+    let cond = b_binary(PreHirBinaryOp::LogicalAnd, b_not(var("zf")), sf_eq_of);
     let mut func = make_flag_func(
         vec![
             assign("zf", zf_def),
@@ -368,7 +368,7 @@ fn flag_recovery_jg_becomes_signed_gt() {
         vec![flag_binding("zf"), flag_binding("sf"), flag_binding("of")],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     // a > b signed = b < a signed
     assert!(
         code.contains("b < a") || code.contains("a > b"),
@@ -386,7 +386,7 @@ fn flag_recovery_jg_becomes_signed_gt() {
 fn dead_flag_assigns_removed_without_condition_rewrite() {
     // Pure flag noise after a high-level condition: must not survive as
     // undeclared `cf`/`of`/`sf`/`zf`/`pf` in C output.
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_dead_flag_noise".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![i32_binding("a"), i32_binding("b")],
@@ -397,36 +397,33 @@ fn dead_flag_assigns_removed_without_condition_rewrite() {
         },
         surface_return_type_name: None,
         body: vec![
-            assign(
-                "of",
-                sborrow_call(var("a"), DirExpr::Const(0, i32_ty())),
-            ),
+            assign("of", sborrow_call(var("a"), PreHirExpr::Const(0, i32_ty()))),
             assign(
                 "sf",
                 b_binary(
-                    DirBinaryOp::SLt,
+                    PreHirBinaryOp::SLt,
                     var("a"),
-                    DirExpr::Const(0, i32_ty()),
+                    PreHirExpr::Const(0, i32_ty()),
                 ),
             ),
             assign(
                 "zf",
-                b_binary(DirBinaryOp::Eq, var("a"), DirExpr::Const(0, i32_ty())),
+                b_binary(PreHirBinaryOp::Eq, var("a"), PreHirExpr::Const(0, i32_ty())),
             ),
-            DirStmt::If {
+            PreHirStmt::If {
                 cond: b_binary(
-                    DirBinaryOp::SLe,
+                    PreHirBinaryOp::SLe,
                     var("a"),
-                    DirExpr::Const(0, i32_ty()),
+                    PreHirExpr::Const(0, i32_ty()),
                 ),
-                then_body: vec![DirStmt::Return(Some(var("b")))],
-                else_body: vec![DirStmt::Return(Some(var("a")))],
+                then_body: vec![PreHirStmt::Return(Some(var("b")))],
+                else_body: vec![PreHirStmt::Return(Some(var("a")))],
             },
         ],
         ..Default::default()
     };
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         !code.contains("of =") && !code.contains("sf =") && !code.contains("zf ="),
         "dead flag assignments must be eliminated, got:\n{code}"
@@ -451,14 +448,17 @@ fn flag_recovery_jb_cf_becomes_ult() {
     // cf = (a < b)  (unsigned carry)
     // if (cf) { return a; } else { return b; }
     let mut func = make_flag_func(
-        vec![assign("cf", b_binary(DirBinaryOp::Lt, var("a"), var("b")))],
+        vec![assign(
+            "cf",
+            b_binary(PreHirBinaryOp::Lt, var("a"), var("b")),
+        )],
         var("cf"),
         vec![flag_binding("cf"), u32_binding("a"), u32_binding("b")],
     );
     // Override to use unsigned params
     func.params = vec![u32_binding("a"), u32_binding("b")];
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("a < b"),
         "expected 'a < b' (unsigned) after flag recovery, got:\n{code}"

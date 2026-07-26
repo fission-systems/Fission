@@ -4,7 +4,7 @@ use fission_midend_core::ir::{
     ProcedureStackEffect, ProcedureSummary, SummarySoundness, WrapperClass,
     WrapperContractionProof, parse_call_target_address,
 };
-use fission_midend_dir::{DirExpr, DirFunction, DirLValue, DirStmt};
+use fission_midend_prehir::{PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
 
 fn summary_seed(target: &str) -> CallTargetRef {
     if let Some(address) = parse_call_target_address(target) {
@@ -25,13 +25,13 @@ fn summary_seed(target: &str) -> CallTargetRef {
     }
 }
 
-pub fn summarize_wrapper_hir_function(func: &DirFunction) -> Option<ProcedureSummary> {
+pub fn summarize_wrapper_hir_function(func: &PreHirFunction) -> Option<ProcedureSummary> {
     let (target, wrapper_class, forwarded_param_indices, confidence) = match func.body.as_slice() {
-        [DirStmt::Return(Some(DirExpr::Call { target, args, .. }))] => {
+        [PreHirStmt::Return(Some(PreHirExpr::Call { target, args, .. }))] => {
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+                    PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
                         func.params.iter().position(|param| param.name == *name)
                     }
                     _ => None,
@@ -45,16 +45,16 @@ pub fn summarize_wrapper_hir_function(func: &DirFunction) -> Option<ProcedureSum
             )
         }
         [
-            DirStmt::Assign {
-                lhs: DirLValue::Var(temp),
-                rhs: DirExpr::Call { target, args, .. },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(temp),
+                rhs: PreHirExpr::Call { target, args, .. },
             },
-            DirStmt::Return(Some(DirExpr::Var(ret))),
+            PreHirStmt::Return(Some(PreHirExpr::Var(ret))),
         ] if temp == ret => {
             let forwarded = args
                 .iter()
                 .map(|arg| match arg {
-                    DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+                    PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
                         func.params.iter().position(|param| param.name == *name)
                     }
                     _ => None,
@@ -102,11 +102,11 @@ pub fn summary_soundness_for_wrapper(summary: &ProcedureSummary) -> SummarySound
 mod tests {
     use super::*;
     use fission_midend_core::ir::NirType;
-    use fission_midend_dir::{DirBinding, DirExpr, DirFunction, DirStmt};
+    use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirStmt};
         use fission_core::CallingConvention;
 
-    fn empty_binding(name: &str) -> DirBinding {
-        DirBinding {
+    fn empty_binding(name: &str) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_string(),
             ty: NirType::Unknown,
             surface_type_name: None,
@@ -117,16 +117,16 @@ mod tests {
 
     #[test]
     fn summarize_wrapper_hir_function_detects_tail_forwarder() {
-        let func = DirFunction {
+        let func = PreHirFunction {
             name: "wrapper".to_string(),
             int_param_offsets: Vec::new(),
             params: vec![empty_binding("param_1")],
             locals: vec![],
             return_type: NirType::Unknown,
             surface_return_type_name: None,
-            body: vec![DirStmt::Return(Some(DirExpr::Call {
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Call {
                 target: "sub_140010000".to_string(),
-                args: vec![DirExpr::Var("param_1".to_string())],
+                args: vec![PreHirExpr::Var("param_1".to_string())],
                 ty: NirType::Unknown,
             }))],
             calling_convention: CallingConvention::default(),

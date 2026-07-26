@@ -1,17 +1,17 @@
 use crate::prelude::*;
-use fission_midend_dir::util::expr_type;
+use fission_midend_prehir::util::expr_type;
 use crate::{HashMap, HashSet};
 
 struct SimpleAssign {
     lhs: String,
-    rhs: DirExpr,
+    rhs: PreHirExpr,
 }
 
-fn collect_assignments(stmts: &[DirStmt], assigns: &mut Vec<SimpleAssign>) {
+fn collect_assignments(stmts: &[PreHirStmt], assigns: &mut Vec<SimpleAssign>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 rhs,
             } => {
                 assigns.push(SimpleAssign {
@@ -19,10 +19,10 @@ fn collect_assignments(stmts: &[DirStmt], assigns: &mut Vec<SimpleAssign>) {
                     rhs: rhs.clone(),
                 });
             }
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 collect_assignments(body, assigns);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
@@ -33,7 +33,7 @@ fn collect_assignments(stmts: &[DirStmt], assigns: &mut Vec<SimpleAssign>) {
                 }
                 collect_assignments(body, assigns);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -41,7 +41,7 @@ fn collect_assignments(stmts: &[DirStmt], assigns: &mut Vec<SimpleAssign>) {
                 collect_assignments(then_body, assigns);
                 collect_assignments(else_body, assigns);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_assignments(&case.body, assigns);
                 }
@@ -60,9 +60,9 @@ fn type_bits(ty: &NirType) -> u32 {
     }
 }
 
-fn match_piece_concat(expr: &DirExpr) -> Option<(DirExpr, DirExpr, u32)> {
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Or,
+fn match_piece_concat(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr, u32)> {
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Or,
         lhs,
         rhs,
         ..
@@ -80,16 +80,16 @@ fn match_piece_concat(expr: &DirExpr) -> Option<(DirExpr, DirExpr, u32)> {
     None
 }
 
-fn match_shifted_high(expr: &DirExpr) -> Option<(DirExpr, u32)> {
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Shl,
+fn match_shifted_high(expr: &PreHirExpr) -> Option<(PreHirExpr, u32)> {
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
         lhs,
         rhs,
         ..
     } = expr
     {
-        if let DirExpr::Const(shift_bits, _) = &**rhs {
-            let hi = if let DirExpr::Cast { expr: inner, .. } = &**lhs {
+        if let PreHirExpr::Const(shift_bits, _) = &**rhs {
+            let hi = if let PreHirExpr::Cast { expr: inner, .. } = &**lhs {
                 (**inner).clone()
             } else {
                 (**lhs).clone()
@@ -100,19 +100,19 @@ fn match_shifted_high(expr: &DirExpr) -> Option<(DirExpr, u32)> {
     None
 }
 
-fn match_unshifted_low(expr: &DirExpr) -> DirExpr {
-    if let DirExpr::Cast { expr: inner, .. } = expr {
+fn match_unshifted_low(expr: &PreHirExpr) -> PreHirExpr {
+    if let PreHirExpr::Cast { expr: inner, .. } = expr {
         (**inner).clone()
     } else {
         expr.clone()
     }
 }
 
-fn match_zext_write(expr: &DirExpr, x_bits: u32) -> Option<(DirExpr, DirExpr, u32)> {
-    if let DirExpr::Cast { ty, expr: inner } = expr {
+fn match_zext_write(expr: &PreHirExpr, x_bits: u32) -> Option<(PreHirExpr, PreHirExpr, u32)> {
+    if let PreHirExpr::Cast { ty, expr: inner } = expr {
         let inner_bits = type_bits(&expr_type(inner));
         if x_bits > inner_bits {
-            let hi = DirExpr::Const(
+            let hi = PreHirExpr::Const(
                 0,
                 NirType::Int {
                     bits: x_bits - inner_bits,
@@ -125,9 +125,9 @@ fn match_zext_write(expr: &DirExpr, x_bits: u32) -> Option<(DirExpr, DirExpr, u3
     None
 }
 
-fn is_valid_low_extract(expr: &DirExpr, x_name: &str, shift_bits: u32) -> bool {
-    if let DirExpr::Cast { ty, expr: inner } = expr {
-        if let DirExpr::Var(name) = &**inner {
+fn is_valid_low_extract(expr: &PreHirExpr, x_name: &str, shift_bits: u32) -> bool {
+    if let PreHirExpr::Cast { ty, expr: inner } = expr {
+        if let PreHirExpr::Var(name) = &**inner {
             if name == x_name {
                 if let NirType::Int { bits, .. } = ty {
                     return *bits <= shift_bits;
@@ -141,30 +141,30 @@ fn is_valid_low_extract(expr: &DirExpr, x_name: &str, shift_bits: u32) -> bool {
     false
 }
 
-fn is_valid_high_extract(expr: &DirExpr, x_name: &str, shift_bits: u32) -> bool {
-    if let DirExpr::Cast { expr: inner, .. } = expr {
-        if let DirExpr::Binary {
-            op: DirBinaryOp::Shr | DirBinaryOp::Sar,
+fn is_valid_high_extract(expr: &PreHirExpr, x_name: &str, shift_bits: u32) -> bool {
+    if let PreHirExpr::Cast { expr: inner, .. } = expr {
+        if let PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
             lhs,
             rhs,
             ..
         } = &**inner
         {
-            if let (DirExpr::Var(name), DirExpr::Const(sa, _)) = (&**lhs, &**rhs) {
+            if let (PreHirExpr::Var(name), PreHirExpr::Const(sa, _)) = (&**lhs, &**rhs) {
                 if name == x_name && *sa as u32 == shift_bits {
                     return true;
                 }
             }
         }
     }
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Shr | DirBinaryOp::Sar,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
         lhs,
         rhs,
         ..
     } = expr
     {
-        if let (DirExpr::Var(name), DirExpr::Const(sa, _)) = (&**lhs, &**rhs) {
+        if let (PreHirExpr::Var(name), PreHirExpr::Const(sa, _)) = (&**lhs, &**rhs) {
             if name == x_name && *sa as u32 == shift_bits {
                 return true;
             }
@@ -173,32 +173,32 @@ fn is_valid_high_extract(expr: &DirExpr, x_name: &str, shift_bits: u32) -> bool 
     false
 }
 
-fn for_each_child_expr_ref<F>(expr: &DirExpr, mut f: F)
+fn for_each_child_expr_ref<F>(expr: &PreHirExpr, mut f: F)
 where
-    F: FnMut(&DirExpr),
+    F: FnMut(&PreHirExpr),
 {
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
             f(inner);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             f(lhs);
             f(rhs);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 f(arg);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             f(base);
             f(index);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -212,7 +212,7 @@ where
     }
 }
 
-fn verify_reads(expr: &DirExpr, x_name: &str, shift_bits: u32, valid: &mut bool) {
+fn verify_reads(expr: &PreHirExpr, x_name: &str, shift_bits: u32, valid: &mut bool) {
     if !*valid {
         return;
     }
@@ -222,7 +222,7 @@ fn verify_reads(expr: &DirExpr, x_name: &str, shift_bits: u32, valid: &mut bool)
     if is_valid_high_extract(expr, x_name, shift_bits) {
         return;
     }
-    if let DirExpr::Var(name) = expr {
+    if let PreHirExpr::Var(name) = expr {
         if name == x_name {
             *valid = false;
             return;
@@ -231,39 +231,39 @@ fn verify_reads(expr: &DirExpr, x_name: &str, shift_bits: u32, valid: &mut bool)
     for_each_child_expr_ref(expr, |child| verify_reads(child, x_name, shift_bits, valid));
 }
 
-fn verify_reads_in_stmt(stmt: &DirStmt, x_name: &str, shift_bits: u32, valid: &mut bool) {
+fn verify_reads_in_stmt(stmt: &PreHirStmt, x_name: &str, shift_bits: u32, valid: &mut bool) {
     if !*valid {
         return;
     }
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             match lhs {
-                DirLValue::Var(_) => {}
-                DirLValue::Deref { ptr, .. } => {
+                PreHirLValue::Var(_) => {}
+                PreHirLValue::Deref { ptr, .. } => {
                     verify_reads(ptr, x_name, shift_bits, valid);
                 }
-                DirLValue::Index { base, index, .. } => {
+                PreHirLValue::Index { base, index, .. } => {
                     verify_reads(base, x_name, shift_bits, valid);
                     verify_reads(index, x_name, shift_bits, valid);
                 }
-                DirLValue::FieldAccess { base, .. } => {
+                PreHirLValue::FieldAccess { base, .. } => {
                     verify_reads(base, x_name, shift_bits, valid);
                 }
             }
             verify_reads(rhs, x_name, shift_bits, valid);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             verify_reads(expr, x_name, shift_bits, valid);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             verify_reads(va_list, x_name, shift_bits, valid);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             for s in body {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -282,7 +282,7 @@ fn verify_reads_in_stmt(stmt: &DirStmt, x_name: &str, shift_bits: u32, valid: &m
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -295,7 +295,7 @@ fn verify_reads_in_stmt(stmt: &DirStmt, x_name: &str, shift_bits: u32, valid: &m
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -314,52 +314,52 @@ fn verify_reads_in_stmt(stmt: &DirStmt, x_name: &str, shift_bits: u32, valid: &m
     }
 }
 
-fn rewrite_expr(expr: &mut DirExpr, x_name: &str, x_low: &str, x_high: &str, shift_bits: u32) {
+fn rewrite_expr(expr: &mut PreHirExpr, x_name: &str, x_low: &str, x_high: &str, shift_bits: u32) {
     if is_valid_low_extract(expr, x_name, shift_bits) {
-        if let DirExpr::Cast { ty, .. } = expr {
-            *expr = DirExpr::Cast {
+        if let PreHirExpr::Cast { ty, .. } = expr {
+            *expr = PreHirExpr::Cast {
                 ty: ty.clone(),
-                expr: Box::new(DirExpr::Var(x_low.to_string())),
+                expr: Box::new(PreHirExpr::Var(x_low.to_string())),
             };
             return;
         }
     }
     if is_valid_high_extract(expr, x_name, shift_bits) {
-        if let DirExpr::Cast { ty, .. } = expr {
-            *expr = DirExpr::Cast {
+        if let PreHirExpr::Cast { ty, .. } = expr {
+            *expr = PreHirExpr::Cast {
                 ty: ty.clone(),
-                expr: Box::new(DirExpr::Var(x_high.to_string())),
+                expr: Box::new(PreHirExpr::Var(x_high.to_string())),
             };
             return;
         }
-        if let DirExpr::Binary { .. } = expr {
-            *expr = DirExpr::Var(x_high.to_string());
+        if let PreHirExpr::Binary { .. } = expr {
+            *expr = PreHirExpr::Var(x_high.to_string());
             return;
         }
     }
 
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
             rewrite_expr(inner, x_name, x_low, x_high, shift_bits);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             rewrite_expr(lhs, x_name, x_low, x_high, shift_bits);
             rewrite_expr(rhs, x_name, x_low, x_high, shift_bits);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 rewrite_expr(arg, x_name, x_low, x_high, shift_bits);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             rewrite_expr(base, x_name, x_low, x_high, shift_bits);
             rewrite_expr(index, x_name, x_low, x_high, shift_bits);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -374,7 +374,7 @@ fn rewrite_expr(expr: &mut DirExpr, x_name: &str, x_low: &str, x_high: &str, shi
 }
 
 fn rewrite_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     x_name: &str,
     x_low: &str,
     x_high: &str,
@@ -382,60 +382,60 @@ fn rewrite_stmt(
     x_bits: u32,
 ) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         } if name == x_name => {
             if let Some((hi, lo, _)) = match_piece_concat(rhs) {
-                *stmt = DirStmt::Block(vec![
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var(x_low.to_string()),
+                *stmt = PreHirStmt::Block(vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var(x_low.to_string()),
                         rhs: lo,
                     },
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var(x_high.to_string()),
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var(x_high.to_string()),
                         rhs: hi,
                     },
                 ]);
             } else if let Some((hi, lo, _)) = match_zext_write(rhs, x_bits) {
-                *stmt = DirStmt::Block(vec![
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var(x_low.to_string()),
+                *stmt = PreHirStmt::Block(vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var(x_low.to_string()),
                         rhs: lo,
                     },
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var(x_high.to_string()),
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var(x_high.to_string()),
                         rhs: hi,
                     },
                 ]);
             }
         }
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             match lhs {
-                DirLValue::Deref { ptr, .. } => {
+                PreHirLValue::Deref { ptr, .. } => {
                     rewrite_expr(ptr, x_name, x_low, x_high, shift_bits);
                 }
-                DirLValue::Index { base, index, .. } => {
+                PreHirLValue::Index { base, index, .. } => {
                     rewrite_expr(base, x_name, x_low, x_high, shift_bits);
                     rewrite_expr(index, x_name, x_low, x_high, shift_bits);
                 }
-                DirLValue::FieldAccess { base, .. } => {
+                PreHirLValue::FieldAccess { base, .. } => {
                     rewrite_expr(base, x_name, x_low, x_high, shift_bits);
                 }
                 _ => {}
             }
             rewrite_expr(rhs, x_name, x_low, x_high, shift_bits);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             rewrite_expr(expr, x_name, x_low, x_high, shift_bits);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             rewrite_expr(va_list, x_name, x_low, x_high, shift_bits);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             rewrite_stmts(body, x_name, x_low, x_high, shift_bits, x_bits);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -452,7 +452,7 @@ fn rewrite_stmt(
             }
             rewrite_stmts(body, x_name, x_low, x_high, shift_bits, x_bits);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -461,7 +461,7 @@ fn rewrite_stmt(
             rewrite_stmts(then_body, x_name, x_low, x_high, shift_bits, x_bits);
             rewrite_stmts(else_body, x_name, x_low, x_high, shift_bits, x_bits);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -477,7 +477,7 @@ fn rewrite_stmt(
 }
 
 fn rewrite_stmts(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     x_name: &str,
     x_low: &str,
     x_high: &str,
@@ -489,9 +489,9 @@ fn rewrite_stmts(
     }
 }
 
-fn narrow_scalar_assignment(expr: &DirExpr) -> Option<(NirType, DirExpr)> {
+fn narrow_scalar_assignment(expr: &PreHirExpr) -> Option<(NirType, PreHirExpr)> {
     let scalar_expr = match expr {
-        DirExpr::Cast {
+        PreHirExpr::Cast {
             ty: NirType::Ptr(_),
             expr: inner,
         } => inner.as_ref(),
@@ -505,34 +505,34 @@ fn narrow_scalar_assignment(expr: &DirExpr) -> Option<(NirType, DirExpr)> {
     }
 }
 
-fn stmt_defines_name(stmt: &DirStmt, name: &str) -> bool {
+fn stmt_defines_name(stmt: &PreHirStmt, name: &str) -> bool {
     matches!(
         stmt,
-        DirStmt::Assign {
-            lhs: DirLValue::Var(lhs),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs),
             ..
         } if lhs == name
     )
 }
 
-fn expr_reads_name(expr: &DirExpr, name: &str) -> bool {
+fn expr_reads_name(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
-        DirExpr::Var(var) => var == name,
-        DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => expr_reads_name(expr, name),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Var(var) => var == name,
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => expr_reads_name(expr, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_reads_name(lhs, name) || expr_reads_name(rhs, name)
         }
-        DirExpr::Call { args, .. } => args.iter().any(|arg| expr_reads_name(arg, name)),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_reads_name(arg, name)),
+        PreHirExpr::Index { base, index, .. } => {
             expr_reads_name(base, name) || expr_reads_name(index, name)
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -545,45 +545,45 @@ fn expr_reads_name(expr: &DirExpr, name: &str) -> bool {
     }
 }
 
-fn lvalue_reads_name(lhs: &DirLValue, name: &str) -> bool {
+fn lvalue_reads_name(lhs: &PreHirLValue, name: &str) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, .. } => expr_reads_name(ptr, name),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_reads_name(ptr, name),
+        PreHirLValue::Index { base, index, .. } => {
             expr_reads_name(base, name) || expr_reads_name(index, name)
         }
-        DirLValue::FieldAccess { base, .. } => expr_reads_name(base, name),
+        PreHirLValue::FieldAccess { base, .. } => expr_reads_name(base, name),
     }
 }
 
-fn stmt_reads_name(stmt: &DirStmt, name: &str) -> bool {
+fn stmt_reads_name(stmt: &PreHirStmt, name: &str) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => lvalue_reads_name(lhs, name) || expr_reads_name(rhs, name),
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => expr_reads_name(expr, name),
-        DirStmt::VaStart { va_list, .. } => expr_reads_name(va_list, name),
-        DirStmt::Return(None)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
-        DirStmt::Block(_)
-        | DirStmt::If { .. }
-        | DirStmt::While { .. }
-        | DirStmt::DoWhile { .. }
-        | DirStmt::For { .. }
-        | DirStmt::Switch { .. } => false,
+        PreHirStmt::Assign { lhs, rhs } => lvalue_reads_name(lhs, name) || expr_reads_name(rhs, name),
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_reads_name(expr, name),
+        PreHirStmt::VaStart { va_list, .. } => expr_reads_name(va_list, name),
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
+        PreHirStmt::Block(_)
+        | PreHirStmt::If { .. }
+        | PreHirStmt::While { .. }
+        | PreHirStmt::DoWhile { .. }
+        | PreHirStmt::For { .. }
+        | PreHirStmt::Switch { .. } => false,
     }
 }
 
-fn stmt_reads_name_deep(stmt: &DirStmt, name: &str) -> bool {
+fn stmt_reads_name_deep(stmt: &PreHirStmt, name: &str) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => lvalue_reads_name(lhs, name) || expr_reads_name(rhs, name),
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => expr_reads_name(expr, name),
-        DirStmt::VaStart { va_list, .. } => expr_reads_name(va_list, name),
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Assign { lhs, rhs } => lvalue_reads_name(lhs, name) || expr_reads_name(rhs, name),
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_reads_name(expr, name),
+        PreHirStmt::VaStart { va_list, .. } => expr_reads_name(va_list, name),
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             body.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -596,7 +596,7 @@ fn stmt_reads_name_deep(stmt: &DirStmt, name: &str) -> bool {
                     .iter()
                     .any(|stmt| stmt_reads_name_deep(stmt, name))
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -612,7 +612,7 @@ fn stmt_reads_name_deep(stmt: &DirStmt, name: &str) -> bool {
                     .is_some_and(|stmt| stmt_reads_name_deep(stmt, name))
                 || body.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -625,35 +625,35 @@ fn stmt_reads_name_deep(stmt: &DirStmt, name: &str) -> bool {
                 })
                 || default.iter().any(|stmt| stmt_reads_name_deep(stmt, name))
         }
-        DirStmt::Return(None)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
     }
 }
 
-fn expr_reads_name_as_address(expr: &DirExpr, name: &str) -> bool {
+fn expr_reads_name_as_address(expr: &PreHirExpr, name: &str) -> bool {
     match expr {
-        DirExpr::Load { ptr, .. }
-        | DirExpr::PtrOffset { base: ptr, .. }
-        | DirExpr::FieldAccess { base: ptr, .. } => {
+        PreHirExpr::Load { ptr, .. }
+        | PreHirExpr::PtrOffset { base: ptr, .. }
+        | PreHirExpr::FieldAccess { base: ptr, .. } => {
             expr_reads_name(ptr, name) || expr_reads_name_as_address(ptr, name)
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             expr_reads_name(base, name)
                 || expr_reads_name_as_address(base, name)
                 || expr_reads_name_as_address(index, name)
         }
-        DirExpr::Cast { expr, .. } | DirExpr::Unary { expr, .. } => {
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
             expr_reads_name_as_address(expr, name)
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_reads_name_as_address(lhs, name) || expr_reads_name_as_address(rhs, name)
         }
-        DirExpr::Call { args, .. } => args.iter().any(|arg| expr_reads_name_as_address(arg, name)),
-        DirExpr::AggregateCopy { src, .. } => expr_reads_name(src, name),
-        DirExpr::Select {
+        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_reads_name_as_address(arg, name)),
+        PreHirExpr::AggregateCopy { src, .. } => expr_reads_name(src, name),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -663,57 +663,57 @@ fn expr_reads_name_as_address(expr: &DirExpr, name: &str) -> bool {
                 || expr_reads_name_as_address(then_expr, name)
                 || expr_reads_name_as_address(else_expr, name)
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
     }
 }
 
-fn stmt_reads_name_as_address(stmt: &DirStmt, name: &str) -> bool {
+fn stmt_reads_name_as_address(stmt: &PreHirStmt, name: &str) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             let lhs_address = match lhs {
-                DirLValue::Var(_) => false,
-                DirLValue::Deref { ptr, .. } => expr_reads_name(ptr, name),
-                DirLValue::Index { base, .. } => expr_reads_name(base, name),
-                DirLValue::FieldAccess { base, .. } => expr_reads_name(base, name),
+                PreHirLValue::Var(_) => false,
+                PreHirLValue::Deref { ptr, .. } => expr_reads_name(ptr, name),
+                PreHirLValue::Index { base, .. } => expr_reads_name(base, name),
+                PreHirLValue::FieldAccess { base, .. } => expr_reads_name(base, name),
             };
             lhs_address || expr_reads_name_as_address(rhs, name)
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => expr_reads_name_as_address(expr, name),
-        DirStmt::VaStart { va_list, .. } => expr_reads_name_as_address(va_list, name),
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_reads_name_as_address(expr, name),
+        PreHirStmt::VaStart { va_list, .. } => expr_reads_name_as_address(va_list, name),
         _ => false,
     }
 }
 
-fn is_linear_phase_stmt(stmt: &DirStmt) -> bool {
+fn is_linear_phase_stmt(stmt: &PreHirStmt) -> bool {
     matches!(
         stmt,
-        DirStmt::Assign { .. } | DirStmt::Expr(_) | DirStmt::Return(_) | DirStmt::VaStart { .. }
+        PreHirStmt::Assign { .. } | PreHirStmt::Expr(_) | PreHirStmt::Return(_) | PreHirStmt::VaStart { .. }
     )
 }
 
-fn rename_expr_var(expr: &mut DirExpr, old: &str, new: &str) {
+fn rename_expr_var(expr: &mut PreHirExpr, old: &str, new: &str) {
     match expr {
-        DirExpr::Var(name) if name == old => *name = new.to_string(),
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => rename_expr_var(expr, old, new),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Var(name) if name == old => *name = new.to_string(),
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => rename_expr_var(expr, old, new),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             rename_expr_var(lhs, old, new);
             rename_expr_var(rhs, old, new);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 rename_expr_var(arg, old, new);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             rename_expr_var(base, old, new);
             rename_expr_var(index, old, new);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -723,26 +723,26 @@ fn rename_expr_var(expr: &mut DirExpr, old: &str, new: &str) {
             rename_expr_var(then_expr, old, new);
             rename_expr_var(else_expr, old, new);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 }
 
-fn rename_stmt_reads(stmt: &mut DirStmt, old: &str, new: &str) {
+fn rename_stmt_reads(stmt: &mut PreHirStmt, old: &str, new: &str) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             match lhs {
-                DirLValue::Var(_) => {}
-                DirLValue::Deref { ptr, .. } => rename_expr_var(ptr, old, new),
-                DirLValue::Index { base, index, .. } => {
+                PreHirLValue::Var(_) => {}
+                PreHirLValue::Deref { ptr, .. } => rename_expr_var(ptr, old, new),
+                PreHirLValue::Index { base, index, .. } => {
                     rename_expr_var(base, old, new);
                     rename_expr_var(index, old, new);
                 }
-                DirLValue::FieldAccess { base, .. } => rename_expr_var(base, old, new),
+                PreHirLValue::FieldAccess { base, .. } => rename_expr_var(base, old, new),
             }
             rename_expr_var(rhs, old, new);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => rename_expr_var(expr, old, new),
-        DirStmt::VaStart { va_list, .. } => rename_expr_var(va_list, old, new),
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => rename_expr_var(expr, old, new),
+        PreHirStmt::VaStart { va_list, .. } => rename_expr_var(va_list, old, new),
         _ => {}
     }
 }
@@ -763,18 +763,18 @@ fn fresh_phase_name(base: &str, used_names: &mut HashSet<String>) -> String {
 }
 
 fn split_scalar_role_phases(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     pointer_locals: &HashSet<String>,
     used_names: &mut HashSet<String>,
-    new_bindings: &mut Vec<DirBinding>,
+    new_bindings: &mut Vec<PreHirBinding>,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 changed |= split_scalar_role_phases(body, pointer_locals, used_names, new_bindings);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -784,7 +784,7 @@ fn split_scalar_role_phases(
                 changed |=
                     split_scalar_role_phases(else_body, pointer_locals, used_names, new_bindings);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -805,7 +805,7 @@ fn split_scalar_role_phases(
                     );
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= split_scalar_role_phases(
                         &mut case.body,
@@ -824,8 +824,8 @@ fn split_scalar_role_phases(
     let mut index = 0usize;
     while index < stmts.len() {
         let candidate = match &stmts[index] {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 rhs,
             } if pointer_locals.contains(name)
                 && stmts[..index]
@@ -869,8 +869,8 @@ fn split_scalar_role_phases(
         }
 
         let new_name = fresh_phase_name(&old_name, used_names);
-        if let DirStmt::Assign {
-            lhs: DirLValue::Var(lhs),
+        if let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs),
             rhs,
         } = &mut stmts[index]
         {
@@ -880,7 +880,7 @@ fn split_scalar_role_phases(
         for stmt in &mut stmts[index + 1..end] {
             rename_stmt_reads(stmt, &old_name, &new_name);
         }
-        new_bindings.push(DirBinding {
+        new_bindings.push(PreHirBinding {
             name: new_name,
             ty: scalar_ty,
             surface_type_name: None,
@@ -893,7 +893,7 @@ fn split_scalar_role_phases(
     changed
 }
 
-pub fn apply_split_flow_pass(func: &mut DirFunction) -> bool {
+pub fn apply_split_flow_pass(func: &mut PreHirFunction) -> bool {
     let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
@@ -902,7 +902,7 @@ pub fn apply_split_flow_pass(func: &mut DirFunction) -> bool {
     let mut assigns = Vec::new();
     collect_assignments(&func.body, &mut assigns);
 
-    let mut var_assigns: HashMap<String, Vec<DirExpr>> = HashMap::default();
+    let mut var_assigns: HashMap<String, Vec<PreHirExpr>> = HashMap::default();
     for assign in assigns {
         var_assigns.entry(assign.lhs).or_default().push(assign.rhs);
     }
@@ -973,7 +973,7 @@ pub fn apply_split_flow_pass(func: &mut DirFunction) -> bool {
             let x_low = format!("{}_low", name);
             let x_high = format!("{}_high", name);
 
-            let low_binding = DirBinding {
+            let low_binding = PreHirBinding {
                 name: x_low.clone(),
                 ty: NirType::Int {
                     bits: shift_bits,
@@ -983,7 +983,7 @@ pub fn apply_split_flow_pass(func: &mut DirFunction) -> bool {
                 origin: Some(NirBindingOrigin::Temp),
                 initializer: None,
             };
-            let high_binding = DirBinding {
+            let high_binding = PreHirBinding {
                 name: x_high.clone(),
                 ty: NirType::Int {
                     bits: x_bits - shift_bits,
@@ -1039,8 +1039,8 @@ mod tests {
         }
     }
 
-    fn binding(name: &str, ty: NirType) -> DirBinding {
-        DirBinding {
+    fn binding(name: &str, ty: NirType) -> PreHirBinding {
+        PreHirBinding {
             name: name.into(),
             ty,
             surface_type_name: None,
@@ -1049,12 +1049,12 @@ mod tests {
         }
     }
 
-    fn narrow_pointer_cast(value: &str, pointer_ty: &NirType) -> DirExpr {
-        DirExpr::Cast {
+    fn narrow_pointer_cast(value: &str, pointer_ty: &NirType) -> PreHirExpr {
+        PreHirExpr::Cast {
             ty: pointer_ty.clone(),
-            expr: Box::new(DirExpr::Cast {
+            expr: Box::new(PreHirExpr::Cast {
                 ty: uint(8),
-                expr: Box::new(DirExpr::Var(value.into())),
+                expr: Box::new(PreHirExpr::Var(value.into())),
             }),
         }
     }
@@ -1062,7 +1062,7 @@ mod tests {
     #[test]
     fn splits_narrow_scalar_phase_from_pointer_storage() {
         let pointer_ty = NirType::Ptr(Box::new(uint(8)));
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "phase_split".into(),
             locals: vec![
                 binding("slot", pointer_ty.clone()),
@@ -1071,20 +1071,20 @@ mod tests {
                 binding("acc", uint(32)),
             ],
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
-                    rhs: DirExpr::Var("base".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Var("base".into()),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
                     rhs: narrow_pointer_cast("value", &pointer_ty),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("acc".into()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("acc".into())),
-                        rhs: Box::new(DirExpr::Var("slot".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("acc".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("acc".into())),
+                        rhs: Box::new(PreHirExpr::Var("slot".into())),
                         ty: uint(32),
                     },
                 },
@@ -1100,9 +1100,9 @@ mod tests {
         }));
         assert!(matches!(
             &func.body[1],
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
-                rhs: DirExpr::Cast {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs: PreHirExpr::Cast {
                     ty: NirType::Int { bits: 8, .. },
                     ..
                 },
@@ -1110,17 +1110,17 @@ mod tests {
         ));
         assert!(matches!(
             &func.body[2],
-            DirStmt::Assign {
-                rhs: DirExpr::Binary { rhs, .. },
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary { rhs, .. },
                 ..
-            } if matches!(rhs.as_ref(), DirExpr::Var(name) if name == "slot_value")
+            } if matches!(rhs.as_ref(), PreHirExpr::Var(name) if name == "slot_value")
         ));
     }
 
     #[test]
     fn splits_direct_narrow_assignment_to_pointer_storage() {
         let pointer_ty = NirType::Ptr(Box::new(uint(8)));
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "direct_phase_split".into(),
             locals: vec![
                 binding("slot", pointer_ty),
@@ -1129,23 +1129,23 @@ mod tests {
                 binding("acc", uint(32)),
             ],
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
-                    rhs: DirExpr::Var("base".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Var("base".into()),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
-                    rhs: DirExpr::Cast {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Cast {
                         ty: uint(8),
-                        expr: Box::new(DirExpr::Var("value".into())),
+                        expr: Box::new(PreHirExpr::Var("value".into())),
                     },
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("acc".into()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("acc".into())),
-                        rhs: Box::new(DirExpr::Var("slot".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("acc".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("acc".into())),
+                        rhs: Box::new(PreHirExpr::Var("slot".into())),
                         ty: uint(32),
                     },
                 },
@@ -1160,17 +1160,17 @@ mod tests {
             .any(|binding| binding.name == "slot_value"));
         assert!(matches!(
             &func.body[2],
-            DirStmt::Assign {
-                rhs: DirExpr::Binary { rhs, .. },
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary { rhs, .. },
                 ..
-            } if matches!(rhs.as_ref(), DirExpr::Var(name) if name == "slot_value")
+            } if matches!(rhs.as_ref(), PreHirExpr::Var(name) if name == "slot_value")
         ));
     }
 
     #[test]
     fn splits_scalar_phase_that_ends_before_label_boundary() {
         let pointer_ty = NirType::Ptr(Box::new(uint(8)));
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "label_phase_split".into(),
             locals: vec![
                 binding("slot", pointer_ty),
@@ -1179,28 +1179,28 @@ mod tests {
                 binding("acc", uint(32)),
             ],
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
-                    rhs: DirExpr::Var("base".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Var("base".into()),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
-                    rhs: DirExpr::Cast {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Cast {
                         ty: uint(8),
-                        expr: Box::new(DirExpr::Var("value".into())),
+                        expr: Box::new(PreHirExpr::Var("value".into())),
                     },
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("acc".into()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("acc".into())),
-                        rhs: Box::new(DirExpr::Var("slot".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("acc".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("acc".into())),
+                        rhs: Box::new(PreHirExpr::Var("slot".into())),
                         ty: uint(32),
                     },
                 },
-                DirStmt::Label("next".into()),
-                DirStmt::Return(Some(DirExpr::Var("acc".into()))),
+                PreHirStmt::Label("next".into()),
+                PreHirStmt::Return(Some(PreHirExpr::Var("acc".into()))),
             ],
             ..Default::default()
         };
@@ -1215,7 +1215,7 @@ mod tests {
     #[test]
     fn keeps_pointer_phase_when_suffix_uses_value_as_address() {
         let pointer_ty = NirType::Ptr(Box::new(uint(8)));
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "phase_no_split".into(),
             locals: vec![
                 binding("slot", pointer_ty.clone()),
@@ -1224,18 +1224,18 @@ mod tests {
                 binding("loaded", uint(8)),
             ],
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
-                    rhs: DirExpr::Var("base".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Var("base".into()),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("slot".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
                     rhs: narrow_pointer_cast("value", &pointer_ty),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("loaded".into()),
-                    rhs: DirExpr::Load {
-                        ptr: Box::new(DirExpr::Var("slot".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("loaded".into()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("slot".into())),
                         ty: uint(8),
                     },
                 },

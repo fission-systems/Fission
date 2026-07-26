@@ -23,11 +23,11 @@
 /// `jumptable.cc`.  Our approach is simpler (HIR-level only) but covers the
 /// common compiler output.
 use super::super::ir::{DispatcherProofKind, NirRenderOptions, NirType};
-use fission_midend_dir::{DirBinaryOp, DirExpr};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RecoveredSwitchSelector {
-    pub discriminant: DirExpr,
+    pub discriminant: PreHirExpr,
     pub min_val: i64,
     pub table_base: u64,
     pub target_base: Option<u64>,
@@ -46,7 +46,7 @@ pub(super) struct RecoveredSwitchSelector {
 /// Returns `None` when the pattern does not match; the caller then keeps the
 /// original `switch_expr` unchanged with `min_val = 0`.
 pub(super) fn recover_switch_discriminant(
-    switch_expr: &DirExpr,
+    switch_expr: &PreHirExpr,
     options: &NirRenderOptions,
 ) -> Option<RecoveredSwitchSelector> {
     let switch_expr = peel_callable_target_mask(switch_expr);
@@ -55,12 +55,12 @@ pub(super) fn recover_switch_discriminant(
 }
 
 fn recover_absolute_switch_selector(
-    switch_expr: &DirExpr,
+    switch_expr: &PreHirExpr,
     options: &NirRenderOptions,
 ) -> Option<RecoveredSwitchSelector> {
     let switch_expr = peel_casts(switch_expr);
     // The switch expression must be a LOAD whose address is the jump-table entry.
-    let DirExpr::Load { ptr: addr_expr, .. } = switch_expr else {
+    let PreHirExpr::Load { ptr: addr_expr, .. } = switch_expr else {
         return None;
     };
 
@@ -113,12 +113,12 @@ fn recover_absolute_switch_selector(
 }
 
 fn recover_relative_switch_selector(
-    switch_expr: &DirExpr,
+    switch_expr: &PreHirExpr,
     options: &NirRenderOptions,
 ) -> Option<RecoveredSwitchSelector> {
     let switch_expr = peel_casts(switch_expr);
-    let DirExpr::Binary {
-        op: DirBinaryOp::Add,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
         lhs,
         rhs,
         ..
@@ -138,7 +138,7 @@ fn recover_relative_switch_selector(
         return None;
     }
 
-    let DirExpr::Load { ptr: addr_expr, .. } = peel_casts(relative_side) else {
+    let PreHirExpr::Load { ptr: addr_expr, .. } = peel_casts(relative_side) else {
         return None;
     };
     let (table_base, selector_expr, entry_size, scaled_by_mul) =
@@ -179,7 +179,7 @@ fn recover_relative_switch_selector(
 /// selector * Const(scale) + Const(base)         (commuted)
 /// selector * Const(scale)                        (relocatable: implicit base 0)
 /// ```
-fn extract_table_base_and_selector(addr: &DirExpr) -> Option<(u64, &DirExpr, u64, bool)> {
+fn extract_table_base_and_selector(addr: &PreHirExpr) -> Option<(u64, &PreHirExpr, u64, bool)> {
     let mut const_base = 0u64;
     let mut saw_const = false;
     let mut selector_term = None;
@@ -201,14 +201,14 @@ fn extract_table_base_and_selector(addr: &DirExpr) -> Option<(u64, &DirExpr, u64
 }
 
 fn collect_additive_switch_terms<'a>(
-    expr: &'a DirExpr,
+    expr: &'a PreHirExpr,
     const_base: &mut u64,
     saw_const: &mut bool,
-    selector_term: &mut Option<&'a DirExpr>,
+    selector_term: &mut Option<&'a PreHirExpr>,
 ) -> bool {
     match peel_casts(expr) {
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -243,20 +243,20 @@ fn collect_additive_switch_terms<'a>(
 /// - `Const(_scale) * selector`
 /// - `selector << Const(_log2)`
 /// - `selector` (scale = 1; no extra operation)
-fn extract_unscaled_selector(expr: &DirExpr) -> Option<(&DirExpr, u64, bool)> {
+fn extract_unscaled_selector(expr: &PreHirExpr) -> Option<(&PreHirExpr, u64, bool)> {
     match expr {
         // selector * scale  or  scale * selector
-        DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ..
         } => {
-            if let DirExpr::Const(scale, _) = rhs.as_ref() {
+            if let PreHirExpr::Const(scale, _) = rhs.as_ref() {
                 u64::try_from(*scale)
                     .ok()
                     .map(|scale| (lhs.as_ref(), scale, true))
-            } else if let DirExpr::Const(scale, _) = lhs.as_ref() {
+            } else if let PreHirExpr::Const(scale, _) = lhs.as_ref() {
                 u64::try_from(*scale)
                     .ok()
                     .map(|scale| (rhs.as_ref(), scale, true))
@@ -265,13 +265,13 @@ fn extract_unscaled_selector(expr: &DirExpr) -> Option<(&DirExpr, u64, bool)> {
             }
         }
         // selector << log2(scale)
-        DirExpr::Binary {
-            op: DirBinaryOp::Shl,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
             lhs,
             rhs,
             ..
         } => {
-            let DirExpr::Const(log2_scale, _) = rhs.as_ref() else {
+            let PreHirExpr::Const(log2_scale, _) = rhs.as_ref() else {
                 return None;
             };
             let shift = u32::try_from(*log2_scale).ok()?;
@@ -279,13 +279,13 @@ fn extract_unscaled_selector(expr: &DirExpr) -> Option<(&DirExpr, u64, bool)> {
                 .map(|scale| (lhs.as_ref(), scale, false))
         }
         // scale == 1: selector directly (any non-constant expression)
-        other if !matches!(other, DirExpr::Const(..)) => Some((other, 1, false)),
+        other if !matches!(other, PreHirExpr::Const(..)) => Some((other, 1, false)),
         _ => None,
     }
 }
 
 pub(super) fn proves_single_target_dispatcher_surface(
-    switch_expr: &DirExpr,
+    switch_expr: &PreHirExpr,
     targets: &[u64],
     current_block: u64,
     options: &NirRenderOptions,
@@ -296,34 +296,34 @@ pub(super) fn proves_single_target_dispatcher_surface(
     has_jump_table_surface(switch_expr, options)
 }
 
-pub(super) fn has_jump_table_surface(switch_expr: &DirExpr, options: &NirRenderOptions) -> bool {
+pub(super) fn has_jump_table_surface(switch_expr: &PreHirExpr, options: &NirRenderOptions) -> bool {
     recover_switch_discriminant(switch_expr, options).is_some()
         || is_mapped_global_load_source(switch_expr, options)
 }
 
-fn is_mapped_global_load_source(expr: &DirExpr, options: &NirRenderOptions) -> bool {
+fn is_mapped_global_load_source(expr: &PreHirExpr, options: &NirRenderOptions) -> bool {
     match expr {
-        DirExpr::Load { ptr, .. } => extract_mapped_global_address(ptr, options).is_some(),
-        DirExpr::Cast { expr: inner, .. } => is_mapped_global_load_source(inner, options),
+        PreHirExpr::Load { ptr, .. } => extract_mapped_global_address(ptr, options).is_some(),
+        PreHirExpr::Cast { expr: inner, .. } => is_mapped_global_load_source(inner, options),
         _ => false,
     }
 }
 
-fn extract_mapped_global_address(expr: &DirExpr, options: &NirRenderOptions) -> Option<u64> {
+fn extract_mapped_global_address(expr: &PreHirExpr, options: &NirRenderOptions) -> Option<u64> {
     let addr = extract_const_address(expr)?;
     options.is_mapped_global(addr).then_some(addr)
 }
 
-pub(super) fn split_selector_base_offset(expr: &DirExpr) -> Option<(DirExpr, i64)> {
+pub(super) fn split_selector_base_offset(expr: &PreHirExpr) -> Option<(PreHirExpr, i64)> {
     extract_min_val_sub(peel_casts(expr))
 }
 
 /// Detect `expr = orig - min_val` where `min_val` is a non-zero constant.
 ///
 /// Returns `(orig_expr, min_val)` when matched, `None` otherwise.
-fn extract_min_val_sub(expr: &DirExpr) -> Option<(DirExpr, i64)> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+fn extract_min_val_sub(expr: &PreHirExpr) -> Option<(PreHirExpr, i64)> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs,
         rhs,
         ..
@@ -331,7 +331,7 @@ fn extract_min_val_sub(expr: &DirExpr) -> Option<(DirExpr, i64)> {
     else {
         return None;
     };
-    let DirExpr::Const(min_val, _) = rhs.as_ref() else {
+    let PreHirExpr::Const(min_val, _) = rhs.as_ref() else {
         return None;
     };
     // min_val == 0 means no adjustment; treat as unrecovered.
@@ -346,9 +346,9 @@ fn extract_min_val_sub(expr: &DirExpr) -> Option<(DirExpr, i64)> {
 /// The compiler commonly inserts a cast like `(ulong)selector` to widen the
 /// selector to pointer width for the table address computation.  Removing it
 /// gives us the original switch variable.
-fn peel_cast(expr: &DirExpr) -> &DirExpr {
+fn peel_cast(expr: &PreHirExpr) -> &PreHirExpr {
     match expr {
-        DirExpr::Cast {
+        PreHirExpr::Cast {
             ty: NirType::Int { .. } | NirType::Bool,
             expr: inner,
         } => inner.as_ref(),
@@ -356,8 +356,8 @@ fn peel_cast(expr: &DirExpr) -> &DirExpr {
     }
 }
 
-fn peel_casts(mut expr: &DirExpr) -> &DirExpr {
-    while let DirExpr::Cast {
+fn peel_casts(mut expr: &PreHirExpr) -> &PreHirExpr {
+    while let PreHirExpr::Cast {
         ty: NirType::Int { .. } | NirType::Bool,
         expr: inner,
     } = expr
@@ -367,10 +367,10 @@ fn peel_casts(mut expr: &DirExpr) -> &DirExpr {
     expr
 }
 
-fn peel_callable_target_mask(expr: &DirExpr) -> &DirExpr {
+fn peel_callable_target_mask(expr: &PreHirExpr) -> &PreHirExpr {
     let expr = peel_casts(expr);
-    let DirExpr::Binary {
-        op: DirBinaryOp::And,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::And,
         lhs,
         rhs,
         ..
@@ -387,24 +387,24 @@ fn peel_callable_target_mask(expr: &DirExpr) -> &DirExpr {
     expr
 }
 
-fn is_callable_target_mask(expr: &DirExpr) -> bool {
+fn is_callable_target_mask(expr: &PreHirExpr) -> bool {
     matches!(
         peel_casts(expr),
-        DirExpr::Const(0xffff_fffe, _) | DirExpr::Const(-2, _)
+        PreHirExpr::Const(0xffff_fffe, _) | PreHirExpr::Const(-2, _)
     )
 }
 
-fn extract_const_address(expr: &DirExpr) -> Option<u64> {
+fn extract_const_address(expr: &PreHirExpr) -> Option<u64> {
     match peel_casts(expr) {
-        DirExpr::Const(value, _) if *value >= 0 => Some(*value as u64),
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Const(value, _) if *value >= 0 => Some(*value as u64),
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } => extract_const_address(lhs)?.checked_add(extract_const_address(rhs)?),
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
@@ -452,73 +452,73 @@ mod tests {
         }
     }
 
-    fn load(ptr: DirExpr) -> DirExpr {
-        DirExpr::Load {
+    fn load(ptr: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Load {
             ptr: Box::new(ptr),
             ty: uint64(),
         }
     }
 
-    fn load32(ptr: DirExpr) -> DirExpr {
-        DirExpr::Load {
+    fn load32(ptr: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Load {
             ptr: Box::new(ptr),
             ty: uint32(),
         }
     }
 
-    fn add(lhs: DirExpr, rhs: DirExpr) -> DirExpr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+    fn add(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
             ty: uint64(),
         }
     }
 
-    fn mul(lhs: DirExpr, rhs: DirExpr) -> DirExpr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+    fn mul(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
             ty: uint64(),
         }
     }
 
-    fn sub(lhs: DirExpr, rhs: DirExpr) -> DirExpr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+    fn sub(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
             ty: uint32(),
         }
     }
 
-    fn shl(lhs: DirExpr, rhs: DirExpr) -> DirExpr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Shl,
+    fn shl(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
             ty: uint64(),
         }
     }
 
-    fn cst(v: i64) -> DirExpr {
-        DirExpr::Const(v, uint64())
+    fn cst(v: i64) -> PreHirExpr {
+        PreHirExpr::Const(v, uint64())
     }
 
-    fn var(name: &str) -> DirExpr {
-        DirExpr::Var(name.to_owned())
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_owned())
     }
 
-    fn cast_u64(inner: DirExpr) -> DirExpr {
-        DirExpr::Cast {
+    fn cast_u64(inner: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Cast {
             ty: uint64(),
             expr: Box::new(inner),
         }
     }
 
-    fn sext_u64(inner: DirExpr) -> DirExpr {
-        DirExpr::Cast {
+    fn sext_u64(inner: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Cast {
             ty: NirType::Int {
                 bits: 64,
                 signed: true,
@@ -627,8 +627,8 @@ mod tests {
         let opts = options_with_section(0x100000, 0x101000);
         let sel = var("sel");
         let table_load = load32(add(cst(0x100024), shl(sel.clone(), cst(2))));
-        let expr = DirExpr::Binary {
-            op: DirBinaryOp::And,
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs: Box::new(table_load),
             rhs: Box::new(cst(0xffff_fffe)),
             ty: uint64(),

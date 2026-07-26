@@ -66,16 +66,16 @@ use super::super::types::{
     apply_type_inference_pass, apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
 use crate::prelude::*;
-use fission_midend_dir::action_pipeline::{
+use fission_midend_prehir::action_pipeline::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT, PassBudget,
     TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS,
 };
-use fission_midend_dir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
+use fission_midend_prehir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
 use fission_midend_core::wave_stats;
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
-pub fn apply_type_signature_fixed_point(func: &mut DirFunction, diag: bool, perf: bool) {
+pub fn apply_type_signature_fixed_point(func: &mut PreHirFunction, diag: bool, perf: bool) {
     let mut interproc_signature_rounds = 0usize;
     for round in 0..TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS {
         let (before_stmts, before_locals) = if perf { hir_shape(func) } else { (0, 0) };
@@ -143,11 +143,11 @@ pub fn apply_type_signature_fixed_point(func: &mut DirFunction, diag: bool, perf
     }
 }
 
-pub fn normalize_function_body(body: &mut Vec<DirStmt>) {
+pub fn normalize_function_body(body: &mut Vec<PreHirStmt>) {
     cleanup_stmt_list(body, "<body>", 0);
 }
 
-pub fn cleanup_func_stmt_list(func: &mut DirFunction) {
+pub fn cleanup_func_stmt_list(func: &mut PreHirFunction) {
     let preserved_temps = preserved_materialization_names(&func.locals);
     // Scale round_limit by body size: large bodies (>500 stmts) converge in
     // fewer useful rounds; extra iterations mostly rescan unchanged trees.
@@ -170,18 +170,18 @@ pub fn cleanup_func_stmt_list(func: &mut DirFunction) {
     );
 }
 
-fn contains_call_expr(expr: &DirExpr) -> bool {
+fn contains_call_expr(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Call { .. } => true,
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => contains_call_expr(expr),
-        DirExpr::Binary { lhs, rhs, .. } => contains_call_expr(lhs) || contains_call_expr(rhs),
-        DirExpr::Index { base, index, .. } => contains_call_expr(base) || contains_call_expr(index),
-        DirExpr::Select {
+        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => contains_call_expr(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => contains_call_expr(lhs) || contains_call_expr(rhs),
+        PreHirExpr::Index { base, index, .. } => contains_call_expr(base) || contains_call_expr(index),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -191,29 +191,29 @@ fn contains_call_expr(expr: &DirExpr) -> bool {
                 || contains_call_expr(then_expr)
                 || contains_call_expr(else_expr)
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
     }
 }
 
-fn contains_call_lvalue(lhs: &DirLValue) -> bool {
+fn contains_call_lvalue(lhs: &PreHirLValue) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, .. } => contains_call_expr(ptr),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => contains_call_expr(ptr),
+        PreHirLValue::Index { base, index, .. } => {
             contains_call_expr(base) || contains_call_expr(index)
         }
-        DirLValue::FieldAccess { base, .. } => contains_call_expr(base),
+        PreHirLValue::FieldAccess { base, .. } => contains_call_expr(base),
     }
 }
 
-fn contains_call_stmt(stmt: &DirStmt) -> bool {
+fn contains_call_stmt(stmt: &PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => contains_call_lvalue(lhs) || contains_call_expr(rhs),
-        DirStmt::VaStart { va_list, .. } | DirStmt::Expr(va_list) => contains_call_expr(va_list),
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. } => contains_call_stmts(stmts),
-        DirStmt::If {
+        PreHirStmt::Assign { lhs, rhs } => contains_call_lvalue(lhs) || contains_call_expr(rhs),
+        PreHirStmt::VaStart { va_list, .. } | PreHirStmt::Expr(va_list) => contains_call_expr(va_list),
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. } => contains_call_stmts(stmts),
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -222,7 +222,7 @@ fn contains_call_stmt(stmt: &DirStmt) -> bool {
                 || contains_call_stmts(then_body)
                 || contains_call_stmts(else_body)
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -233,7 +233,7 @@ fn contains_call_stmt(stmt: &DirStmt) -> bool {
                 || update.as_deref().is_some_and(contains_call_stmt)
                 || contains_call_stmts(body)
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -242,31 +242,31 @@ fn contains_call_stmt(stmt: &DirStmt) -> bool {
                 || cases.iter().any(|case| contains_call_stmts(&case.body))
                 || contains_call_stmts(default)
         }
-        DirStmt::Return(Some(expr)) => contains_call_expr(expr),
-        DirStmt::Return(None)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
+        PreHirStmt::Return(Some(expr)) => contains_call_expr(expr),
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
     }
 }
 
-pub fn body_contains_popcount_call(body: &[DirStmt]) -> bool {
+pub fn body_contains_popcount_call(body: &[PreHirStmt]) -> bool {
     body.iter().any(stmt_contains_popcount_call)
 }
 
-fn stmt_contains_popcount_call(stmt: &DirStmt) -> bool {
+fn stmt_contains_popcount_call(stmt: &PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             lvalue_contains_popcount_call(lhs) || expr_contains_popcount_call(rhs)
         }
-        DirStmt::VaStart { va_list, .. } | DirStmt::Expr(va_list) => {
+        PreHirStmt::VaStart { va_list, .. } | PreHirStmt::Expr(va_list) => {
             expr_contains_popcount_call(va_list)
         }
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. } => stmts.iter().any(stmt_contains_popcount_call),
-        DirStmt::If {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. } => stmts.iter().any(stmt_contains_popcount_call),
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -275,7 +275,7 @@ fn stmt_contains_popcount_call(stmt: &DirStmt) -> bool {
                 || then_body.iter().any(stmt_contains_popcount_call)
                 || else_body.iter().any(stmt_contains_popcount_call)
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -286,7 +286,7 @@ fn stmt_contains_popcount_call(stmt: &DirStmt) -> bool {
                 || update.as_deref().is_some_and(stmt_contains_popcount_call)
                 || body.iter().any(stmt_contains_popcount_call)
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -297,44 +297,44 @@ fn stmt_contains_popcount_call(stmt: &DirStmt) -> bool {
                     .any(|case| case.body.iter().any(stmt_contains_popcount_call))
                 || default.iter().any(stmt_contains_popcount_call)
         }
-        DirStmt::Return(Some(expr)) => expr_contains_popcount_call(expr),
-        DirStmt::Return(None)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
+        PreHirStmt::Return(Some(expr)) => expr_contains_popcount_call(expr),
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
     }
 }
 
-fn lvalue_contains_popcount_call(lhs: &DirLValue) -> bool {
+fn lvalue_contains_popcount_call(lhs: &PreHirLValue) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, .. } => expr_contains_popcount_call(ptr),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_contains_popcount_call(ptr),
+        PreHirLValue::Index { base, index, .. } => {
             expr_contains_popcount_call(base) || expr_contains_popcount_call(index)
         }
-        DirLValue::FieldAccess { base, .. } => expr_contains_popcount_call(base),
+        PreHirLValue::FieldAccess { base, .. } => expr_contains_popcount_call(base),
     }
 }
 
-fn expr_contains_popcount_call(expr: &DirExpr) -> bool {
+fn expr_contains_popcount_call(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             target == "__popcount" || args.iter().any(expr_contains_popcount_call)
         }
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => expr_contains_popcount_call(inner),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => expr_contains_popcount_call(inner),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_popcount_call(lhs) || expr_contains_popcount_call(rhs)
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             expr_contains_popcount_call(base) || expr_contains_popcount_call(index)
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -344,11 +344,11 @@ fn expr_contains_popcount_call(expr: &DirExpr) -> bool {
                 || expr_contains_popcount_call(then_expr)
                 || expr_contains_popcount_call(else_expr)
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => false,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
     }
 }
 
-pub fn contains_call_stmts(stmts: &[DirStmt]) -> bool {
+pub fn contains_call_stmts(stmts: &[PreHirStmt]) -> bool {
     stmts.iter().any(contains_call_stmt)
 }
 
@@ -389,28 +389,28 @@ pub struct GlobalSymbolContext {
     pub sizes: std::collections::HashMap<u64, u64>,
 }
 
-pub fn normalize_hir_function(func: &mut DirFunction) {
+pub fn normalize_hir_function(func: &mut PreHirFunction) {
     super::groups::run_normalize_pipeline(func, normalize_diag_enabled(), normalize_perf_enabled());
 }
 
-pub fn is_large_hir_function(func: &DirFunction) -> bool {
+pub fn is_large_hir_function(func: &PreHirFunction) -> bool {
     count_hir_stmts(&func.body) > 220 || func.locals.len() > 160
 }
 
-fn count_hir_stmts(stmts: &[DirStmt]) -> usize {
-    fn count_stmt(stmt: &DirStmt) -> usize {
+fn count_hir_stmts(stmts: &[PreHirStmt]) -> usize {
+    fn count_stmt(stmt: &PreHirStmt) -> usize {
         match stmt {
-            DirStmt::Block(stmts)
-            | DirStmt::While { body: stmts, .. }
-            | DirStmt::DoWhile { body: stmts, .. } => 1 + count_hir_stmts(stmts),
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Block(stmts)
+            | PreHirStmt::While { body: stmts, .. }
+            | PreHirStmt::DoWhile { body: stmts, .. } => 1 + count_hir_stmts(stmts),
+            PreHirStmt::Switch { cases, default, .. } => {
                 1 + cases
                     .iter()
                     .map(|case| count_hir_stmts(&case.body))
                     .sum::<usize>()
                     + count_hir_stmts(default)
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -422,11 +422,11 @@ fn count_hir_stmts(stmts: &[DirStmt]) -> usize {
     stmts.iter().map(count_stmt).sum()
 }
 
-pub fn hir_shape(func: &DirFunction) -> (usize, usize) {
+pub fn hir_shape(func: &PreHirFunction) -> (usize, usize) {
     (count_hir_stmts(&func.body), func.locals.len())
 }
 
-fn body_exceeds_early_cleanup_budget(body: &[DirStmt]) -> bool {
+fn body_exceeds_early_cleanup_budget(body: &[PreHirStmt]) -> bool {
     count_hir_stmts(body) > EARLY_CLEANUP_BLOCK_STMT_LIMIT
         || count_hir_blocks(body) > EARLY_CLEANUP_BLOCK_BLOCK_LIMIT
 }
@@ -442,7 +442,7 @@ pub struct SccpAdmissionSummary {
     pub eligible: bool,
 }
 
-pub fn jump_resolver_admission(body: &[DirStmt]) -> JumpResolverAdmission {
+pub fn jump_resolver_admission(body: &[PreHirStmt]) -> JumpResolverAdmission {
     if !body_exceeds_early_cleanup_budget(body) {
         return JumpResolverAdmission {
             eligible: true,
@@ -456,7 +456,7 @@ pub fn jump_resolver_admission(body: &[DirStmt]) -> JumpResolverAdmission {
     }
 }
 
-pub fn sccp_admission_summary(body: &[DirStmt]) -> SccpAdmissionSummary {
+pub fn sccp_admission_summary(body: &[PreHirStmt]) -> SccpAdmissionSummary {
     let has_control_seed = body_has_sccp_control_seed(body);
     let has_const_seed = body_has_sccp_const_seed(body);
     SccpAdmissionSummary {
@@ -464,7 +464,7 @@ pub fn sccp_admission_summary(body: &[DirStmt]) -> SccpAdmissionSummary {
     }
 }
 
-pub fn memory_fact_prefilter_allows_full(func: &DirFunction) -> bool {
+pub fn memory_fact_prefilter_allows_full(func: &PreHirFunction) -> bool {
     func.params
         .iter()
         .chain(func.locals.iter())
@@ -472,18 +472,18 @@ pub fn memory_fact_prefilter_allows_full(func: &DirFunction) -> bool {
         || body_has_memory_surface_interest(&func.body)
 }
 
-fn body_has_sccp_control_seed(body: &[DirStmt]) -> bool {
+fn body_has_sccp_control_seed(body: &[PreHirStmt]) -> bool {
     body.iter().any(stmt_has_sccp_control_seed)
 }
 
-fn stmt_has_sccp_control_seed(stmt: &DirStmt) -> bool {
+fn stmt_has_sccp_control_seed(stmt: &PreHirStmt) -> bool {
     match stmt {
-        DirStmt::If { .. } | DirStmt::Switch { .. } => true,
-        DirStmt::Block(body) => body_has_sccp_control_seed(body),
-        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::If { .. } | PreHirStmt::Switch { .. } => true,
+        PreHirStmt::Block(body) => body_has_sccp_control_seed(body),
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
             expr_contains_const(cond) || body_has_sccp_control_seed(body)
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -498,16 +498,16 @@ fn stmt_has_sccp_control_seed(stmt: &DirStmt) -> bool {
     }
 }
 
-fn body_has_sccp_const_seed(body: &[DirStmt]) -> bool {
+fn body_has_sccp_const_seed(body: &[PreHirStmt]) -> bool {
     body.iter().any(stmt_has_sccp_const_seed)
 }
 
-fn stmt_has_sccp_const_seed(stmt: &DirStmt) -> bool {
+fn stmt_has_sccp_const_seed(stmt: &PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Assign { rhs, .. } | DirStmt::Expr(rhs) | DirStmt::Return(Some(rhs)) => {
+        PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
             expr_contains_const(rhs)
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -516,7 +516,7 @@ fn stmt_has_sccp_const_seed(stmt: &DirStmt) -> bool {
                 || body_has_sccp_const_seed(then_body)
                 || body_has_sccp_const_seed(else_body)
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -527,11 +527,11 @@ fn stmt_has_sccp_const_seed(stmt: &DirStmt) -> bool {
                     .any(|case| body_has_sccp_const_seed(&case.body))
                 || body_has_sccp_const_seed(default)
         }
-        DirStmt::Block(body) => body_has_sccp_const_seed(body),
-        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::Block(body) => body_has_sccp_const_seed(body),
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
             expr_contains_const(cond) || body_has_sccp_const_seed(body)
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -542,26 +542,26 @@ fn stmt_has_sccp_const_seed(stmt: &DirStmt) -> bool {
                 || update.as_deref().is_some_and(stmt_has_sccp_const_seed)
                 || body_has_sccp_const_seed(body)
         }
-        DirStmt::VaStart { .. }
-        | DirStmt::Return(None)
-        | DirStmt::Break
-        | DirStmt::Continue
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_) => false,
+        PreHirStmt::VaStart { .. }
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_) => false,
     }
 }
 
-fn body_has_memory_surface_interest(body: &[DirStmt]) -> bool {
+fn body_has_memory_surface_interest(body: &[PreHirStmt]) -> bool {
     body.iter().any(stmt_has_memory_surface_interest)
 }
 
-fn stmt_has_memory_surface_interest(stmt: &DirStmt) -> bool {
+fn stmt_has_memory_surface_interest(stmt: &PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             lvalue_has_memory_surface_interest(lhs) || expr_has_memory_surface_interest(rhs)
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => expr_has_memory_surface_interest(expr),
-        DirStmt::If {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_has_memory_surface_interest(expr),
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -570,7 +570,7 @@ fn stmt_has_memory_surface_interest(stmt: &DirStmt) -> bool {
                 || body_has_memory_surface_interest(then_body)
                 || body_has_memory_surface_interest(else_body)
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -581,11 +581,11 @@ fn stmt_has_memory_surface_interest(stmt: &DirStmt) -> bool {
                     .any(|case| body_has_memory_surface_interest(&case.body))
                 || body_has_memory_surface_interest(default)
         }
-        DirStmt::Block(body) => body_has_memory_surface_interest(body),
-        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::Block(body) => body_has_memory_surface_interest(body),
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
             expr_has_memory_surface_interest(cond) || body_has_memory_surface_interest(body)
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -599,56 +599,56 @@ fn stmt_has_memory_surface_interest(stmt: &DirStmt) -> bool {
                     .is_some_and(stmt_has_memory_surface_interest)
                 || body_has_memory_surface_interest(body)
         }
-        DirStmt::VaStart { .. }
-        | DirStmt::Return(None)
-        | DirStmt::Break
-        | DirStmt::Continue
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_) => false,
+        PreHirStmt::VaStart { .. }
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_) => false,
     }
 }
 
-fn lvalue_has_memory_surface_interest(lhs: &DirLValue) -> bool {
+fn lvalue_has_memory_surface_interest(lhs: &PreHirLValue) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => {
             let _ = ptr;
             true
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             let _ = (base, index);
             true
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             let _ = base;
             true
         }
     }
 }
 
-fn expr_has_memory_surface_interest(expr: &DirExpr) -> bool {
+fn expr_has_memory_surface_interest(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Const(_, _) | DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => false,
-        DirExpr::Load { ptr, .. } => {
+        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => false,
+        PreHirExpr::Load { ptr, .. } => {
             let _ = ptr;
             true
         }
-        DirExpr::PtrOffset { base, .. } | DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
             let _ = base;
             true
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             let _ = (base, index);
             true
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => expr_has_memory_surface_interest(expr),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => expr_has_memory_surface_interest(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_has_memory_surface_interest(lhs) || expr_has_memory_surface_interest(rhs)
         }
-        DirExpr::Call { args, .. } => args.iter().any(expr_has_memory_surface_interest),
-        DirExpr::Select {
+        PreHirExpr::Call { args, .. } => args.iter().any(expr_has_memory_surface_interest),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -661,22 +661,22 @@ fn expr_has_memory_surface_interest(expr: &DirExpr) -> bool {
     }
 }
 
-fn expr_contains_const(expr: &DirExpr) -> bool {
+fn expr_contains_const(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Const(_, _) => true,
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => false,
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => expr_contains_const(expr),
-        DirExpr::Binary { lhs, rhs, .. } => expr_contains_const(lhs) || expr_contains_const(rhs),
-        DirExpr::Call { args, .. } => args.iter().any(expr_contains_const),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => false,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_contains_const(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_contains_const(lhs) || expr_contains_const(rhs),
+        PreHirExpr::Call { args, .. } => args.iter().any(expr_contains_const),
+        PreHirExpr::Index { base, index, .. } => {
             expr_contains_const(base) || expr_contains_const(index)
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -694,8 +694,8 @@ mod tests {
     use super::*;
     // prelude via parent
 
-    fn empty_func() -> DirFunction {
-        DirFunction {
+    fn empty_func() -> PreHirFunction {
+        PreHirFunction {
             name: "admission".to_string(),
             params: Vec::new(),
             locals: Vec::new(),
@@ -713,9 +713,9 @@ mod tests {
 
     #[test]
     fn sccp_admission_rejects_linear_body_without_control_seed() {
-        let body = vec![DirStmt::Assign {
-            lhs: DirLValue::Var("xVar0".to_string()),
-            rhs: DirExpr::Const(
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("xVar0".to_string()),
+            rhs: PreHirExpr::Const(
                 1,
                 NirType::Int {
                     bits: 32,
@@ -728,11 +728,11 @@ mod tests {
 
     #[test]
     fn sccp_admission_accepts_if_with_const_guard() {
-        let body = vec![DirStmt::If {
-            cond: DirExpr::Binary {
-                op: DirBinaryOp::Eq,
-                lhs: Box::new(DirExpr::Var("uVar0".to_string())),
-                rhs: Box::new(DirExpr::Const(
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Eq,
+                lhs: Box::new(PreHirExpr::Var("uVar0".to_string())),
+                rhs: Box::new(PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -741,7 +741,7 @@ mod tests {
                 )),
                 ty: NirType::Bool,
             },
-            then_body: vec![DirStmt::Return(None)],
+            then_body: vec![PreHirStmt::Return(None)],
             else_body: Vec::new(),
         }];
         assert!(sccp_admission_summary(&body).eligible);
@@ -750,14 +750,14 @@ mod tests {
     #[test]
     fn memory_fact_prefilter_rejects_non_pointer_function() {
         let mut func = empty_func();
-        func.body.push(DirStmt::Return(None));
+        func.body.push(PreHirStmt::Return(None));
         assert!(!memory_fact_prefilter_allows_full(&func));
     }
 
     #[test]
     fn memory_fact_prefilter_accepts_pointer_param() {
         let mut func = empty_func();
-        func.params.push(DirBinding {
+        func.params.push(PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -778,7 +778,7 @@ mod tests {
             signed: false,
         };
         let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
-        let binding = |name: &str, ty: NirType, origin| DirBinding {
+        let binding = |name: &str, ty: NirType, origin| PreHirBinding {
             name: name.to_string(),
             ty,
             surface_type_name: None,
@@ -795,30 +795,30 @@ mod tests {
             binding("value", u8_ty.clone(), NirBindingOrigin::Temp),
         ];
         func.body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("end".into()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Add,
-                    lhs: Box::new(DirExpr::Var("offset".into())),
-                    rhs: Box::new(DirExpr::Cast {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("end".into()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("offset".into())),
+                    rhs: Box::new(PreHirExpr::Cast {
                         ty: u64_ty.clone(),
-                        expr: Box::new(DirExpr::Var("base".into())),
+                        expr: Box::new(PreHirExpr::Var("base".into())),
                     }),
                     ty: u64_ty,
                 },
             },
-            DirStmt::Assign {
-                lhs: DirLValue::Var("value".into()),
-                rhs: DirExpr::Load {
-                    ptr: Box::new(DirExpr::Var("base".into())),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("value".into()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("base".into())),
                     ty: u8_ty,
                 },
             },
-            DirStmt::If {
-                cond: DirExpr::Binary {
-                    op: DirBinaryOp::Ne,
-                    lhs: Box::new(DirExpr::Var("end".into())),
-                    rhs: Box::new(DirExpr::Var("base".into())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Ne,
+                    lhs: Box::new(PreHirExpr::Var("end".into())),
+                    rhs: Box::new(PreHirExpr::Var("base".into())),
                     ty: NirType::Bool,
                 },
                 then_body: Vec::new(),
@@ -849,7 +849,7 @@ mod tests {
             signed: false,
         };
         let ptr_ty = NirType::Ptr(Box::new(u8_ty.clone()));
-        let binding = |name: &str, ty: NirType, origin| DirBinding {
+        let binding = |name: &str, ty: NirType, origin| PreHirBinding {
             name: name.to_string(),
             ty,
             surface_type_name: None,
@@ -867,44 +867,44 @@ mod tests {
             binding("value", u8_ty.clone(), NirBindingOrigin::Temp),
         ];
         func.body = vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var("end".into()),
-                rhs: DirExpr::Var("offset".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("end".into()),
+                rhs: PreHirExpr::Var("offset".into()),
             },
-            DirStmt::If {
-                cond: DirExpr::Var("offset".into()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("offset".into()),
                 then_body: vec![
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var("cursor".into()),
-                        rhs: DirExpr::Var("base".into()),
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("cursor".into()),
+                        rhs: PreHirExpr::Var("base".into()),
                     },
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var("end".into()),
-                        rhs: DirExpr::Binary {
-                            op: DirBinaryOp::Add,
-                            lhs: Box::new(DirExpr::Var("offset".into())),
-                            rhs: Box::new(DirExpr::Cast {
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("end".into()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("offset".into())),
+                            rhs: Box::new(PreHirExpr::Cast {
                                 ty: u64_ty.clone(),
-                                expr: Box::new(DirExpr::Var("cursor".into())),
+                                expr: Box::new(PreHirExpr::Var("cursor".into())),
                             }),
                             ty: u64_ty,
                         },
                     },
-                    DirStmt::Assign {
-                        lhs: DirLValue::Var("value".into()),
-                        rhs: DirExpr::Load {
-                            ptr: Box::new(DirExpr::Var("cursor".into())),
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("value".into()),
+                        rhs: PreHirExpr::Load {
+                            ptr: Box::new(PreHirExpr::Var("cursor".into())),
                             ty: u8_ty,
                         },
                     },
                 ],
                 else_body: Vec::new(),
             },
-            DirStmt::If {
-                cond: DirExpr::Binary {
-                    op: DirBinaryOp::Ne,
-                    lhs: Box::new(DirExpr::Var("end".into())),
-                    rhs: Box::new(DirExpr::Var("cursor".into())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Ne,
+                    lhs: Box::new(PreHirExpr::Var("end".into())),
+                    rhs: Box::new(PreHirExpr::Var("cursor".into())),
                     ty: NirType::Bool,
                 },
                 then_body: Vec::new(),
@@ -928,17 +928,17 @@ mod tests {
     fn cleanup_func_stmt_list_keeps_protected_lsda_landing_pad() {
         let mut func = empty_func();
         func.body = vec![
-            DirStmt::Return(Some(DirExpr::Const(
+            PreHirStmt::Return(Some(PreHirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
                     signed: false,
                 },
             ))),
-            DirStmt::Label("landing_pad".to_string()),
-            DirStmt::Assign {
-                lhs: DirLValue::Var("cleanup".to_string()),
-                rhs: DirExpr::Const(
+            PreHirStmt::Label("landing_pad".to_string()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cleanup".to_string()),
+                rhs: PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -946,7 +946,7 @@ mod tests {
                     },
                 ),
             },
-            DirStmt::Return(None),
+            PreHirStmt::Return(None),
         ];
 
         PROTECTED_LSDA_LABELS.with(|protected| {
@@ -960,7 +960,7 @@ mod tests {
         assert!(
             func.body
                 .iter()
-                .any(|s| matches!(s, DirStmt::Label(l) if l == "landing_pad")),
+                .any(|s| matches!(s, PreHirStmt::Label(l) if l == "landing_pad")),
             "protected LSDA landing pad label was dropped by cleanup_func_stmt_list: {:#?}",
             func.body
         );
@@ -968,13 +968,13 @@ mod tests {
 }
 
 pub fn run_cleanup_block<F>(
-    func: &mut DirFunction,
+    func: &mut PreHirFunction,
     pass_name: &str,
     perf: bool,
     mut block: F,
 ) -> bool
 where
-    F: FnMut(&mut DirFunction),
+    F: FnMut(&mut PreHirFunction),
 {
     if body_exceeds_early_cleanup_budget(&func.body) {
         wave_stats::add_cleanup_budget_skips(1);
@@ -990,7 +990,7 @@ where
 }
 
 pub fn run_cleanup_family_passes(
-    func: &mut DirFunction,
+    func: &mut PreHirFunction,
     stage: &str,
     perf: bool,
     budget: PassBudget,
@@ -1107,9 +1107,9 @@ pub fn run_cleanup_family_passes(
     changed
 }
 
-pub fn run_pass_logged<F>(func: &mut DirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
+pub fn run_pass_logged<F>(func: &mut PreHirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
 where
-    F: FnOnce(&mut DirFunction) -> bool,
+    F: FnOnce(&mut PreHirFunction) -> bool,
 {
     let _span = debug_span!("normalize_pass", fn_name = %func.name, pass = pass_name).entered();
 
@@ -1119,13 +1119,13 @@ where
     let (after_stmts, after_locals) = hir_shape(func);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    if fission_midend_dir::action_pipeline::norm_trace_enabled() {
+    if fission_midend_prehir::action_pipeline::norm_trace_enabled() {
         eprintln!(
             "[NORM_TRACE] fn={} pass={} changed={} hash={:016x}",
             func.name,
             pass_name,
             changed,
-            fission_midend_dir::action_pipeline::norm_trace_hash(func)
+            fission_midend_prehir::action_pipeline::norm_trace_hash(func)
         );
     }
 
@@ -1164,22 +1164,22 @@ where
 }
 
 pub fn run_pass_logged_fn<F>(
-    func: &mut DirFunction,
+    func: &mut PreHirFunction,
     pass_name: &str,
     perf: bool,
     pass_fn: F,
 ) -> bool
 where
-    F: FnOnce(&mut DirFunction) -> bool,
+    F: FnOnce(&mut PreHirFunction) -> bool,
 {
     run_pass_logged(func, pass_name, perf, pass_fn)
 }
 
-fn has_binding_initializers(bindings: &[DirBinding]) -> bool {
+fn has_binding_initializers(bindings: &[PreHirBinding]) -> bool {
     bindings.iter().any(|binding| binding.initializer.is_some())
 }
 
-fn collect_initializer_fingerprints(bindings: &[DirBinding]) -> Vec<(String, Option<String>)> {
+fn collect_initializer_fingerprints(bindings: &[PreHirBinding]) -> Vec<(String, Option<String>)> {
     bindings
         .iter()
         .map(|binding| {
@@ -1191,16 +1191,16 @@ fn collect_initializer_fingerprints(bindings: &[DirBinding]) -> Vec<(String, Opt
         .collect()
 }
 
-pub fn body_has_loopish_shapes(stmts: &[DirStmt]) -> bool {
+pub fn body_has_loopish_shapes(stmts: &[PreHirStmt]) -> bool {
     for stmt in stmts {
         match stmt {
-            DirStmt::While { .. } | DirStmt::DoWhile { .. } | DirStmt::For { .. } => return true,
-            DirStmt::Block(body) => {
+            PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => return true,
+            PreHirStmt::Block(body) => {
                 if body_has_loopish_shapes(body) {
                     return true;
                 }
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1209,39 +1209,39 @@ pub fn body_has_loopish_shapes(stmts: &[DirStmt]) -> bool {
                     return true;
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 if cases.iter().any(|case| body_has_loopish_shapes(&case.body))
                     || body_has_loopish_shapes(default)
                 {
                     return true;
                 }
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     false
 }
 
-fn body_has_boundary_label_shapes(stmts: &[DirStmt]) -> bool {
+fn body_has_boundary_label_shapes(stmts: &[PreHirStmt]) -> bool {
     for stmt in stmts {
         match stmt {
-            DirStmt::Label(_) | DirStmt::Goto(_) => return true,
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Label(_) | PreHirStmt::Goto(_) => return true,
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 if body_has_boundary_label_shapes(body) {
                     return true;
                 }
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1252,7 +1252,7 @@ fn body_has_boundary_label_shapes(stmts: &[DirStmt]) -> bool {
                     return true;
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 if cases
                     .iter()
                     .any(|case| body_has_boundary_label_shapes(&case.body))
@@ -1261,31 +1261,31 @@ fn body_has_boundary_label_shapes(stmts: &[DirStmt]) -> bool {
                     return true;
                 }
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     false
 }
 
-fn body_has_conditional_return_shapes(stmts: &[DirStmt]) -> bool {
+fn body_has_conditional_return_shapes(stmts: &[PreHirStmt]) -> bool {
     for stmt in stmts {
         match stmt {
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
                 let then_ret = then_body
                     .last()
-                    .is_some_and(|stmt| matches!(stmt, DirStmt::Return(_)));
+                    .is_some_and(|stmt| matches!(stmt, PreHirStmt::Return(_)));
                 let else_ret = else_body
                     .last()
-                    .is_some_and(|stmt| matches!(stmt, DirStmt::Return(_)));
+                    .is_some_and(|stmt| matches!(stmt, PreHirStmt::Return(_)));
                 if (then_ret && else_ret)
                     || body_has_conditional_return_shapes(then_body)
                     || body_has_conditional_return_shapes(else_body)
@@ -1293,15 +1293,15 @@ fn body_has_conditional_return_shapes(stmts: &[DirStmt]) -> bool {
                     return true;
                 }
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 if body_has_conditional_return_shapes(body) {
                     return true;
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 if cases
                     .iter()
                     .any(|case| body_has_conditional_return_shapes(&case.body))
@@ -1310,35 +1310,35 @@ fn body_has_conditional_return_shapes(stmts: &[DirStmt]) -> bool {
                     return true;
                 }
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     false
 }
 
-fn body_needs_stmt_fold_cleanup(stmts: &[DirStmt]) -> bool {
+fn body_needs_stmt_fold_cleanup(stmts: &[PreHirStmt]) -> bool {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 ..
             } if looks_like_trivial_temp_name(name) => return true,
-            DirStmt::Return(Some(DirExpr::Var(name))) if looks_like_trivial_temp_name(name) => {
+            PreHirStmt::Return(Some(PreHirExpr::Var(name))) if looks_like_trivial_temp_name(name) => {
                 return true;
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                if matches!(cond, DirExpr::Const(_, _))
+                if matches!(cond, PreHirExpr::Const(_, _))
                     || then_body.is_empty()
                     || else_body.is_empty()
                     || body_needs_stmt_fold_cleanup(then_body)
@@ -1347,15 +1347,15 @@ fn body_needs_stmt_fold_cleanup(stmts: &[DirStmt]) -> bool {
                     return true;
                 }
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 if body_needs_stmt_fold_cleanup(body) {
                     return true;
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 if cases
                     .iter()
                     .any(|case| body_needs_stmt_fold_cleanup(&case.body))
@@ -1364,14 +1364,14 @@ fn body_needs_stmt_fold_cleanup(stmts: &[DirStmt]) -> bool {
                     return true;
                 }
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     false
@@ -1386,50 +1386,50 @@ fn looks_like_trivial_temp_name(name: &str) -> bool {
         || name.starts_with("bVar")
 }
 
-fn count_hir_blocks(stmts: &[DirStmt]) -> usize {
-    fn count_stmt(stmt: &DirStmt) -> usize {
+fn count_hir_blocks(stmts: &[PreHirStmt]) -> usize {
+    fn count_stmt(stmt: &PreHirStmt) -> usize {
         match stmt {
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => 1 + count_hir_blocks(body),
-            DirStmt::If {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => 1 + count_hir_blocks(body),
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => 1 + count_hir_blocks(then_body) + count_hir_blocks(else_body),
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 1 + cases
                     .iter()
                     .map(|case| count_hir_blocks(&case.body))
                     .sum::<usize>()
                     + count_hir_blocks(default)
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => 0,
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => 0,
         }
     }
 
     stmts.iter().map(count_stmt).sum()
 }
 
-pub fn normalize_stmt(stmt: &mut DirStmt) {
+pub fn normalize_stmt(stmt: &mut PreHirStmt) {
     match stmt {
-        DirStmt::Assign { rhs, .. } => normalize_expr(rhs),
-        DirStmt::VaStart { va_list, .. } => normalize_expr(va_list),
-        DirStmt::Expr(expr) => normalize_expr(expr),
-        DirStmt::Block(stmts) => {
+        PreHirStmt::Assign { rhs, .. } => normalize_expr(rhs),
+        PreHirStmt::VaStart { va_list, .. } => normalize_expr(va_list),
+        PreHirStmt::Expr(expr) => normalize_expr(expr),
+        PreHirStmt::Block(stmts) => {
             for stmt in stmts {
                 normalize_stmt(stmt);
             }
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -1444,7 +1444,7 @@ pub fn normalize_stmt(stmt: &mut DirStmt) {
                 normalize_stmt(stmt);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1457,19 +1457,19 @@ pub fn normalize_stmt(stmt: &mut DirStmt) {
                 normalize_stmt(stmt);
             }
         }
-        DirStmt::While { cond, body } => {
+        PreHirStmt::While { cond, body } => {
             normalize_condition_expr(cond);
             for stmt in body {
                 normalize_stmt(stmt);
             }
         }
-        DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::DoWhile { body, cond } => {
             for stmt in body {
                 normalize_stmt(stmt);
             }
             normalize_condition_expr(cond);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -1488,13 +1488,13 @@ pub fn normalize_stmt(stmt: &mut DirStmt) {
                 normalize_stmt(stmt);
             }
         }
-        DirStmt::Label(_) | DirStmt::Goto(_) => {}
-        DirStmt::Return(Some(expr)) => normalize_expr(expr),
-        DirStmt::Return(None) | DirStmt::Break | DirStmt::Continue => {}
+        PreHirStmt::Label(_) | PreHirStmt::Goto(_) => {}
+        PreHirStmt::Return(Some(expr)) => normalize_expr(expr),
+        PreHirStmt::Return(None) | PreHirStmt::Break | PreHirStmt::Continue => {}
     }
 }
 
-fn normalize_condition_expr(expr: &mut DirExpr) {
+fn normalize_condition_expr(expr: &mut PreHirExpr) {
     normalize_expr(expr);
     let mut current = expr.clone();
     loop {
@@ -1516,7 +1516,7 @@ struct CleanupStmtOptions {
     round_limit: usize,
 }
 
-fn cleanup_stmt_list(stmts: &mut Vec<DirStmt>, func_name: &str, depth: usize) {
+fn cleanup_stmt_list(stmts: &mut Vec<PreHirStmt>, func_name: &str, depth: usize) {
     let preserved_temps = HashSet::default();
     let global_refs = if depth == 0 {
         let mut refs = crate::cleanup::utils::collect_referenced_labels(stmts);
@@ -1541,7 +1541,7 @@ fn cleanup_stmt_list(stmts: &mut Vec<DirStmt>, func_name: &str, depth: usize) {
 }
 
 fn cleanup_stmt_list_with_options(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     func_name: &str,
     depth: usize,
     options: CleanupStmtOptions,
@@ -1567,7 +1567,7 @@ fn cleanup_stmt_list_with_options(
 }
 
 fn cleanup_stmt_list_with_options_and_preserved(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     func_name: &str,
     depth: usize,
     options: CleanupStmtOptions,
@@ -1577,7 +1577,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
         match stmt {
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 cleanup_stmt_list_with_options_and_preserved(
                     body,
                     func_name,
@@ -1587,11 +1587,11 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     global_refs,
                 )
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(i) = init {
-                    if let DirStmt::Block(b) = &mut **i {
+                    if let PreHirStmt::Block(b) = &mut **i {
                         cleanup_stmt_list_with_options_and_preserved(
                             b,
                             func_name,
@@ -1603,7 +1603,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     }
                 }
                 if let Some(u) = update {
-                    if let DirStmt::Block(b) = &mut **u {
+                    if let PreHirStmt::Block(b) = &mut **u {
                         cleanup_stmt_list_with_options_and_preserved(
                             b,
                             func_name,
@@ -1623,7 +1623,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     global_refs,
                 )
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1645,7 +1645,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     global_refs,
                 );
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     cleanup_stmt_list_with_options_and_preserved(
                         &mut case.body,
@@ -1665,14 +1665,14 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     global_refs,
                 );
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
 
@@ -1853,20 +1853,20 @@ fn cleanup_stmt_list_with_options_and_preserved(
 }
 
 fn cleanup_boundary_labels_recursive(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     global_refs: &HashSet<String>,
 ) -> bool {
     let mut changed = cleanup_redundant_boundary_labels(stmts, Some(global_refs))
         || remove_unreferenced_leading_labels(stmts, Some(global_refs));
     for stmt in stmts.iter_mut() {
         match stmt {
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 changed |= cleanup_boundary_labels_recursive(body, global_refs);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1874,36 +1874,36 @@ fn cleanup_boundary_labels_recursive(
                 changed |= cleanup_boundary_labels_recursive(then_body, global_refs);
                 changed |= cleanup_boundary_labels_recursive(else_body, global_refs);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= cleanup_boundary_labels_recursive(&mut case.body, global_refs);
                 }
                 changed |= cleanup_boundary_labels_recursive(default, global_refs);
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     changed
 }
 
-fn collapse_redundant_conditional_returns_recursive(stmts: &mut Vec<DirStmt>) -> bool {
+fn collapse_redundant_conditional_returns_recursive(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = collapse_redundant_conditional_returns(stmts);
     for stmt in stmts.iter_mut() {
         match stmt {
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 changed |= collapse_redundant_conditional_returns_recursive(body);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1911,26 +1911,26 @@ fn collapse_redundant_conditional_returns_recursive(stmts: &mut Vec<DirStmt>) ->
                 changed |= collapse_redundant_conditional_returns_recursive(then_body);
                 changed |= collapse_redundant_conditional_returns_recursive(else_body);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= collapse_redundant_conditional_returns_recursive(&mut case.body);
                 }
                 changed |= collapse_redundant_conditional_returns_recursive(default);
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
     changed
 }
 
-pub fn normalize_expr(expr: &mut DirExpr) {
+pub fn normalize_expr(expr: &mut PreHirExpr) {
     // Pre-pass: merge consecutive shifts top-down before child recursion so that
     // Shr(Shr(x, K1), K2) → Shr(x, K1+K2) is visible before any child Shr gets
     // converted to a division by recognize_mod_div_power_of_two.
@@ -1938,26 +1938,26 @@ pub fn normalize_expr(expr: &mut DirExpr) {
         *expr = merged;
     }
     match expr {
-        DirExpr::Cast { expr: inner, .. } => normalize_expr(inner),
-        DirExpr::Unary { expr: inner, .. } => normalize_expr(inner),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr: inner, .. } => normalize_expr(inner),
+        PreHirExpr::Unary { expr: inner, .. } => normalize_expr(inner),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             normalize_expr(lhs);
             normalize_expr(rhs);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 normalize_expr(arg);
             }
         }
-        DirExpr::Load { ptr, .. }
-        | DirExpr::PtrOffset { base: ptr, .. }
-        | DirExpr::FieldAccess { base: ptr, .. } => normalize_expr(ptr),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Load { ptr, .. }
+        | PreHirExpr::PtrOffset { base: ptr, .. }
+        | PreHirExpr::FieldAccess { base: ptr, .. } => normalize_expr(ptr),
+        PreHirExpr::Index { base, index, .. } => {
             normalize_expr(base);
             normalize_expr(index);
         }
-        DirExpr::AggregateCopy { src, .. } => normalize_expr(src),
-        DirExpr::Select {
+        PreHirExpr::AggregateCopy { src, .. } => normalize_expr(src),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -1967,7 +1967,7 @@ pub fn normalize_expr(expr: &mut DirExpr) {
             normalize_expr(then_expr);
             normalize_expr(else_expr);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 
     let mut current = expr.clone();

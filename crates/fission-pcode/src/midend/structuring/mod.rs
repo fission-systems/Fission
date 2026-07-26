@@ -10,11 +10,11 @@ pub(crate) mod cfg_analysis;
 mod host_impl;
 
 // Pure free-function owners: fission-midend-structuring
+pub use fission_midend_structuring::StructuringHost;
 pub use fission_midend_structuring::cleanup;
 pub use fission_midend_structuring::irreducible;
 pub use fission_midend_structuring::loop_analysis;
 pub use fission_midend_structuring::regions;
-pub use fission_midend_structuring::StructuringHost;
 // Graph types: no local thin module — re-export owner crate directly (ADR 0012).
 pub use fission_midend_structuring::graph::{
     StructureEdge, StructureEdgeFlags, StructureGraph, StructureNode, StructureNodeId,
@@ -32,6 +32,7 @@ pub(crate) mod sese;
 mod switch;
 
 // --- re-exports consumed by builder and other midend subsystems ---
+pub(crate) use crate::midend::SWITCH_FALLTHROUGH_SENTINEL;
 pub(crate) use cfg_analysis::{
     CfgAnalysis, CfgFactCache, DomTree, EdgeClass, PostDomTree, SccAnalysis,
 };
@@ -50,7 +51,6 @@ pub(crate) use regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,
 };
-pub(crate) use crate::midend::SWITCH_FALLTHROUGH_SENTINEL;
 
 #[cfg(test)]
 pub(super) use driver::{

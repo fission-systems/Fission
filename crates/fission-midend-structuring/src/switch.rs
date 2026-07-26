@@ -10,11 +10,11 @@ use crate::helpers::{
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
 use crate::regions::EmitReadyDecision;
-use fission_midend_dir::util::format_expr_key;
+use fission_midend_prehir::util::format_expr_key;
 use fission_midend_core::ir::{DispatcherCaseMapSource, DispatcherLegality, DispatcherProofScope, DispatcherProofUnit, MlilPreviewError, SelectorNormalization};
-use fission_midend_dir::{DirExpr, DirStmt, DirSwitchCase};
+use fission_midend_prehir::{PreHirExpr, PreHirStmt, PreHirSwitchCase};
 use fission_midend_core::wave_stats;
-use fission_midend_dir::util::strip_casts;
+use fission_midend_prehir::util::strip_casts;
 use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
 use crate::HashSet;
 
@@ -23,7 +23,7 @@ pub const SWITCH_CHAIN_PARSE_BUDGET_MAX: usize = 16;
 
 pub fn try_lower_switch(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         if let Some(direct) = try_lower_direct_dispatcher_switch(host, idx)? {
             return Ok(Some(direct));
         }
@@ -79,14 +79,14 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
                 return Ok(None);
             };
             max_skip = max_skip.max(skip_to).max(case_idx + 1);
-            if !case_body.iter().any(|s| matches!(s, DirStmt::Label(_))) {
+            if !case_body.iter().any(|s| matches!(s, PreHirStmt::Label(_))) {
                 let target_addr = host.block_start_address(case_idx);
                 case_body.insert(
                     0,
-                    DirStmt::Label(block_label(target_addr)),
+                    PreHirStmt::Label(block_label(target_addr)),
                 );
             }
-            cases.push(DirSwitchCase {
+            cases.push(PreHirSwitchCase {
                 values: vec![value],
                 body: case_body,
             });
@@ -99,11 +99,11 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
              *host.active_switch_targets_mut() = old_targets;
             return Ok(None);
         };
-        if !default_body.iter().any(|s| matches!(s, DirStmt::Label(_))) {
+        if !default_body.iter().any(|s| matches!(s, PreHirStmt::Label(_))) {
             let target_addr = host.block_start_address(parsed.default_idx);
             default_body.insert(
                 0,
-                DirStmt::Label(block_label(target_addr)),
+                PreHirStmt::Label(block_label(target_addr)),
             );
         }
         max_skip = max_skip.max(default_skip).max(parsed.default_idx + 1);
@@ -120,7 +120,7 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
         wave_stats::add_dispatcher_proof_completed(1);
         wave_stats::add_dispatcher_shape_recoveries(1);
         Ok(Some((
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr: parsed.selector,
                 cases,
                 default: default_body,
@@ -131,7 +131,7 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
 
 pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         let LoweredTerminator::Switch {
             expr,
             targets,
@@ -215,7 +215,7 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
                 break;
             };
             max_skip = max_skip.max(skip_to).max(case_idx + 1);
-            cases.push(DirSwitchCase {
+            cases.push(PreHirSwitchCase {
                 values: vec![value],
                 body: case_body,
             });
@@ -258,7 +258,7 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
         wave_stats::add_dispatcher_proof_completed(1);
         wave_stats::add_dispatcher_shape_recoveries(1);
         Ok(Some((
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -272,7 +272,7 @@ pub fn parse_switch_chain(host: &mut impl StructuringHost,
     ) -> Result<Option<ParsedSwitch>, MlilPreviewError> {
         let mut current_idx = start_idx;
         let mut current_term = host.lower_block_terminator(current_idx)?;
-        let mut selector: Option<DirExpr> = None;
+        let mut selector: Option<PreHirExpr> = None;
         let mut cases = Vec::new();
         let mut guarded_default_idx: Option<usize> = None;
         let mut saw_range_guard = false;
@@ -458,7 +458,7 @@ pub fn compare_chain_switch_candidate(parsed: &ParsedSwitch) -> bool {
 
 #[derive(Debug, Clone)]
 pub struct ParsedSwitch {
-    pub selector: DirExpr,
+    pub selector: PreHirExpr,
     pub cases: Vec<(i64, usize)>,
     pub default_idx: usize,
     pub proof: DispatcherProofUnit,
@@ -466,7 +466,7 @@ pub struct ParsedSwitch {
 
 pub fn build_compare_chain_proof(host: &impl StructuringHost, 
         start_idx: usize,
-        selector: &DirExpr,
+        selector: &PreHirExpr,
         cases: &[(i64, usize)],
         default_idx: usize,
     ) -> DispatcherProofUnit {
@@ -526,14 +526,14 @@ mod tests {
     use super::*;
     use crate::helpers::extract_eq_const_operands;
     use fission_midend_core::ir::{NirType};
-use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirUnaryOp};
 
     #[test]
     fn merge_equivalent_switch_cases_merges_non_adjacent_equal_bodies() {
         let mut cases = vec![
-            DirSwitchCase {
+            PreHirSwitchCase {
                 values: vec![1],
-                body: vec![DirStmt::Return(Some(DirExpr::Const(
+                body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -541,9 +541,9 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
                     },
                 )))],
             },
-            DirSwitchCase {
+            PreHirSwitchCase {
                 values: vec![2],
-                body: vec![DirStmt::Return(Some(DirExpr::Const(
+                body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
                     2,
                     NirType::Int {
                         bits: 32,
@@ -551,9 +551,9 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
                     },
                 )))],
             },
-            DirSwitchCase {
+            PreHirSwitchCase {
                 values: vec![3],
-                body: vec![DirStmt::Return(Some(DirExpr::Const(
+                body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -572,11 +572,11 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
 
     #[test]
     fn extract_eq_const_operands_normalizes_subtracted_selector() {
-        let selector = DirExpr::Var("msg".to_string());
-        let shifted = DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        let selector = PreHirExpr::Var("msg".to_string());
+        let shifted = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs: Box::new(selector.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 160,
                 NirType::Int {
                     bits: 32,
@@ -590,7 +590,7 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
         };
         let recovered = extract_eq_const_operands(
             &shifted,
-            &DirExpr::Const(
+            &PreHirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 32,
@@ -605,11 +605,11 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
 
     #[test]
     fn extract_range_guard_for_chain_normalizes_affine_selector() {
-        let selector = DirExpr::Var("msg".to_string());
-        let shifted = DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        let selector = PreHirExpr::Var("msg".to_string());
+        let shifted = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs: Box::new(selector.clone()),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 160,
                 NirType::Int {
                     bits: 32,
@@ -621,10 +621,10 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
                 signed: false,
             },
         };
-        let cond = DirExpr::Binary {
-            op: DirBinaryOp::Le,
+        let cond = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Le,
             lhs: Box::new(shifted),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 95,
                 NirType::Int {
                     bits: 32,
@@ -645,16 +645,16 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
     fn test_switch_fallthrough_detection_patches_goto_to_next_label() {
         let next_label = "block_0x1000".to_string();
         let mut cases = vec![
-            DirSwitchCase {
+            PreHirSwitchCase {
                 values: vec![0],
                 body: vec![
-                    DirStmt::Label("block_0x0000".to_string()),
-                    DirStmt::Goto(next_label.clone()),
+                    PreHirStmt::Label("block_0x0000".to_string()),
+                    PreHirStmt::Goto(next_label.clone()),
                 ],
             },
-            DirSwitchCase {
+            PreHirSwitchCase {
                 values: vec![1],
-                body: vec![DirStmt::Label(next_label.clone()), DirStmt::Return(None)],
+                body: vec![PreHirStmt::Label(next_label.clone()), PreHirStmt::Return(None)],
             },
         ];
 
@@ -662,28 +662,28 @@ use fission_midend_dir::{DirBinaryOp, DirUnaryOp};
         assert_eq!(patched, 1, "Expected 1 fallthrough patched");
         // The goto in case[0] should now be the sentinel.
         assert!(
-            matches!(&cases[0].body[1], DirStmt::Goto(lbl) if lbl == SWITCH_FALLTHROUGH_SENTINEL),
+            matches!(&cases[0].body[1], PreHirStmt::Goto(lbl) if lbl == SWITCH_FALLTHROUGH_SENTINEL),
             "Expected __fallthrough sentinel, got: {:?}",
             &cases[0].body[1]
         );
         // Case[1] should be unchanged.
-        assert!(matches!(&cases[1].body[0], DirStmt::Label(lbl) if lbl == &next_label),);
+        assert!(matches!(&cases[1].body[0], PreHirStmt::Label(lbl) if lbl == &next_label),);
     }
 
     /// A switch where case 0's goto targets a label NOT in case 1 — must not be patched.
     #[test]
     fn test_switch_fallthrough_detection_ignores_non_adjacent_goto() {
         let mut cases = vec![
-            DirSwitchCase {
+            PreHirSwitchCase {
                 values: vec![0],
                 body: vec![
-                    DirStmt::Label("block_a".to_string()),
-                    DirStmt::Goto("block_x".to_string()), // points somewhere else
+                    PreHirStmt::Label("block_a".to_string()),
+                    PreHirStmt::Goto("block_x".to_string()), // points somewhere else
                 ],
             },
-            DirSwitchCase {
+            PreHirSwitchCase {
                 values: vec![1],
-                body: vec![DirStmt::Label("block_b".to_string()), DirStmt::Return(None)],
+                body: vec![PreHirStmt::Label("block_b".to_string()), PreHirStmt::Return(None)],
             },
         ];
         let patched = detect_and_patch_case_fallthrough(&mut cases);

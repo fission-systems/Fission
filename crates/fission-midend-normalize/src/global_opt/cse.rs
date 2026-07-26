@@ -40,13 +40,13 @@ use crate::prelude::*;
 use crate::{HashMap, HashSet};
 
 /// Apply CSE to the function body.  Returns `true` if any substitution was made.
-pub fn apply_cse_pass(func: &mut DirFunction) -> bool {
+pub fn apply_cse_pass(func: &mut PreHirFunction) -> bool {
     let mut map: PureExprMap = HashMap::default();
     let non_value_representatives = collect_non_value_representatives(func);
     cse_stmts(&mut func.body, &mut map, &non_value_representatives)
 }
 
-fn collect_non_value_representatives(func: &DirFunction) -> HashSet<String> {
+fn collect_non_value_representatives(func: &PreHirFunction) -> HashSet<String> {
     func.locals
         .iter()
         .filter(|binding| {
@@ -78,7 +78,7 @@ fn is_cse_representative_name(name: &str, non_value_representatives: &HashSet<St
 /// Process a statement list with CSE.  `map` accumulates known expressions.
 /// Returns `true` if any substitution was made.
 fn cse_stmts(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     map: &mut PureExprMap,
     non_value_representatives: &HashSet<String>,
 ) -> bool {
@@ -92,22 +92,22 @@ fn cse_stmts(
 }
 
 fn cse_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     map: &mut PureExprMap,
     non_value_representatives: &HashSet<String>,
 ) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             // Try to substitute rhs with a known equivalent variable.
             let mut changed = false;
-            if let DirLValue::Var(target) = lhs {
+            if let PreHirLValue::Var(target) = lhs {
                 invalidate_representative(map, target);
                 if let Some(key) = pure_expr_key(rhs) {
                     if let Some(existing) = map.get(&key) {
                         // Replace rhs with Var(existing).
                         let existing_name = existing.clone();
                         if existing_name != *target {
-                            *rhs = DirExpr::Var(existing_name);
+                            *rhs = PreHirExpr::Var(existing_name);
                             changed = true;
                         }
                     } else if is_cse_representative_name(target, non_value_representatives) {
@@ -125,7 +125,7 @@ fn cse_stmt(
             changed
         }
         // For branches: recurse with a fresh map clone (no propagation across arms).
-        DirStmt::If {
+        PreHirStmt::If {
             cond: _,
             then_body,
             else_body,
@@ -140,7 +140,7 @@ fn cse_stmt(
             map.clear();
             changed
         }
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             // Loop body: fresh map (loop may execute 0 or many times).
             let mut loop_map = HashMap::default();
             let changed = cse_stmts(body, &mut loop_map, non_value_representatives);
@@ -151,7 +151,7 @@ fn cse_stmt(
             map.clear();
             changed
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, body, update, ..
         } => {
             let mut changed = false;
@@ -173,7 +173,7 @@ fn cse_stmt(
             map.clear();
             changed
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases.iter_mut() {
                 let mut arm_map = map.clone();
@@ -188,8 +188,8 @@ fn cse_stmt(
             map.clear();
             changed
         }
-        DirStmt::Block(body) => cse_stmts(body, map, non_value_representatives),
-        DirStmt::Return(_) | DirStmt::Break | DirStmt::Continue => {
+        PreHirStmt::Block(body) => cse_stmts(body, map, non_value_representatives),
+        PreHirStmt::Return(_) | PreHirStmt::Break | PreHirStmt::Continue => {
             map.clear();
             false
         }
@@ -213,15 +213,15 @@ mod tests {
         }
     }
 
-    fn assign(lhs: &str, rhs: DirExpr) -> DirStmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(lhs.to_owned()),
+    fn assign(lhs: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs.to_owned()),
             rhs,
         }
     }
 
-    fn local(name: &str, origin: NirBindingOrigin) -> DirBinding {
-        DirBinding {
+    fn local(name: &str, origin: NirBindingOrigin) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_owned(),
             ty: u32_ty(),
             surface_type_name: None,
@@ -232,45 +232,45 @@ mod tests {
 
     #[test]
     fn stack_slots_do_not_become_cse_value_representatives() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "cse_stack_slot_rep".to_owned(),
             int_param_offsets: Vec::new(),
             locals: vec![local("saved_param", NirBindingOrigin::HomeSlot(0))],
             body: vec![
-                assign("saved_param", DirExpr::Var("param_1".to_owned())),
-                assign("uVar19", DirExpr::Var("param_1".to_owned())),
+                assign("saved_param", PreHirExpr::Var("param_1".to_owned())),
+                assign("uVar19", PreHirExpr::Var("param_1".to_owned())),
             ],
             ..Default::default()
         };
 
         assert!(!apply_cse_pass(&mut func));
-        let DirStmt::Assign { rhs, .. } = &func.body[1] else {
+        let PreHirStmt::Assign { rhs, .. } = &func.body[1] else {
             panic!("expected second assignment");
         };
-        assert!(matches!(rhs, DirExpr::Var(name) if name == "param_1"));
+        assert!(matches!(rhs, PreHirExpr::Var(name) if name == "param_1"));
     }
 
     #[test]
     fn temp_representatives_still_drive_local_cse() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "cse_temp_rep".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
                 assign(
                     "uVar1",
-                    DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("param_1".to_owned())),
-                        rhs: Box::new(DirExpr::Const(1, u32_ty())),
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("param_1".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
                         ty: u32_ty(),
                     },
                 ),
                 assign(
                     "uVar2",
-                    DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("param_1".to_owned())),
-                        rhs: Box::new(DirExpr::Const(1, u32_ty())),
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("param_1".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
                         ty: u32_ty(),
                     },
                 ),
@@ -279,68 +279,68 @@ mod tests {
         };
 
         assert!(apply_cse_pass(&mut func));
-        let DirStmt::Assign { rhs, .. } = &func.body[1] else {
+        let PreHirStmt::Assign { rhs, .. } = &func.body[1] else {
             panic!("expected second assignment");
         };
-        assert!(matches!(rhs, DirExpr::Var(name) if name == "uVar1"));
+        assert!(matches!(rhs, PreHirExpr::Var(name) if name == "uVar1"));
     }
 
     #[test]
     fn loop_body_clobber_clears_outer_cse_representatives() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "cse_loop_clobber".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                assign("uVar1", DirExpr::Var("param_1".to_owned())),
-                DirStmt::DoWhile {
+                assign("uVar1", PreHirExpr::Var("param_1".to_owned())),
+                PreHirStmt::DoWhile {
                     body: vec![assign(
                         "uVar1",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
-                            lhs: Box::new(DirExpr::Var("uVar1".to_owned())),
-                            rhs: Box::new(DirExpr::Const(1, u32_ty())),
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("uVar1".to_owned())),
+                            rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
                             ty: u32_ty(),
                         },
                     )],
-                    cond: DirExpr::Var("cond".to_owned()),
+                    cond: PreHirExpr::Var("cond".to_owned()),
                 },
-                assign("uVar2", DirExpr::Var("param_1".to_owned())),
+                assign("uVar2", PreHirExpr::Var("param_1".to_owned())),
             ],
             ..Default::default()
         };
 
         assert!(!apply_cse_pass(&mut func));
-        let DirStmt::Assign { rhs, .. } = &func.body[2] else {
+        let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
             panic!("expected post-loop assignment");
         };
-        assert!(matches!(rhs, DirExpr::Var(name) if name == "param_1"));
+        assert!(matches!(rhs, PreHirExpr::Var(name) if name == "param_1"));
     }
 
     #[test]
     fn redefining_representative_invalidates_cse_map_entry() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "cse_representative_redef".to_owned(),
             int_param_offsets: Vec::new(),
             body: vec![
-                assign("uVar1", DirExpr::Var("param_1".to_owned())),
+                assign("uVar1", PreHirExpr::Var("param_1".to_owned())),
                 assign(
                     "uVar1",
-                    DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("uVar1".to_owned())),
-                        rhs: Box::new(DirExpr::Const(1, u32_ty())),
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("uVar1".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
                         ty: u32_ty(),
                     },
                 ),
-                assign("uVar2", DirExpr::Var("param_1".to_owned())),
+                assign("uVar2", PreHirExpr::Var("param_1".to_owned())),
             ],
             ..Default::default()
         };
 
         assert!(!apply_cse_pass(&mut func));
-        let DirStmt::Assign { rhs, .. } = &func.body[2] else {
+        let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
             panic!("expected final assignment");
         };
-        assert!(matches!(rhs, DirExpr::Var(name) if name == "param_1"));
+        assert!(matches!(rhs, PreHirExpr::Var(name) if name == "param_1"));
     }
 }

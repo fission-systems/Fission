@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use fission_midend_dir::util::expr_type;
+use fission_midend_prehir::util::expr_type;
 use crate::HashMap;
 
 /// Normalizes floating-point sign bit manipulation patterns (equivalent to Ghidra's RuleFloatSign):
@@ -7,7 +7,7 @@ use crate::HashMap;
 /// - `x ^ 0x80000000` -> `-x`
 /// - `y & 0x7fffffffffffffff` -> `fabs(y)`
 /// - `y ^ 0x8000000000000000` -> `-y`
-pub fn apply_float_sign_pass(func: &mut DirFunction) -> bool {
+pub fn apply_float_sign_pass(func: &mut PreHirFunction) -> bool {
     let mut var_types = HashMap::default();
     for binding in &func.params {
         var_types.insert(binding.name.clone(), binding.ty.clone());
@@ -24,12 +24,12 @@ pub fn apply_float_sign_pass(func: &mut DirFunction) -> bool {
 }
 
 fn resolve_float_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     var_types: &HashMap<String, NirType>,
-) -> Option<(DirExpr, u32)> {
+) -> Option<(PreHirExpr, u32)> {
     match expr {
-        DirExpr::Cast { expr: inner, .. } => resolve_float_expr(inner, var_types),
-        DirExpr::Var(name) => {
+        PreHirExpr::Cast { expr: inner, .. } => resolve_float_expr(inner, var_types),
+        PreHirExpr::Var(name) => {
             if let Some(NirType::Float { bits }) = var_types.get(name) {
                 Some((expr.clone(), *bits))
             } else {
@@ -62,28 +62,28 @@ fn matches_neg_mask(val: i64, bits: u32) -> bool {
     }
 }
 
-fn visit_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) -> bool {
+fn visit_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
 
     // Recurse first
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
             changed |= visit_expr(inner, var_types);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= visit_expr(lhs, var_types);
             changed |= visit_expr(rhs, var_types);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= visit_expr(arg, var_types);
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -93,7 +93,7 @@ fn visit_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) -> bool 
             changed |= visit_expr(then_expr, var_types);
             changed |= visit_expr(else_expr, var_types);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= visit_expr(base, var_types);
             changed |= visit_expr(index, var_types);
         }
@@ -101,13 +101,13 @@ fn visit_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) -> bool 
     }
 
     // Try simplifying FLOAT_ABS / FLOAT_NEG patterns
-    if let DirExpr::Binary { op, lhs, rhs, .. } = expr {
-        if *op == DirBinaryOp::And {
+    if let PreHirExpr::Binary { op, lhs, rhs, .. } = expr {
+        if *op == PreHirBinaryOp::And {
             if let Some((inner, bits)) = resolve_float_expr(lhs, var_types) {
-                if let DirExpr::Const(val, _) = rhs.as_ref() {
+                if let PreHirExpr::Const(val, _) = rhs.as_ref() {
                     if matches_abs_mask(*val, bits) {
                         let fn_name = if bits == 32 { "fabsf" } else { "fabs" };
-                        *expr = DirExpr::Call {
+                        *expr = PreHirExpr::Call {
                             target: fn_name.to_string(),
                             args: vec![inner],
                             ty: NirType::Float { bits },
@@ -117,10 +117,10 @@ fn visit_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) -> bool 
                 }
             }
             if let Some((inner, bits)) = resolve_float_expr(rhs, var_types) {
-                if let DirExpr::Const(val, _) = lhs.as_ref() {
+                if let PreHirExpr::Const(val, _) = lhs.as_ref() {
                     if matches_abs_mask(*val, bits) {
                         let fn_name = if bits == 32 { "fabsf" } else { "fabs" };
-                        *expr = DirExpr::Call {
+                        *expr = PreHirExpr::Call {
                             target: fn_name.to_string(),
                             args: vec![inner],
                             ty: NirType::Float { bits },
@@ -129,12 +129,12 @@ fn visit_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) -> bool 
                     }
                 }
             }
-        } else if *op == DirBinaryOp::Xor {
+        } else if *op == PreHirBinaryOp::Xor {
             if let Some((inner, bits)) = resolve_float_expr(lhs, var_types) {
-                if let DirExpr::Const(val, _) = rhs.as_ref() {
+                if let PreHirExpr::Const(val, _) = rhs.as_ref() {
                     if matches_neg_mask(*val, bits) {
-                        *expr = DirExpr::Unary {
-                            op: DirUnaryOp::Neg,
+                        *expr = PreHirExpr::Unary {
+                            op: PreHirUnaryOp::Neg,
                             expr: Box::new(inner),
                             ty: NirType::Float { bits },
                         };
@@ -143,10 +143,10 @@ fn visit_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) -> bool 
                 }
             }
             if let Some((inner, bits)) = resolve_float_expr(rhs, var_types) {
-                if let DirExpr::Const(val, _) = lhs.as_ref() {
+                if let PreHirExpr::Const(val, _) = lhs.as_ref() {
                     if matches_neg_mask(*val, bits) {
-                        *expr = DirExpr::Unary {
-                            op: DirUnaryOp::Neg,
+                        *expr = PreHirExpr::Unary {
+                            op: PreHirUnaryOp::Neg,
                             expr: Box::new(inner),
                             ty: NirType::Float { bits },
                         };
@@ -160,37 +160,37 @@ fn visit_expr(expr: &mut DirExpr, var_types: &HashMap<String, NirType>) -> bool 
     changed
 }
 
-fn visit_stmt(stmt: &mut DirStmt, var_types: &HashMap<String, NirType>) -> bool {
+fn visit_stmt(stmt: &mut PreHirStmt, var_types: &HashMap<String, NirType>) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             changed |= visit_expr(rhs, var_types);
             match lhs {
-                DirLValue::Deref { ptr, .. } => {
+                PreHirLValue::Deref { ptr, .. } => {
                     changed |= visit_expr(ptr, var_types);
                 }
-                DirLValue::Index { base, index, .. } => {
+                PreHirLValue::Index { base, index, .. } => {
                     changed |= visit_expr(base, var_types);
                     changed |= visit_expr(index, var_types);
                 }
                 _ => {}
             }
         }
-        DirStmt::Expr(expr) => {
+        PreHirStmt::Expr(expr) => {
             changed |= visit_expr(expr, var_types);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             changed |= visit_expr(va_list, var_types);
         }
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
             for s in body {
                 changed |= visit_stmt(s, var_types);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -203,7 +203,7 @@ fn visit_stmt(stmt: &mut DirStmt, var_types: &HashMap<String, NirType>) -> bool 
                 changed |= visit_stmt(s, var_types);
             }
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -218,7 +218,7 @@ fn visit_stmt(stmt: &mut DirStmt, var_types: &HashMap<String, NirType>) -> bool 
                 changed |= visit_stmt(s, var_types);
             }
         }
-        DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Return(Some(expr)) => {
             changed |= visit_expr(expr, var_types);
         }
         _ => {}

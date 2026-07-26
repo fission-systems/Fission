@@ -1,29 +1,29 @@
 use crate::prelude::*;
 use super::util::*;
 
-pub fn collapse_zero_offset_cast(expr: &DirExpr) -> Option<DirExpr> {
+pub fn collapse_zero_offset_cast(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        DirExpr::Load { ptr, ty } => {
-            let DirExpr::PtrOffset { base, offset } = ptr.as_ref() else {
+        PreHirExpr::Load { ptr, ty } => {
+            let PreHirExpr::PtrOffset { base, offset } = ptr.as_ref() else {
                 return None;
             };
             if *offset != 0 {
                 return None;
             }
-            Some(DirExpr::Load {
+            Some(PreHirExpr::Load {
                 ptr: base.clone(),
                 ty: ty.clone(),
             })
         }
-        DirExpr::PtrOffset { base, offset } if *offset == 0 => Some((**base).clone()),
-        DirExpr::Index {
+        PreHirExpr::PtrOffset { base, offset } if *offset == 0 => Some((**base).clone()),
+        PreHirExpr::Index {
             base,
             index,
             elem_ty,
-        } if matches!(index.as_ref(), DirExpr::Const(0, _))
-            && !matches!(base.as_ref(), DirExpr::Var(_)) =>
+        } if matches!(index.as_ref(), PreHirExpr::Const(0, _))
+            && !matches!(base.as_ref(), PreHirExpr::Var(_)) =>
         {
-            Some(DirExpr::Load {
+            Some(PreHirExpr::Load {
                 ptr: base.clone(),
                 ty: elem_ty.clone(),
             })
@@ -32,120 +32,120 @@ pub fn collapse_zero_offset_cast(expr: &DirExpr) -> Option<DirExpr> {
     }
 }
 
-pub fn cleanup_arithmetic_wrappers(expr: &DirExpr) -> Option<DirExpr> {
+pub fn cleanup_arithmetic_wrappers(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
         } if is_zero_const(lhs.as_ref()) => Some((**rhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ..
         } if is_one_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ..
         } if is_one_const(lhs.as_ref()) => Some((**rhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Div,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Div,
             lhs,
             rhs,
             ..
         } if is_one_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Mod,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mod,
             lhs,
             rhs,
             ..
-        } if is_one_const(rhs.as_ref()) => Some(DirExpr::Const(0, expr_type(lhs))),
-        DirExpr::Binary {
-            op: DirBinaryOp::Shl,
-            lhs,
-            rhs,
-            ..
-        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Shr,
+        } if is_one_const(rhs.as_ref()) => Some(PreHirExpr::Const(0, expr_type(lhs))),
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Sar,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Or,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Or,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
             lhs,
             rhs,
             ..
         } if is_zero_const(lhs.as_ref()) => Some((**rhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Xor,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Xor,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Xor,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Xor,
             lhs,
             rhs,
             ..
         } if is_zero_const(lhs.as_ref()) => Some((**rhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Or,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
             lhs,
             rhs,
             ..
         } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::Xor,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Xor,
             lhs,
             rhs,
             ..
         } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => {
-            Some(DirExpr::Const(0, expr_type(lhs)))
+            Some(PreHirExpr::Const(0, expr_type(lhs)))
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if is_full_mask_const(rhs.as_ref(), &expr_type(lhs)) => Some((**lhs).clone()),
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
@@ -154,18 +154,18 @@ pub fn cleanup_arithmetic_wrappers(expr: &DirExpr) -> Option<DirExpr> {
         // if the output type of the Sar equals the cast type, the cast is
         // redundant — drop it.  This prevents the printer from emitting a
         // double-signed-cast.
-        DirExpr::Binary {
-            op: DirBinaryOp::Sar,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
             lhs,
             rhs,
             ty,
         } => match lhs.as_ref() {
-            DirExpr::Cast {
+            PreHirExpr::Cast {
                 ty: cast_ty,
                 expr: inner,
             } if matches!(cast_ty, NirType::Int { signed: true, .. }) && cast_ty == ty => {
-                Some(DirExpr::Binary {
-                    op: DirBinaryOp::Sar,
+                Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Sar,
                     lhs: inner.clone(),
                     rhs: rhs.clone(),
                     ty: ty.clone(),
@@ -173,14 +173,14 @@ pub fn cleanup_arithmetic_wrappers(expr: &DirExpr) -> Option<DirExpr> {
             }
             _ => None,
         },
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } if is_zero_const(rhs.as_ref()) => match lhs.as_ref() {
-            DirExpr::Binary {
-                op: DirBinaryOp::And,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
                 lhs: and_lhs,
                 rhs: and_rhs,
                 ty: _,
@@ -208,8 +208,8 @@ pub fn cleanup_arithmetic_wrappers(expr: &DirExpr) -> Option<DirExpr> {
 /// 2. **Zero extraction**: when the shift amount K is ≥ bit_width(x), the shift
 ///    completely expels all data bits through zero-extension, yielding zero:
 ///    `Cast(IntN, Shr(Cast(IntM, x), K))` where K >= x_bits → `Const(0, IntN)`
-pub fn simplify_subpiece_chain(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Cast {
+pub fn simplify_subpiece_chain(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Cast {
         ty: outer_ty,
         expr: shr_expr,
     } = expr
@@ -219,8 +219,8 @@ pub fn simplify_subpiece_chain(expr: &DirExpr) -> Option<DirExpr> {
     if !is_integer_type(outer_ty) {
         return None;
     }
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shr | DirBinaryOp::Sar,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
         lhs: inner_cast_expr,
         rhs: shift_const,
         ..
@@ -228,10 +228,10 @@ pub fn simplify_subpiece_chain(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(shift_amount, _) = shift_const.as_ref() else {
+    let PreHirExpr::Const(shift_amount, _) = shift_const.as_ref() else {
         return None;
     };
-    let DirExpr::Cast {
+    let PreHirExpr::Cast {
         ty: mid_ty,
         expr: source_expr,
     } = inner_cast_expr.as_ref()
@@ -248,7 +248,7 @@ pub fn simplify_subpiece_chain(expr: &DirExpr) -> Option<DirExpr> {
 
     // Rule 2: shift expels all real data → result is 0.
     if *shift_amount >= i64::from(source_bits) && mid_bits >= source_bits {
-        return Some(DirExpr::Const(0, outer_ty.clone()));
+        return Some(PreHirExpr::Const(0, outer_ty.clone()));
     }
 
     // Rule 1: inner cast is a non-narrowing zero-extension — it doesn't
@@ -261,10 +261,10 @@ pub fn simplify_subpiece_chain(expr: &DirExpr) -> Option<DirExpr> {
         } else {
             outer_ty.clone()
         };
-        return Some(DirExpr::Cast {
+        return Some(PreHirExpr::Cast {
             ty: outer_ty.clone(),
-            expr: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Shr,
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
                 lhs: source_expr.clone(),
                 rhs: shift_const.clone(),
                 ty: shr_result_ty,
@@ -281,9 +281,9 @@ pub fn simplify_subpiece_chain(expr: &DirExpr) -> Option<DirExpr> {
 /// This is valid for UNSIGNED (`Shr`) shifts with non-negative amounts.  We
 /// conservatively reject `Sar` (arithmetic shift) to avoid changing sign-extension
 /// semantics for the outer shift.
-pub fn merge_consecutive_shifts(expr: &DirExpr) -> Option<DirExpr> {
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shr,
+pub fn merge_consecutive_shifts(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr,
         lhs,
         rhs: rhs2,
         ty,
@@ -291,8 +291,8 @@ pub fn merge_consecutive_shifts(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shr,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr,
         lhs: x,
         rhs: rhs1,
         ..
@@ -300,10 +300,10 @@ pub fn merge_consecutive_shifts(expr: &DirExpr) -> Option<DirExpr> {
     else {
         return None;
     };
-    let DirExpr::Const(k1, _) = rhs1.as_ref() else {
+    let PreHirExpr::Const(k1, _) = rhs1.as_ref() else {
         return None;
     };
-    let DirExpr::Const(k2, _) = rhs2.as_ref() else {
+    let PreHirExpr::Const(k2, _) = rhs2.as_ref() else {
         return None;
     };
     if *k1 < 0 || *k2 < 0 {
@@ -312,12 +312,12 @@ pub fn merge_consecutive_shifts(expr: &DirExpr) -> Option<DirExpr> {
     let total = k1.checked_add(*k2)?;
     // Guard against degenerate total shifts ≥ 64 bits.
     if total >= 64 {
-        return Some(DirExpr::Const(0, ty.clone()));
+        return Some(PreHirExpr::Const(0, ty.clone()));
     }
-    Some(DirExpr::Binary {
-        op: DirBinaryOp::Shr,
+    Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr,
         lhs: x.clone(),
-        rhs: Box::new(DirExpr::Const(
+        rhs: Box::new(PreHirExpr::Const(
             total,
             rhs1.as_ref().clone().into_const_type(),
         )),
@@ -328,10 +328,10 @@ pub fn merge_consecutive_shifts(expr: &DirExpr) -> Option<DirExpr> {
 pub trait IntoConstType {
     fn into_const_type(self) -> NirType;
 }
-impl IntoConstType for DirExpr {
+impl IntoConstType for PreHirExpr {
     fn into_const_type(self) -> NirType {
         match self {
-            DirExpr::Const(_, ty) => ty,
+            PreHirExpr::Const(_, ty) => ty,
             _ => NirType::Int {
                 bits: 64,
                 signed: false,

@@ -171,17 +171,17 @@ pub fn render_mlil_preview_with_binary_and_context(
     normalize_pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
         *protected.borrow_mut() = builder.lsda_landing_pad_labels().into_iter().collect();
     });
-    // Stage: midend-normalize (owner crate). `hir` is a real `DirFunction`
+    // Stage: midend-normalize (owner crate). `hir` is a real `PreHirFunction`
     // here (builder's native output) -- kept named `hir` through this
-    // function for minimal diff, but its type is DIR until the explicit
+    // function for minimal diff, but its type is PreHIR until the explicit
     // conversion below.
     normalize_hir_function(&mut hir);
     // Observation side channel (mirrors `take_last_layered_pseudocode`
-    // below): the real `DirFunction` structuring is about to consume,
+    // below): the real `PreHirFunction` structuring is about to consume,
     // captured before any structuring rewrite touches it. Zero effect on
     // `hir` itself -- purely a clone for whoever reads it back via
-    // `take_last_dir_snapshot`.
-    store_last_dir_snapshot(hir.clone());
+    // `take_last_prehir_snapshot`.
+    store_last_prehir_snapshot(hir.clone());
     // Stage: post-structure cleanup pass shim (host residual still in pcode).
     // Provides PassTrace extension point for future per-CollapseRule migration.
     structuring::passes::pipeline::run_structuring_pipeline(
@@ -192,14 +192,14 @@ pub fn render_mlil_preview_with_binary_and_context(
     // Structuring may wrap/rearrange after normalize; drop pure identity
     // assigns that only become adjacent post-layout.
     let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut hir.body);
-    // The real DirFunction -> HirFunction boundary: structuring's CFG-to-AST
-    // rewrite is done, so `hir.body` (still `Vec<DirStmt>`) is converted to
+    // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
+    // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to
     // the genuinely separate `HirStmt` grammar and `hir` is rebound to a
     // real `HirFunction` from here on -- not a type pun, an actual
-    // structural conversion (`dir_stmts_to_hir_stmts`).
-    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(hir.body.clone());
+    // structural conversion (`prehir_stmts_to_hir_stmts`).
+    let hir_body = fission_midend_prehir::ir::prehir_stmts_to_hir_stmts(hir.body.clone());
     let mut hir = hir.into_hir_function(hir_body);
-    // Observation side channel, same rationale as `store_last_dir_snapshot`
+    // Observation side channel, same rationale as `store_last_prehir_snapshot`
     // above: the fully-finalized `HirFunction` (structured body, plus the
     // `params`/`locals` an interpreter needs) as of the point a real caller
     // would consider structuring's semantic output done -- any remaining
@@ -217,10 +217,10 @@ pub fn render_mlil_preview_with_binary_and_context(
     build_stats.merge_assign(&take_normalize_wave_stats());
     // `discover_guarded_tail_candidates_for_stats` is a structuring-side stats
     // pass (re-runs guarded-tail promotion discovery for telemetry, doesn't
-    // mutate `hir`) defined for `DirStmt` input -- convert back via
-    // `hir_stmts_to_dir_stmts` rather than duplicating the pass for `HirStmt`.
+    // mutate `hir`) defined for `PreHirStmt` input -- convert back via
+    // `hir_stmts_to_prehir_stmts` rather than duplicating the pass for `HirStmt`.
     let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(
-        &fission_midend_dir::ir::hir_stmts_to_dir_stmts(hir.body.clone()),
+        &fission_midend_prehir::ir::hir_stmts_to_prehir_stmts(hir.body.clone()),
     );
     build_stats.merge_guarded_tail_discovery_assign(&normalized_discovery_stats);
     build_stats.refresh_structuring_reason_families();
@@ -305,21 +305,21 @@ pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
 }
 
 thread_local! {
-    static LAST_DIR_SNAPSHOT: std::cell::RefCell<Option<super::DirFunction>> =
+    static LAST_PREHIR_SNAPSHOT: std::cell::RefCell<Option<super::PreHirFunction>> =
         const { std::cell::RefCell::new(None) };
 }
 
-fn store_last_dir_snapshot(func: super::DirFunction) {
-    LAST_DIR_SNAPSHOT.with(|slot| {
+fn store_last_prehir_snapshot(func: super::PreHirFunction) {
+    LAST_PREHIR_SNAPSHOT.with(|slot| {
         *slot.borrow_mut() = Some(func);
     });
 }
 
-/// Take the real [`super::DirFunction`] (builder's native output, the same
+/// Take the real [`super::PreHirFunction`] (builder's native output, the same
 /// one normalize/structuring's own internal passes read and rewrite) that
 /// structuring consumed as input on the most recent
 /// `render_mlil_preview*`/`render_nir*` call on this thread -- captured
-/// immediately before structuring's CFG-to-AST rewrite runs. `DirFunction`
+/// immediately before structuring's CFG-to-AST rewrite runs. `PreHirFunction`
 /// is a genuinely independent type from [`super::HirFunction`] (see
 /// `fission_midend_core::ir::hir`'s module doc), not the same type under a
 /// different name, so callers can't accidentally swap this with the
@@ -328,8 +328,8 @@ fn store_last_dir_snapshot(func: super::DirFunction) {
 /// same concrete inputs, without any change to what structuring itself
 /// computes -- purely observational, same pattern as
 /// `take_last_layered_pseudocode` above.
-pub fn take_last_dir_snapshot() -> Option<super::DirFunction> {
-    LAST_DIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
+pub fn take_last_prehir_snapshot() -> Option<super::PreHirFunction> {
+    LAST_PREHIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
 }
 
 thread_local! {
@@ -345,12 +345,12 @@ fn store_last_hir_function_snapshot(func: super::HirFunction) {
 
 /// Take the fully-finalized `HirFunction` (structured body, `params`,
 /// `locals`) from the most recent `render_mlil_preview*`/`render_nir*` call
-/// on this thread -- the counterpart to [`take_last_dir_snapshot`]: a
+/// on this thread -- the counterpart to [`take_last_prehir_snapshot`]: a
 /// caller that wants to differentially verify structuring calls both after
 /// one decompile call, wraps the returned `HirFunction::body` in
-/// [`super::Hir`], and diffs it against the `Dir` using the same
+/// [`super::Hir`], and diffs it against the PreHIR snapshot using the same
 /// `params`/`locals`. Same observational side-channel pattern as
-/// `take_last_layered_pseudocode`/`take_last_dir_snapshot` above.
+/// `take_last_layered_pseudocode`/`take_last_prehir_snapshot` above.
 pub fn take_last_hir_function_snapshot() -> Option<super::HirFunction> {
     LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| slot.borrow_mut().take())
 }

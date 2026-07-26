@@ -1,11 +1,11 @@
 use crate::prelude::*;
-use fission_midend_dir::util::expr_type;
+use fission_midend_prehir::util::expr_type;
 
 /// Access context describing the parent operation and siblings of a field access.
 #[derive(Debug, Clone)]
 enum AccessContext {
     Binary {
-        op: DirBinaryOp,
+        op: PreHirBinaryOp,
         ty: NirType,
         is_float_op: bool,
     },
@@ -30,7 +30,7 @@ struct AccessInfo {
 /// A Fission-native Union/Alias datatype resolution pass (equivalent to Ghidra's UnionResolve/ScoreUnionFields).
 /// Identifies structure field offsets accessed as multiple overlapping types and applies
 /// bidirectional context-sensitive scoring to resolve and establish the single most accurate type.
-pub fn apply_union_resolve_pass(func: &mut DirFunction) -> bool {
+pub fn apply_union_resolve_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
 
     // 1. Identify bindings with Ptr(Aggregate { .. }) type
@@ -127,23 +127,23 @@ pub fn apply_union_resolve_pass(func: &mut DirFunction) -> bool {
     changed
 }
 
-fn is_target_access(expr: &DirExpr, binding_name: &str, target_offset: i64) -> bool {
+fn is_target_access(expr: &PreHirExpr, binding_name: &str, target_offset: i64) -> bool {
     match expr {
-        DirExpr::Var(name) => name == binding_name && target_offset == 0,
-        DirExpr::PtrOffset { base, offset } => {
-            if let DirExpr::Var(name) = base.as_ref() {
+        PreHirExpr::Var(name) => name == binding_name && target_offset == 0,
+        PreHirExpr::PtrOffset { base, offset } => {
+            if let PreHirExpr::Var(name) = base.as_ref() {
                 name == binding_name && *offset == target_offset
             } else {
                 false
             }
         }
-        DirExpr::Cast { expr, .. } => is_target_access(expr, binding_name, target_offset),
+        PreHirExpr::Cast { expr, .. } => is_target_access(expr, binding_name, target_offset),
         _ => false,
     }
 }
 
 fn collect_accesses_in_stmts(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     binding_name: &str,
     target_offset: i64,
     out: &mut Vec<AccessInfo>,
@@ -154,14 +154,14 @@ fn collect_accesses_in_stmts(
 }
 
 fn collect_accesses_in_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     binding_name: &str,
     target_offset: i64,
     out: &mut Vec<AccessInfo>,
 ) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
-            if let DirLValue::Deref { ptr, ty } = lhs {
+        PreHirStmt::Assign { lhs, rhs } => {
+            if let PreHirLValue::Deref { ptr, ty } = lhs {
                 if is_target_access(ptr, binding_name, target_offset) {
                     let mut contexts = Vec::new();
                     contexts.push(AccessContext::StoreRhs {
@@ -173,16 +173,16 @@ fn collect_accesses_in_stmt(
                     });
                 }
                 collect_accesses_in_expr(ptr, binding_name, target_offset, out, &[]);
-            } else if let DirLValue::Index { base, index, .. } = lhs {
+            } else if let PreHirLValue::Index { base, index, .. } = lhs {
                 collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
                 collect_accesses_in_expr(index, binding_name, target_offset, out, &[]);
             }
             collect_accesses_in_expr(rhs, binding_name, target_offset, out, &[]);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             collect_accesses_in_expr(expr, binding_name, target_offset, out, &[]);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -191,11 +191,11 @@ fn collect_accesses_in_stmt(
             collect_accesses_in_stmts(then_body, binding_name, target_offset, out);
             collect_accesses_in_stmts(else_body, binding_name, target_offset, out);
         }
-        DirStmt::While { cond, body } | DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
             collect_accesses_in_expr(cond, binding_name, target_offset, out, &[]);
             collect_accesses_in_stmts(body, binding_name, target_offset, out);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -212,7 +212,7 @@ fn collect_accesses_in_stmt(
             }
             collect_accesses_in_stmts(body, binding_name, target_offset, out);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -223,7 +223,7 @@ fn collect_accesses_in_stmt(
             }
             collect_accesses_in_stmts(default, binding_name, target_offset, out);
         }
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             collect_accesses_in_stmts(body, binding_name, target_offset, out);
         }
         _ => {}
@@ -231,14 +231,14 @@ fn collect_accesses_in_stmt(
 }
 
 fn collect_accesses_in_expr(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     binding_name: &str,
     target_offset: i64,
     out: &mut Vec<AccessInfo>,
     parent_contexts: &[AccessContext],
 ) {
     match expr {
-        DirExpr::Load { ptr, ty } => {
+        PreHirExpr::Load { ptr, ty } => {
             if is_target_access(ptr, binding_name, target_offset) {
                 let mut contexts = parent_contexts.to_vec();
                 contexts.push(AccessContext::LoadParent);
@@ -249,17 +249,17 @@ fn collect_accesses_in_expr(
             }
             collect_accesses_in_expr(ptr, binding_name, target_offset, out, &[]);
         }
-        DirExpr::Cast { ty, expr: inner } => {
+        PreHirExpr::Cast { ty, expr: inner } => {
             let mut next_contexts = parent_contexts.to_vec();
             next_contexts.push(AccessContext::Cast {
                 target_ty: ty.clone(),
             });
             collect_accesses_in_expr(inner, binding_name, target_offset, out, &next_contexts);
         }
-        DirExpr::Unary { expr: inner, .. } => {
+        PreHirExpr::Unary { expr: inner, .. } => {
             collect_accesses_in_expr(inner, binding_name, target_offset, out, &[]);
         }
-        DirExpr::Binary { op, lhs, rhs, ty } => {
+        PreHirExpr::Binary { op, lhs, rhs, ty } => {
             let is_float_op = matches!(ty, NirType::Float { .. });
             let mut next_contexts = parent_contexts.to_vec();
             next_contexts.push(AccessContext::Binary {
@@ -270,7 +270,7 @@ fn collect_accesses_in_expr(
             collect_accesses_in_expr(lhs, binding_name, target_offset, out, &next_contexts);
             collect_accesses_in_expr(rhs, binding_name, target_offset, out, &next_contexts);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -280,7 +280,7 @@ fn collect_accesses_in_expr(
             collect_accesses_in_expr(then_expr, binding_name, target_offset, out, parent_contexts);
             collect_accesses_in_expr(else_expr, binding_name, target_offset, out, parent_contexts);
         }
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             for (idx, arg) in args.iter().enumerate() {
                 let mut next_contexts = parent_contexts.to_vec();
                 next_contexts.push(AccessContext::Call {
@@ -290,14 +290,14 @@ fn collect_accesses_in_expr(
                 collect_accesses_in_expr(arg, binding_name, target_offset, out, &next_contexts);
             }
         }
-        DirExpr::PtrOffset { base, .. } => {
+        PreHirExpr::PtrOffset { base, .. } => {
             collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             collect_accesses_in_expr(base, binding_name, target_offset, out, &[]);
             collect_accesses_in_expr(index, binding_name, target_offset, out, &[]);
         }
-        DirExpr::AggregateCopy { src, .. } => {
+        PreHirExpr::AggregateCopy { src, .. } => {
             collect_accesses_in_expr(src, binding_name, target_offset, out, &[]);
         }
         _ => {}
@@ -331,10 +331,10 @@ fn score_candidate_type(candidate: &NirType, accesses: &[AccessInfo]) -> i32 {
                             score += 3;
                             if matches!(
                                 op,
-                                DirBinaryOp::SLt
-                                    | DirBinaryOp::SLe
-                                    | DirBinaryOp::SGt
-                                    | DirBinaryOp::SGe
+                                PreHirBinaryOp::SLt
+                                    | PreHirBinaryOp::SLe
+                                    | PreHirBinaryOp::SGt
+                                    | PreHirBinaryOp::SGe
                             ) {
                                 if *signed {
                                     score += 5;
@@ -344,10 +344,10 @@ fn score_candidate_type(candidate: &NirType, accesses: &[AccessInfo]) -> i32 {
                             }
                             if matches!(
                                 op,
-                                DirBinaryOp::Lt
-                                    | DirBinaryOp::Le
-                                    | DirBinaryOp::Gt
-                                    | DirBinaryOp::Ge
+                                PreHirBinaryOp::Lt
+                                    | PreHirBinaryOp::Le
+                                    | PreHirBinaryOp::Gt
+                                    | PreHirBinaryOp::Ge
                             ) {
                                 if !*signed {
                                     score += 5;
@@ -357,19 +357,19 @@ fn score_candidate_type(candidate: &NirType, accesses: &[AccessInfo]) -> i32 {
                             }
                             if matches!(
                                 op,
-                                DirBinaryOp::And
-                                    | DirBinaryOp::Or
-                                    | DirBinaryOp::Xor
-                                    | DirBinaryOp::Shl
-                                    | DirBinaryOp::Shr
-                                    | DirBinaryOp::Sar
+                                PreHirBinaryOp::And
+                                    | PreHirBinaryOp::Or
+                                    | PreHirBinaryOp::Xor
+                                    | PreHirBinaryOp::Shl
+                                    | PreHirBinaryOp::Shr
+                                    | PreHirBinaryOp::Sar
                             ) {
                                 score += 5;
                             }
                         }
                     }
                     NirType::Ptr(_) => {
-                        if matches!(op, DirBinaryOp::Add | DirBinaryOp::Sub) {
+                        if matches!(op, PreHirBinaryOp::Add | PreHirBinaryOp::Sub) {
                             score += 5;
                         } else {
                             score -= 8;

@@ -5,10 +5,10 @@
 //! different policy checks.
 
 use fission_midend_core::NirBindingOrigin;
-    use fission_midend_dir::DirBinding;
+    use fission_midend_prehir::PreHirBinding;
 use crate::HashSet;
 
-pub fn preserved_materialization_names(bindings: &[DirBinding]) -> HashSet<&str> {
+pub fn preserved_materialization_names(bindings: &[PreHirBinding]) -> HashSet<&str> {
     bindings
         .iter()
         .filter(|binding| binding.preserves_materialization())
@@ -62,8 +62,8 @@ mod tests {
         }
     }
 
-    fn temp_binding(name: &str, origin: NirBindingOrigin) -> DirBinding {
-        DirBinding {
+    fn temp_binding(name: &str, origin: NirBindingOrigin) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_string(),
             ty: int(32),
             surface_type_name: None,

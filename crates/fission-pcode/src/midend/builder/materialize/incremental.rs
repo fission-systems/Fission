@@ -1,6 +1,6 @@
 use crate::midend::builder::*;
-use crate::midend::support::*;
 use crate::midend::ir::*;
+use crate::midend::support::*;
 use crate::pcode::*;
 
 impl<'a> PreviewBuilder<'a> {

@@ -227,12 +227,13 @@ fn minimal_options_for_abi(abi: CallingConvention) -> crate::midend::NirRenderOp
 }
 
 /// Build a [`RegisterNamer`] from ABI defaults (no cspec param offsets unless supplied).
-fn group_sla_map_by_offset(
-    map: &HashMap<(u64, u32), String>,
-) -> HashMap<u64, Vec<(u32, String)>> {
+fn group_sla_map_by_offset(map: &HashMap<(u64, u32), String>) -> HashMap<u64, Vec<(u32, String)>> {
     let mut by_offset: HashMap<u64, Vec<(u32, String)>> = HashMap::default();
     for (&(offset, size), name) in map {
-        by_offset.entry(offset).or_default().push((size, name.clone()));
+        by_offset
+            .entry(offset)
+            .or_default()
+            .push((size, name.clone()));
     }
     by_offset
 }

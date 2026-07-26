@@ -1,7 +1,7 @@
-//! Operation-edge type propagation for DIR bindings.
+//! Operation-edge type propagation for PreHIR bindings.
 //!
 //! This is the owner-local counterpart to Ghidra's `TypeOp::propagateType` /
-//! `ActionInferTypes::propagateTypeEdge` design.  DIR is not full SSA, so the
+//! `ActionInferTypes::propagateTypeEdge` design.  PreHIR is not full SSA, so the
 //! graph is deliberately limited to operations whose C type relation is
 //! invariant across lowering: COPY, LOAD, STORE, INDEX, and explicit CAST.
 
@@ -85,7 +85,7 @@ struct TypeFlowSolver {
 }
 
 impl TypeFlowSolver {
-    fn from_function(func: &DirFunction) -> Self {
+    fn from_function(func: &PreHirFunction) -> Self {
         let mut solver = Self {
             pointer_bits: if func.is_64bit { 64 } else { 32 },
             facts: HashMap::default(),
@@ -187,7 +187,7 @@ impl TypeFlowSolver {
             TypeFlowEdge::Copy { lhs, rhs } => {
                 let lhs_fact = self.fact(lhs);
                 let rhs_fact = self.fact(rhs);
-                // DIR bindings are not SSA varnodes. A name with multiple
+                // PreHIR bindings are not SSA varnodes. A name with multiple
                 // definitions cannot model Ghidra's per-varnode COPY equality:
                 // propagating a later scalar result backward through an earlier
                 // pointer copy would corrupt the source parameter. Single-def
@@ -353,31 +353,31 @@ fn refine_fact(current: &TypeFact, candidate: &TypeFact, pointer_bits: u32) -> O
     })
 }
 
-fn direct_var(expr: &DirExpr) -> Option<&str> {
+fn direct_var(expr: &PreHirExpr) -> Option<&str> {
     match expr {
-        DirExpr::Var(name) => Some(name),
+        PreHirExpr::Var(name) => Some(name),
         _ => None,
     }
 }
 
-fn direct_pointer_var(expr: &DirExpr) -> Option<&str> {
+fn direct_pointer_var(expr: &PreHirExpr) -> Option<&str> {
     match expr {
-        DirExpr::Var(name) => Some(name),
-        DirExpr::Cast { expr, .. } | DirExpr::PtrOffset { base: expr, .. } => {
+        PreHirExpr::Var(name) => Some(name),
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::PtrOffset { base: expr, .. } => {
             direct_pointer_var(expr)
         }
         _ => None,
     }
 }
 
-fn collect_assignment_edges(lhs: &DirLValue, rhs: &DirExpr, edges: &mut Vec<TypeFlowEdge>) {
+fn collect_assignment_edges(lhs: &PreHirLValue, rhs: &PreHirExpr, edges: &mut Vec<TypeFlowEdge>) {
     match lhs {
-        DirLValue::Var(lhs_name) => match rhs {
-            DirExpr::Var(rhs_name) => edges.push(TypeFlowEdge::Copy {
+        PreHirLValue::Var(lhs_name) => match rhs {
+            PreHirExpr::Var(rhs_name) => edges.push(TypeFlowEdge::Copy {
                 lhs: lhs_name.clone(),
                 rhs: rhs_name.clone(),
             }),
-            DirExpr::Load { ptr, ty } => {
+            PreHirExpr::Load { ptr, ty } => {
                 if let Some(pointer) = direct_pointer_var(ptr) {
                     edges.push(TypeFlowEdge::Load {
                         pointer: pointer.to_owned(),
@@ -386,7 +386,7 @@ fn collect_assignment_edges(lhs: &DirLValue, rhs: &DirExpr, edges: &mut Vec<Type
                     });
                 }
             }
-            DirExpr::Index { base, elem_ty, .. } => {
+            PreHirExpr::Index { base, elem_ty, .. } => {
                 if let Some(pointer) = direct_pointer_var(base) {
                     edges.push(TypeFlowEdge::Load {
                         pointer: pointer.to_owned(),
@@ -395,7 +395,7 @@ fn collect_assignment_edges(lhs: &DirLValue, rhs: &DirExpr, edges: &mut Vec<Type
                     });
                 }
             }
-            DirExpr::Cast { ty, .. } => edges.push(TypeFlowEdge::Cast {
+            PreHirExpr::Cast { ty, .. } => edges.push(TypeFlowEdge::Cast {
                 output: lhs_name.clone(),
                 ty: ty.clone(),
             }),
@@ -409,7 +409,7 @@ fn collect_assignment_edges(lhs: &DirLValue, rhs: &DirExpr, edges: &mut Vec<Type
                 }
             }
         },
-        DirLValue::Deref { ptr, ty } => {
+        PreHirLValue::Deref { ptr, ty } => {
             if let Some(pointer) = direct_pointer_var(ptr) {
                 if let Some(value) = direct_var(rhs) {
                     edges.push(TypeFlowEdge::Store {
@@ -425,7 +425,7 @@ fn collect_assignment_edges(lhs: &DirLValue, rhs: &DirExpr, edges: &mut Vec<Type
                 }
             }
         }
-        DirLValue::Index { base, elem_ty, .. } => {
+        PreHirLValue::Index { base, elem_ty, .. } => {
             if let Some(pointer) = direct_pointer_var(base) {
                 if let Some(value) = direct_var(rhs) {
                     edges.push(TypeFlowEdge::Store {
@@ -441,18 +441,18 @@ fn collect_assignment_edges(lhs: &DirLValue, rhs: &DirExpr, edges: &mut Vec<Type
                 }
             }
         }
-        DirLValue::FieldAccess { .. } => {}
+        PreHirLValue::FieldAccess { .. } => {}
     }
 }
 
-fn collect_edges(stmts: &[DirStmt], edges: &mut Vec<TypeFlowEdge>) {
+fn collect_edges(stmts: &[PreHirStmt], edges: &mut Vec<TypeFlowEdge>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => collect_assignment_edges(lhs, rhs, edges),
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Assign { lhs, rhs } => collect_assignment_edges(lhs, rhs, edges),
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 collect_edges(body, edges)
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -463,7 +463,7 @@ fn collect_edges(stmts: &[DirStmt], edges: &mut Vec<TypeFlowEdge>) {
                 }
                 collect_edges(body, edges);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -471,7 +471,7 @@ fn collect_edges(stmts: &[DirStmt], edges: &mut Vec<TypeFlowEdge>) {
                 collect_edges(then_body, edges);
                 collect_edges(else_body, edges);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_edges(&case.body, edges);
                 }
@@ -482,17 +482,17 @@ fn collect_edges(stmts: &[DirStmt], edges: &mut Vec<TypeFlowEdge>) {
     }
 }
 
-fn collect_definition_counts(stmts: &[DirStmt], counts: &mut HashMap<String, usize>) {
+fn collect_definition_counts(stmts: &[PreHirStmt], counts: &mut HashMap<String, usize>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 ..
             } => *counts.entry(name.clone()).or_default() += 1,
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 collect_definition_counts(body, counts)
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -503,7 +503,7 @@ fn collect_definition_counts(stmts: &[DirStmt], counts: &mut HashMap<String, usi
                 }
                 collect_definition_counts(body, counts);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -511,7 +511,7 @@ fn collect_definition_counts(stmts: &[DirStmt], counts: &mut HashMap<String, usi
                 collect_definition_counts(then_body, counts);
                 collect_definition_counts(else_body, counts);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_definition_counts(&case.body, counts);
                 }
@@ -522,7 +522,7 @@ fn collect_definition_counts(stmts: &[DirStmt], counts: &mut HashMap<String, usi
     }
 }
 
-pub(super) fn apply_type_flow_pass(func: &mut DirFunction) -> bool {
+pub(super) fn apply_type_flow_pass(func: &mut PreHirFunction) -> bool {
     let solved = TypeFlowSolver::from_function(func).solve();
     let mut changed = false;
     for binding in func.params.iter_mut().chain(func.locals.iter_mut()) {
@@ -544,8 +544,8 @@ pub(super) fn apply_type_flow_pass(func: &mut DirFunction) -> bool {
 mod tests {
     use super::*;
 
-    fn binding(name: &str, ty: NirType, origin: NirBindingOrigin) -> DirBinding {
-        DirBinding {
+    fn binding(name: &str, ty: NirType, origin: NirBindingOrigin) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_owned(),
             ty,
             surface_type_name: None,
@@ -555,11 +555,11 @@ mod tests {
     }
 
     fn function(
-        params: Vec<DirBinding>,
-        locals: Vec<DirBinding>,
-        body: Vec<DirStmt>,
-    ) -> DirFunction {
-        DirFunction {
+        params: Vec<PreHirBinding>,
+        locals: Vec<PreHirBinding>,
+        body: Vec<PreHirStmt>,
+    ) -> PreHirFunction {
+        PreHirFunction {
             name: "type_flow".to_owned(),
             params,
             locals,
@@ -587,22 +587,22 @@ mod tests {
             })
             .collect::<Vec<_>>();
         locals.push(binding("value", float.clone(), NirBindingOrigin::Temp));
-        let mut body = vec![DirStmt::Assign {
-            lhs: DirLValue::Var("alias_0".to_owned()),
-            rhs: DirExpr::Var("out".to_owned()),
+        let mut body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("alias_0".to_owned()),
+            rhs: PreHirExpr::Var("out".to_owned()),
         }];
         for index in 1..8 {
-            body.push(DirStmt::Assign {
-                lhs: DirLValue::Var(format!("alias_{index}")),
-                rhs: DirExpr::Var(format!("alias_{}", index - 1)),
+            body.push(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(format!("alias_{index}")),
+                rhs: PreHirExpr::Var(format!("alias_{}", index - 1)),
             });
         }
-        body.push(DirStmt::Assign {
-            lhs: DirLValue::Deref {
-                ptr: Box::new(DirExpr::Var("alias_7".to_owned())),
+        body.push(PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("alias_7".to_owned())),
                 ty: uint,
             },
-            rhs: DirExpr::Var("value".to_owned()),
+            rhs: PreHirExpr::Var("value".to_owned()),
         });
         let mut func = function(
             vec![binding("out", uint_ptr, NirBindingOrigin::ParamIndex(0))],
@@ -634,10 +634,10 @@ mod tests {
                 NirBindingOrigin::ParamIndex(0),
             )],
             vec![binding("value", NirType::Unknown, NirBindingOrigin::Temp)],
-            vec![DirStmt::Assign {
-                lhs: DirLValue::Var("value".to_owned()),
-                rhs: DirExpr::Load {
-                    ptr: Box::new(DirExpr::Var("input".to_owned())),
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("value".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("input".to_owned())),
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
@@ -667,12 +667,12 @@ mod tests {
                 NirBindingOrigin::ParamIndex(0),
             )],
             vec![binding("value", value_ty.clone(), NirBindingOrigin::Temp)],
-            vec![DirStmt::Assign {
-                lhs: DirLValue::Deref {
-                    ptr: Box::new(DirExpr::Var("out".to_owned())),
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("out".to_owned())),
                     ty: uint64,
                 },
-                rhs: DirExpr::Var("value".to_owned()),
+                rhs: PreHirExpr::Var("value".to_owned()),
             }],
         );
 
@@ -698,15 +698,15 @@ mod tests {
                 NirType::Float { bits: 32 },
                 NirBindingOrigin::Temp,
             )],
-            vec![DirStmt::Assign {
-                lhs: DirLValue::Deref {
-                    ptr: Box::new(DirExpr::Var("out".to_owned())),
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("out".to_owned())),
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
-                rhs: DirExpr::Var("value".to_owned()),
+                rhs: PreHirExpr::Var("value".to_owned()),
             }],
         );
 
@@ -734,16 +734,16 @@ mod tests {
             )],
             vec![binding("reuse", uint64.clone(), NirBindingOrigin::Temp)],
             vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("reuse".to_owned()),
-                    rhs: DirExpr::Var("input".to_owned()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("reuse".to_owned()),
+                    rhs: PreHirExpr::Var("input".to_owned()),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("reuse".to_owned()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Const(1, uint64.clone())),
-                        rhs: Box::new(DirExpr::Const(2, uint64.clone())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("reuse".to_owned()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Const(1, uint64.clone())),
+                        rhs: Box::new(PreHirExpr::Const(2, uint64.clone())),
                         ty: uint64,
                     },
                 },

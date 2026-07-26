@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use fission_midend_dir::util::expr_type;
+use fission_midend_prehir::util::expr_type;
 use crate::HashMap;
 
 /// Bit-level consumed-mask backward propagation pass.
@@ -34,9 +34,9 @@ use crate::HashMap;
 ///
 /// Variables with multiple definitions are treated conservatively (fully consumed).
 /// Loop-carried variables are also treated conservatively.
-pub fn apply_bit_consume_dead_code_pass(func: &mut DirFunction) -> bool {
+pub fn apply_bit_consume_dead_code_pass(func: &mut PreHirFunction) -> bool {
     // --- Phase 1: collect definitions and multi-def variables ---
-    let mut def_map: HashMap<String, DirExpr> = HashMap::default();
+    let mut def_map: HashMap<String, PreHirExpr> = HashMap::default();
     let mut multi_def: crate::HashSet<String> = crate::HashSet::default();
     collect_definitions(&func.body, &mut def_map, &mut multi_def);
 
@@ -93,8 +93,8 @@ pub fn apply_bit_consume_dead_code_pass(func: &mut DirFunction) -> bool {
 // ── Phase 1: definition collection ───────────────────────────────────────────
 
 fn collect_definitions(
-    stmts: &[DirStmt],
-    def_map: &mut HashMap<String, DirExpr>,
+    stmts: &[PreHirStmt],
+    def_map: &mut HashMap<String, PreHirExpr>,
     multi_def: &mut crate::HashSet<String>,
 ) {
     for stmt in stmts {
@@ -103,13 +103,13 @@ fn collect_definitions(
 }
 
 fn collect_def_stmt(
-    stmt: &DirStmt,
-    def_map: &mut HashMap<String, DirExpr>,
+    stmt: &PreHirStmt,
+    def_map: &mut HashMap<String, PreHirExpr>,
     multi_def: &mut crate::HashSet<String>,
 ) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         } => {
             if def_map.contains_key(name.as_str()) {
@@ -118,10 +118,10 @@ fn collect_def_stmt(
                 def_map.insert(name.clone(), rhs.clone());
             }
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             collect_definitions(body, def_map, multi_def);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -132,7 +132,7 @@ fn collect_def_stmt(
             }
             collect_definitions(body, def_map, multi_def);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -140,7 +140,7 @@ fn collect_def_stmt(
             collect_definitions(then_body, def_map, multi_def);
             collect_definitions(else_body, def_map, multi_def);
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 collect_definitions(&case.body, def_map, multi_def);
             }
@@ -153,9 +153,9 @@ fn collect_def_stmt(
 // ── Phase 2: seed consumed masks from use sites ───────────────────────────────
 
 fn collect_consumed_seeds(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     consumed: &mut HashMap<String, u64>,
-    def_map: &HashMap<String, DirExpr>,
+    def_map: &HashMap<String, PreHirExpr>,
     multi_def: &crate::HashSet<String>,
 ) {
     for stmt in stmts {
@@ -164,34 +164,34 @@ fn collect_consumed_seeds(
 }
 
 fn seed_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     consumed: &mut HashMap<String, u64>,
-    def_map: &HashMap<String, DirExpr>,
+    def_map: &HashMap<String, PreHirExpr>,
     multi_def: &crate::HashSet<String>,
 ) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         } => {
             // The RHS seeds the consumed mask for variables it reads.
             // This is the forward-seed pass: we look at how `rhs` reads variables.
             seed_expr_uses(rhs, consumed, true /*can_narrow*/);
         }
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             // Memory write: all operands fully consumed.
             seed_lvalue_fully(lhs, consumed);
             seed_expr_fully(rhs, consumed);
         }
-        DirStmt::Expr(expr) => seed_expr_fully(expr, consumed),
-        DirStmt::Return(Some(expr)) => seed_expr_fully(expr, consumed),
-        DirStmt::Return(None) => {}
-        DirStmt::Break | DirStmt::Continue | DirStmt::Label(_) | DirStmt::Goto(_) => {}
-        DirStmt::VaStart { va_list, .. } => seed_expr_fully(va_list, consumed),
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Expr(expr) => seed_expr_fully(expr, consumed),
+        PreHirStmt::Return(Some(expr)) => seed_expr_fully(expr, consumed),
+        PreHirStmt::Return(None) => {}
+        PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Label(_) | PreHirStmt::Goto(_) => {}
+        PreHirStmt::VaStart { va_list, .. } => seed_expr_fully(va_list, consumed),
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             collect_consumed_seeds(body, consumed, def_map, multi_def);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -208,7 +208,7 @@ fn seed_stmt(
             }
             collect_consumed_seeds(body, consumed, def_map, multi_def);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -217,7 +217,7 @@ fn seed_stmt(
             collect_consumed_seeds(then_body, consumed, def_map, multi_def);
             collect_consumed_seeds(else_body, consumed, def_map, multi_def);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -233,21 +233,21 @@ fn seed_stmt(
 
 /// Seed variables in `expr` as their bits in context determine.
 /// `can_narrow = true` means we track the operator-level narrowing (AND/cast).
-fn seed_expr_uses(expr: &DirExpr, consumed: &mut HashMap<String, u64>, can_narrow: bool) {
+fn seed_expr_uses(expr: &PreHirExpr, consumed: &mut HashMap<String, u64>, can_narrow: bool) {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
         } if can_narrow => {
             // `_ = lhs & const_mask`: only those bits of lhs are initially consumed.
-            if let DirExpr::Const(mask, _) = rhs.as_ref() {
+            if let PreHirExpr::Const(mask, _) = rhs.as_ref() {
                 seed_expr_with_mask(lhs, *mask as u64, consumed);
                 // mask itself is a constant, no variable
                 return;
             }
-            if let DirExpr::Const(mask, _) = lhs.as_ref() {
+            if let PreHirExpr::Const(mask, _) = lhs.as_ref() {
                 seed_expr_with_mask(rhs, *mask as u64, consumed);
                 return;
             }
@@ -255,13 +255,13 @@ fn seed_expr_uses(expr: &DirExpr, consumed: &mut HashMap<String, u64>, can_narro
             seed_expr_fully(lhs, consumed);
             seed_expr_fully(rhs, consumed);
         }
-        DirExpr::Cast { ty, expr: inner } if can_narrow => {
+        PreHirExpr::Cast { ty, expr: inner } if can_narrow => {
             // Narrow cast: only narrow bits of inner are consumed initially.
             let narrow_mask = type_bitmask(ty);
             seed_expr_with_mask(inner, narrow_mask, consumed);
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::Shr,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
             lhs,
             rhs: shift,
             ..
@@ -275,9 +275,9 @@ fn seed_expr_uses(expr: &DirExpr, consumed: &mut HashMap<String, u64>, can_narro
     }
 }
 
-fn seed_expr_with_mask(expr: &DirExpr, mask: u64, consumed: &mut HashMap<String, u64>) {
+fn seed_expr_with_mask(expr: &PreHirExpr, mask: u64, consumed: &mut HashMap<String, u64>) {
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             let entry = consumed.entry(name.clone()).or_insert(0);
             *entry |= mask;
         }
@@ -286,32 +286,32 @@ fn seed_expr_with_mask(expr: &DirExpr, mask: u64, consumed: &mut HashMap<String,
     }
 }
 
-fn seed_expr_fully(expr: &DirExpr, consumed: &mut HashMap<String, u64>) {
+fn seed_expr_fully(expr: &PreHirExpr, consumed: &mut HashMap<String, u64>) {
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             *consumed.entry(name.clone()).or_insert(0) = u64::MAX;
         }
-        DirExpr::Const(_, _) => {}
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => seed_expr_fully(inner, consumed),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => seed_expr_fully(inner, consumed),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             seed_expr_fully(lhs, consumed);
             seed_expr_fully(rhs, consumed);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for a in args {
                 seed_expr_fully(a, consumed);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             seed_expr_fully(base, consumed);
             seed_expr_fully(index, consumed);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -321,19 +321,19 @@ fn seed_expr_fully(expr: &DirExpr, consumed: &mut HashMap<String, u64>) {
             seed_expr_fully(then_expr, consumed);
             seed_expr_fully(else_expr, consumed);
         }
-        DirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::AddressOfGlobal(_) => {}
     }
 }
 
-fn seed_lvalue_fully(lhs: &DirLValue, consumed: &mut HashMap<String, u64>) {
+fn seed_lvalue_fully(lhs: &PreHirLValue, consumed: &mut HashMap<String, u64>) {
     match lhs {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => seed_expr_fully(ptr, consumed),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => seed_expr_fully(ptr, consumed),
+        PreHirLValue::Index { base, index, .. } => {
             seed_expr_fully(base, consumed);
             seed_expr_fully(index, consumed);
         }
-        DirLValue::FieldAccess { base, .. } => seed_expr_fully(base, consumed),
+        PreHirLValue::FieldAccess { base, .. } => seed_expr_fully(base, consumed),
     }
 }
 
@@ -341,30 +341,30 @@ fn seed_lvalue_fully(lhs: &DirLValue, consumed: &mut HashMap<String, u64>) {
 
 /// Given a definition `x = expr` and `out_consume` = consumed mask of `x`,
 /// compute additional consumed contributions for variables appearing in `expr`.
-fn backward_propagate(expr: &DirExpr, out_consume: u64) -> Vec<(String, u64)> {
+fn backward_propagate(expr: &PreHirExpr, out_consume: u64) -> Vec<(String, u64)> {
     let mut result = Vec::new();
     backward_propagate_inner(expr, out_consume, &mut result);
     result
 }
 
-fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(String, u64)>) {
+fn backward_propagate_inner(expr: &PreHirExpr, out_consume: u64, result: &mut Vec<(String, u64)>) {
     match expr {
         // x = y        → consumed[y] |= consumed[x]
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             result.push((name.clone(), out_consume));
         }
 
         // x = y & C    → consumed[y] |= consumed[x] & C
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
         } => {
-            if let DirExpr::Const(mask, _) = rhs.as_ref() {
+            if let PreHirExpr::Const(mask, _) = rhs.as_ref() {
                 backward_propagate_inner(lhs, out_consume & (*mask as u64), result);
                 // mask is a constant, no variable contribution
-            } else if let DirExpr::Const(mask, _) = lhs.as_ref() {
+            } else if let PreHirExpr::Const(mask, _) = lhs.as_ref() {
                 backward_propagate_inner(rhs, out_consume & (*mask as u64), result);
             } else {
                 // Non-const AND: conservative
@@ -375,17 +375,17 @@ fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(
 
         // x = y | z   → consumed[y] |= consumed[x], consumed[z] |= consumed[x]
         // Special: x = y | C → consumed[y] |= consumed[x] & ~C (those bits not covered by C)
-        DirExpr::Binary {
-            op: DirBinaryOp::Or,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
             lhs,
             rhs,
             ..
         } => {
-            if let DirExpr::Const(c, _) = rhs.as_ref() {
+            if let PreHirExpr::Const(c, _) = rhs.as_ref() {
                 // Bits covered by constant: variable contributes if constant didn't already cover
                 let var_mask = out_consume & !(*c as u64);
                 backward_propagate_inner(lhs, var_mask, result);
-            } else if let DirExpr::Const(c, _) = lhs.as_ref() {
+            } else if let PreHirExpr::Const(c, _) = lhs.as_ref() {
                 let var_mask = out_consume & !(*c as u64);
                 backward_propagate_inner(rhs, var_mask, result);
             } else {
@@ -395,8 +395,8 @@ fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y ^ z   → consumed[y] |= consumed[x], consumed[z] |= consumed[x]
-        DirExpr::Binary {
-            op: DirBinaryOp::Xor,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Xor,
             lhs,
             rhs,
             ..
@@ -406,13 +406,13 @@ fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y << n (const) → consumed[y] |= consumed[x] >> n
-        DirExpr::Binary {
-            op: DirBinaryOp::Shl,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
             lhs,
             rhs: shift,
             ..
         } => {
-            if let DirExpr::Const(n, _) = shift.as_ref() {
+            if let PreHirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 let src_mask = out_consume >> n;
                 if src_mask != 0 {
@@ -427,13 +427,13 @@ fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y >> n (const, logical) → consumed[y] |= consumed[x] << n
-        DirExpr::Binary {
-            op: DirBinaryOp::Shr,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
             lhs,
             rhs: shift,
             ..
         } => {
-            if let DirExpr::Const(n, _) = shift.as_ref() {
+            if let PreHirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 let src_mask = out_consume << n;
                 backward_propagate_inner(lhs, src_mask, result);
@@ -445,13 +445,13 @@ fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = y >>s n (const, arithmetic) → same as logical for consumed-mask purposes
-        DirExpr::Binary {
-            op: DirBinaryOp::Sar,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
             lhs,
             rhs: shift,
             ..
         } => {
-            if let DirExpr::Const(n, _) = shift.as_ref() {
+            if let PreHirExpr::Const(n, _) = shift.as_ref() {
                 let n = (*n).clamp(0, 63) as u32;
                 // Arithmetic shift: sign-bit may replicate; treat upper bits as consumed too
                 let src_mask = (out_consume << n)
@@ -469,23 +469,23 @@ fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // x = (NarrowType)y → consumed[y] |= consumed[x] & narrow_mask
-        DirExpr::Cast { ty, expr: inner } => {
+        PreHirExpr::Cast { ty, expr: inner } => {
             let narrow_mask = type_bitmask(ty);
             let src_mask = out_consume & narrow_mask;
             backward_propagate_inner(inner, src_mask, result);
         }
 
         // x = -y  or  x = ~y → consumed[y] |= consumed[x]
-        DirExpr::Unary { expr: inner, .. } => {
+        PreHirExpr::Unary { expr: inner, .. } => {
             backward_propagate_inner(inner, out_consume, result);
         }
-        DirExpr::FieldAccess { base, .. } => {
+        PreHirExpr::FieldAccess { base, .. } => {
             backward_propagate_inner(base, out_consume, result);
         }
 
         // x = y + z  → conservative (carry propagation makes it hard to be precise)
-        DirExpr::Binary {
-            op: DirBinaryOp::Add | DirBinaryOp::Sub | DirBinaryOp::Mul,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ..
@@ -495,28 +495,28 @@ fn backward_propagate_inner(expr: &DirExpr, out_consume: u64, result: &mut Vec<(
         }
 
         // Comparisons, div, mod: treat all inputs as fully consumed
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             let full = if out_consume == 0 { 0 } else { u64::MAX };
             backward_propagate_inner(lhs, full, result);
             backward_propagate_inner(rhs, full, result);
         }
 
         // Loads, calls, constants: no variable propagation needed (no sub-variables)
-        DirExpr::Const(_, _)
-        | DirExpr::Load { .. }
-        | DirExpr::Call { .. }
-        | DirExpr::AddressOfGlobal(_)
-        | DirExpr::PtrOffset { .. }
-        | DirExpr::AggregateCopy { .. }
-        | DirExpr::Index { .. }
-        | DirExpr::Select { .. } => {}
+        PreHirExpr::Const(_, _)
+        | PreHirExpr::Load { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::PtrOffset { .. }
+        | PreHirExpr::AggregateCopy { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::Select { .. } => {}
     }
 }
 
 // ── Phase 4: simplification ───────────────────────────────────────────────────
 
 fn simplify_stmts(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     consumed: &HashMap<String, u64>,
     multi_def: &crate::HashSet<String>,
     type_map: &HashMap<String, NirType>,
@@ -528,15 +528,15 @@ fn simplify_stmts(
 }
 
 fn simplify_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     consumed: &HashMap<String, u64>,
     multi_def: &crate::HashSet<String>,
     type_map: &HashMap<String, NirType>,
     any_changed: &mut bool,
 ) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         } => {
             // Only simplify single-defined, non-multi-def variables.
@@ -547,18 +547,18 @@ fn simplify_stmt(
             let out_consume = consumed.get(name.as_str()).copied().unwrap_or(0);
             simplify_assign_rhs(rhs, out_consume, consumed, type_map, any_changed);
         }
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             simplify_lvalue(lhs, consumed, any_changed);
             simplify_expr(rhs, consumed, any_changed);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             simplify_expr(expr, consumed, any_changed);
         }
-        DirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             simplify_stmts(body, consumed, multi_def, type_map, any_changed);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -575,7 +575,7 @@ fn simplify_stmt(
             }
             simplify_stmts(body, consumed, multi_def, type_map, any_changed);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -584,7 +584,7 @@ fn simplify_stmt(
             simplify_stmts(then_body, consumed, multi_def, type_map, any_changed);
             simplify_stmts(else_body, consumed, multi_def, type_map, any_changed);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -601,7 +601,7 @@ fn simplify_stmt(
 
 /// Simplify the RHS of `name = rhs` given the consumed mask of `name`.
 fn simplify_assign_rhs(
-    rhs: &mut DirExpr,
+    rhs: &mut PreHirExpr,
     out_consume: u64,
     consumed: &HashMap<String, u64>,
     type_map: &HashMap<String, NirType>,
@@ -609,14 +609,14 @@ fn simplify_assign_rhs(
 ) {
     // Rule 1: `x = y | C` where no consumed bit overlaps with C → `x = y`
     // This removes dead OR-with-constant branches.
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Or,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Or,
         lhs,
         rhs: rhs_inner,
         ty,
     } = rhs
     {
-        if let DirExpr::Const(c, _) = rhs_inner.as_ref() {
+        if let PreHirExpr::Const(c, _) = rhs_inner.as_ref() {
             let dead_bits = *c as u64 & !out_consume;
             if dead_bits == *c as u64 && *c != 0 {
                 // All bits of C are never consumed → strip the OR
@@ -628,7 +628,7 @@ fn simplify_assign_rhs(
                 return;
             }
         }
-        if let DirExpr::Const(c, _) = lhs.as_ref() {
+        if let PreHirExpr::Const(c, _) = lhs.as_ref() {
             let dead_bits = *c as u64 & !out_consume;
             if dead_bits == *c as u64 && *c != 0 {
                 let inner = *rhs_inner.clone();
@@ -646,7 +646,7 @@ fn simplify_assign_rhs(
 
     // Rule 3: a widening cast is redundant when consumers only need bits that
     // already exist in the source. A narrowing cast always changes the value.
-    if let DirExpr::Cast { ty, expr: inner } = rhs {
+    if let PreHirExpr::Cast { ty, expr: inner } = rhs {
         let source_ty = expr_type_with_bindings(inner, type_map);
         let can_remove = type_width(ty)
             .zip(type_width(&source_ty))
@@ -666,30 +666,30 @@ fn simplify_assign_rhs(
     simplify_expr(rhs, consumed, any_changed);
 }
 
-fn simplify_expr(expr: &mut DirExpr, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
+fn simplify_expr(expr: &mut PreHirExpr, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
     match expr {
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             simplify_expr(lhs, consumed, any_changed);
             simplify_expr(rhs, consumed, any_changed);
         }
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             simplify_expr(inner, consumed, any_changed);
         }
-        DirExpr::Load { ptr, .. } | DirExpr::PtrOffset { base: ptr, .. } => {
+        PreHirExpr::Load { ptr, .. } | PreHirExpr::PtrOffset { base: ptr, .. } => {
             simplify_expr(ptr, consumed, any_changed);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 simplify_expr(a, consumed, any_changed);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             simplify_expr(base, consumed, any_changed);
             simplify_expr(index, consumed, any_changed);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -699,20 +699,20 @@ fn simplify_expr(expr: &mut DirExpr, consumed: &HashMap<String, u64>, any_change
             simplify_expr(then_expr, consumed, any_changed);
             simplify_expr(else_expr, consumed, any_changed);
         }
-        DirExpr::AggregateCopy { src, .. } => simplify_expr(src, consumed, any_changed),
+        PreHirExpr::AggregateCopy { src, .. } => simplify_expr(src, consumed, any_changed),
         _ => {}
     }
 }
 
-fn simplify_lvalue(lhs: &mut DirLValue, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
+fn simplify_lvalue(lhs: &mut PreHirLValue, consumed: &HashMap<String, u64>, any_changed: &mut bool) {
     match lhs {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => simplify_expr(ptr, consumed, any_changed),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => simplify_expr(ptr, consumed, any_changed),
+        PreHirLValue::Index { base, index, .. } => {
             simplify_expr(base, consumed, any_changed);
             simplify_expr(index, consumed, any_changed);
         }
-        DirLValue::FieldAccess { base, .. } => simplify_expr(base, consumed, any_changed),
+        PreHirLValue::FieldAccess { base, .. } => simplify_expr(base, consumed, any_changed),
     }
 }
 
@@ -744,9 +744,9 @@ fn type_width(ty: &NirType) -> Option<u32> {
     }
 }
 
-fn expr_type_with_bindings(expr: &DirExpr, type_map: &HashMap<String, NirType>) -> NirType {
+fn expr_type_with_bindings(expr: &PreHirExpr, type_map: &HashMap<String, NirType>) -> NirType {
     match expr {
-        DirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
+        PreHirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
         _ => expr_type(expr),
     }
 }
@@ -765,17 +765,17 @@ mod tests {
 
     #[test]
     fn preserves_narrowing_cast_from_wide_binding() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "narrow_lane".into(),
             locals: vec![
-                DirBinding {
+                PreHirBinding {
                     name: "wide".into(),
                     ty: uint(32),
                     surface_type_name: None,
                     origin: Some(NirBindingOrigin::Temp),
                     initializer: None,
                 },
-                DirBinding {
+                PreHirBinding {
                     name: "narrowed".into(),
                     ty: uint(32),
                     surface_type_name: None,
@@ -785,14 +785,14 @@ mod tests {
             ],
             return_type: uint(32),
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("narrowed".into()),
-                    rhs: DirExpr::Cast {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("narrowed".into()),
+                    rhs: PreHirExpr::Cast {
                         ty: uint(8),
-                        expr: Box::new(DirExpr::Var("wide".into())),
+                        expr: Box::new(PreHirExpr::Var("wide".into())),
                     },
                 },
-                DirStmt::Return(Some(DirExpr::Var("narrowed".into()))),
+                PreHirStmt::Return(Some(PreHirExpr::Var("narrowed".into()))),
             ],
             ..Default::default()
         };
@@ -800,8 +800,8 @@ mod tests {
         assert!(!apply_bit_consume_dead_code_pass(&mut func));
         assert!(matches!(
             &func.body[0],
-            DirStmt::Assign {
-                rhs: DirExpr::Cast {
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Cast {
                     ty: NirType::Int { bits: 8, .. },
                     ..
                 },

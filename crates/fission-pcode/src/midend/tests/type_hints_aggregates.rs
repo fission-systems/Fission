@@ -187,10 +187,10 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
 
 #[test]
 fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "FUN_0x140006260".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_2".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Aggregate {
                 size: 16,
@@ -200,7 +200,7 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
             origin: None,
             initializer: None,
         }],
-        locals: vec![DirBinding {
+        locals: vec![PreHirBinding {
             name: "local_3c".to_string(),
             ty: NirType::Aggregate {
                 size: 16,
@@ -212,22 +212,22 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
         }],
         return_type: NirType::Unknown,
         surface_return_type_name: None,
-        body: vec![DirStmt::If {
-            cond: DirExpr::Const(1, NirType::Bool),
+        body: vec![PreHirStmt::If {
+            cond: PreHirExpr::Const(1, NirType::Bool),
             then_body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("xVar32".to_string()),
-                    rhs: DirExpr::Var("local_3c".to_string()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar32".to_string()),
+                    rhs: PreHirExpr::Var("local_3c".to_string()),
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Deref {
-                        ptr: Box::new(DirExpr::Var("param_2".to_string())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::Var("param_2".to_string())),
                         ty: NirType::Aggregate {
                             size: 16,
                             fields: vec![],
                         },
                     },
-                    rhs: DirExpr::Var("local_3c".to_string()),
+                    rhs: PreHirExpr::Var("local_3c".to_string()),
                 },
             ],
             else_body: vec![],
@@ -236,7 +236,7 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         !rendered.contains("xVar32 = local_3c;"),
         "rendered:\n{}",
@@ -252,10 +252,10 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
 
 #[test]
 fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "process_config_like".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
@@ -268,16 +268,16 @@ fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
             signed: false,
         },
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Load {
-            ptr: Box::new(DirExpr::Cast {
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Cast {
                 ty: NirType::Ptr(Box::new(NirType::Int {
                     bits: 16,
                     signed: false,
                 })),
-                expr: Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Add,
-                    lhs: Box::new(DirExpr::Var("param_1".to_string())),
-                    rhs: Box::new(DirExpr::Const(
+                expr: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("param_1".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(
                         8,
                         NirType::Int {
                             bits: 64,
@@ -297,7 +297,7 @@ fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         rendered.contains("param_1->field_8"),
         "rendered:\n{}",
@@ -308,17 +308,17 @@ fn normalize_recovers_field_access_after_aggregate_pointer_inference() {
 
 #[test]
 fn normalize_rewrites_constant_index_alias_back_to_aggregate_field() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "process_config_alias".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::ParamIndex(0)),
             initializer: None,
         }],
-        locals: vec![DirBinding {
+        locals: vec![PreHirBinding {
             name: "slot_4".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Int {
                 bits: 32,
@@ -326,13 +326,13 @@ fn normalize_rewrites_constant_index_alias_back_to_aggregate_field() {
             })),
             surface_type_name: None,
             origin: None,
-            initializer: Some(DirExpr::Cast {
+            initializer: Some(PreHirExpr::Cast {
                 ty: NirType::Ptr(Box::new(NirType::Int {
                     bits: 32,
                     signed: false,
                 })),
-                expr: Box::new(DirExpr::PtrOffset {
-                    base: Box::new(DirExpr::Var("param_1".to_string())),
+                expr: Box::new(PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("param_1".to_string())),
                     offset: 4,
                 }),
             }),
@@ -342,9 +342,9 @@ fn normalize_rewrites_constant_index_alias_back_to_aggregate_field() {
             signed: false,
         },
         surface_return_type_name: None,
-        body: vec![DirStmt::Return(Some(DirExpr::Index {
-            base: Box::new(DirExpr::Var("slot_4".to_string())),
-            index: Box::new(DirExpr::Const(
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Index {
+            base: Box::new(PreHirExpr::Var("slot_4".to_string())),
+            index: Box::new(PreHirExpr::Const(
                 0,
                 NirType::Int {
                     bits: 64,
@@ -361,7 +361,7 @@ fn normalize_rewrites_constant_index_alias_back_to_aggregate_field() {
     };
 
     normalize_hir_function(&mut func);
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         rendered.contains("param_1->field_4"),
         "rendered:\n{}",
@@ -789,10 +789,10 @@ fn union_resolve_scores_and_selects_dominant_float_access_type() {
         signed: true,
     };
 
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_union_resolve".to_string(),
         int_param_offsets: Vec::new(),
-        params: vec![DirBinding {
+        params: vec![PreHirBinding {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Aggregate {
                 size: 8,
@@ -812,16 +812,16 @@ fn union_resolve_scores_and_selects_dominant_float_access_type() {
         body: vec![
             // A statement doing a float load and binary float addition:
             // res = (float_load_at_offset_0) + 1.0f
-            DirStmt::Return(Some(DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Load {
-                    ptr: Box::new(DirExpr::PtrOffset {
-                        base: Box::new(DirExpr::Var("param_1".to_string())),
+            PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("param_1".to_string())),
                         offset: 0,
                     }),
                     ty: float32.clone(),
                 }),
-                rhs: Box::new(DirExpr::Const(1, float32.clone())),
+                rhs: Box::new(PreHirExpr::Const(1, float32.clone())),
                 ty: float32.clone(),
             })),
         ],

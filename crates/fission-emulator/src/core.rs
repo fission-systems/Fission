@@ -1065,7 +1065,7 @@ impl Emulator {
 
 /// Why [`Emulator::run_inner`] (and therefore [`Emulator::run`]/
 /// [`Emulator::run_until_pc`]) stopped -- distinct, reported outcomes so a
-/// caller (e.g. `fission-verify`'s "call one function" driver) never has to
+/// caller (e.g. `fission-dir`'s "call one function" driver) never has to
 /// guess or silently coerce a non-`Returned` stop into a pass/fail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunOutcome {

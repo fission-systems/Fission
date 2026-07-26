@@ -14,7 +14,7 @@ struct ReplaceVar {
 #[derive(Debug, Clone)]
 struct AssignInfo {
     lhs: String,
-    rhs: DirExpr,
+    rhs: PreHirExpr,
 }
 
 /// Helper to identify if a bitmask represents a standard narrow subvariable size.
@@ -46,14 +46,14 @@ fn compute_sizes(mask: u64) -> Option<(u32, u32)> {
 
 /// Recursively scans statement trees to collect all local assignments and track multi-defined variables.
 fn collect_assignments(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     assigns: &mut Vec<AssignInfo>,
     multi_def: &mut HashSet<String>,
 ) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 rhs,
             } => {
                 if assigns.iter().any(|a| &a.lhs == name) {
@@ -64,38 +64,38 @@ fn collect_assignments(
                     rhs: rhs.clone(),
                 });
             }
-            DirStmt::Assign {
-                lhs: DirLValue::Deref { ptr, .. },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ptr, .. },
                 rhs,
             } => {
                 collect_expr_assigns(ptr, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            DirStmt::Assign {
-                lhs: DirLValue::Index { base, index, .. },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Index { base, index, .. },
                 rhs,
             } => {
                 collect_expr_assigns(base, assigns, multi_def);
                 collect_expr_assigns(index, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            DirStmt::Assign {
-                lhs: DirLValue::FieldAccess { base, .. },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::FieldAccess { base, .. },
                 rhs,
             } => {
                 collect_expr_assigns(base, assigns, multi_def);
                 collect_expr_assigns(rhs, assigns, multi_def);
             }
-            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 collect_expr_assigns(expr, assigns, multi_def);
             }
-            DirStmt::VaStart { va_list, .. } => {
+            PreHirStmt::VaStart { va_list, .. } => {
                 collect_expr_assigns(va_list, assigns, multi_def);
             }
-            DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 collect_assignments(body, assigns, multi_def);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -112,7 +112,7 @@ fn collect_assignments(
                 }
                 collect_assignments(body, assigns, multi_def);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -121,7 +121,7 @@ fn collect_assignments(
                 collect_assignments(then_body, assigns, multi_def);
                 collect_assignments(else_body, assigns, multi_def);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -138,7 +138,7 @@ fn collect_assignments(
 }
 
 fn collect_expr_assigns(
-    _expr: &DirExpr,
+    _expr: &PreHirExpr,
     _assigns: &mut Vec<AssignInfo>,
     _multi_def: &mut HashSet<String>,
 ) {
@@ -161,16 +161,16 @@ enum UseContext {
         dest: String,
     },
     Binary {
-        op: DirBinaryOp,
-        other: DirExpr,
+        op: PreHirBinaryOp,
+        other: PreHirExpr,
         dest: String,
     },
     Compare {
-        op: DirBinaryOp,
-        other: DirExpr,
+        op: PreHirBinaryOp,
+        other: PreHirExpr,
     },
     ShiftAmount {
-        op: DirBinaryOp,
+        op: PreHirBinaryOp,
         dest: String,
     },
     Call {
@@ -182,23 +182,23 @@ enum UseContext {
 }
 
 /// Determines if an expression contains references to a variable.
-fn expr_contains_var(expr: &DirExpr, var_name: &str) -> bool {
+fn expr_contains_var(expr: &PreHirExpr, var_name: &str) -> bool {
     match expr {
-        DirExpr::Var(name) => name == var_name,
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Var(name) => name == var_name,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_contains_var(expr, var_name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             expr_contains_var(lhs, var_name) || expr_contains_var(rhs, var_name)
         }
-        DirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, var_name)),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_contains_var(arg, var_name)),
+        PreHirExpr::Index { base, index, .. } => {
             expr_contains_var(base, var_name) || expr_contains_var(index, var_name)
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -213,25 +213,25 @@ fn expr_contains_var(expr: &DirExpr, var_name: &str) -> bool {
 }
 
 /// Scans statement body recursively to find all usages and their contextual patterns for a given variable.
-fn find_uses(stmts: &[DirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
+fn find_uses(stmts: &[PreHirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Assign {
-                lhs: DirLValue::Var(dest),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(dest),
                 rhs,
             } => {
                 analyze_expr_use(rhs, var_name, Some(dest), uses);
             }
-            DirStmt::Assign { lhs, rhs } => {
+            PreHirStmt::Assign { lhs, rhs } => {
                 analyze_lvalue_use(lhs, var_name, uses);
                 analyze_expr_use(rhs, var_name, None, uses);
             }
-            DirStmt::Expr(expr) => {
+            PreHirStmt::Expr(expr) => {
                 analyze_expr_use(expr, var_name, None, uses);
             }
-            DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Return(Some(expr)) => {
                 if expr_contains_var(expr, var_name) {
-                    if let DirExpr::Var(name) = expr {
+                    if let PreHirExpr::Var(name) = expr {
                         if name == var_name {
                             uses.push(UseInfo {
                                 context: UseContext::Return,
@@ -244,19 +244,19 @@ fn find_uses(stmts: &[DirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                     });
                 }
             }
-            DirStmt::Return(None) => {}
-            DirStmt::Block(body) => {
+            PreHirStmt::Return(None) => {}
+            PreHirStmt::Block(body) => {
                 find_uses(body, var_name, uses);
             }
-            DirStmt::While { cond, body } => {
+            PreHirStmt::While { cond, body } => {
                 analyze_expr_use(cond, var_name, None, uses);
                 find_uses(body, var_name, uses);
             }
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 find_uses(body, var_name, uses);
                 analyze_expr_use(cond, var_name, None, uses);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -273,7 +273,7 @@ fn find_uses(stmts: &[DirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 }
                 find_uses(body, var_name, uses);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -282,7 +282,7 @@ fn find_uses(stmts: &[DirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
                 find_uses(then_body, var_name, uses);
                 find_uses(else_body, var_name, uses);
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -298,18 +298,18 @@ fn find_uses(stmts: &[DirStmt], var_name: &str, uses: &mut Vec<UseInfo>) {
     }
 }
 
-fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &mut Vec<UseInfo>) {
+fn analyze_expr_use(expr: &PreHirExpr, var_name: &str, dest: Option<&str>, uses: &mut Vec<UseInfo>) {
     if !expr_contains_var(expr, var_name) {
         return;
     }
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             if name == var_name {
                 if let Some(d) = dest {
                     uses.push(UseInfo {
                         context: UseContext::Binary {
-                            op: DirBinaryOp::And,
-                            other: DirExpr::Const(-1, NirType::Unknown),
+                            op: PreHirBinaryOp::And,
+                            other: PreHirExpr::Const(-1, NirType::Unknown),
                             dest: d.to_string(),
                         },
                     });
@@ -320,29 +320,29 @@ fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &m
                 }
             }
         }
-        DirExpr::Binary { op, lhs, rhs, .. } => {
+        PreHirExpr::Binary { op, lhs, rhs, .. } => {
             let left_var = match &**lhs {
-                DirExpr::Var(name) => name == var_name,
+                PreHirExpr::Var(name) => name == var_name,
                 _ => false,
             };
             let right_var = match &**rhs {
-                DirExpr::Var(name) => name == var_name,
+                PreHirExpr::Var(name) => name == var_name,
                 _ => false,
             };
 
             if left_var || right_var {
                 let other = if left_var { &**rhs } else { &**lhs };
                 match op {
-                    DirBinaryOp::Eq
-                    | DirBinaryOp::Ne
-                    | DirBinaryOp::Lt
-                    | DirBinaryOp::Le
-                    | DirBinaryOp::Gt
-                    | DirBinaryOp::Ge
-                    | DirBinaryOp::SLt
-                    | DirBinaryOp::SLe
-                    | DirBinaryOp::SGt
-                    | DirBinaryOp::SGe => {
+                    PreHirBinaryOp::Eq
+                    | PreHirBinaryOp::Ne
+                    | PreHirBinaryOp::Lt
+                    | PreHirBinaryOp::Le
+                    | PreHirBinaryOp::Gt
+                    | PreHirBinaryOp::Ge
+                    | PreHirBinaryOp::SLt
+                    | PreHirBinaryOp::SLe
+                    | PreHirBinaryOp::SGt
+                    | PreHirBinaryOp::SGe => {
                         uses.push(UseInfo {
                             context: UseContext::Compare {
                                 op: *op,
@@ -350,8 +350,8 @@ fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &m
                             },
                         });
                     }
-                    DirBinaryOp::And => {
-                        if let (Some(d), DirExpr::Const(mask, _)) = (dest, other) {
+                    PreHirBinaryOp::And => {
+                        if let (Some(d), PreHirExpr::Const(mask, _)) = (dest, other) {
                             uses.push(UseInfo {
                                 context: UseContext::AndMask {
                                     mask: *mask as u64,
@@ -372,17 +372,17 @@ fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &m
                             });
                         }
                     }
-                    DirBinaryOp::Add
-                    | DirBinaryOp::Sub
-                    | DirBinaryOp::Or
-                    | DirBinaryOp::Xor
-                    | DirBinaryOp::Shl
-                    | DirBinaryOp::Shr
-                    | DirBinaryOp::Sar => {
+                    PreHirBinaryOp::Add
+                    | PreHirBinaryOp::Sub
+                    | PreHirBinaryOp::Or
+                    | PreHirBinaryOp::Xor
+                    | PreHirBinaryOp::Shl
+                    | PreHirBinaryOp::Shr
+                    | PreHirBinaryOp::Sar => {
                         if let Some(d) = dest {
-                            if (*op == DirBinaryOp::Shl
-                                || *op == DirBinaryOp::Shr
-                                || *op == DirBinaryOp::Sar)
+                            if (*op == PreHirBinaryOp::Shl
+                                || *op == PreHirBinaryOp::Shr
+                                || *op == PreHirBinaryOp::Sar)
                                 && right_var
                             {
                                 uses.push(UseInfo {
@@ -418,8 +418,8 @@ fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &m
                 });
             }
         }
-        DirExpr::Cast { ty, expr } => {
-            if let DirExpr::Var(name) = &**expr {
+        PreHirExpr::Cast { ty, expr } => {
+            if let PreHirExpr::Var(name) = &**expr {
                 if name == var_name {
                     if let Some(d) = dest {
                         uses.push(UseInfo {
@@ -440,9 +440,9 @@ fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &m
                 context: UseContext::Incompatible,
             });
         }
-        DirExpr::Call { target, args, .. } => {
+        PreHirExpr::Call { target, args, .. } => {
             for (idx, arg) in args.iter().enumerate() {
-                if let DirExpr::Var(name) = arg {
+                if let PreHirExpr::Var(name) = arg {
                     if name == var_name {
                         uses.push(UseInfo {
                             context: UseContext::Call {
@@ -469,26 +469,26 @@ fn analyze_expr_use(expr: &DirExpr, var_name: &str, dest: Option<&str>, uses: &m
 }
 
 /// RuleSubvarShift: trace SUBPIECE/CONCAT-style `Or` reassembly back to the source varnode.
-fn trace_or_subvar_piece(lhs: &DirExpr, rhs: &DirExpr, mask: u64) -> Option<(String, u64)> {
+fn trace_or_subvar_piece(lhs: &PreHirExpr, rhs: &PreHirExpr, mask: u64) -> Option<(String, u64)> {
     let (low_part, high_part) = match (lhs, rhs) {
         (
             low,
-            DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 ..
             },
         ) => (low, rhs),
         (
-            DirExpr::Binary {
-                op: DirBinaryOp::Shl,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
                 ..
             },
             low,
         ) => (low, lhs),
         _ => return None,
     };
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shl,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
         lhs: shifted,
         rhs: shift_amt,
         ..
@@ -496,7 +496,7 @@ fn trace_or_subvar_piece(lhs: &DirExpr, rhs: &DirExpr, mask: u64) -> Option<(Str
     else {
         return None;
     };
-    let DirExpr::Const(n, _) = shift_amt.as_ref() else {
+    let PreHirExpr::Const(n, _) = shift_amt.as_ref() else {
         return None;
     };
     if *n <= 0 || *n >= 64 {
@@ -507,14 +507,14 @@ fn trace_or_subvar_piece(lhs: &DirExpr, rhs: &DirExpr, mask: u64) -> Option<(Str
         return None;
     }
     let (src, and_mask) = match low_part {
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs: and_lhs,
             rhs: and_rhs,
             ..
         } => match (and_lhs.as_ref(), and_rhs.as_ref()) {
-            (DirExpr::Var(name), DirExpr::Const(m, _)) => (name.clone(), *m as u64),
-            (DirExpr::Const(m, _), DirExpr::Var(name)) => (name.clone(), *m as u64),
+            (PreHirExpr::Var(name), PreHirExpr::Const(m, _)) => (name.clone(), *m as u64),
+            (PreHirExpr::Const(m, _), PreHirExpr::Var(name)) => (name.clone(), *m as u64),
             _ => return None,
         },
         _ => return None,
@@ -522,8 +522,8 @@ fn trace_or_subvar_piece(lhs: &DirExpr, rhs: &DirExpr, mask: u64) -> Option<(Str
     if and_mask != expected_low_mask {
         return None;
     }
-    let DirExpr::Binary {
-        op: DirBinaryOp::Shr | DirBinaryOp::Sar,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr | PreHirBinaryOp::Sar,
         lhs: shr_lhs,
         rhs: shr_amt,
         ..
@@ -531,36 +531,36 @@ fn trace_or_subvar_piece(lhs: &DirExpr, rhs: &DirExpr, mask: u64) -> Option<(Str
     else {
         return None;
     };
-    let DirExpr::Const(shr_n, _) = shr_amt.as_ref() else {
+    let PreHirExpr::Const(shr_n, _) = shr_amt.as_ref() else {
         return None;
     };
     if shr_n != n {
         return None;
     }
     match shr_lhs.as_ref() {
-        DirExpr::Var(name) if name == &src => Some((src, mask)),
+        PreHirExpr::Var(name) if name == &src => Some((src, mask)),
         _ => None,
     }
 }
 
-fn analyze_lvalue_use(lhs: &DirLValue, var_name: &str, uses: &mut Vec<UseInfo>) {
+fn analyze_lvalue_use(lhs: &PreHirLValue, var_name: &str, uses: &mut Vec<UseInfo>) {
     match lhs {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => {
             if expr_contains_var(ptr, var_name) {
                 uses.push(UseInfo {
                     context: UseContext::Incompatible,
                 });
             }
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             if expr_contains_var(base, var_name) || expr_contains_var(index, var_name) {
                 uses.push(UseInfo {
                     context: UseContext::Incompatible,
                 });
             }
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             if expr_contains_var(base, var_name) {
                 uses.push(UseInfo {
                     context: UseContext::Incompatible,
@@ -572,7 +572,7 @@ fn analyze_lvalue_use(lhs: &DirLValue, var_name: &str, uses: &mut Vec<UseInfo>) 
 
 /// Global Subvariable Flow solver executing worklist bit constraint propagation backward and forward.
 struct SubvarFlowSolver {
-    def_map: HashMap<String, DirExpr>,
+    def_map: HashMap<String, PreHirExpr>,
     type_map: HashMap<String, NirType>,
     multi_defined: HashSet<String>,
     varmap: HashMap<String, ReplaceVar>,
@@ -582,7 +582,7 @@ struct SubvarFlowSolver {
 }
 
 impl SubvarFlowSolver {
-    fn solve(&mut self, body: &[DirStmt]) -> bool {
+    fn solve(&mut self, body: &[PreHirStmt]) -> bool {
         while let Some((var_name, mask)) = self.worklist.pop() {
             if let Some(existing) = self.varmap.get(&var_name) {
                 if existing.mask != mask {
@@ -647,44 +647,44 @@ impl SubvarFlowSolver {
             // but produces a bogus, uninitialized-looking declaration for a
             // synthetic named value that isn't backed by any real storage
             // (e.g. a fixed-address field read materialized as a bare,
-            // deliberately-unregistered `DirExpr::Var`, as in the Windows
+            // deliberately-unregistered `PreHirExpr::Var`, as in the Windows
             // TEB/PEB field recognition in `fission-pcode`).
             None => return self.type_map.contains_key(var_name),
         };
 
         match def_expr {
-            DirExpr::Binary { op, lhs, rhs, .. } => match op {
-                DirBinaryOp::Or => {
+            PreHirExpr::Binary { op, lhs, rhs, .. } => match op {
+                PreHirBinaryOp::Or => {
                     if let Some((src, piece_mask)) = trace_or_subvar_piece(lhs, rhs, mask) {
                         self.worklist.push((src, piece_mask));
                         return true;
                     }
-                    if let DirExpr::Var(l) = &**lhs {
+                    if let PreHirExpr::Var(l) = &**lhs {
                         self.worklist.push((l.clone(), mask));
                     }
-                    if let DirExpr::Var(r) = &**rhs {
+                    if let PreHirExpr::Var(r) = &**rhs {
                         self.worklist.push((r.clone(), mask));
                     }
                     true
                 }
-                DirBinaryOp::Add | DirBinaryOp::Sub | DirBinaryOp::And | DirBinaryOp::Xor => {
-                    if let DirExpr::Var(l) = &**lhs {
+                PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::And | PreHirBinaryOp::Xor => {
+                    if let PreHirExpr::Var(l) = &**lhs {
                         self.worklist.push((l.clone(), mask));
                     }
-                    if let DirExpr::Var(r) = &**rhs {
+                    if let PreHirExpr::Var(r) = &**rhs {
                         self.worklist.push((r.clone(), mask));
                     }
                     true
                 }
-                DirBinaryOp::Shl => {
-                    if let DirExpr::Const(sa, _) = &**rhs {
+                PreHirBinaryOp::Shl => {
+                    if let PreHirExpr::Const(sa, _) = &**rhs {
                         let sa = *sa as u32;
                         if sa < 64 {
                             let new_mask = mask >> sa;
                             if new_mask == 0 {
                                 true
                             } else if (new_mask << sa) == mask {
-                                if let DirExpr::Var(l) = &**lhs {
+                                if let PreHirExpr::Var(l) = &**lhs {
                                     self.worklist.push((l.clone(), new_mask));
                                 }
                                 true
@@ -698,13 +698,13 @@ impl SubvarFlowSolver {
                         false
                     }
                 }
-                DirBinaryOp::Shr | DirBinaryOp::Sar => {
-                    if let DirExpr::Const(sa, _) = &**rhs {
+                PreHirBinaryOp::Shr | PreHirBinaryOp::Sar => {
+                    if let PreHirExpr::Const(sa, _) = &**rhs {
                         let sa = *sa as u32;
                         if sa < 64 {
                             let new_mask = mask << sa;
                             if (new_mask >> sa) == mask {
-                                if let DirExpr::Var(l) = &**lhs {
+                                if let PreHirExpr::Var(l) = &**lhs {
                                     self.worklist.push((l.clone(), new_mask));
                                 }
                                 true
@@ -720,17 +720,17 @@ impl SubvarFlowSolver {
                 }
                 _ => false,
             },
-            DirExpr::Cast { expr, .. } => {
-                if let DirExpr::Var(inner) = &**expr {
+            PreHirExpr::Cast { expr, .. } => {
+                if let PreHirExpr::Var(inner) = &**expr {
                     self.worklist.push((inner.clone(), mask));
                     true
                 } else {
                     false
                 }
             }
-            DirExpr::Unary { op, expr, .. } => {
-                if *op == DirUnaryOp::BitNot || *op == DirUnaryOp::Neg {
-                    if let DirExpr::Var(inner) = &**expr {
+            PreHirExpr::Unary { op, expr, .. } => {
+                if *op == PreHirUnaryOp::BitNot || *op == PreHirUnaryOp::Neg {
+                    if let PreHirExpr::Var(inner) = &**expr {
                         self.worklist.push((inner.clone(), mask));
                         true
                     } else {
@@ -740,17 +740,17 @@ impl SubvarFlowSolver {
                     false
                 }
             }
-            DirExpr::Var(src) => {
+            PreHirExpr::Var(src) => {
                 self.worklist.push((src.clone(), mask));
                 true
             }
-            DirExpr::Const(_, _) => true,
-            DirExpr::Load { .. } | DirExpr::Call { .. } => true,
+            PreHirExpr::Const(_, _) => true,
+            PreHirExpr::Load { .. } | PreHirExpr::Call { .. } => true,
             _ => false,
         }
     }
 
-    fn trace_forward(&mut self, body: &[DirStmt], var_name: &str, mask: u64) -> bool {
+    fn trace_forward(&mut self, body: &[PreHirStmt], var_name: &str, mask: u64) -> bool {
         let mut uses = Vec::new();
         find_uses(body, var_name, &mut uses);
 
@@ -788,13 +788,13 @@ impl SubvarFlowSolver {
                     }
                 }
                 UseContext::Binary { op, other, dest } => match op {
-                    DirBinaryOp::Add
-                    | DirBinaryOp::Sub
-                    | DirBinaryOp::And
-                    | DirBinaryOp::Or
-                    | DirBinaryOp::Xor => {
+                    PreHirBinaryOp::Add
+                    | PreHirBinaryOp::Sub
+                    | PreHirBinaryOp::And
+                    | PreHirBinaryOp::Or
+                    | PreHirBinaryOp::Xor => {
                         self.worklist.push((dest.clone(), mask));
-                        if let DirExpr::Var(o) = other {
+                        if let PreHirExpr::Var(o) = other {
                             self.worklist.push((o.clone(), mask));
                         }
                     }
@@ -802,12 +802,12 @@ impl SubvarFlowSolver {
                 },
                 UseContext::Compare { op: _, other } => {
                     match other {
-                        DirExpr::Const(val, _) => {
+                        PreHirExpr::Const(val, _) => {
                             if (val as u64 & !mask) != 0 {
                                 return false;
                             }
                         }
-                        DirExpr::Var(o) => {
+                        PreHirExpr::Var(o) => {
                             self.worklist.push((o.clone(), mask));
                         }
                         _ => return false,
@@ -822,14 +822,14 @@ impl SubvarFlowSolver {
 }
 
 /// Recursively applies subvariable replacements to a given expression.
-fn rewrite_expr(expr: &mut DirExpr, varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_expr(expr: &mut PreHirExpr, varmap: &HashMap<String, ReplaceVar>) {
     match expr {
-        DirExpr::Cast { ty, expr: inner } => {
-            if let DirExpr::Var(name) = &**inner {
+        PreHirExpr::Cast { ty, expr: inner } => {
+            if let PreHirExpr::Var(name) = &**inner {
                 if let Some(rep) = varmap.get(name) {
                     if let NirType::Int { bits, .. } = ty {
                         if *bits == rep.bitsize {
-                            *expr = DirExpr::Var(rep.new_name.clone());
+                            *expr = PreHirExpr::Var(rep.new_name.clone());
                             return;
                         }
                     }
@@ -837,32 +837,32 @@ fn rewrite_expr(expr: &mut DirExpr, varmap: &HashMap<String, ReplaceVar>) {
             }
             rewrite_expr(inner, varmap);
         }
-        DirExpr::Binary { op, lhs, rhs, ty } => {
-            if *op == DirBinaryOp::And {
-                if let (DirExpr::Var(name), DirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
+        PreHirExpr::Binary { op, lhs, rhs, ty } => {
+            if *op == PreHirBinaryOp::And {
+                if let (PreHirExpr::Var(name), PreHirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
                     if let Some(rep) = varmap.get(name) {
                         if *mask as u64 == rep.mask {
-                            *expr = DirExpr::Var(rep.new_name.clone());
+                            *expr = PreHirExpr::Var(rep.new_name.clone());
                             return;
                         }
                     }
                 }
-                if let (DirExpr::Const(mask, _), DirExpr::Var(name)) = (&**lhs, &**rhs) {
+                if let (PreHirExpr::Const(mask, _), PreHirExpr::Var(name)) = (&**lhs, &**rhs) {
                     if let Some(rep) = varmap.get(name) {
                         if *mask as u64 == rep.mask {
-                            *expr = DirExpr::Var(rep.new_name.clone());
+                            *expr = PreHirExpr::Var(rep.new_name.clone());
                             return;
                         }
                     }
                 }
             }
 
-            let l_narrow_ty = if let DirExpr::Var(n) = &**lhs {
+            let l_narrow_ty = if let PreHirExpr::Var(n) = &**lhs {
                 varmap.get(n).map(|r| r.new_type.clone())
             } else {
                 None
             };
-            let r_narrow_ty = if let DirExpr::Var(n) = &**rhs {
+            let r_narrow_ty = if let PreHirExpr::Var(n) = &**rhs {
                 varmap.get(n).map(|r| r.new_type.clone())
             } else {
                 None
@@ -875,10 +875,10 @@ fn rewrite_expr(expr: &mut DirExpr, varmap: &HashMap<String, ReplaceVar>) {
                 *ty = nty;
             }
         }
-        DirExpr::Unary {
+        PreHirExpr::Unary {
             expr: inner, ty, ..
         } => {
-            let narrow_ty = if let DirExpr::Var(name) = &**inner {
+            let narrow_ty = if let PreHirExpr::Var(name) = &**inner {
                 varmap.get(name).map(|rep| rep.new_type.clone())
             } else {
                 None
@@ -888,7 +888,7 @@ fn rewrite_expr(expr: &mut DirExpr, varmap: &HashMap<String, ReplaceVar>) {
                 *ty = nty;
             }
         }
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             if let Some(rep) = varmap.get(name) {
                 *name = rep.new_name.clone();
             }
@@ -899,33 +899,33 @@ fn rewrite_expr(expr: &mut DirExpr, varmap: &HashMap<String, ReplaceVar>) {
     }
 }
 
-fn for_each_child_expr<F>(expr: &mut DirExpr, mut f: F)
+fn for_each_child_expr<F>(expr: &mut PreHirExpr, mut f: F)
 where
-    F: FnMut(&mut DirExpr),
+    F: FnMut(&mut PreHirExpr),
 {
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             f(inner);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             f(lhs);
             f(rhs);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 f(arg);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             f(base);
             f(index);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -939,50 +939,50 @@ where
     }
 }
 
-fn rewrite_lvalue(lhs: &mut DirLValue, varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_lvalue(lhs: &mut PreHirLValue, varmap: &HashMap<String, ReplaceVar>) {
     match lhs {
-        DirLValue::Var(name) => {
+        PreHirLValue::Var(name) => {
             if let Some(rep) = varmap.get(name) {
                 *name = rep.new_name.clone();
             }
         }
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Deref { ptr, .. } => {
             rewrite_expr(ptr, varmap);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             rewrite_expr(base, varmap);
             rewrite_expr(index, varmap);
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             rewrite_expr(base, varmap);
         }
     }
 }
 
-fn rewrite_stmt(stmt: &mut DirStmt, varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_stmt(stmt: &mut PreHirStmt, varmap: &HashMap<String, ReplaceVar>) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             rewrite_lvalue(lhs, varmap);
             rewrite_expr(rhs, varmap);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             rewrite_expr(expr, varmap);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             rewrite_expr(va_list, varmap);
         }
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             rewrite_stmts(body, varmap);
         }
-        DirStmt::While { cond, body } => {
+        PreHirStmt::While { cond, body } => {
             rewrite_expr(cond, varmap);
             rewrite_stmts(body, varmap);
         }
-        DirStmt::DoWhile { body, cond } => {
+        PreHirStmt::DoWhile { body, cond } => {
             rewrite_stmts(body, varmap);
             rewrite_expr(cond, varmap);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -999,7 +999,7 @@ fn rewrite_stmt(stmt: &mut DirStmt, varmap: &HashMap<String, ReplaceVar>) {
             }
             rewrite_stmts(body, varmap);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -1008,7 +1008,7 @@ fn rewrite_stmt(stmt: &mut DirStmt, varmap: &HashMap<String, ReplaceVar>) {
             rewrite_stmts(then_body, varmap);
             rewrite_stmts(else_body, varmap);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -1023,14 +1023,14 @@ fn rewrite_stmt(stmt: &mut DirStmt, varmap: &HashMap<String, ReplaceVar>) {
     }
 }
 
-fn rewrite_stmts(stmts: &mut [DirStmt], varmap: &HashMap<String, ReplaceVar>) {
+fn rewrite_stmts(stmts: &mut [PreHirStmt], varmap: &HashMap<String, ReplaceVar>) {
     for stmt in stmts.iter_mut() {
         rewrite_stmt(stmt, varmap);
     }
 }
 
 /// Pipeline entry point for the Global Subvariable Flow Analyzer normalization pass.
-pub fn apply_subvar_flow_pass(func: &mut DirFunction) -> bool {
+pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
     let mut assigns = Vec::new();
     let mut multi_defined = HashSet::default();
     collect_assignments(&func.body, &mut assigns, &mut multi_defined);
@@ -1048,25 +1048,25 @@ pub fn apply_subvar_flow_pass(func: &mut DirFunction) -> bool {
             continue;
         }
         match &assign.rhs {
-            DirExpr::Binary {
-                op: DirBinaryOp::And,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
                 lhs,
                 rhs,
                 ..
             } => {
-                if let (DirExpr::Var(name), DirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
+                if let (PreHirExpr::Var(name), PreHirExpr::Const(mask, _)) = (&**lhs, &**rhs) {
                     if is_valid_subvar_mask(*mask as u64) {
                         candidate_set.insert((name.clone(), *mask as u64));
                     }
                 }
-                if let (DirExpr::Const(mask, _), DirExpr::Var(name)) = (&**lhs, &**rhs) {
+                if let (PreHirExpr::Const(mask, _), PreHirExpr::Var(name)) = (&**lhs, &**rhs) {
                     if is_valid_subvar_mask(*mask as u64) {
                         candidate_set.insert((name.clone(), *mask as u64));
                     }
                 }
             }
-            DirExpr::Cast { ty, expr } => {
-                if let DirExpr::Var(name) = &**expr {
+            PreHirExpr::Cast { ty, expr } => {
+                if let PreHirExpr::Var(name) = &**expr {
                     if let NirType::Int { bits, .. } = ty {
                         if *bits == 8 || *bits == 16 || *bits == 32 {
                             let mask = (1u64 << bits) - 1;
@@ -1121,7 +1121,7 @@ pub fn apply_subvar_flow_pass(func: &mut DirFunction) -> bool {
         if solver.solve(&func.body) {
             for replace_var in solver.varmap.values() {
                 if !func.locals.iter().any(|l| l.name == replace_var.new_name) {
-                    let binding = DirBinding {
+                    let binding = PreHirBinding {
                         name: replace_var.new_name.clone(),
                         ty: replace_var.new_type.clone(),
                         surface_type_name: None,
@@ -1167,7 +1167,7 @@ mod tests {
 
     #[test]
     fn test_subvar_flow_rewrite() {
-        let mut func = DirFunction::default();
+        let mut func = PreHirFunction::default();
         func.name = "test_subflow".to_string();
 
         // `a`/`b` are function parameters (real, declared storage feeding
@@ -1177,35 +1177,35 @@ mod tests {
         // is treated as a synthetic value with no real storage to declare,
         // not a parameter -- see the Windows TEB/PEB field regression this
         // guarded against).
-        func.params.push(DirBinding {
+        func.params.push(PreHirBinding {
             name: "a".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::ParamIndex(0)),
             initializer: None,
         });
-        func.params.push(DirBinding {
+        func.params.push(PreHirBinding {
             name: "b".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::ParamIndex(1)),
             initializer: None,
         });
-        func.locals.push(DirBinding {
+        func.locals.push(PreHirBinding {
             name: "x".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
         });
-        func.locals.push(DirBinding {
+        func.locals.push(PreHirBinding {
             name: "y".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
             origin: Some(NirBindingOrigin::Temp),
             initializer: None,
         });
-        func.locals.push(DirBinding {
+        func.locals.push(PreHirBinding {
             name: "z".to_string(),
             ty: u64_ty(),
             surface_type_name: None,
@@ -1217,30 +1217,30 @@ mod tests {
         // x = a + b;
         // y = x & 0xff;
         // z = y == 12;
-        let stmt1 = DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_string()),
-            rhs: DirExpr::Binary {
-                op: DirBinaryOp::Add,
-                lhs: Box::new(DirExpr::Var("a".to_string())),
-                rhs: Box::new(DirExpr::Var("b".to_string())),
+        let stmt1 = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                rhs: Box::new(PreHirExpr::Var("b".to_string())),
                 ty: u64_ty(),
             },
         };
-        let stmt2 = DirStmt::Assign {
-            lhs: DirLValue::Var("y".to_string()),
-            rhs: DirExpr::Binary {
-                op: DirBinaryOp::And,
-                lhs: Box::new(DirExpr::Var("x".to_string())),
-                rhs: Box::new(DirExpr::Const(0xff, u64_ty())),
+        let stmt2 = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("y".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
+                lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                rhs: Box::new(PreHirExpr::Const(0xff, u64_ty())),
                 ty: u64_ty(),
             },
         };
-        let stmt3 = DirStmt::Assign {
-            lhs: DirLValue::Var("z".to_string()),
-            rhs: DirExpr::Binary {
-                op: DirBinaryOp::Eq,
-                lhs: Box::new(DirExpr::Var("y".to_string())),
-                rhs: Box::new(DirExpr::Const(12, u64_ty())),
+        let stmt3 = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("z".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Eq,
+                lhs: Box::new(PreHirExpr::Var("y".to_string())),
+                rhs: Box::new(PreHirExpr::Const(12, u64_ty())),
                 ty: NirType::Bool,
             },
         };
@@ -1251,14 +1251,14 @@ mod tests {
         assert!(changed);
 
         // Verify z comparison is bridged and y's masking AND is completely eliminated
-        if let DirStmt::Assign { rhs, .. } = &func.body[2] {
-            if let DirExpr::Binary { lhs, rhs, .. } = rhs {
-                if let DirExpr::Var(name) = &**lhs {
+        if let PreHirStmt::Assign { rhs, .. } = &func.body[2] {
+            if let PreHirExpr::Binary { lhs, rhs, .. } = rhs {
+                if let PreHirExpr::Var(name) = &**lhs {
                     assert_eq!(name, "x_sub8");
                 } else {
                     panic!("LHS should be narrow variable x_sub8");
                 }
-                if let DirExpr::Const(val, _) = &**rhs {
+                if let PreHirExpr::Const(val, _) = &**rhs {
                     assert_eq!(*val, 12);
                 } else {
                     panic!("RHS should be constant 12");

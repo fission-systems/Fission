@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use fission_midend_dir::util::expr_type;
+use fission_midend_prehir::util::expr_type;
 use crate::HashMap;
 
 pub fn type_mask(ty: &NirType) -> u64 {
@@ -24,22 +24,22 @@ fn type_bits(ty: &NirType) -> u32 {
     }
 }
 
-fn get_expr_type(expr: &DirExpr, type_map: &HashMap<String, NirType>) -> NirType {
+fn get_expr_type(expr: &PreHirExpr, type_map: &HashMap<String, NirType>) -> NirType {
     match expr {
-        DirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
+        PreHirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
         _ => expr_type(expr),
     }
 }
 
 pub fn eval_expr_nz_mask(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     var_masks: &HashMap<String, u64>,
     type_map: &HashMap<String, NirType>,
 ) -> u64 {
     match expr {
-        DirExpr::Const(val, _) => *val as u64,
-        DirExpr::Var(name) => *var_masks.get(name).unwrap_or(&u64::MAX),
-        DirExpr::Cast { ty, expr } => {
+        PreHirExpr::Const(val, _) => *val as u64,
+        PreHirExpr::Var(name) => *var_masks.get(name).unwrap_or(&u64::MAX),
+        PreHirExpr::Cast { ty, expr } => {
             let inner_mask = eval_expr_nz_mask(expr, var_masks, type_map);
             let outer_mask = type_mask(ty);
             let inner_ty = get_expr_type(expr, type_map);
@@ -63,14 +63,14 @@ pub fn eval_expr_nz_mask(
             }
             inner_mask & outer_mask
         }
-        DirExpr::Binary { op, lhs, rhs, ty } => {
+        PreHirExpr::Binary { op, lhs, rhs, ty } => {
             let left_mask = eval_expr_nz_mask(lhs, var_masks, type_map);
             let right_mask = eval_expr_nz_mask(rhs, var_masks, type_map);
             let out_mask = type_mask(ty);
             match op {
-                DirBinaryOp::And => left_mask & right_mask & out_mask,
-                DirBinaryOp::Or | DirBinaryOp::Xor => (left_mask | right_mask) & out_mask,
-                DirBinaryOp::Add => {
+                PreHirBinaryOp::And => left_mask & right_mask & out_mask,
+                PreHirBinaryOp::Or | PreHirBinaryOp::Xor => (left_mask | right_mask) & out_mask,
+                PreHirBinaryOp::Add => {
                     let h1 = 64 - left_mask.leading_zeros();
                     let h2 = 64 - right_mask.leading_zeros();
                     let max_h = std::cmp::max(h1, h2);
@@ -81,8 +81,8 @@ pub fn eval_expr_nz_mask(
                         ((1u64 << sum_h) - 1) & out_mask
                     }
                 }
-                DirBinaryOp::Shl => {
-                    if let DirExpr::Const(sa, _) = &**rhs {
+                PreHirBinaryOp::Shl => {
+                    if let PreHirExpr::Const(sa, _) = &**rhs {
                         let sa = *sa as u32;
                         if sa >= 64 {
                             0
@@ -93,8 +93,8 @@ pub fn eval_expr_nz_mask(
                         out_mask
                     }
                 }
-                DirBinaryOp::Shr => {
-                    if let DirExpr::Const(sa, _) = &**rhs {
+                PreHirBinaryOp::Shr => {
+                    if let PreHirExpr::Const(sa, _) = &**rhs {
                         let sa = *sa as u32;
                         if sa >= 64 {
                             0
@@ -105,8 +105,8 @@ pub fn eval_expr_nz_mask(
                         out_mask
                     }
                 }
-                DirBinaryOp::Sar => {
-                    if let DirExpr::Const(sa, _) = &**rhs {
+                PreHirBinaryOp::Sar => {
+                    if let PreHirExpr::Const(sa, _) = &**rhs {
                         let sa = *sa as u32;
                         if sa >= 64 {
                             out_mask
@@ -123,22 +123,22 @@ pub fn eval_expr_nz_mask(
                         out_mask
                     }
                 }
-                DirBinaryOp::LogicalAnd
-                | DirBinaryOp::LogicalOr
-                | DirBinaryOp::Eq
-                | DirBinaryOp::Ne
-                | DirBinaryOp::Lt
-                | DirBinaryOp::Le
-                | DirBinaryOp::Gt
-                | DirBinaryOp::Ge
-                | DirBinaryOp::SLt
-                | DirBinaryOp::SLe
-                | DirBinaryOp::SGt
-                | DirBinaryOp::SGe => 1,
+                PreHirBinaryOp::LogicalAnd
+                | PreHirBinaryOp::LogicalOr
+                | PreHirBinaryOp::Eq
+                | PreHirBinaryOp::Ne
+                | PreHirBinaryOp::Lt
+                | PreHirBinaryOp::Le
+                | PreHirBinaryOp::Gt
+                | PreHirBinaryOp::Ge
+                | PreHirBinaryOp::SLt
+                | PreHirBinaryOp::SLe
+                | PreHirBinaryOp::SGt
+                | PreHirBinaryOp::SGe => 1,
                 _ => out_mask,
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             then_expr,
             else_expr,
             ty,
@@ -148,10 +148,10 @@ pub fn eval_expr_nz_mask(
             let e_mask = eval_expr_nz_mask(else_expr, var_masks, type_map);
             (t_mask | e_mask) & type_mask(ty)
         }
-        DirExpr::Unary { op, expr, ty } => {
+        PreHirExpr::Unary { op, expr, ty } => {
             let out_mask = type_mask(ty);
             match op {
-                DirUnaryOp::Not => 1,
+                PreHirUnaryOp::Not => 1,
                 _ => out_mask,
             }
         }
@@ -163,14 +163,14 @@ pub fn eval_expr_nz_mask(
 }
 
 fn collect_assignments_in_stmt(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     var_masks: &mut HashMap<String, u64>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         } => {
             let new_mask = eval_expr_nz_mask(rhs, var_masks, type_map);
@@ -181,14 +181,14 @@ fn collect_assignments_in_stmt(
                 changed = true;
             }
         }
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. } => {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. } => {
             for s in stmts {
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -200,7 +200,7 @@ fn collect_assignments_in_stmt(
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init {
@@ -213,7 +213,7 @@ fn collect_assignments_in_stmt(
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for s in &case.body {
                     changed |= collect_assignments_in_stmt(s, var_masks, type_map);
@@ -228,7 +228,7 @@ fn collect_assignments_in_stmt(
     changed
 }
 
-pub fn compute_nz_masks(func: &DirFunction) -> HashMap<String, u64> {
+pub fn compute_nz_masks(func: &PreHirFunction) -> HashMap<String, u64> {
     let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(binding.name.clone(), binding.ty.clone());
@@ -264,34 +264,34 @@ pub fn compute_nz_masks(func: &DirFunction) -> HashMap<String, u64> {
 }
 
 fn simplify_expr(
-    expr: &mut DirExpr,
+    expr: &mut PreHirExpr,
     nz_masks: &HashMap<String, u64>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
 
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
             changed |= simplify_expr(inner, nz_masks, type_map);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= simplify_expr(lhs, nz_masks, type_map);
             changed |= simplify_expr(rhs, nz_masks, type_map);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= simplify_expr(arg, nz_masks, type_map);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= simplify_expr(base, nz_masks, type_map);
             changed |= simplify_expr(index, nz_masks, type_map);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -304,20 +304,20 @@ fn simplify_expr(
         _ => {}
     }
 
-    if let DirExpr::Binary {
-        op: DirBinaryOp::And,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::And,
         lhs,
         rhs,
         ..
     } = expr
     {
-        if let DirExpr::Const(mask, _) = &**rhs {
+        if let PreHirExpr::Const(mask, _) = &**rhs {
             let active = eval_expr_nz_mask(lhs, nz_masks, type_map);
             if (active & !(*mask as u64)) == 0 {
                 *expr = (**lhs).clone();
                 return true;
             }
-        } else if let DirExpr::Const(mask, _) = &**lhs {
+        } else if let PreHirExpr::Const(mask, _) = &**lhs {
             let active = eval_expr_nz_mask(rhs, nz_masks, type_map);
             if (active & !(*mask as u64)) == 0 {
                 *expr = (**rhs).clone();
@@ -330,18 +330,18 @@ fn simplify_expr(
 }
 
 fn simplify_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     nz_masks: &HashMap<String, u64>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             match lhs {
-                DirLValue::Deref { ptr, .. } => {
+                PreHirLValue::Deref { ptr, .. } => {
                     changed |= simplify_expr(ptr, nz_masks, type_map);
                 }
-                DirLValue::Index { base, index, .. } => {
+                PreHirLValue::Index { base, index, .. } => {
                     changed |= simplify_expr(base, nz_masks, type_map);
                     changed |= simplify_expr(index, nz_masks, type_map);
                 }
@@ -349,16 +349,16 @@ fn simplify_stmt(
             }
             changed |= simplify_expr(rhs, nz_masks, type_map);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr, nz_masks, type_map);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list, nz_masks, type_map);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body, nz_masks, type_map);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -375,7 +375,7 @@ fn simplify_stmt(
             }
             changed |= simplify_stmts(body, nz_masks, type_map);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -384,7 +384,7 @@ fn simplify_stmt(
             changed |= simplify_stmts(then_body, nz_masks, type_map);
             changed |= simplify_stmts(else_body, nz_masks, type_map);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -401,7 +401,7 @@ fn simplify_stmt(
 }
 
 fn simplify_stmts(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     nz_masks: &HashMap<String, u64>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
@@ -412,7 +412,7 @@ fn simplify_stmts(
     changed
 }
 
-pub fn apply_nz_mask_simplification_pass(func: &mut DirFunction) -> bool {
+pub fn apply_nz_mask_simplification_pass(func: &mut PreHirFunction) -> bool {
     let nz_masks = compute_nz_masks(func);
     let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {

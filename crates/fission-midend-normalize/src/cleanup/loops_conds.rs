@@ -3,7 +3,7 @@ use crate::prelude::*;
 use super::utils::*;
 use crate::{HashMap, HashSet};
 
-pub fn collapse_loop_exit_alias_returns(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn collapse_loop_exit_alias_returns(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
 
@@ -24,9 +24,9 @@ pub fn collapse_loop_exit_alias_returns(stmts: &mut Vec<DirStmt>) -> bool {
             idx += 1;
             continue;
         };
-        let source_expr = DirExpr::Var(source.clone());
+        let source_expr = PreHirExpr::Var(source.clone());
         if remove_loop_exit_alias_assignment(&mut stmts[idx], &alias, &source) {
-            stmts[idx + 1] = DirStmt::Return(Some(source_expr));
+            stmts[idx + 1] = PreHirStmt::Return(Some(source_expr));
             changed = true;
         }
         idx += 1;
@@ -35,7 +35,7 @@ pub fn collapse_loop_exit_alias_returns(stmts: &mut Vec<DirStmt>) -> bool {
     changed
 }
 
-pub fn recover_guarded_loop_tail_accumulator_returns(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn recover_guarded_loop_tail_accumulator_returns(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
     while idx + 3 < stmts.len() {
@@ -48,11 +48,11 @@ pub fn recover_guarded_loop_tail_accumulator_returns(stmts: &mut Vec<DirStmt>) -
         stmts.splice(
             idx..end,
             [
-                DirStmt::While {
+                PreHirStmt::While {
                     cond: replacement.cond,
                     body: replacement.body,
                 },
-                DirStmt::Return(Some(DirExpr::Var(replacement.accumulator))),
+                PreHirStmt::Return(Some(PreHirExpr::Var(replacement.accumulator))),
             ],
         );
         changed = true;
@@ -66,17 +66,17 @@ pub fn recover_guarded_loop_tail_accumulator_returns(stmts: &mut Vec<DirStmt>) -
 }
 
 struct GuardedLoopTailReplacement {
-    cond: DirExpr,
-    body: Vec<DirStmt>,
+    cond: PreHirExpr,
+    body: Vec<PreHirStmt>,
     accumulator: String,
     end: usize,
 }
 
 fn guarded_loop_tail_replacement(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     idx: usize,
 ) -> Option<GuardedLoopTailReplacement> {
-    let DirStmt::If {
+    let PreHirStmt::If {
         cond,
         then_body,
         else_body,
@@ -87,11 +87,11 @@ fn guarded_loop_tail_replacement(
     if !else_body.is_empty() {
         return None;
     }
-    let [DirStmt::Goto(label)] = then_body.as_slice() else {
+    let [PreHirStmt::Goto(label)] = then_body.as_slice() else {
         return None;
     };
     let stale_temp = return_var_name(stmts.get(idx + 1)?)?.to_string();
-    let DirStmt::Label(body_label) = stmts.get(idx + 2)? else {
+    let PreHirStmt::Label(body_label) = stmts.get(idx + 2)? else {
         return None;
     };
     if body_label != label {
@@ -119,7 +119,7 @@ fn guarded_loop_tail_replacement(
     }
     let stale_def_idx = body
         .iter()
-        .position(|stmt| matches!(stmt, DirStmt::Assign { lhs: DirLValue::Var(lhs), .. } if lhs == &stale_temp))?;
+        .position(|stmt| matches!(stmt, PreHirStmt::Assign { lhs: PreHirLValue::Var(lhs), .. } if lhs == &stale_temp))?;
     let acc_update_idx = body
         .iter()
         .position(|stmt| accumulator_update_stmt(stmt, &stale_temp).is_some())?;
@@ -134,30 +134,30 @@ fn guarded_loop_tail_replacement(
     })
 }
 
-fn recover_guarded_loop_tail_accumulator_returns_in_stmt(stmt: &mut DirStmt) -> bool {
+fn recover_guarded_loop_tail_accumulator_returns_in_stmt(stmt: &mut PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Block(stmts)
-        | DirStmt::While { body: stmts, .. }
-        | DirStmt::DoWhile { body: stmts, .. } => {
+        PreHirStmt::Block(stmts)
+        | PreHirStmt::While { body: stmts, .. }
+        | PreHirStmt::DoWhile { body: stmts, .. } => {
             recover_guarded_loop_tail_accumulator_returns(stmts)
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             let mut changed = false;
             if let Some(init) = init
-                && let DirStmt::Block(stmts) = init.as_mut()
+                && let PreHirStmt::Block(stmts) = init.as_mut()
             {
                 changed |= recover_guarded_loop_tail_accumulator_returns(stmts);
             }
             if let Some(update) = update
-                && let DirStmt::Block(stmts) = update.as_mut()
+                && let PreHirStmt::Block(stmts) = update.as_mut()
             {
                 changed |= recover_guarded_loop_tail_accumulator_returns(stmts);
             }
             changed | recover_guarded_loop_tail_accumulator_returns(body)
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -165,7 +165,7 @@ fn recover_guarded_loop_tail_accumulator_returns_in_stmt(stmt: &mut DirStmt) -> 
             recover_guarded_loop_tail_accumulator_returns(then_body)
                 | recover_guarded_loop_tail_accumulator_returns(else_body)
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
                 changed |= recover_guarded_loop_tail_accumulator_returns(&mut case.body);
@@ -176,15 +176,15 @@ fn recover_guarded_loop_tail_accumulator_returns_in_stmt(stmt: &mut DirStmt) -> 
     }
 }
 
-fn next_label_or_end(stmts: &[DirStmt], start: usize) -> usize {
+fn next_label_or_end(stmts: &[PreHirStmt], start: usize) -> usize {
     stmts[start..]
         .iter()
-        .position(|stmt| matches!(stmt, DirStmt::Label(_)))
+        .position(|stmt| matches!(stmt, PreHirStmt::Label(_)))
         .map(|offset| start + offset)
         .unwrap_or(stmts.len())
 }
 
-fn accumulator_updated_from_temp(body: &[DirStmt], temp: &str) -> Option<String> {
+fn accumulator_updated_from_temp(body: &[PreHirStmt], temp: &str) -> Option<String> {
     let mut acc = None;
     for stmt in body {
         let Some(candidate) = accumulator_update_stmt(stmt, temp) else {
@@ -198,12 +198,12 @@ fn accumulator_updated_from_temp(body: &[DirStmt], temp: &str) -> Option<String>
     acc
 }
 
-fn accumulator_update_stmt(stmt: &DirStmt, temp: &str) -> Option<String> {
-    let DirStmt::Assign {
-        lhs: DirLValue::Var(lhs),
+fn accumulator_update_stmt(stmt: &PreHirStmt, temp: &str) -> Option<String> {
+    let PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(lhs),
         rhs:
-            DirExpr::Binary {
-                op: DirBinaryOp::Add | DirBinaryOp::Sub,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add | PreHirBinaryOp::Sub,
                 lhs: bin_lhs,
                 rhs: bin_rhs,
                 ..
@@ -223,26 +223,26 @@ fn accumulator_update_stmt(stmt: &DirStmt, temp: &str) -> Option<String> {
     }
 }
 
-fn vars_in_expr(expr: &DirExpr) -> HashSet<String> {
+fn vars_in_expr(expr: &PreHirExpr) -> HashSet<String> {
     let mut vars = HashSet::default();
     collect_vars_in_expr(expr, &mut vars);
     vars
 }
 
-fn collect_vars_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
+fn collect_vars_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             vars.insert(name.clone());
         }
-        DirExpr::Const(_, _) => {}
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::Load { ptr: expr, .. }
-        | DirExpr::PtrOffset { base: expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. }
-        | DirExpr::AggregateCopy { src: expr, .. } => collect_vars_in_expr(expr, vars),
-        DirExpr::Binary { lhs, rhs, .. }
-        | DirExpr::Index {
+        PreHirExpr::Const(_, _) => {}
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => collect_vars_in_expr(expr, vars),
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index {
             base: lhs,
             index: rhs,
             ..
@@ -250,7 +250,7 @@ fn collect_vars_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
             collect_vars_in_expr(lhs, vars);
             collect_vars_in_expr(rhs, vars);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -260,7 +260,7 @@ fn collect_vars_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
             collect_vars_in_expr(then_expr, vars);
             collect_vars_in_expr(else_expr, vars);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_vars_in_expr(arg, vars);
             }
@@ -268,28 +268,28 @@ fn collect_vars_in_expr(expr: &DirExpr, vars: &mut HashSet<String>) {
     }
 }
 
-fn return_var_name(stmt: &DirStmt) -> Option<&str> {
+fn return_var_name(stmt: &PreHirStmt) -> Option<&str> {
     match stmt {
-        DirStmt::Return(Some(DirExpr::Var(name))) => Some(name.as_str()),
+        PreHirStmt::Return(Some(PreHirExpr::Var(name))) => Some(name.as_str()),
         _ => None,
     }
 }
 
-fn loop_executes_before_exit_return(stmts: &[DirStmt], loop_idx: usize) -> bool {
+fn loop_executes_before_exit_return(stmts: &[PreHirStmt], loop_idx: usize) -> bool {
     match stmts.get(loop_idx) {
-        Some(DirStmt::DoWhile { .. }) => true,
-        Some(DirStmt::For { init, cond, .. }) => {
+        Some(PreHirStmt::DoWhile { .. }) => true,
+        Some(PreHirStmt::For { init, cond, .. }) => {
             for_loop_guard_proves_first_iteration(stmts, loop_idx, init.as_deref(), cond.as_ref())
         }
         _ => false,
     }
 }
 
-fn loop_exit_alias_source(stmt: &DirStmt, alias: &str) -> Option<String> {
+fn loop_exit_alias_source(stmt: &PreHirStmt, alias: &str) -> Option<String> {
     match stmt {
-        DirStmt::DoWhile { body, cond } => loop_body_exit_alias_source(body, alias)
+        PreHirStmt::DoWhile { body, cond } => loop_body_exit_alias_source(body, alias)
             .filter(|source| !expr_mentions_var(cond, alias) && !expr_mentions_var(cond, source)),
-        DirStmt::For {
+        PreHirStmt::For {
             update, body, cond, ..
         } => loop_body_exit_alias_source(body, alias).filter(|source| {
             cond.as_ref()
@@ -302,14 +302,14 @@ fn loop_exit_alias_source(stmt: &DirStmt, alias: &str) -> Option<String> {
     }
 }
 
-fn loop_body_exit_alias_source(body: &[DirStmt], alias: &str) -> Option<String> {
+fn loop_body_exit_alias_source(body: &[PreHirStmt], alias: &str) -> Option<String> {
     let mut match_idx = None;
     let mut match_source = None;
 
     for (idx, stmt) in body.iter().enumerate() {
-        if let DirStmt::Assign {
-            lhs: DirLValue::Var(lhs),
-            rhs: DirExpr::Var(source),
+        if let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs),
+            rhs: PreHirExpr::Var(source),
         } = stmt
         {
             if lhs == alias && source != alias {
@@ -335,17 +335,17 @@ fn loop_body_exit_alias_source(body: &[DirStmt], alias: &str) -> Option<String> 
     Some(source)
 }
 
-fn remove_loop_exit_alias_assignment(stmt: &mut DirStmt, alias: &str, source: &str) -> bool {
+fn remove_loop_exit_alias_assignment(stmt: &mut PreHirStmt, alias: &str, source: &str) -> bool {
     let body = match stmt {
-        DirStmt::DoWhile { body, .. } | DirStmt::For { body, .. } => body,
+        PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => body,
         _ => return false,
     };
     let Some(idx) = body.iter().position(|stmt| {
         matches!(
             stmt,
-            DirStmt::Assign {
-                lhs: DirLValue::Var(lhs),
-                rhs: DirExpr::Var(rhs),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(lhs),
+                rhs: PreHirExpr::Var(rhs),
             } if lhs == alias && rhs == source
         )
     }) else {
@@ -356,13 +356,13 @@ fn remove_loop_exit_alias_assignment(stmt: &mut DirStmt, alias: &str, source: &s
 }
 
 fn for_loop_guard_proves_first_iteration(
-    stmts: &[DirStmt],
+    stmts: &[PreHirStmt],
     loop_idx: usize,
-    init: Option<&DirStmt>,
-    cond: Option<&DirExpr>,
+    init: Option<&PreHirStmt>,
+    cond: Option<&PreHirExpr>,
 ) -> bool {
     let Some(exit_label) = stmts.get(loop_idx + 2).and_then(|stmt| match stmt {
-        DirStmt::Label(label) => Some(label.as_str()),
+        PreHirStmt::Label(label) => Some(label.as_str()),
         _ => None,
     }) else {
         return false;
@@ -372,7 +372,7 @@ fn for_loop_guard_proves_first_iteration(
     };
 
     stmts[..loop_idx].iter().any(|stmt| {
-        let DirStmt::If {
+        let PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -387,11 +387,11 @@ fn for_loop_guard_proves_first_iteration(
 }
 
 fn zero_based_less_than_bound(
-    init: Option<&DirStmt>,
-    cond: Option<&DirExpr>,
+    init: Option<&PreHirStmt>,
+    cond: Option<&PreHirExpr>,
 ) -> Option<(String, String)> {
-    let DirStmt::Assign {
-        lhs: DirLValue::Var(init_var),
+    let PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(init_var),
         rhs,
     } = init?
     else {
@@ -400,8 +400,8 @@ fn zero_based_less_than_bound(
     if expr_as_const_ignoring_casts(rhs) != Some(0) {
         return None;
     }
-    let DirExpr::Binary {
-        op: DirBinaryOp::Lt | DirBinaryOp::SLt,
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Lt | PreHirBinaryOp::SLt,
         lhs,
         rhs,
         ..
@@ -417,8 +417,8 @@ fn zero_based_less_than_bound(
     Some((init_var.clone(), bound.to_string()))
 }
 
-fn guard_excludes_zero_iteration(cond: &DirExpr, bound: &str) -> bool {
-    let DirExpr::Binary { op, lhs, rhs, .. } = cond else {
+fn guard_excludes_zero_iteration(cond: &PreHirExpr, bound: &str) -> bool {
+    let PreHirExpr::Binary { op, lhs, rhs, .. } = cond else {
         return false;
     };
     let lhs_var = expr_as_var_ignoring_casts(lhs);
@@ -428,34 +428,34 @@ fn guard_excludes_zero_iteration(cond: &DirExpr, bound: &str) -> bool {
 
     matches!(
         (op, lhs_var, rhs_const),
-        (DirBinaryOp::Le | DirBinaryOp::SLe, Some(var), Some(0)) if var == bound
+        (PreHirBinaryOp::Le | PreHirBinaryOp::SLe, Some(var), Some(0)) if var == bound
     ) || matches!(
         (op, lhs_const, rhs_var),
-        (DirBinaryOp::Ge | DirBinaryOp::SGe, Some(0), Some(var)) if var == bound
+        (PreHirBinaryOp::Ge | PreHirBinaryOp::SGe, Some(0), Some(var)) if var == bound
     )
 }
 
-fn expr_as_var_ignoring_casts(expr: &DirExpr) -> Option<&str> {
+fn expr_as_var_ignoring_casts(expr: &PreHirExpr) -> Option<&str> {
     match expr {
-        DirExpr::Var(name) => Some(name.as_str()),
-        DirExpr::Cast { expr, .. } => expr_as_var_ignoring_casts(expr),
+        PreHirExpr::Var(name) => Some(name.as_str()),
+        PreHirExpr::Cast { expr, .. } => expr_as_var_ignoring_casts(expr),
         _ => None,
     }
 }
 
-fn expr_as_const_ignoring_casts(expr: &DirExpr) -> Option<i64> {
+fn expr_as_const_ignoring_casts(expr: &PreHirExpr) -> Option<i64> {
     match expr {
-        DirExpr::Const(value, _) => Some(*value),
-        DirExpr::Cast { expr, .. } => expr_as_const_ignoring_casts(expr),
+        PreHirExpr::Const(value, _) => Some(*value),
+        PreHirExpr::Cast { expr, .. } => expr_as_const_ignoring_casts(expr),
         _ => None,
     }
 }
 
-fn matches_single_goto(body: &[DirStmt], label: &str) -> bool {
-    matches!(body, [DirStmt::Goto(target)] if target == label)
+fn matches_single_goto(body: &[PreHirStmt], label: &str) -> bool {
+    matches!(body, [PreHirStmt::Goto(target)] if target == label)
 }
 
-pub fn inline_loop_condition_trailing_temps(func: &mut DirFunction) -> bool {
+pub fn inline_loop_condition_trailing_temps(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     for _ in 0..8 {
         let use_count = DefUseMap::build(&func.body).use_count;
@@ -474,21 +474,21 @@ pub fn inline_loop_condition_trailing_temps(func: &mut DirFunction) -> bool {
 /// The invariant: if the do-while body's last statement is `v = v - c` (linear decrement by
 /// loop-invariant constant `c > 0`) and the condition is `v != c`, the semantically correct
 /// condition is `v != 0` (check the post-decrement value against zero).
-pub fn normalize_dowhile_decrement_condition(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn normalize_dowhile_decrement_condition(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 if try_repair_dowhile_dec_cond(body, cond) {
                     changed = true;
                 }
                 // Recurse into nested statements.
                 changed |= normalize_dowhile_decrement_condition(body);
             }
-            DirStmt::While { body, .. } | DirStmt::For { body, .. } | DirStmt::Block(body) => {
+            PreHirStmt::While { body, .. } | PreHirStmt::For { body, .. } | PreHirStmt::Block(body) => {
                 changed |= normalize_dowhile_decrement_condition(body);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -496,7 +496,7 @@ pub fn normalize_dowhile_decrement_condition(stmts: &mut Vec<DirStmt>) -> bool {
                 changed |= normalize_dowhile_decrement_condition(then_body);
                 changed |= normalize_dowhile_decrement_condition(else_body);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     changed |= normalize_dowhile_decrement_condition(&mut case.body);
                 }
@@ -510,16 +510,16 @@ pub fn normalize_dowhile_decrement_condition(stmts: &mut Vec<DirStmt>) -> bool {
 
 /// Check whether `body` ends with `v = v - c` (or `v = v + (-c)`) and `cond` is `v != c`.
 /// If so, rewrite cond to `v != 0`.
-fn try_repair_dowhile_dec_cond(body: &[DirStmt], cond: &mut DirExpr) -> bool {
+fn try_repair_dowhile_dec_cond(body: &[PreHirStmt], cond: &mut PreHirExpr) -> bool {
     // Condition must be `v != c` where c is a positive constant.
     let (cond_var, cond_const) = match cond {
-        DirExpr::Binary {
-            op: DirBinaryOp::Ne,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
             lhs,
             rhs,
             ..
         } => match (lhs.as_ref(), rhs.as_ref()) {
-            (DirExpr::Var(name), DirExpr::Const(c, _)) if *c > 0 => {
+            (PreHirExpr::Var(name), PreHirExpr::Const(c, _)) if *c > 0 => {
                 // Clone to owned so we can mutably borrow `cond` later.
                 (name.clone(), *c)
             }
@@ -533,18 +533,18 @@ fn try_repair_dowhile_dec_cond(body: &[DirStmt], cond: &mut DirExpr) -> bool {
         return false;
     };
     let decrement_matches = match last {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(lhs_name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs_name),
             rhs,
         } if lhs_name == &cond_var => match rhs {
-            DirExpr::Binary {
-                op: DirBinaryOp::Sub,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sub,
                 lhs: inner_lhs,
                 rhs: inner_rhs,
                 ..
             } => {
-                matches!(inner_lhs.as_ref(), DirExpr::Var(n) if n == &cond_var)
-                    && matches!(inner_rhs.as_ref(), DirExpr::Const(c, _) if *c == cond_const)
+                matches!(inner_lhs.as_ref(), PreHirExpr::Var(n) if n == &cond_var)
+                    && matches!(inner_rhs.as_ref(), PreHirExpr::Const(c, _) if *c == cond_const)
             }
             _ => false,
         },
@@ -557,52 +557,52 @@ fn try_repair_dowhile_dec_cond(body: &[DirStmt], cond: &mut DirExpr) -> bool {
 
     // Rewrite: condition `v != c` → `v != 0`
     // Extract the type from the existing rhs (an integer Const), then zero it.
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Ne,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Ne,
         rhs,
         ..
     } = cond
     {
         let zero_ty = match rhs.as_ref() {
-            DirExpr::Const(_, ty) => ty.clone(),
+            PreHirExpr::Const(_, ty) => ty.clone(),
             _ => NirType::Unknown,
         };
-        *rhs = Box::new(DirExpr::Const(0, zero_ty));
+        *rhs = Box::new(PreHirExpr::Const(0, zero_ty));
         return true;
     }
     false
 }
 
 fn inline_loop_condition_trailing_temps_in_stmts(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     read_counts: &HashMap<String, usize>,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 changed |= inline_trailing_temps_into_condition(body, cond, read_counts);
                 changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
             }
-            DirStmt::While { body, .. } | DirStmt::Block(body) => {
+            PreHirStmt::While { body, .. } | PreHirStmt::Block(body) => {
                 changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init
-                    && let DirStmt::Block(body) = init.as_mut()
+                    && let PreHirStmt::Block(body) = init.as_mut()
                 {
                     changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
                 }
                 if let Some(update) = update
-                    && let DirStmt::Block(body) = update.as_mut()
+                    && let PreHirStmt::Block(body) = update.as_mut()
                 {
                     changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
                 }
                 changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -610,7 +610,7 @@ fn inline_loop_condition_trailing_temps_in_stmts(
                 changed |= inline_loop_condition_trailing_temps_in_stmts(then_body, read_counts);
                 changed |= inline_loop_condition_trailing_temps_in_stmts(else_body, read_counts);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |=
                         inline_loop_condition_trailing_temps_in_stmts(&mut case.body, read_counts);
@@ -624,14 +624,14 @@ fn inline_loop_condition_trailing_temps_in_stmts(
 }
 
 fn inline_trailing_temps_into_condition(
-    body: &mut Vec<DirStmt>,
-    cond: &mut DirExpr,
+    body: &mut Vec<PreHirStmt>,
+    cond: &mut PreHirExpr,
     read_counts: &HashMap<String, usize>,
 ) -> bool {
     let mut changed = false;
     loop {
-        let Some(DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        let Some(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         }) = body.last()
         else {
@@ -656,33 +656,33 @@ fn inline_trailing_temps_into_condition(
     changed
 }
 
-fn expr_is_low_cost_inline_candidate(expr: &DirExpr) -> bool {
+fn expr_is_low_cost_inline_candidate(expr: &PreHirExpr) -> bool {
     match expr {
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => true,
-        DirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Call { target, args, .. } if is_low_cost_flag_intrinsic(target) => {
             args.iter().all(expr_is_low_cost_inline_candidate)
         }
-        DirExpr::Cast { expr, .. }
-        | DirExpr::Unary { expr, .. }
-        | DirExpr::FieldAccess { base: expr, .. } => expr_is_low_cost_inline_candidate(expr),
-        DirExpr::Binary { op, lhs, rhs, .. } => {
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_is_low_cost_inline_candidate(expr),
+        PreHirExpr::Binary { op, lhs, rhs, .. } => {
             matches!(
                 op,
-                DirBinaryOp::Eq
-                    | DirBinaryOp::Ne
-                    | DirBinaryOp::Lt
-                    | DirBinaryOp::Le
-                    | DirBinaryOp::SLt
-                    | DirBinaryOp::SLe
-                    | DirBinaryOp::And
-                    | DirBinaryOp::Or
-                    | DirBinaryOp::Xor
-                    | DirBinaryOp::Add
-                    | DirBinaryOp::Sub
-                    | DirBinaryOp::Shl
-                    | DirBinaryOp::Shr
-                    | DirBinaryOp::Sar
-                    | DirBinaryOp::Mod
+                PreHirBinaryOp::Eq
+                    | PreHirBinaryOp::Ne
+                    | PreHirBinaryOp::Lt
+                    | PreHirBinaryOp::Le
+                    | PreHirBinaryOp::SLt
+                    | PreHirBinaryOp::SLe
+                    | PreHirBinaryOp::And
+                    | PreHirBinaryOp::Or
+                    | PreHirBinaryOp::Xor
+                    | PreHirBinaryOp::Add
+                    | PreHirBinaryOp::Sub
+                    | PreHirBinaryOp::Shl
+                    | PreHirBinaryOp::Shr
+                    | PreHirBinaryOp::Sar
+                    | PreHirBinaryOp::Mod
             ) && expr_is_low_cost_inline_candidate(lhs)
                 && expr_is_low_cost_inline_candidate(rhs)
         }
@@ -690,13 +690,13 @@ fn expr_is_low_cost_inline_candidate(expr: &DirExpr) -> bool {
     }
 }
 
-pub fn collapse_redundant_conditional_returns(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn collapse_redundant_conditional_returns(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
     let mut idx = 0usize;
 
     while idx < stmts.len() {
-        let Some(DirStmt::If {
+        let Some(PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -715,7 +715,7 @@ pub fn collapse_redundant_conditional_returns(stmts: &mut Vec<DirStmt>) -> bool 
         {
             changed = true;
             if expr_has_side_effects(cond) {
-                rewritten.push(DirStmt::Expr(cond.clone()));
+                rewritten.push(PreHirStmt::Expr(cond.clone()));
             }
             rewritten.push(then_ret);
             idx += 1;
@@ -730,7 +730,7 @@ pub fn collapse_redundant_conditional_returns(stmts: &mut Vec<DirStmt>) -> bool 
             if then_matches_next || else_matches_next {
                 changed = true;
                 if expr_has_side_effects(cond) {
-                    rewritten.push(DirStmt::Expr(cond.clone()));
+                    rewritten.push(PreHirStmt::Expr(cond.clone()));
                 }
                 idx += 1;
                 continue;
@@ -747,34 +747,34 @@ pub fn collapse_redundant_conditional_returns(stmts: &mut Vec<DirStmt>) -> bool 
     changed
 }
 
-fn as_return_stmt(stmt: &DirStmt) -> Option<&DirStmt> {
-    matches!(stmt, DirStmt::Return(_)).then_some(stmt)
+fn as_return_stmt(stmt: &PreHirStmt) -> Option<&PreHirStmt> {
+    matches!(stmt, PreHirStmt::Return(_)).then_some(stmt)
 }
 
-fn return_expr(stmt: &DirStmt) -> Option<&DirExpr> {
+fn return_expr(stmt: &PreHirStmt) -> Option<&PreHirExpr> {
     match stmt {
-        DirStmt::Return(Some(expr)) => Some(expr),
+        PreHirStmt::Return(Some(expr)) => Some(expr),
         _ => None,
     }
 }
 
-fn single_return_stmt(body: &[DirStmt]) -> Option<DirStmt> {
+fn single_return_stmt(body: &[PreHirStmt]) -> Option<PreHirStmt> {
     match body {
-        [DirStmt::Return(expr)] => Some(DirStmt::Return(expr.clone())),
+        [PreHirStmt::Return(expr)] => Some(PreHirStmt::Return(expr.clone())),
         _ => None,
     }
 }
 
-fn single_return_expr(body: &[DirStmt]) -> Option<&DirExpr> {
+fn single_return_expr(body: &[PreHirStmt]) -> Option<&PreHirExpr> {
     match body {
-        [DirStmt::Return(Some(expr))] => Some(expr),
+        [PreHirStmt::Return(Some(expr))] => Some(expr),
         _ => None,
     }
 }
 
-fn if_parts(stmt: &DirStmt) -> Option<(&DirExpr, &[DirStmt], &[DirStmt])> {
+fn if_parts(stmt: &PreHirStmt) -> Option<(&PreHirExpr, &[PreHirStmt], &[PreHirStmt])> {
     match stmt {
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -784,19 +784,19 @@ fn if_parts(stmt: &DirStmt) -> Option<(&DirExpr, &[DirStmt], &[DirStmt])> {
 }
 
 fn binary_comparison_parts(
-    expr: &DirExpr,
-) -> Option<(DirBinaryOp, &Box<DirExpr>, &Box<DirExpr>, &NirType)> {
+    expr: &PreHirExpr,
+) -> Option<(PreHirBinaryOp, &Box<PreHirExpr>, &Box<PreHirExpr>, &NirType)> {
     match expr {
-        DirExpr::Binary {
+        PreHirExpr::Binary {
             op:
-                op @ (DirBinaryOp::Lt
-                | DirBinaryOp::Le
-                | DirBinaryOp::Gt
-                | DirBinaryOp::Ge
-                | DirBinaryOp::SLt
-                | DirBinaryOp::SLe
-                | DirBinaryOp::SGt
-                | DirBinaryOp::SGe),
+                op @ (PreHirBinaryOp::Lt
+                | PreHirBinaryOp::Le
+                | PreHirBinaryOp::Gt
+                | PreHirBinaryOp::Ge
+                | PreHirBinaryOp::SLt
+                | PreHirBinaryOp::SLe
+                | PreHirBinaryOp::SGt
+                | PreHirBinaryOp::SGe),
             lhs,
             rhs,
             ty,
@@ -805,17 +805,17 @@ fn binary_comparison_parts(
     }
 }
 
-fn minmax_branch_swap_op(op: DirBinaryOp) -> Option<DirBinaryOp> {
+fn minmax_branch_swap_op(op: PreHirBinaryOp) -> Option<PreHirBinaryOp> {
     match op {
-        DirBinaryOp::Lt | DirBinaryOp::Le => Some(DirBinaryOp::Gt),
-        DirBinaryOp::Gt | DirBinaryOp::Ge => Some(DirBinaryOp::Lt),
-        DirBinaryOp::SLt | DirBinaryOp::SLe => Some(DirBinaryOp::SGt),
-        DirBinaryOp::SGt | DirBinaryOp::SGe => Some(DirBinaryOp::SLt),
+        PreHirBinaryOp::Lt | PreHirBinaryOp::Le => Some(PreHirBinaryOp::Gt),
+        PreHirBinaryOp::Gt | PreHirBinaryOp::Ge => Some(PreHirBinaryOp::Lt),
+        PreHirBinaryOp::SLt | PreHirBinaryOp::SLe => Some(PreHirBinaryOp::SGt),
+        PreHirBinaryOp::SGt | PreHirBinaryOp::SGe => Some(PreHirBinaryOp::SLt),
         _ => None,
     }
 }
 
-pub fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
 
@@ -857,17 +857,17 @@ pub fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<DirStmt>) -> bool
         let rhs_expr = (**rhs).clone();
         let cond_ty = ty.clone();
 
-        stmts[idx] = DirStmt::If {
-            cond: DirExpr::Binary {
+        stmts[idx] = PreHirStmt::If {
+            cond: PreHirExpr::Binary {
                 op: new_op,
                 lhs: Box::new(lhs_expr.clone()),
                 rhs: Box::new(rhs_expr.clone()),
                 ty: cond_ty,
             },
-            then_body: vec![DirStmt::Return(Some(lhs_expr))],
+            then_body: vec![PreHirStmt::Return(Some(lhs_expr))],
             else_body: Vec::new(),
         };
-        stmts[idx + 1] = DirStmt::Return(Some(rhs_expr));
+        stmts[idx + 1] = PreHirStmt::Return(Some(rhs_expr));
         changed = true;
         idx += 2;
     }
@@ -882,16 +882,16 @@ pub fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<DirStmt>) -> bool
 ///
 /// This improves readability for x86/x86-64 CMOVcc patterns.
 /// Returns true if any change was made.
-pub fn conditional_select_pass(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn conditional_select_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0;
     while idx < stmts.len() {
         // Check for a convertible If, then decide.
-        let is_convertible = matches!(&stmts[idx], DirStmt::If { .. });
+        let is_convertible = matches!(&stmts[idx], PreHirStmt::If { .. });
         if is_convertible {
             // Temporarily take ownership to avoid borrow conflicts.
-            let stmt = std::mem::replace(&mut stmts[idx], DirStmt::Break);
-            if let DirStmt::If {
+            let stmt = std::mem::replace(&mut stmts[idx], PreHirStmt::Break);
+            if let PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -903,7 +903,7 @@ pub fn conditional_select_pass(stmts: &mut Vec<DirStmt>) -> bool {
                 } else {
                     // Restore and recurse.
                     stmts[idx] = stmt;
-                    if let DirStmt::If {
+                    if let PreHirStmt::If {
                         then_body,
                         else_body,
                         ..
@@ -918,27 +918,27 @@ pub fn conditional_select_pass(stmts: &mut Vec<DirStmt>) -> bool {
             }
         } else {
             match &mut stmts[idx] {
-                DirStmt::While { body, .. }
-                | DirStmt::DoWhile { body, .. }
-                | DirStmt::Block(body) => {
+                PreHirStmt::While { body, .. }
+                | PreHirStmt::DoWhile { body, .. }
+                | PreHirStmt::Block(body) => {
                     changed |= conditional_select_pass(body);
                 }
-                DirStmt::For {
+                PreHirStmt::For {
                     init, update, body, ..
                 } => {
                     if let Some(init) = init {
-                        if let DirStmt::Block(b) = init.as_mut() {
+                        if let PreHirStmt::Block(b) = init.as_mut() {
                             changed |= conditional_select_pass(b);
                         }
                     }
                     if let Some(update) = update {
-                        if let DirStmt::Block(b) = update.as_mut() {
+                        if let PreHirStmt::Block(b) = update.as_mut() {
                             changed |= conditional_select_pass(b);
                         }
                     }
                     changed |= conditional_select_pass(body);
                 }
-                DirStmt::Switch { cases, default, .. } => {
+                PreHirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         changed |= conditional_select_pass(&mut case.body);
                     }
@@ -959,12 +959,12 @@ pub fn conditional_select_pass(stmts: &mut Vec<DirStmt>) -> bool {
 ///   - neither `then_rhs` nor `else_rhs` has side effects
 ///   - `then_rhs` and `else_rhs` are cheap to inline (no calls)
 ///
-/// Returns `DirStmt::Assign { lhs, rhs: Select { cond, then_expr, else_expr } }` if matched.
+/// Returns `PreHirStmt::Assign { lhs, rhs: Select { cond, then_expr, else_expr } }` if matched.
 fn try_cmov_to_select(
-    cond: &DirExpr,
-    then_body: &[DirStmt],
-    else_body: &[DirStmt],
-) -> Option<DirStmt> {
+    cond: &PreHirExpr,
+    then_body: &[PreHirStmt],
+    else_body: &[PreHirStmt],
+) -> Option<PreHirStmt> {
     // Both branches must be a single assignment.
     let (then_lhs, then_rhs) = single_assign(then_body)?;
     let (else_lhs, else_rhs) = single_assign(else_body)?;
@@ -992,9 +992,9 @@ fn try_cmov_to_select(
 
     let result_ty = expr_nir_type(then_rhs).or_else(|| expr_nir_type(else_rhs))?;
 
-    Some(DirStmt::Assign {
-        lhs: DirLValue::Var(then_lhs.to_string()),
-        rhs: DirExpr::Select {
+    Some(PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(then_lhs.to_string()),
+        rhs: PreHirExpr::Select {
             cond: Box::new(cond.clone()),
             then_expr: Box::new(then_rhs.clone()),
             else_expr: Box::new(else_rhs.clone()),
@@ -1003,11 +1003,11 @@ fn try_cmov_to_select(
     })
 }
 
-fn single_assign(body: &[DirStmt]) -> Option<(&str, &DirExpr)> {
+fn single_assign(body: &[PreHirStmt]) -> Option<(&str, &PreHirExpr)> {
     match body {
         [
-            DirStmt::Assign {
-                lhs: DirLValue::Var(name),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
                 rhs,
             },
         ] => Some((name.as_str(), rhs)),
@@ -1015,19 +1015,19 @@ fn single_assign(body: &[DirStmt]) -> Option<(&str, &DirExpr)> {
     }
 }
 
-fn expr_nir_type(expr: &DirExpr) -> Option<NirType> {
+fn expr_nir_type(expr: &PreHirExpr) -> Option<NirType> {
     match expr {
-        DirExpr::Const(_, ty) => Some(ty.clone()),
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) => None,
-        DirExpr::Cast { ty, .. } => Some(ty.clone()),
-        DirExpr::Binary { ty, .. } => Some(ty.clone()),
-        DirExpr::Unary { ty, .. } => Some(ty.clone()),
-        DirExpr::Load { ty, .. } => Some(ty.clone()),
-        DirExpr::Select { ty, .. } => Some(ty.clone()),
-        DirExpr::Index { elem_ty, .. } => Some(elem_ty.clone()),
-        DirExpr::PtrOffset { .. } | DirExpr::FieldAccess { .. } => None,
-        DirExpr::Call { ty, .. } => Some(ty.clone()),
-        DirExpr::AggregateCopy { .. } => None,
+        PreHirExpr::Const(_, ty) => Some(ty.clone()),
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => None,
+        PreHirExpr::Cast { ty, .. } => Some(ty.clone()),
+        PreHirExpr::Binary { ty, .. } => Some(ty.clone()),
+        PreHirExpr::Unary { ty, .. } => Some(ty.clone()),
+        PreHirExpr::Load { ty, .. } => Some(ty.clone()),
+        PreHirExpr::Select { ty, .. } => Some(ty.clone()),
+        PreHirExpr::Index { elem_ty, .. } => Some(elem_ty.clone()),
+        PreHirExpr::PtrOffset { .. } | PreHirExpr::FieldAccess { .. } => None,
+        PreHirExpr::Call { ty, .. } => Some(ty.clone()),
+        PreHirExpr::AggregateCopy { .. } => None,
     }
 }
 
@@ -1039,17 +1039,17 @@ fn expr_nir_type(expr: &DirExpr) -> Option<NirType> {
 /// Only rewrites a break that is immediately preceded (same statement list)
 /// by a non-induction assignment to a local. Exit breaks like
 /// `if (i >= n) break;` are left alone.
-pub fn rewrite_found_path_break_to_return(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn rewrite_found_path_break_to_return(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
     while idx < stmts.len() {
         let has_sentinel = matches!(
             stmts.get(idx + 1),
-            Some(DirStmt::Return(Some(DirExpr::Const(_, _))))
+            Some(PreHirStmt::Return(Some(PreHirExpr::Const(_, _))))
         );
         let is_loop = matches!(
             stmts.get(idx),
-            Some(DirStmt::While { .. } | DirStmt::DoWhile { .. } | DirStmt::For { .. })
+            Some(PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. })
         );
         if is_loop && has_sentinel {
             if rewrite_found_breaks_in_stmt(&mut stmts[idx]) {
@@ -1063,12 +1063,12 @@ pub fn rewrite_found_path_break_to_return(stmts: &mut Vec<DirStmt>) -> bool {
     changed
 }
 
-fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut DirStmt) -> bool {
+fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. } => rewrite_found_path_break_to_return(body),
-        DirStmt::For {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => rewrite_found_path_break_to_return(body),
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             let mut changed = false;
@@ -1080,7 +1080,7 @@ fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut DirStmt) -> bool {
             }
             changed | rewrite_found_path_break_to_return(body)
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -1088,7 +1088,7 @@ fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut DirStmt) -> bool {
             rewrite_found_path_break_to_return(then_body)
                 | rewrite_found_path_break_to_return(else_body)
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
                 changed |= rewrite_found_path_break_to_return(&mut case.body);
@@ -1099,21 +1099,21 @@ fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut DirStmt) -> bool {
     }
 }
 
-fn rewrite_found_breaks_in_stmt(stmt: &mut DirStmt) -> bool {
+fn rewrite_found_breaks_in_stmt(stmt: &mut PreHirStmt) -> bool {
     match stmt {
-        DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => rewrite_found_breaks_in_body(body),
+        PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => rewrite_found_breaks_in_body(body),
         _ => false,
     }
 }
 
-fn rewrite_found_breaks_in_body(body: &mut Vec<DirStmt>) -> bool {
+fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     // Nested regions first.
     for stmt in body.iter_mut() {
         match stmt {
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1121,13 +1121,13 @@ fn rewrite_found_breaks_in_body(body: &mut Vec<DirStmt>) -> bool {
                 changed |= rewrite_found_breaks_in_body(then_body);
                 changed |= rewrite_found_breaks_in_body(else_body);
             }
-            DirStmt::Block(inner)
-            | DirStmt::While { body: inner, .. }
-            | DirStmt::DoWhile { body: inner, .. }
-            | DirStmt::For { body: inner, .. } => {
+            PreHirStmt::Block(inner)
+            | PreHirStmt::While { body: inner, .. }
+            | PreHirStmt::DoWhile { body: inner, .. }
+            | PreHirStmt::For { body: inner, .. } => {
                 changed |= rewrite_found_breaks_in_body(inner);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     changed |= rewrite_found_breaks_in_body(&mut case.body);
                 }
@@ -1139,10 +1139,10 @@ fn rewrite_found_breaks_in_body(body: &mut Vec<DirStmt>) -> bool {
 
     let mut i = 0usize;
     while i + 1 < body.len() {
-        if matches!(&body[i + 1], DirStmt::Break)
+        if matches!(&body[i + 1], PreHirStmt::Break)
             && let Some(ret_name) = found_result_assign_name(&body[i])
         {
-            body[i + 1] = DirStmt::Return(Some(DirExpr::Var(ret_name)));
+            body[i + 1] = PreHirStmt::Return(Some(PreHirExpr::Var(ret_name)));
             changed = true;
             i += 2;
             continue;
@@ -1153,9 +1153,9 @@ fn rewrite_found_breaks_in_body(body: &mut Vec<DirStmt>) -> bool {
 }
 
 /// `result = <expr>` that is not a loop-induction self-update (`i = i + 1`).
-fn found_result_assign_name(stmt: &DirStmt) -> Option<String> {
-    let DirStmt::Assign {
-        lhs: DirLValue::Var(name),
+fn found_result_assign_name(stmt: &PreHirStmt) -> Option<String> {
+    let PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(name),
         rhs,
     } = stmt
     else {
@@ -1165,24 +1165,24 @@ fn found_result_assign_name(stmt: &DirStmt) -> Option<String> {
         return None;
     }
     // Avoid promoting pure param copies as "found" results.
-    if matches!(rhs, DirExpr::Var(src) if src.starts_with("param_")) {
+    if matches!(rhs, PreHirExpr::Var(src) if src.starts_with("param_")) {
         return None;
     }
     Some(name.clone())
 }
 
-fn is_self_increment_assign(name: &str, rhs: &DirExpr) -> bool {
+fn is_self_increment_assign(name: &str, rhs: &PreHirExpr) -> bool {
     match rhs {
-        DirExpr::Binary {
-            op: DirBinaryOp::Add | DirBinaryOp::Sub,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add | PreHirBinaryOp::Sub,
             lhs,
             rhs: step,
             ..
         } => {
-            let lhs_is_self = matches!(lhs.as_ref(), DirExpr::Var(n) if n == name);
-            let rhs_is_self = matches!(step.as_ref(), DirExpr::Var(n) if n == name);
-            let lhs_is_const = matches!(lhs.as_ref(), DirExpr::Const(_, _));
-            let rhs_is_const = matches!(step.as_ref(), DirExpr::Const(_, _));
+            let lhs_is_self = matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == name);
+            let rhs_is_self = matches!(step.as_ref(), PreHirExpr::Var(n) if n == name);
+            let lhs_is_const = matches!(lhs.as_ref(), PreHirExpr::Const(_, _));
+            let rhs_is_const = matches!(step.as_ref(), PreHirExpr::Const(_, _));
             (lhs_is_self && rhs_is_const) || (rhs_is_self && lhs_is_const)
         }
         _ => false,
@@ -1194,27 +1194,27 @@ fn is_self_increment_assign(name: &str, rhs: &DirExpr) -> bool {
 /// loop. If the loop bound-check form `if (bound <= i) break;` is present,
 /// inject `i++` before `continue` so the orphan edge matches the usual
 /// search-loop continue (skip-to-increment) rather than spinning forever.
-pub fn rewrite_orphan_loop_gotos_to_continue(stmts: &mut Vec<DirStmt>) -> bool {
+pub fn rewrite_orphan_loop_gotos_to_continue(stmts: &mut Vec<PreHirStmt>) -> bool {
     let defined = collect_defined_labels(stmts);
     rewrite_orphan_loop_gotos_to_continue_rec(stmts, &defined, false, None)
 }
 
-fn collect_defined_labels(stmts: &[DirStmt]) -> HashSet<String> {
+fn collect_defined_labels(stmts: &[PreHirStmt]) -> HashSet<String> {
     let mut labels = HashSet::default();
     collect_defined_labels_in_stmts(stmts, &mut labels);
     labels
 }
 
-fn collect_defined_labels_in_stmts(stmts: &[DirStmt], out: &mut HashSet<String>) {
+fn collect_defined_labels_in_stmts(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Label(name) => {
+            PreHirStmt::Label(name) => {
                 out.insert(name.clone());
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. } => collect_defined_labels_in_stmts(body, out),
-            DirStmt::For {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => collect_defined_labels_in_stmts(body, out),
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init) = init {
@@ -1225,7 +1225,7 @@ fn collect_defined_labels_in_stmts(stmts: &[DirStmt], out: &mut HashSet<String>)
                 }
                 collect_defined_labels_in_stmts(body, out);
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1233,7 +1233,7 @@ fn collect_defined_labels_in_stmts(stmts: &[DirStmt], out: &mut HashSet<String>)
                 collect_defined_labels_in_stmts(then_body, out);
                 collect_defined_labels_in_stmts(else_body, out);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_defined_labels_in_stmts(&case.body, out);
                 }
@@ -1244,18 +1244,18 @@ fn collect_defined_labels_in_stmts(stmts: &[DirStmt], out: &mut HashSet<String>)
     }
 }
 
-fn collect_defined_labels_in_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
+fn collect_defined_labels_in_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
     match stmt {
-        DirStmt::Label(name) => {
+        PreHirStmt::Label(name) => {
             out.insert(name.clone());
         }
-        DirStmt::Block(body) => collect_defined_labels_in_stmts(body, out),
+        PreHirStmt::Block(body) => collect_defined_labels_in_stmts(body, out),
         _ => {}
     }
 }
 
 fn rewrite_orphan_loop_gotos_to_continue_rec(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     defined: &HashSet<String>,
     in_loop: bool,
     loop_index: Option<&str>,
@@ -1263,11 +1263,11 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
-            DirStmt::Goto(label) if in_loop && !defined.contains(label) => {
+            PreHirStmt::Goto(label) if in_loop && !defined.contains(label) => {
                 *stmt = orphan_loop_continue_stmt(loop_index);
                 changed = true;
             }
-            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 let idx = detect_bound_break_loop_index(body);
                 changed |= rewrite_orphan_loop_gotos_to_continue_rec(
                     body,
@@ -1276,7 +1276,7 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
                     idx.as_deref().or(loop_index),
                 );
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, update, body, ..
             } => {
                 let idx = detect_bound_break_loop_index(body);
@@ -1294,12 +1294,12 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
                 changed |=
                     rewrite_orphan_loop_gotos_to_continue_rec(body, defined, true, idx_ref);
             }
-            DirStmt::Block(body) => {
+            PreHirStmt::Block(body) => {
                 changed |= rewrite_orphan_loop_gotos_to_continue_rec(
                     body, defined, in_loop, loop_index,
                 );
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -1311,7 +1311,7 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
                     else_body, defined, in_loop, loop_index,
                 );
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     changed |= rewrite_orphan_loop_gotos_to_continue_rec(
                         &mut case.body,
@@ -1331,16 +1331,16 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
 }
 
 fn rewrite_orphan_loop_gotos_to_continue_in_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     defined: &HashSet<String>,
     in_loop: bool,
     loop_index: Option<&str>,
 ) -> bool {
     match stmt {
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             rewrite_orphan_loop_gotos_to_continue_rec(body, defined, in_loop, loop_index)
         }
-        DirStmt::Goto(label) if in_loop && !defined.contains(label) => {
+        PreHirStmt::Goto(label) if in_loop && !defined.contains(label) => {
             *stmt = orphan_loop_continue_stmt(loop_index);
             true
         }
@@ -1348,15 +1348,15 @@ fn rewrite_orphan_loop_gotos_to_continue_in_stmt(
     }
 }
 
-fn orphan_loop_continue_stmt(loop_index: Option<&str>) -> DirStmt {
+fn orphan_loop_continue_stmt(loop_index: Option<&str>) -> PreHirStmt {
     if let Some(idx) = loop_index {
-        DirStmt::Block(vec![
-            DirStmt::Assign {
-                lhs: DirLValue::Var(idx.to_string()),
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::Add,
-                    lhs: Box::new(DirExpr::Var(idx.to_string())),
-                    rhs: Box::new(DirExpr::Const(
+        PreHirStmt::Block(vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(idx.to_string()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var(idx.to_string())),
+                    rhs: Box::new(PreHirExpr::Const(
                         1,
                         NirType::Int {
                             bits: 64,
@@ -1369,17 +1369,17 @@ fn orphan_loop_continue_stmt(loop_index: Option<&str>) -> DirStmt {
                     },
                 },
             },
-            DirStmt::Continue,
+            PreHirStmt::Continue,
         ])
     } else {
-        DirStmt::Continue
+        PreHirStmt::Continue
     }
 }
 
 /// Recognize `if (bound <= i) break;` / `if (i >= bound) break;` at the head
 /// of a search-loop body and return the induction variable name.
-fn detect_bound_break_loop_index(body: &[DirStmt]) -> Option<String> {
-    let DirStmt::If {
+fn detect_bound_break_loop_index(body: &[PreHirStmt]) -> Option<String> {
+    let PreHirStmt::If {
         cond,
         then_body,
         else_body,
@@ -1387,26 +1387,26 @@ fn detect_bound_break_loop_index(body: &[DirStmt]) -> Option<String> {
     else {
         return None;
     };
-    if !else_body.is_empty() || !matches!(then_body.as_slice(), [DirStmt::Break]) {
+    if !else_body.is_empty() || !matches!(then_body.as_slice(), [PreHirStmt::Break]) {
         return None;
     }
-    let DirExpr::Binary { op, lhs, rhs, .. } = cond else {
+    let PreHirExpr::Binary { op, lhs, rhs, .. } = cond else {
         return None;
     };
     match op {
-        DirBinaryOp::Le | DirBinaryOp::Lt => {
+        PreHirBinaryOp::Le | PreHirBinaryOp::Lt => {
             // bound <= i  or  bound < i
             match (lhs.as_ref(), rhs.as_ref()) {
-                (_, DirExpr::Var(idx)) => Some(idx.clone()),
-                (DirExpr::Var(idx), _) => Some(idx.clone()),
+                (_, PreHirExpr::Var(idx)) => Some(idx.clone()),
+                (PreHirExpr::Var(idx), _) => Some(idx.clone()),
                 _ => None,
             }
         }
-        DirBinaryOp::Ge | DirBinaryOp::Gt => {
+        PreHirBinaryOp::Ge | PreHirBinaryOp::Gt => {
             // i >= bound  or  i > bound
             match (lhs.as_ref(), rhs.as_ref()) {
-                (DirExpr::Var(idx), _) => Some(idx.clone()),
-                (_, DirExpr::Var(idx)) => Some(idx.clone()),
+                (PreHirExpr::Var(idx), _) => Some(idx.clone()),
+                (_, PreHirExpr::Var(idx)) => Some(idx.clone()),
                 _ => None,
             }
         }

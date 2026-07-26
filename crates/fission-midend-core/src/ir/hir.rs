@@ -2,11 +2,11 @@ use super::*;
 
 /// The final, structured statement AST (`if`/`while`/`for`, no stray
 /// `Goto`/`Label` left over from flattening) that structuring's
-/// `DirFunction -> HirFunction` conversion produces, and that
+/// `PreHirFunction -> HirFunction` conversion produces, and that
 /// `fission-pcode`'s `render`/printer layer (and anything downstream of a
-/// finished decompile) consumes. See `fission_midend_dir::ir::DirStmt`'s
+/// finished decompile) consumes. See `fission_midend_prehir::ir::PreHirStmt`'s
 /// doc comment for why this is an independently-defined type rather than
-/// `DirStmt` reused under a different name (`fission-midend-dir` is
+/// `PreHirStmt` reused under a different name (`fission-midend-prehir` is
 /// downstream of this crate, so this crate can't link to it directly).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirStmt {

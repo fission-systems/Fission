@@ -4,7 +4,7 @@
 //! `if`/`switch` joins, and conservatively drops variables written in loop bodies
 //! from the map after `while`/`for`/`do-while`.  This complements
 //! [`super::super::analysis::defuse::constant_folding_pass`] (single-statement fold) and VSA
-//! [`fission_midend_dir::vsa::jump_resolver`] (intervals, not a constant lattice).
+//! [`fission_midend_prehir::vsa::jump_resolver`] (intervals, not a constant lattice).
 
 use super::super::analysis::defuse::{eval_hir_expr_with_const_env, fold_expr_hir};
 use super::super::cleanup::expr_has_side_effects;
@@ -14,7 +14,7 @@ use crate::{HashMap, HashSet};
 
 type ConstEnv = HashMap<String, (i64, NirType)>;
 
-pub fn apply_sccp_pass(func: &mut DirFunction) -> bool {
+pub fn apply_sccp_pass(func: &mut PreHirFunction) -> bool {
     let max_rounds = if is_large_hir_function(func) { 2 } else { 8 };
     let goto_targets = collect_goto_targets(&func.body);
     let mut all_xvars = HashSet::default();
@@ -30,7 +30,7 @@ pub fn apply_sccp_pass(func: &mut DirFunction) -> bool {
     any
 }
 
-fn collect_goto_targets(stmts: &[DirStmt]) -> HashSet<String> {
+fn collect_goto_targets(stmts: &[PreHirStmt]) -> HashSet<String> {
     let mut targets = HashSet::default();
     for stmt in stmts {
         collect_goto_targets_stmt(stmt, &mut targets);
@@ -38,17 +38,17 @@ fn collect_goto_targets(stmts: &[DirStmt]) -> HashSet<String> {
     targets
 }
 
-fn collect_goto_targets_stmt(stmt: &DirStmt, targets: &mut HashSet<String>) {
+fn collect_goto_targets_stmt(stmt: &PreHirStmt, targets: &mut HashSet<String>) {
     match stmt {
-        DirStmt::Goto(label) => {
+        PreHirStmt::Goto(label) => {
             targets.insert(label.clone());
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             for s in body {
                 collect_goto_targets_stmt(s, targets);
             }
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(s) = init.as_deref() {
@@ -61,7 +61,7 @@ fn collect_goto_targets_stmt(stmt: &DirStmt, targets: &mut HashSet<String>) {
                 collect_goto_targets_stmt(s, targets);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -73,7 +73,7 @@ fn collect_goto_targets_stmt(stmt: &DirStmt, targets: &mut HashSet<String>) {
                 collect_goto_targets_stmt(s, targets);
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for s in &case.body {
                     collect_goto_targets_stmt(s, targets);
@@ -109,44 +109,44 @@ fn env_without_vars(env: &ConstEnv, vars: &HashSet<String>) -> ConstEnv {
     out
 }
 
-fn stmt_list_has_side_effects(stmts: &[DirStmt]) -> bool {
+fn stmt_list_has_side_effects(stmts: &[PreHirStmt]) -> bool {
     stmts.iter().any(stmt_has_side_effects)
 }
 
-fn stmt_has_side_effects(stmt: &DirStmt) -> bool {
+fn stmt_has_side_effects(stmt: &PreHirStmt) -> bool {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs),
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
-        DirStmt::Block(body) => stmt_list_has_side_effects(body),
-        DirStmt::If {
+        PreHirStmt::Assign { lhs, rhs } => lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs),
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
+        PreHirStmt::Block(body) => stmt_list_has_side_effects(body),
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => stmt_list_has_side_effects(then_body) || stmt_list_has_side_effects(else_body),
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } | DirStmt::For { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => {
             stmt_list_has_side_effects(body)
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             cases.iter().any(|c| stmt_list_has_side_effects(&c.body))
                 || stmt_list_has_side_effects(default)
         }
-        DirStmt::VaStart { .. } => true,
+        PreHirStmt::VaStart { .. } => true,
         _ => false,
     }
 }
 
-fn lvalue_has_side_effects(lhs: &DirLValue) -> bool {
+fn lvalue_has_side_effects(lhs: &PreHirLValue) -> bool {
     match lhs {
-        DirLValue::Var(_) => false,
-        DirLValue::Deref { ptr, .. } => expr_has_side_effects(ptr),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_has_side_effects(ptr),
+        PreHirLValue::Index { base, index, .. } => {
             expr_has_side_effects(base) || expr_has_side_effects(index)
         }
-        DirLValue::FieldAccess { base, .. } => expr_has_side_effects(base),
+        PreHirLValue::FieldAccess { base, .. } => expr_has_side_effects(base),
     }
 }
 
-fn loop_variant_vars(body: &[DirStmt], all_xvars: &HashSet<String>) -> HashSet<String> {
+fn loop_variant_vars(body: &[PreHirStmt], all_xvars: &HashSet<String>) -> HashSet<String> {
     let mut vars = HashSet::default();
     for stmt in body {
         loop_variant_stmt(stmt, &mut vars);
@@ -157,15 +157,15 @@ fn loop_variant_vars(body: &[DirStmt], all_xvars: &HashSet<String>) -> HashSet<S
     vars
 }
 
-fn loop_variant_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
+fn loop_variant_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             ..
         } => {
             out.insert(name.clone());
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -177,12 +177,12 @@ fn loop_variant_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
                 loop_variant_stmt(s, out);
             }
         }
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             for s in body {
                 loop_variant_stmt(s, out);
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
                 for s in &case.body {
                     loop_variant_stmt(s, out);
@@ -192,40 +192,40 @@ fn loop_variant_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
                 loop_variant_stmt(s, out);
             }
         }
-        DirStmt::While { .. } | DirStmt::DoWhile { .. } | DirStmt::For { .. } => {}
+        PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => {}
         _ => {}
     }
 }
 
-fn sccp_subst_expr(expr: &mut DirExpr, env: &ConstEnv) -> bool {
+fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
     let mut changed = false;
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             if let Some((v, ty)) = env.get(name) {
-                *expr = DirExpr::Const(*v, ty.clone());
+                *expr = PreHirExpr::Const(*v, ty.clone());
                 changed = true;
             }
         }
-        DirExpr::Unary { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Unary { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= sccp_subst_expr(lhs, env);
             changed |= sccp_subst_expr(rhs, env);
         }
-        DirExpr::Cast { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
-        DirExpr::Load { ptr, .. } => changed |= sccp_subst_expr(ptr, env),
-        DirExpr::PtrOffset { base, .. } => changed |= sccp_subst_expr(base, env),
-        DirExpr::FieldAccess { base, .. } => changed |= sccp_subst_expr(base, env),
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Cast { expr: inner, .. } => changed |= sccp_subst_expr(inner, env),
+        PreHirExpr::Load { ptr, .. } => changed |= sccp_subst_expr(ptr, env),
+        PreHirExpr::PtrOffset { base, .. } => changed |= sccp_subst_expr(base, env),
+        PreHirExpr::FieldAccess { base, .. } => changed |= sccp_subst_expr(base, env),
+        PreHirExpr::Index { base, index, .. } => {
             changed |= sccp_subst_expr(base, env);
             changed |= sccp_subst_expr(index, env);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for a in args.iter_mut() {
                 changed |= sccp_subst_expr(a, env);
             }
         }
-        DirExpr::AggregateCopy { src, .. } => changed |= sccp_subst_expr(src, env),
-        DirExpr::Select {
+        PreHirExpr::AggregateCopy { src, .. } => changed |= sccp_subst_expr(src, env),
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -235,7 +235,7 @@ fn sccp_subst_expr(expr: &mut DirExpr, env: &ConstEnv) -> bool {
             changed |= sccp_subst_expr(then_expr, env);
             changed |= sccp_subst_expr(else_expr, env);
         }
-        DirExpr::Const(_, _) => {}
+        PreHirExpr::Const(_, _) => {}
     }
     changed
 }
@@ -252,39 +252,39 @@ mod tests {
         }
     }
 
-    fn var(name: &str) -> DirExpr {
-        DirExpr::Var(name.to_string())
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
     }
 
     #[test]
     fn sccp_keeps_backedge_label_values_nonconstant() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "test_sccp_unstructured_backedge".to_string(),
             int_param_offsets: Vec::new(),
             return_type: int(32),
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("x".to_string()),
-                    rhs: DirExpr::Const(0, int(32)),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(0, int(32)),
                 },
-                DirStmt::Label("loop".to_string()),
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("x".to_string()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
+                PreHirStmt::Label("loop".to_string()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
                         lhs: Box::new(var("x")),
-                        rhs: Box::new(DirExpr::Const(1, int(32))),
+                        rhs: Box::new(PreHirExpr::Const(1, int(32))),
                         ty: int(32),
                     },
                 },
-                DirStmt::If {
-                    cond: DirExpr::Binary {
-                        op: DirBinaryOp::Sub,
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Sub,
                         lhs: Box::new(var("rows")),
                         rhs: Box::new(var("x")),
                         ty: int(32),
                     },
-                    then_body: vec![DirStmt::Goto("loop".to_string())],
+                    then_body: vec![PreHirStmt::Goto("loop".to_string())],
                     else_body: vec![],
                 },
             ],
@@ -293,10 +293,10 @@ mod tests {
 
         apply_sccp_pass(&mut func);
 
-        let DirStmt::If { cond, .. } = &func.body[3] else {
+        let PreHirStmt::If { cond, .. } = &func.body[3] else {
             panic!("expected loop branch to remain an if");
         };
-        let DirExpr::Binary { rhs, .. } = cond else {
+        let PreHirExpr::Binary { rhs, .. } = cond else {
             panic!("expected branch condition to remain binary");
         };
         assert_eq!(rhs.as_ref(), &var("x"));
@@ -304,20 +304,20 @@ mod tests {
 
     #[test]
     fn sccp_does_not_prune_if_when_discarded_branch_has_side_effects() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "test".to_string(),
             int_param_offsets: Vec::new(),
             return_type: int(32),
-            body: vec![DirStmt::If {
-                cond: DirExpr::Const(1, int(32)),
-                then_body: vec![DirStmt::Expr(DirExpr::Call {
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Const(1, int(32)),
+                then_body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                     target: "add".to_string(),
-                    args: vec![DirExpr::Const(1, int(32)), DirExpr::Const(2, int(32))],
+                    args: vec![PreHirExpr::Const(1, int(32)), PreHirExpr::Const(2, int(32))],
                     ty: int(32),
                 })],
-                else_body: vec![DirStmt::Expr(DirExpr::Call {
+                else_body: vec![PreHirStmt::Expr(PreHirExpr::Call {
                     target: "max".to_string(),
-                    args: vec![DirExpr::Const(3, int(32)), DirExpr::Const(4, int(32))],
+                    args: vec![PreHirExpr::Const(3, int(32)), PreHirExpr::Const(4, int(32))],
                     ty: int(32),
                 })],
             }],
@@ -326,7 +326,7 @@ mod tests {
 
         apply_sccp_pass(&mut func);
 
-        let DirStmt::If {
+        let PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -339,7 +339,7 @@ mod tests {
     }
 }
 
-fn eval_truth(expr: &DirExpr, env: &ConstEnv) -> Option<bool> {
+fn eval_truth(expr: &PreHirExpr, env: &ConstEnv) -> Option<bool> {
     let (v, _) = eval_hir_expr_with_const_env(expr, env)?;
     Some(v != 0)
 }
@@ -355,7 +355,7 @@ fn eval_truth(expr: &DirExpr, env: &ConstEnv) -> Option<bool> {
 /// - `!(x == K)` → else: x=K (same as x != K)
 /// - `cond1 && cond2` → then: union of both
 fn derive_branch_constants(
-    cond: &DirExpr,
+    cond: &PreHirExpr,
 ) -> (Vec<(String, i64, NirType)>, Vec<(String, i64, NirType)>) {
     let mut then_bindings: Vec<(String, i64, NirType)> = Vec::new();
     let mut else_bindings: Vec<(String, i64, NirType)> = Vec::new();
@@ -364,35 +364,35 @@ fn derive_branch_constants(
 }
 
 fn extract_branch_constants(
-    cond: &DirExpr,
+    cond: &PreHirExpr,
     negated: bool,
     then_bindings: &mut Vec<(String, i64, NirType)>,
     else_bindings: &mut Vec<(String, i64, NirType)>,
 ) {
     match cond {
         // NOT: flip then/else roles.
-        DirExpr::Unary {
-            op: DirUnaryOp::Not,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
             expr: inner,
             ..
         } => {
             extract_branch_constants(inner, !negated, then_bindings, else_bindings);
         }
         // x == K or K == x  → then: x=K ; x != K or K != x → else: x=K
-        DirExpr::Binary {
-            op: op @ (DirBinaryOp::Eq | DirBinaryOp::Ne),
+        PreHirExpr::Binary {
+            op: op @ (PreHirBinaryOp::Eq | PreHirBinaryOp::Ne),
             lhs,
             rhs,
             ..
         } => {
             let (var_name, const_val, ty) = match (lhs.as_ref(), rhs.as_ref()) {
-                (DirExpr::Var(name), DirExpr::Const(k, ty)) => (name.clone(), *k, ty.clone()),
-                (DirExpr::Const(k, ty), DirExpr::Var(name)) => (name.clone(), *k, ty.clone()),
+                (PreHirExpr::Var(name), PreHirExpr::Const(k, ty)) => (name.clone(), *k, ty.clone()),
+                (PreHirExpr::Const(k, ty), PreHirExpr::Var(name)) => (name.clone(), *k, ty.clone()),
                 _ => return,
             };
             // For `==`: const holds in then-branch (unless negated → else-branch).
             // For `!=`: const holds in else-branch.
-            let const_in_then = matches!(op, DirBinaryOp::Eq) ^ negated;
+            let const_in_then = matches!(op, PreHirBinaryOp::Eq) ^ negated;
             if const_in_then {
                 then_bindings.push((var_name, const_val, ty));
             } else {
@@ -400,8 +400,8 @@ fn extract_branch_constants(
             }
         }
         // cond_a && cond_b → then: both hold; else: nothing (either could be false).
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs,
             rhs,
             ..
@@ -414,7 +414,7 @@ fn extract_branch_constants(
 }
 
 fn sccp_transform_stmts(
-    stmts: &mut Vec<DirStmt>,
+    stmts: &mut Vec<PreHirStmt>,
     env: &mut ConstEnv,
     goto_targets: &HashSet<String>,
     all_xvars: &HashSet<String>,
@@ -429,7 +429,7 @@ fn sccp_transform_stmts(
 }
 
 fn sccp_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     env: &mut ConstEnv,
     goto_targets: &HashSet<String>,
     all_xvars: &HashSet<String>,
@@ -437,13 +437,13 @@ fn sccp_stmt(
     let mut changed = false;
     loop {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
-                if let DirLValue::Var(name) = lhs {
+            PreHirStmt::Assign { lhs, rhs } => {
+                if let PreHirLValue::Var(name) = lhs {
                     changed |= sccp_subst_expr(rhs, env);
                     changed |= fold_expr_hir(rhs);
                     if let Some((v, ty)) = eval_hir_expr_with_const_env(rhs, env) {
-                        if !matches!(rhs, DirExpr::Const(cv, _) if *cv == v) {
-                            *rhs = DirExpr::Const(v, ty.clone());
+                        if !matches!(rhs, PreHirExpr::Const(cv, _) if *cv == v) {
+                            *rhs = PreHirExpr::Const(v, ty.clone());
                             changed = true;
                         }
                         env.insert(name.clone(), (v, ty));
@@ -456,21 +456,21 @@ fn sccp_stmt(
                 }
                 break;
             }
-            DirStmt::VaStart { va_list, .. } => {
+            PreHirStmt::VaStart { va_list, .. } => {
                 changed |= sccp_subst_expr(va_list, env);
                 changed |= fold_expr_hir(va_list);
                 break;
             }
-            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 changed |= sccp_subst_expr(expr, env);
                 changed |= fold_expr_hir(expr);
                 break;
             }
-            DirStmt::Block(stmts) => {
+            PreHirStmt::Block(stmts) => {
                 changed |= sccp_transform_stmts(stmts, env, goto_targets, all_xvars);
                 break;
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -480,12 +480,12 @@ fn sccp_stmt(
                 changed |= fold_expr_hir(cond);
                 match eval_truth(cond, &pre) {
                     Some(true) if !stmt_list_has_side_effects(else_body) => {
-                        *stmt = DirStmt::Block(std::mem::take(then_body));
+                        *stmt = PreHirStmt::Block(std::mem::take(then_body));
                         changed = true;
                         continue;
                     }
                     Some(false) if !stmt_list_has_side_effects(then_body) => {
-                        *stmt = DirStmt::Block(std::mem::take(else_body));
+                        *stmt = PreHirStmt::Block(std::mem::take(else_body));
                         changed = true;
                         continue;
                     }
@@ -511,7 +511,7 @@ fn sccp_stmt(
                 }
                 break;
             }
-            DirStmt::While { cond, body } => {
+            PreHirStmt::While { cond, body } => {
                 let pre = env.clone();
                 let modified = loop_variant_vars(body, all_xvars);
                 let loop_entry = env_without_vars(&pre, &modified);
@@ -522,7 +522,7 @@ fn sccp_stmt(
                 *env = env_without_vars(&pre, &modified);
                 break;
             }
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 let pre = env.clone();
                 let modified = loop_variant_vars(body, all_xvars);
                 let mut inner = env_without_vars(&pre, &modified);
@@ -533,7 +533,7 @@ fn sccp_stmt(
                 *env = env_without_vars(&pre, &modified);
                 break;
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -545,8 +545,8 @@ fn sccp_stmt(
                 let loop_entry = env.clone();
                 let mut modified = loop_variant_vars(body, all_xvars);
                 if let Some(u) = update {
-                    if let DirStmt::Assign {
-                        lhs: DirLValue::Var(n),
+                    if let PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var(n),
                         ..
                     } = u.as_ref()
                     {
@@ -567,7 +567,7 @@ fn sccp_stmt(
                 }
                 break;
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -576,7 +576,7 @@ fn sccp_stmt(
                 changed |= sccp_subst_expr(expr, &pre);
                 changed |= fold_expr_hir(expr);
                 if let Some((v, _)) = eval_hir_expr_with_const_env(expr, &pre) {
-                    let mut taken: Option<Vec<DirStmt>> = None;
+                    let mut taken: Option<Vec<PreHirStmt>> = None;
                     for case in cases.iter_mut() {
                         if case.values.iter().any(|x| *x == v) {
                             taken = Some(std::mem::take(&mut case.body));
@@ -590,7 +590,7 @@ fn sccp_stmt(
                         || stmt_list_has_side_effects(default);
                     if !discarded_have_side_effects {
                         let blk = taken.unwrap_or_else(|| std::mem::take(default));
-                        *stmt = DirStmt::Block(blk);
+                        *stmt = PreHirStmt::Block(blk);
                         changed = true;
                         continue;
                     }
@@ -610,13 +610,13 @@ fn sccp_stmt(
                 *env = merge_env(acc.as_ref().unwrap_or(&pre), &ed);
                 break;
             }
-            DirStmt::Label(label) => {
+            PreHirStmt::Label(label) => {
                 if goto_targets.contains(label) {
                     env.clear();
                 }
                 break;
             }
-            DirStmt::Return(None) | DirStmt::Break | DirStmt::Continue | DirStmt::Goto(_) => {
+            PreHirStmt::Return(None) | PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Goto(_) => {
                 env.clear();
                 break;
             }
@@ -625,28 +625,28 @@ fn sccp_stmt(
     changed
 }
 
-fn collect_xvars_in_stmts(stmts: &[DirStmt], out: &mut HashSet<String>) {
+fn collect_xvars_in_stmts(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         collect_xvars_in_stmt(stmt, out);
     }
 }
 
-fn collect_xvars_in_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
+fn collect_xvars_in_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             collect_xvars_in_lvalue(lhs, out);
             collect_xvars_in_expr(rhs, out);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             collect_xvars_in_expr(va_list, out);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             collect_xvars_in_expr(expr, out);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             collect_xvars_in_stmts(body, out);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -663,7 +663,7 @@ fn collect_xvars_in_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
             }
             collect_xvars_in_stmts(body, out);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -672,7 +672,7 @@ fn collect_xvars_in_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
             collect_xvars_in_stmts(then_body, out);
             collect_xvars_in_stmts(else_body, out);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -687,59 +687,59 @@ fn collect_xvars_in_stmt(stmt: &DirStmt, out: &mut HashSet<String>) {
     }
 }
 
-fn collect_xvars_in_lvalue(lhs: &DirLValue, out: &mut HashSet<String>) {
+fn collect_xvars_in_lvalue(lhs: &PreHirLValue, out: &mut HashSet<String>) {
     match lhs {
-        DirLValue::Var(name) => {
+        PreHirLValue::Var(name) => {
             if name.starts_with("xVar") {
                 out.insert(name.clone());
             }
         }
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Deref { ptr, .. } => {
             collect_xvars_in_expr(ptr, out);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             collect_xvars_in_expr(base, out);
             collect_xvars_in_expr(index, out);
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             collect_xvars_in_expr(base, out);
         }
     }
 }
 
-fn collect_xvars_in_expr(expr: &DirExpr, out: &mut HashSet<String>) {
+fn collect_xvars_in_expr(expr: &PreHirExpr, out: &mut HashSet<String>) {
     match expr {
-        DirExpr::Var(name) | DirExpr::AddressOfGlobal(name) => {
+        PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             if name.starts_with("xVar") {
                 out.insert(name.clone());
             }
         }
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             collect_xvars_in_expr(inner, out);
         }
-        DirExpr::PtrOffset { base, .. } => {
+        PreHirExpr::PtrOffset { base, .. } => {
             collect_xvars_in_expr(base, out);
         }
-        DirExpr::AggregateCopy { src, .. } => {
+        PreHirExpr::AggregateCopy { src, .. } => {
             collect_xvars_in_expr(src, out);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             collect_xvars_in_expr(lhs, out);
             collect_xvars_in_expr(rhs, out);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             collect_xvars_in_expr(base, out);
             collect_xvars_in_expr(index, out);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_xvars_in_expr(arg, out);
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -749,6 +749,6 @@ fn collect_xvars_in_expr(expr: &DirExpr, out: &mut HashSet<String>) {
             collect_xvars_in_expr(then_expr, out);
             collect_xvars_in_expr(else_expr, out);
         }
-        DirExpr::Const(_, _) => {}
+        PreHirExpr::Const(_, _) => {}
     }
 }

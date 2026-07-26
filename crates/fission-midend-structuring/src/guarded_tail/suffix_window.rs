@@ -9,7 +9,7 @@ use crate::cleanup::{has_non_ignorable_payload, is_ignorable_discovery_stmt};
 use crate::guarded_tail::bodies::StructuringCounter;
 use crate::host::StructuringHost;
 use fission_midend_core::ir::{CallEffectSummarySource, NirCallEffectSummary, parse_call_target_address};
-use fission_midend_dir::{DirStmt};
+use fission_midend_prehir::{PreHirStmt};
 use crate::HashMap;
 use crate::HashSet;
 
@@ -23,7 +23,7 @@ pub fn nir_call_summary_is_preview_unsafe(summary: &NirCallEffectSummary) -> boo
 
 /// Pure: if `summary` is a preview-unsafe callee for `stmt`'s call, return target name.
 pub fn preview_unsafe_callee_target(
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     summary: Option<&NirCallEffectSummary>,
 ) -> Option<String> {
     let (target, _args, _return_used) = suffix_call_expr(stmt)?;
@@ -45,7 +45,7 @@ pub struct SuffixCallProvenanceFacts {
 /// Pure emit path for unknown-call provenance diagnostics (no host state).
 pub fn emit_suffix_unknown_call_provenance_trace(
     stmt_idx: usize,
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
     facts: &SuffixCallProvenanceFacts,
 ) {
     let Some((target, _args, return_used)) = suffix_call_expr(stmt) else {
@@ -103,7 +103,7 @@ pub fn emit_suffix_unknown_call_provenance_trace(
 /// Host-facing free entry: look up summary via host residual and apply pure check.
 pub fn suffix_call_uses_preview_unsafe_callee(
     host: &impl StructuringHost,
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
 ) -> Option<String> {
     let (target, _, _) = suffix_call_expr(stmt)?;
     let summary = host.call_effect_summary_for_target(target);
@@ -114,7 +114,7 @@ pub fn suffix_call_uses_preview_unsafe_callee(
 pub fn trace_suffix_unknown_call_provenance(
     host: &impl StructuringHost,
     stmt_idx: usize,
-    stmt: &DirStmt,
+    stmt: &PreHirStmt,
 ) {
     let Some((target, _, _)) = suffix_call_expr(stmt) else {
         return;
@@ -126,34 +126,34 @@ pub fn trace_suffix_unknown_call_provenance(
 
 pub fn classify_suffix_stmt_with_diag(
     host: &mut impl StructuringHost,
-        stmt: &DirStmt,
-        body: &[DirStmt],
+        stmt: &PreHirStmt,
+        body: &[PreHirStmt],
         stmt_idx: usize,
         current_label_idx: usize,
         terminal_label_idx: usize,
         next_label: &str,
     ) -> Result<(), SuffixTailRejection> {
         if is_ignorable_discovery_stmt(stmt)
-            || matches!(stmt, DirStmt::Block(inner) if inner.is_empty())
+            || matches!(stmt, PreHirStmt::Block(inner) if inner.is_empty())
         {
             return Ok(());
         }
         if stmt_is_pure_value_expr(stmt) || stmt_is_pure_value_assign(stmt) {
             return Ok(());
         }
-        if let DirStmt::Goto(target) = stmt {
+        if let PreHirStmt::Goto(target) = stmt {
             if target == next_label
                 || stmt_is_sink_safe_return_goto_for_owned_tail(stmt, body)
             {
                 return Ok(());
             }
             let next_stmt_label_idx = (stmt_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], DirStmt::Label(_)))
+                .find(|pos| matches!(body[*pos], PreHirStmt::Label(_)))
                 .unwrap_or(body.len());
             for trailing_idx in stmt_idx + 1..next_stmt_label_idx {
                 let trailing = &body[trailing_idx];
                 if is_ignorable_discovery_stmt(trailing)
-                    || matches!(trailing, DirStmt::Block(inner) if inner.is_empty())
+                    || matches!(trailing, PreHirStmt::Block(inner) if inner.is_empty())
                 {
                     continue;
                 }
@@ -162,7 +162,7 @@ pub fn classify_suffix_stmt_with_diag(
                 }
                 if !stmt_is_pure_value_expr(trailing)
                     && !stmt_is_pure_value_assign(trailing)
-                    && !matches!(trailing, DirStmt::Goto(target) if target == next_label)
+                    && !matches!(trailing, PreHirStmt::Goto(target) if target == next_label)
                 {
                     return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
                 }
@@ -172,7 +172,7 @@ pub fn classify_suffix_stmt_with_diag(
                 let terminal_label = body
                     .get(terminal_label_idx)
                     .and_then(|stmt| match stmt {
-                        DirStmt::Label(label) => Some(label.as_str()),
+                        PreHirStmt::Label(label) => Some(label.as_str()),
                         _ => None,
                     })
                     .unwrap_or("");
@@ -204,12 +204,12 @@ pub fn classify_suffix_stmt_with_diag(
         }
         if matches!(
             stmt,
-            DirStmt::Switch { .. }
-                | DirStmt::While { .. }
-                | DirStmt::DoWhile { .. }
-                | DirStmt::For { .. }
-                | DirStmt::Break
-                | DirStmt::Continue
+            PreHirStmt::Switch { .. }
+                | PreHirStmt::While { .. }
+                | PreHirStmt::DoWhile { .. }
+                | PreHirStmt::For { .. }
+                | PreHirStmt::Break
+                | PreHirStmt::Continue
         ) {
             return Err(SuffixTailRejection::SuffixHasLoopOrSwitchCrossing { stmt_idx });
         }
@@ -317,7 +317,7 @@ pub fn classify_suffix_stmt_with_diag(
 
 pub fn suffix_is_nonowned_terminal_tail_with_diag(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         anchor_idx: usize,
         start_label: &str,
         start_label_idx: usize,
@@ -389,7 +389,7 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
             }
 
             let Some(next_label_idx) = (current_label_idx + 1..body.len())
-                .find(|pos| matches!(body[*pos], DirStmt::Label(_)))
+                .find(|pos| matches!(body[*pos], PreHirStmt::Label(_)))
             else {
                 return Err(SuffixTailRejection::SuffixHasLabelCrossing {
                     stmt_idx: current_label_idx,
@@ -402,10 +402,10 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
                     label: current_label,
                 });
             }
-            let DirStmt::Label(terminal_label) = &body[terminal_label_idx] else {
+            let PreHirStmt::Label(terminal_label) = &body[terminal_label_idx] else {
                 unreachable!();
             };
-            let DirStmt::Label(next_label) = &body[next_label_idx] else {
+            let PreHirStmt::Label(next_label) = &body[next_label_idx] else {
                 unreachable!();
             };
             for (offset, stmt) in body[current_label_idx + 1..next_label_idx]
@@ -413,7 +413,7 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
                 .enumerate()
             {
                 let stmt_idx = current_label_idx + 1 + offset;
-                if matches!(stmt, DirStmt::Goto(target) if target == terminal_label)
+                if matches!(stmt, PreHirStmt::Goto(target) if target == terminal_label)
                     && suffix_stmt_is_terminal_join_owned_safe(
                         body,
                         stmt_idx,
@@ -426,7 +426,7 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
                 if rewrites == 0
                     && next_label_idx == terminal_label_idx
                     && !is_ignorable_discovery_stmt(stmt)
-                    && !matches!(stmt, DirStmt::Block(inner) if inner.is_empty())
+                    && !matches!(stmt, PreHirStmt::Block(inner) if inner.is_empty())
                 {
                     return Err(SuffixTailRejection::SuffixHasSideEffect { stmt_idx });
                 }
@@ -450,7 +450,7 @@ pub fn suffix_is_nonowned_terminal_tail_with_diag(
 
 pub fn candidate_window_can_shrink_to_label_with_diag(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         anchor_idx: usize,
         candidate_label: &str,
         candidate_label_idx: usize,
@@ -485,7 +485,7 @@ pub fn candidate_window_can_shrink_to_label_with_diag(
 
 pub fn find_earliest_owned_join_label_with_diag(
     host: &mut impl StructuringHost,
-        body: &[DirStmt],
+        body: &[PreHirStmt],
         anchor_idx: usize,
         terminal_label_idx: usize,
         referenced: &HashMap<String, usize>,
@@ -496,7 +496,7 @@ pub fn find_earliest_owned_join_label_with_diag(
         }
 
         for candidate_label_idx in anchor_idx + 1..terminal_label_idx {
-            let DirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
+            let PreHirStmt::Label(candidate_label) = &body[candidate_label_idx] else {
                 continue;
             };
             let has_payload = has_non_ignorable_payload(&body[anchor_idx + 1..candidate_label_idx]);
@@ -529,7 +529,7 @@ pub fn find_earliest_owned_join_label_with_diag(
                     "[GT-TRACE] candidate={} join_label={} early_label={} first_fail={:?} stmt_idx={} first_fail_stmt={:?}",
                     anchor_idx,
                     match body.get(terminal_label_idx) {
-                        Some(DirStmt::Label(label)) => label.as_str(),
+                        Some(PreHirStmt::Label(label)) => label.as_str(),
                         _ => "<missing-terminal-label>",
                     },
                     candidate_label,

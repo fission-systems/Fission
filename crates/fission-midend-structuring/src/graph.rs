@@ -3,7 +3,7 @@ use crate::HashSet;
 use crate::regions::{RegionKind, RegionProof};
 use fission_midend_core::ir::MlilPreviewError;
 use fission_midend_core::ir::*;
-use fission_midend_dir::DirStmt;
+use fission_midend_prehir::PreHirStmt;
 
 pub type StructureNodeId = usize;
 
@@ -78,13 +78,13 @@ pub struct StructureNode {
     pub id: StructureNodeId,
     pub kind: StructureNodeKind,
     pub skip_to: usize,
-    pub statements: Vec<DirStmt>,
+    pub statements: Vec<PreHirStmt>,
     pub proof: Option<RegionProof>,
     pub ownership: BlockOwnership,
 }
 
 impl StructureNode {
-    pub fn region(id: StructureNodeId, stmt: DirStmt, skip_to: usize, proof: RegionProof) -> Self {
+    pub fn region(id: StructureNodeId, stmt: PreHirStmt, skip_to: usize, proof: RegionProof) -> Self {
         let ownership = BlockOwnership::from_members(proof.members.iter().copied());
         Self {
             id,
@@ -98,7 +98,7 @@ impl StructureNode {
 
     pub fn region_body(
         id: StructureNodeId,
-        statements: Vec<DirStmt>,
+        statements: Vec<PreHirStmt>,
         skip_to: usize,
         proof: RegionProof,
     ) -> Self {
@@ -113,7 +113,7 @@ impl StructureNode {
         }
     }
 
-    pub fn basic(id: StructureNodeId, statements: Vec<DirStmt>, block: usize) -> Self {
+    pub fn basic(id: StructureNodeId, statements: Vec<PreHirStmt>, block: usize) -> Self {
         Self {
             id,
             kind: StructureNodeKind::Basic,
@@ -124,7 +124,7 @@ impl StructureNode {
         }
     }
 
-    pub fn unstructured(id: StructureNodeId, statements: Vec<DirStmt>, block: usize) -> Self {
+    pub fn unstructured(id: StructureNodeId, statements: Vec<PreHirStmt>, block: usize) -> Self {
         Self {
             id,
             kind: StructureNodeKind::Unstructured,
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn region_node_owns_proven_members() {
         let proof = RegionProof::structured(RegionKind::Loop, 2, 6, None);
-        let node = StructureNode::region(0, DirStmt::Block(vec![]), 6, proof);
+        let node = StructureNode::region(0, PreHirStmt::Block(vec![]), 6, proof);
 
         assert_eq!(node.ownership.iter().collect::<Vec<_>>(), vec![2, 3, 4, 5]);
         assert!(node.ownership.contains(4));
@@ -230,7 +230,7 @@ mod tests {
     }
 }
 
-pub fn surface_structure_graph(graph: StructureGraph) -> Vec<DirStmt> {
+pub fn surface_structure_graph(graph: StructureGraph) -> Vec<PreHirStmt> {
     graph
         .into_nodes()
         .into_iter()

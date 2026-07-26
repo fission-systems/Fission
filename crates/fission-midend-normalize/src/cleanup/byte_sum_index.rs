@@ -9,12 +9,12 @@ use crate::prelude::*;
 use crate::HashMap;
 
 /// Apply byte-sum index truncation recovery. Returns true if any rewrite ran.
-pub fn apply_byte_sum_index_trunc(func: &mut DirFunction) -> bool {
+pub fn apply_byte_sum_index_trunc(func: &mut PreHirFunction) -> bool {
     let mut type_map: HashMap<String, NirType> = HashMap::default();
     for b in func.params.iter().chain(func.locals.iter()) {
         type_map.insert(b.name.clone(), b.ty.clone());
     }
-    let mut last_def: HashMap<String, DirExpr> = HashMap::default();
+    let mut last_def: HashMap<String, PreHirExpr> = HashMap::default();
     let mut byte_ranged: HashMap<String, bool> = HashMap::default();
     // Names whose *last* def was a sum of two byte-ranged values (frozen at assign time).
     let mut byte_sum_names: HashMap<String, bool> = HashMap::default();
@@ -31,9 +31,9 @@ pub fn apply_byte_sum_index_trunc(func: &mut DirFunction) -> bool {
 }
 
 fn rewrite_stmts(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     type_map: &HashMap<String, NirType>,
-    last_def: &mut HashMap<String, DirExpr>,
+    last_def: &mut HashMap<String, PreHirExpr>,
     byte_ranged: &mut HashMap<String, bool>,
     byte_sum_names: &mut HashMap<String, bool>,
     changed: &mut bool,
@@ -51,25 +51,25 @@ fn rewrite_stmts(
 }
 
 fn rewrite_stmt(
-    stmt: &mut DirStmt,
+    stmt: &mut PreHirStmt,
     type_map: &HashMap<String, NirType>,
-    last_def: &mut HashMap<String, DirExpr>,
+    last_def: &mut HashMap<String, PreHirExpr>,
     byte_ranged: &mut HashMap<String, bool>,
     byte_sum_names: &mut HashMap<String, bool>,
     changed: &mut bool,
 ) {
     match stmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
             rhs,
         } => {
             // Pattern: w = v  where v's last def was a byte-sum.
-            if let DirExpr::Var(src) = rhs {
+            if let PreHirExpr::Var(src) = rhs {
                 if byte_sum_names.get(src).copied().unwrap_or(false) {
                     let source_ty = last_def
                         .get(src)
                         .and_then(|d| match d {
-                            DirExpr::Binary { ty, .. } => Some(ty.clone()),
+                            PreHirExpr::Binary { ty, .. } => Some(ty.clone()),
                             _ => None,
                         })
                         .unwrap_or(NirType::Int {
@@ -77,10 +77,10 @@ fn rewrite_stmt(
                             signed: false,
                         });
                     let ty = unsigned_mask_type(name, &source_ty, type_map);
-                    *rhs = DirExpr::Binary {
-                        op: DirBinaryOp::And,
-                        lhs: Box::new(DirExpr::Var(src.clone())),
-                        rhs: Box::new(DirExpr::Const(0xff, ty.clone())),
+                    *rhs = PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var(src.clone())),
+                        rhs: Box::new(PreHirExpr::Const(0xff, ty.clone())),
                         ty,
                     };
                     *changed = true;
@@ -98,7 +98,7 @@ fn rewrite_stmt(
             byte_sum_names.insert(name.clone(), is_sum);
             last_def.insert(name.clone(), rhs.clone());
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             rewrite_stmts(
                 body,
                 type_map,
@@ -108,7 +108,7 @@ fn rewrite_stmt(
                 changed,
             );
         }
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -146,7 +146,7 @@ fn rewrite_stmt(
                 then_sum.get(k).copied() == Some(*v) && else_sum.get(k).copied() == Some(*v)
             });
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(i) = init.as_mut() {
@@ -174,7 +174,7 @@ fn rewrite_stmt(
                 );
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 let mut d = last_def.clone();
                 let mut b = byte_ranged.clone();
@@ -215,13 +215,13 @@ fn int_type_width(ty: &NirType) -> Option<u32> {
 }
 
 fn is_byte_sum(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     byte_ranged: &HashMap<String, bool>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     match expr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
@@ -245,53 +245,53 @@ fn ptr_elem_is_byte(ty: &NirType) -> bool {
 }
 
 fn expr_is_byte_ranged(
-    expr: &DirExpr,
+    expr: &PreHirExpr,
     byte_ranged: &HashMap<String, bool>,
     type_map: &HashMap<String, NirType>,
 ) -> bool {
     match expr {
-        DirExpr::Var(name) => {
+        PreHirExpr::Var(name) => {
             if byte_ranged.get(name).copied().unwrap_or(false) {
                 return true;
             }
             // Typed as uchar / byte binding.
             type_map.get(name).is_some_and(is_byte_int_ty)
         }
-        DirExpr::Load { ptr, ty, .. } => {
+        PreHirExpr::Load { ptr, ty, .. } => {
             if is_byte_int_ty(ty) {
                 return true;
             }
             // `*uchar_ptr` may be typed as a wider int after promotion.
-            if let DirExpr::Var(pn) = ptr.as_ref() {
+            if let PreHirExpr::Var(pn) = ptr.as_ref() {
                 if type_map.get(pn).is_some_and(ptr_elem_is_byte) {
                     return true;
                 }
             }
-            match fission_midend_dir::util::expr_type(ptr) {
+            match fission_midend_prehir::util::expr_type(ptr) {
                 NirType::Ptr(inner) => is_byte_int_ty(&inner),
                 _ => false,
             }
         }
-        DirExpr::Cast { ty, expr: inner } => {
+        PreHirExpr::Cast { ty, expr: inner } => {
             is_byte_int_ty(ty) || expr_is_byte_ranged(inner, byte_ranged, type_map)
         }
-        DirExpr::Binary {
-            op: DirBinaryOp::And,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             rhs,
             lhs,
             ..
         } => match (lhs.as_ref(), rhs.as_ref()) {
-            (DirExpr::Const(m, _), _) | (_, DirExpr::Const(m, _)) => {
+            (PreHirExpr::Const(m, _), _) | (_, PreHirExpr::Const(m, _)) => {
                 let m = *m as u64;
                 m == 0xff || m == 255
             }
             _ => false,
         },
-        DirExpr::Binary {
-            op: DirBinaryOp::Mod,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mod,
             rhs,
             ..
-        } => matches!(rhs.as_ref(), DirExpr::Const(m, _) if *m == 256 || *m == 0x100),
+        } => matches!(rhs.as_ref(), PreHirExpr::Const(m, _) if *m == 256 || *m == 0x100),
         _ => false,
     }
 }
@@ -322,8 +322,8 @@ mod tests {
         }
     }
 
-    fn binding(name: &str, ty: NirType) -> DirBinding {
-        DirBinding {
+    fn binding(name: &str, ty: NirType) -> PreHirBinding {
+        PreHirBinding {
             name: name.into(),
             ty,
             surface_type_name: None,
@@ -334,38 +334,38 @@ mod tests {
 
     #[test]
     fn recovers_truncation_after_byte_sum_copy() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "f".into(),
             params: vec![],
             locals: vec![],
             return_type: u32_ty(),
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("a".into()),
-                    rhs: DirExpr::Load {
-                        ptr: Box::new(DirExpr::Var("p".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("a".into()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("p".into())),
                         ty: u8_ty(),
                     },
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("b".into()),
-                    rhs: DirExpr::Load {
-                        ptr: Box::new(DirExpr::Var("q".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("b".into()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("q".into())),
                         ty: u8_ty(),
                     },
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("s".into()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("a".into())),
-                        rhs: Box::new(DirExpr::Var("b".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("s".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("a".into())),
+                        rhs: Box::new(PreHirExpr::Var("b".into())),
                         ty: u32_ty(),
                     },
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("idx".into()),
-                    rhs: DirExpr::Var("s".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("idx".into()),
+                    rhs: PreHirExpr::Var("s".into()),
                 },
             ],
             ..Default::default()
@@ -373,13 +373,13 @@ mod tests {
 
         assert!(apply_byte_sum_index_trunc(&mut func));
         match &func.body[3] {
-            DirStmt::Assign { rhs, .. } => match rhs {
-                DirExpr::Binary {
-                    op: DirBinaryOp::And,
+            PreHirStmt::Assign { rhs, .. } => match rhs {
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
                     rhs: mask,
                     ..
                 } => {
-                    assert!(matches!(mask.as_ref(), DirExpr::Const(0xff, _)));
+                    assert!(matches!(mask.as_ref(), PreHirExpr::Const(0xff, _)));
                 }
                 other => panic!("expected masked assign, got {other:?}"),
             },
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn recovered_mask_uses_unsigned_destination_width() {
-        let mut func = DirFunction {
+        let mut func = PreHirFunction {
             name: "signed_byte_sum".into(),
             params: vec![],
             locals: vec![
@@ -400,18 +400,18 @@ mod tests {
             ],
             return_type: u32_ty(),
             body: vec![
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("sum".into()),
-                    rhs: DirExpr::Binary {
-                        op: DirBinaryOp::Add,
-                        lhs: Box::new(DirExpr::Var("a".into())),
-                        rhs: Box::new(DirExpr::Var("b".into())),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("sum".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("a".into())),
+                        rhs: Box::new(PreHirExpr::Var("b".into())),
                         ty: i8_ty(),
                     },
                 },
-                DirStmt::Assign {
-                    lhs: DirLValue::Var("index".into()),
-                    rhs: DirExpr::Var("sum".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("index".into()),
+                    rhs: PreHirExpr::Var("sum".into()),
                 },
             ],
             ..Default::default()
@@ -420,9 +420,9 @@ mod tests {
         assert!(apply_byte_sum_index_trunc(&mut func));
         assert!(matches!(
             &func.body[1],
-            DirStmt::Assign {
-                rhs: DirExpr::Binary {
-                    op: DirBinaryOp::And,
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
                     rhs,
                     ty: NirType::Int {
                         bits: 32,
@@ -433,7 +433,7 @@ mod tests {
                 ..
             } if matches!(
                 rhs.as_ref(),
-                DirExpr::Const(
+                PreHirExpr::Const(
                     0xff,
                     NirType::Int {
                         bits: 32,

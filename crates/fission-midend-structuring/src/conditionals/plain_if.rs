@@ -6,12 +6,12 @@ use super::{
 use crate::host::StructuringHost;
 use crate::linear_types::{IfLoweringBudget, LinearExit, LoweredTerminator, structuring_diag_enabled};
 use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_dir::{DirExpr, DirStmt};
-use fission_midend_dir::util::negate_expr;
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
+use fission_midend_prehir::util::negate_expr;
 
 struct PlainIfCandidate {
-    cond_prefix: Vec<DirStmt>,
-    cond: DirExpr,
+    cond_prefix: Vec<PreHirStmt>,
+    cond: PreHirExpr,
     body_idx: usize,
     exit: LinearExit,
     block_addr: u64,
@@ -109,7 +109,7 @@ fn classify_plain_if_candidate(
 pub fn try_lower_if(
     host: &mut impl StructuringHost,
     idx: usize,
-) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
     let diag = structuring_diag_enabled();
     let mut budget = IfLoweringBudget::new(
         host.options(),
@@ -160,7 +160,7 @@ pub fn try_lower_if(
             return Ok(None);
         };
 
-        let stmt = DirStmt::If {
+        let stmt = PreHirStmt::If {
             cond: candidate.cond,
             then_body: body,
             else_body: Vec::new(),
@@ -170,7 +170,7 @@ pub fn try_lower_if(
         } else {
             let mut wrapped = candidate.cond_prefix;
             wrapped.push(stmt);
-            Ok(Some((DirStmt::Block(wrapped), skip_to)))
+            Ok(Some((PreHirStmt::Block(wrapped), skip_to)))
         }
     })();
 

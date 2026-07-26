@@ -3,13 +3,13 @@ use crate::prelude::*;
 /// Simplifies comparisons involving 3-way comparisons.
 /// Detects expressions of the form `zext(a < b) + zext(a <= b) - 1` (or similar)
 /// compared to constants (-1, 0, 1) and replaces them with direct comparisons.
-pub fn apply_three_way_compare_pass(func: &mut DirFunction) -> bool {
+pub fn apply_three_way_compare_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     changed |= simplify_stmts(&mut func.body);
     changed
 }
 
-fn simplify_stmts(stmts: &mut [DirStmt]) -> bool {
+fn simplify_stmts(stmts: &mut [PreHirStmt]) -> bool {
     let mut changed = false;
     for stmt in stmts {
         changed |= simplify_stmt(stmt);
@@ -17,20 +17,20 @@ fn simplify_stmts(stmts: &mut [DirStmt]) -> bool {
     changed
 }
 
-fn simplify_stmt(stmt: &mut DirStmt) -> bool {
+fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             changed |= simplify_expr(rhs);
             changed |= simplify_lvalue(lhs);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -47,7 +47,7 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
             }
             changed |= simplify_stmts(body);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -56,7 +56,7 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
             changed |= simplify_stmts(then_body);
             changed |= simplify_stmts(else_body);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -67,7 +67,7 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
             }
             changed |= simplify_stmts(default);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list);
         }
         _ => {}
@@ -75,46 +75,46 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
     changed
 }
 
-fn simplify_lvalue(lval: &mut DirLValue) -> bool {
+fn simplify_lvalue(lval: &mut PreHirLValue) -> bool {
     let mut changed = false;
     match lval {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => {
             changed |= simplify_expr(ptr);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             changed |= simplify_expr(base);
         }
     }
     changed
 }
 
-fn simplify_expr(expr: &mut DirExpr) -> bool {
+fn simplify_expr(expr: &mut PreHirExpr) -> bool {
     let mut changed = false;
 
     // Recurse first
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
             changed |= simplify_expr(inner);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= simplify_expr(lhs);
             changed |= simplify_expr(rhs);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= simplify_expr(arg);
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -124,7 +124,7 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
             changed |= simplify_expr(then_expr);
             changed |= simplify_expr(else_expr);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
@@ -132,9 +132,9 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
     }
 
     // Attempt to simplify 3-way comparisons on this Binary expression
-    if let DirExpr::Binary { op, lhs, rhs, ty } = expr {
+    if let PreHirExpr::Binary { op, lhs, rhs, ty } = expr {
         if let Some((new_op, v, w)) = try_simplify_three_way_cmp(*op, lhs, rhs) {
-            *expr = DirExpr::Binary {
+            *expr = PreHirExpr::Binary {
                 op: new_op,
                 lhs: Box::new(v),
                 rhs: Box::new(w),
@@ -147,9 +147,9 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
     changed
 }
 
-fn collect_add_terms(expr: &DirExpr, terms: &mut Vec<DirExpr>) {
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Add,
+fn collect_add_terms(expr: &PreHirExpr, terms: &mut Vec<PreHirExpr>) {
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
         lhs,
         rhs,
         ..
@@ -162,7 +162,7 @@ fn collect_add_terms(expr: &DirExpr, terms: &mut Vec<DirExpr>) {
     }
 }
 
-fn detect_three_way(expr: &DirExpr) -> Option<(DirExpr, DirExpr, DirBinaryOp)> {
+fn detect_three_way(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr, PreHirBinaryOp)> {
     let mut terms = Vec::new();
     collect_add_terms(expr, &mut terms);
     if terms.len() != 3 {
@@ -170,7 +170,7 @@ fn detect_three_way(expr: &DirExpr) -> Option<(DirExpr, DirExpr, DirBinaryOp)> {
     }
     // Find the constant -1
     let const_idx = terms.iter().position(|t| {
-        if let DirExpr::Const(val, ty) = t {
+        if let PreHirExpr::Const(val, ty) = t {
             let mask = match ty {
                 NirType::Int { bits, .. } => {
                     (1u64.checked_shl(*bits).unwrap_or(0).wrapping_sub(1)) as i64
@@ -187,8 +187,8 @@ fn detect_three_way(expr: &DirExpr) -> Option<(DirExpr, DirExpr, DirBinaryOp)> {
     // The other two terms must be Casts of comparisons
     let mut comparisons = Vec::new();
     for term in &terms {
-        if let DirExpr::Cast { expr: inner, .. } = term {
-            if let DirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref() {
+        if let PreHirExpr::Cast { expr: inner, .. } = term {
+            if let PreHirExpr::Binary { op, lhs, rhs, .. } = inner.as_ref() {
                 comparisons.push((*op, lhs.as_ref(), rhs.as_ref()));
             }
         }
@@ -206,8 +206,8 @@ fn detect_three_way(expr: &DirExpr) -> Option<(DirExpr, DirExpr, DirBinaryOp)> {
     }
 
     // One must be less than, the other must be less-than-or-equal
-    let is_less = |op: DirBinaryOp| matches!(op, DirBinaryOp::Lt | DirBinaryOp::SLt);
-    let is_lesseq = |op: DirBinaryOp| matches!(op, DirBinaryOp::Le | DirBinaryOp::SLe);
+    let is_less = |op: PreHirBinaryOp| matches!(op, PreHirBinaryOp::Lt | PreHirBinaryOp::SLt);
+    let is_lesseq = |op: PreHirBinaryOp| matches!(op, PreHirBinaryOp::Le | PreHirBinaryOp::SLe);
 
     if (is_less(op1) && is_lesseq(op2)) || (is_lesseq(op1) && is_less(op2)) {
         let less_op = if is_less(op1) { op1 } else { op2 };
@@ -226,36 +226,36 @@ enum TargetRelation {
     Ne,
 }
 
-fn get_compare_op(less_op: DirBinaryOp, rel: TargetRelation) -> DirBinaryOp {
+fn get_compare_op(less_op: PreHirBinaryOp, rel: TargetRelation) -> PreHirBinaryOp {
     match (less_op, rel) {
-        (DirBinaryOp::Lt, TargetRelation::Lt) => DirBinaryOp::Lt,
-        (DirBinaryOp::Lt, TargetRelation::Le) => DirBinaryOp::Le,
-        (DirBinaryOp::Lt, TargetRelation::Gt) => DirBinaryOp::Gt,
-        (DirBinaryOp::Lt, TargetRelation::Ge) => DirBinaryOp::Ge,
-        (DirBinaryOp::Lt, TargetRelation::Eq) => DirBinaryOp::Eq,
-        (DirBinaryOp::Lt, TargetRelation::Ne) => DirBinaryOp::Ne,
+        (PreHirBinaryOp::Lt, TargetRelation::Lt) => PreHirBinaryOp::Lt,
+        (PreHirBinaryOp::Lt, TargetRelation::Le) => PreHirBinaryOp::Le,
+        (PreHirBinaryOp::Lt, TargetRelation::Gt) => PreHirBinaryOp::Gt,
+        (PreHirBinaryOp::Lt, TargetRelation::Ge) => PreHirBinaryOp::Ge,
+        (PreHirBinaryOp::Lt, TargetRelation::Eq) => PreHirBinaryOp::Eq,
+        (PreHirBinaryOp::Lt, TargetRelation::Ne) => PreHirBinaryOp::Ne,
 
-        (DirBinaryOp::SLt, TargetRelation::Lt) => DirBinaryOp::SLt,
-        (DirBinaryOp::SLt, TargetRelation::Le) => DirBinaryOp::SLe,
-        (DirBinaryOp::SLt, TargetRelation::Gt) => DirBinaryOp::SGt,
-        (DirBinaryOp::SLt, TargetRelation::Ge) => DirBinaryOp::SGe,
-        (DirBinaryOp::SLt, TargetRelation::Eq) => DirBinaryOp::Eq,
-        (DirBinaryOp::SLt, TargetRelation::Ne) => DirBinaryOp::Ne,
+        (PreHirBinaryOp::SLt, TargetRelation::Lt) => PreHirBinaryOp::SLt,
+        (PreHirBinaryOp::SLt, TargetRelation::Le) => PreHirBinaryOp::SLe,
+        (PreHirBinaryOp::SLt, TargetRelation::Gt) => PreHirBinaryOp::SGt,
+        (PreHirBinaryOp::SLt, TargetRelation::Ge) => PreHirBinaryOp::SGe,
+        (PreHirBinaryOp::SLt, TargetRelation::Eq) => PreHirBinaryOp::Eq,
+        (PreHirBinaryOp::SLt, TargetRelation::Ne) => PreHirBinaryOp::Ne,
 
         _ => less_op,
     }
 }
 
 fn try_simplify_three_way_cmp(
-    op: DirBinaryOp,
-    lhs: &DirExpr,
-    rhs: &DirExpr,
-) -> Option<(DirBinaryOp, DirExpr, DirExpr)> {
+    op: PreHirBinaryOp,
+    lhs: &PreHirExpr,
+    rhs: &PreHirExpr,
+) -> Option<(PreHirBinaryOp, PreHirExpr, PreHirExpr)> {
     // We expect one side to be a 3-way compare, and the other side to be a constant
     // Match (3way, constant) or (constant, 3way)
     let (three_way_expr, const_val, is_three_way_lhs) = match (lhs, rhs) {
-        (t, DirExpr::Const(c, _)) => (t, *c, true),
-        (DirExpr::Const(c, _), t) => (t, *c, false),
+        (t, PreHirExpr::Const(c, _)) => (t, *c, true),
+        (PreHirExpr::Const(c, _), t) => (t, *c, false),
         _ => return None,
     };
 
@@ -272,24 +272,24 @@ fn try_simplify_three_way_cmp(
         op
     } else {
         match op {
-            DirBinaryOp::Lt => DirBinaryOp::Gt,
-            DirBinaryOp::SLt => DirBinaryOp::SGt,
+            PreHirBinaryOp::Lt => PreHirBinaryOp::Gt,
+            PreHirBinaryOp::SLt => PreHirBinaryOp::SGt,
 
-            DirBinaryOp::Le => DirBinaryOp::Ge,
-            DirBinaryOp::SLe => DirBinaryOp::SGe,
+            PreHirBinaryOp::Le => PreHirBinaryOp::Ge,
+            PreHirBinaryOp::SLe => PreHirBinaryOp::SGe,
 
-            DirBinaryOp::Gt => DirBinaryOp::Lt,
-            DirBinaryOp::SGt => DirBinaryOp::SLt,
+            PreHirBinaryOp::Gt => PreHirBinaryOp::Lt,
+            PreHirBinaryOp::SGt => PreHirBinaryOp::SLt,
 
-            DirBinaryOp::Ge => DirBinaryOp::Le,
-            DirBinaryOp::SGe => DirBinaryOp::SLe,
+            PreHirBinaryOp::Ge => PreHirBinaryOp::Le,
+            PreHirBinaryOp::SGe => PreHirBinaryOp::SLe,
 
             other => other, // Eq, Ne are symmetric
         }
     };
 
     // Helper to return comparison inputs in order (v, w) or (w, v)
-    let make_ret = |rel: TargetRelation| -> Option<(DirBinaryOp, DirExpr, DirExpr)> {
+    let make_ret = |rel: TargetRelation| -> Option<(PreHirBinaryOp, PreHirExpr, PreHirExpr)> {
         match rel {
             TargetRelation::Lt => Some((
                 get_compare_op(less_op, TargetRelation::Lt),
@@ -326,7 +326,7 @@ fn try_simplify_three_way_cmp(
 
     match normalized_op {
         // EQUAL
-        DirBinaryOp::Eq => {
+        PreHirBinaryOp::Eq => {
             match const_val {
                 -1 => make_ret(TargetRelation::Lt), // X == -1 => v < w
                 0 => make_ret(TargetRelation::Eq),  // X == 0  => v == w
@@ -335,7 +335,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // NOT EQUAL
-        DirBinaryOp::Ne => {
+        PreHirBinaryOp::Ne => {
             match const_val {
                 -1 => make_ret(TargetRelation::Ge), // X != -1 => v >= w
                 0 => make_ret(TargetRelation::Ne),  // X != 0  => v != w
@@ -344,7 +344,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // LESS THAN (signed and unsigned)
-        DirBinaryOp::Lt | DirBinaryOp::SLt => {
+        PreHirBinaryOp::Lt | PreHirBinaryOp::SLt => {
             match const_val {
                 0 => make_ret(TargetRelation::Lt), // X < 0  => v < w
                 1 => make_ret(TargetRelation::Le), // X < 1  => v <= w
@@ -353,7 +353,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // LESS OR EQUAL
-        DirBinaryOp::Le | DirBinaryOp::SLe => {
+        PreHirBinaryOp::Le | PreHirBinaryOp::SLe => {
             match const_val {
                 -1 => make_ret(TargetRelation::Lt), // X <= -1 => v < w
                 0 => make_ret(TargetRelation::Le),  // X <= 0  => v <= w
@@ -362,7 +362,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // GREATER THAN
-        DirBinaryOp::Gt | DirBinaryOp::SGt => {
+        PreHirBinaryOp::Gt | PreHirBinaryOp::SGt => {
             match const_val {
                 0 => make_ret(TargetRelation::Gt),  // X > 0  => w < v (v > w)
                 -1 => make_ret(TargetRelation::Ge), // X > -1 => w <= v (v >= w)
@@ -371,7 +371,7 @@ fn try_simplify_three_way_cmp(
             }
         }
         // GREATER OR EQUAL
-        DirBinaryOp::Ge | DirBinaryOp::SGe => {
+        PreHirBinaryOp::Ge | PreHirBinaryOp::SGe => {
             match const_val {
                 1 => make_ret(TargetRelation::Gt), // X >= 1  => w < v (v > w)
                 0 => make_ret(TargetRelation::Ge), // X >= 0  => w <= v (v >= w)

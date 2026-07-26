@@ -137,7 +137,7 @@ fn selfjit_supports<'a>(ops: impl IntoIterator<Item = &'a fission_pcode::ir::Pco
 }
 
 /// Build a fresh `Emulator` with `binary_path` loaded, PC at `entry_pc`.
-/// Format-aware (PE or ELF), mirroring `fission-verify::emu_driver::
+/// Format-aware (PE or ELF), mirroring `fission-dir::emu_driver::
 /// EmulatorHarness::build`'s and `fission-cli`'s `sandbox` setup sequence
 /// -- so this harness can target either a self-contained ELF fixture
 /// (e.g. `testdata/x64_static_printf_malloc.elf`, `selfjit::compiler`'s

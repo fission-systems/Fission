@@ -3,10 +3,10 @@ use crate::prelude::*;
 /// The trait representing an AST simplification rule.
 pub trait Rule {
     fn name(&self) -> &'static str;
-    fn apply_stmt(&self, _stmt: &mut DirStmt) -> bool {
+    fn apply_stmt(&self, _stmt: &mut PreHirStmt) -> bool {
         false
     }
-    fn apply_expr(&self, _expr: &mut DirExpr) -> bool {
+    fn apply_expr(&self, _expr: &mut PreHirExpr) -> bool {
         false
     }
 }
@@ -19,21 +19,21 @@ impl Rule for RuleSimplifyDoubleNegation {
         "simplify_double_negation"
     }
 
-    fn apply_expr(&self, expr: &mut DirExpr) -> bool {
-        if let DirExpr::Unary {
+    fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
+        if let PreHirExpr::Unary {
             op: op1,
             expr: inner1,
             ty: _,
         } = expr
         {
-            if let DirExpr::Unary {
+            if let PreHirExpr::Unary {
                 op: op2,
                 expr: inner2,
                 ty: _,
             } = inner1.as_mut()
             {
-                if (*op1 == DirUnaryOp::Not && *op2 == DirUnaryOp::Not)
-                    || (*op1 == DirUnaryOp::BitNot && *op2 == DirUnaryOp::BitNot)
+                if (*op1 == PreHirUnaryOp::Not && *op2 == PreHirUnaryOp::Not)
+                    || (*op1 == PreHirUnaryOp::BitNot && *op2 == PreHirUnaryOp::BitNot)
                 {
                     *expr = (**inner2).clone();
                     return true;
@@ -57,58 +57,58 @@ impl Rule for RuleFoldConstants {
         "fold_constants"
     }
 
-    fn apply_expr(&self, expr: &mut DirExpr) -> bool {
+    fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
         match expr {
-            DirExpr::Binary { op, lhs, rhs, ty } => {
+            PreHirExpr::Binary { op, lhs, rhs, ty } => {
                 match (lhs.as_ref(), rhs.as_ref()) {
                     // Fold double constants
-                    (DirExpr::Const(c1, _), DirExpr::Const(c2, _)) => {
+                    (PreHirExpr::Const(c1, _), PreHirExpr::Const(c2, _)) => {
                         let val = match op {
-                            DirBinaryOp::Add => Some(c1.wrapping_add(*c2)),
-                            DirBinaryOp::Sub => Some(c1.wrapping_sub(*c2)),
-                            DirBinaryOp::Mul => Some(c1.wrapping_mul(*c2)),
-                            DirBinaryOp::Div if *c2 != 0 => Some(c1.wrapping_div(*c2)),
-                            DirBinaryOp::Mod if *c2 != 0 => Some(c1.wrapping_rem(*c2)),
-                            DirBinaryOp::And => Some(c1 & c2),
-                            DirBinaryOp::Or => Some(c1 | c2),
-                            DirBinaryOp::Xor => Some(c1 ^ c2),
-                            DirBinaryOp::Shl => Some(c1.wrapping_shl(*c2 as u32)),
-                            DirBinaryOp::Shr => Some((*c1 as u64).wrapping_shr(*c2 as u32) as i64),
-                            DirBinaryOp::Sar => Some(c1.wrapping_shr(*c2 as u32)),
+                            PreHirBinaryOp::Add => Some(c1.wrapping_add(*c2)),
+                            PreHirBinaryOp::Sub => Some(c1.wrapping_sub(*c2)),
+                            PreHirBinaryOp::Mul => Some(c1.wrapping_mul(*c2)),
+                            PreHirBinaryOp::Div if *c2 != 0 => Some(c1.wrapping_div(*c2)),
+                            PreHirBinaryOp::Mod if *c2 != 0 => Some(c1.wrapping_rem(*c2)),
+                            PreHirBinaryOp::And => Some(c1 & c2),
+                            PreHirBinaryOp::Or => Some(c1 | c2),
+                            PreHirBinaryOp::Xor => Some(c1 ^ c2),
+                            PreHirBinaryOp::Shl => Some(c1.wrapping_shl(*c2 as u32)),
+                            PreHirBinaryOp::Shr => Some((*c1 as u64).wrapping_shr(*c2 as u32) as i64),
+                            PreHirBinaryOp::Sar => Some(c1.wrapping_shr(*c2 as u32)),
                             _ => None,
                         };
                         if let Some(v) = val {
-                            *expr = DirExpr::Const(v, ty.clone());
+                            *expr = PreHirExpr::Const(v, ty.clone());
                             return true;
                         }
                     }
                     // x + 0 -> x
-                    (other, DirExpr::Const(0, _)) if *op == DirBinaryOp::Add => {
+                    (other, PreHirExpr::Const(0, _)) if *op == PreHirBinaryOp::Add => {
                         *expr = other.clone();
                         return true;
                     }
-                    (DirExpr::Const(0, _), other) if *op == DirBinaryOp::Add => {
+                    (PreHirExpr::Const(0, _), other) if *op == PreHirBinaryOp::Add => {
                         *expr = other.clone();
                         return true;
                     }
                     // x - 0 -> x
-                    (other, DirExpr::Const(0, _)) if *op == DirBinaryOp::Sub => {
+                    (other, PreHirExpr::Const(0, _)) if *op == PreHirBinaryOp::Sub => {
                         *expr = other.clone();
                         return true;
                     }
                     // x * 0 -> 0, x * 1 -> x
-                    (other, DirExpr::Const(c, _)) if *op == DirBinaryOp::Mul => {
+                    (other, PreHirExpr::Const(c, _)) if *op == PreHirBinaryOp::Mul => {
                         if *c == 0 {
-                            *expr = DirExpr::Const(0, ty.clone());
+                            *expr = PreHirExpr::Const(0, ty.clone());
                             return true;
                         } else if *c == 1 {
                             *expr = other.clone();
                             return true;
                         }
                     }
-                    (DirExpr::Const(c, _), other) if *op == DirBinaryOp::Mul => {
+                    (PreHirExpr::Const(c, _), other) if *op == PreHirBinaryOp::Mul => {
                         if *c == 0 {
-                            *expr = DirExpr::Const(0, ty.clone());
+                            *expr = PreHirExpr::Const(0, ty.clone());
                             return true;
                         } else if *c == 1 {
                             *expr = other.clone();
@@ -118,13 +118,13 @@ impl Rule for RuleFoldConstants {
                     _ => {}
                 }
             }
-            DirExpr::Unary {
-                op: DirUnaryOp::Neg,
+            PreHirExpr::Unary {
+                op: PreHirUnaryOp::Neg,
                 expr: inner,
                 ty,
             } => {
-                if let DirExpr::Const(c, _) = inner.as_ref() {
-                    *expr = DirExpr::Const(c.wrapping_neg(), ty.clone());
+                if let PreHirExpr::Const(c, _) = inner.as_ref() {
+                    *expr = PreHirExpr::Const(c.wrapping_neg(), ty.clone());
                     return true;
                 }
             }
@@ -146,45 +146,45 @@ impl Rule for RuleBitwiseIdentities {
         "bitwise_identities"
     }
 
-    fn apply_expr(&self, expr: &mut DirExpr) -> bool {
-        if let DirExpr::Binary { op, lhs, rhs, ty } = expr {
+    fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
+        if let PreHirExpr::Binary { op, lhs, rhs, ty } = expr {
             match op {
-                DirBinaryOp::And => match (lhs.as_ref(), rhs.as_ref()) {
-                    (_, DirExpr::Const(0, _)) => {
-                        *expr = DirExpr::Const(0, ty.clone());
+                PreHirBinaryOp::And => match (lhs.as_ref(), rhs.as_ref()) {
+                    (_, PreHirExpr::Const(0, _)) => {
+                        *expr = PreHirExpr::Const(0, ty.clone());
                         return true;
                     }
-                    (DirExpr::Const(0, _), _) => {
-                        *expr = DirExpr::Const(0, ty.clone());
+                    (PreHirExpr::Const(0, _), _) => {
+                        *expr = PreHirExpr::Const(0, ty.clone());
                         return true;
                     }
-                    (other, DirExpr::Const(-1, _)) => {
+                    (other, PreHirExpr::Const(-1, _)) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (DirExpr::Const(-1, _), other) => {
-                        *expr = other.clone();
-                        return true;
-                    }
-                    _ => {}
-                },
-                DirBinaryOp::Or => match (lhs.as_ref(), rhs.as_ref()) {
-                    (other, DirExpr::Const(0, _)) => {
-                        *expr = other.clone();
-                        return true;
-                    }
-                    (DirExpr::Const(0, _), other) => {
+                    (PreHirExpr::Const(-1, _), other) => {
                         *expr = other.clone();
                         return true;
                     }
                     _ => {}
                 },
-                DirBinaryOp::Xor => match (lhs.as_ref(), rhs.as_ref()) {
-                    (other, DirExpr::Const(0, _)) => {
+                PreHirBinaryOp::Or => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, PreHirExpr::Const(0, _)) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (DirExpr::Const(0, _), other) => {
+                    (PreHirExpr::Const(0, _), other) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    _ => {}
+                },
+                PreHirBinaryOp::Xor => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, PreHirExpr::Const(0, _)) => {
+                        *expr = other.clone();
+                        return true;
+                    }
+                    (PreHirExpr::Const(0, _), other) => {
                         *expr = other.clone();
                         return true;
                     }
@@ -207,8 +207,8 @@ impl Rule for RuleLogicalIdentities {
         "logical_identities"
     }
 
-    fn apply_expr(&self, expr: &mut DirExpr) -> bool {
-        if let DirExpr::Binary {
+    fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
+        if let PreHirExpr::Binary {
             op,
             lhs,
             rhs,
@@ -216,40 +216,40 @@ impl Rule for RuleLogicalIdentities {
         } = expr
         {
             match op {
-                DirBinaryOp::LogicalAnd => match (lhs.as_ref(), rhs.as_ref()) {
-                    (other, DirExpr::Const(1, _)) => {
+                PreHirBinaryOp::LogicalAnd => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, PreHirExpr::Const(1, _)) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (DirExpr::Const(1, _), other) => {
+                    (PreHirExpr::Const(1, _), other) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (_, DirExpr::Const(0, _)) => {
-                        *expr = DirExpr::Const(0, NirType::Bool);
+                    (_, PreHirExpr::Const(0, _)) => {
+                        *expr = PreHirExpr::Const(0, NirType::Bool);
                         return true;
                     }
-                    (DirExpr::Const(0, _), _) => {
-                        *expr = DirExpr::Const(0, NirType::Bool);
+                    (PreHirExpr::Const(0, _), _) => {
+                        *expr = PreHirExpr::Const(0, NirType::Bool);
                         return true;
                     }
                     _ => {}
                 },
-                DirBinaryOp::LogicalOr => match (lhs.as_ref(), rhs.as_ref()) {
-                    (other, DirExpr::Const(0, _)) => {
+                PreHirBinaryOp::LogicalOr => match (lhs.as_ref(), rhs.as_ref()) {
+                    (other, PreHirExpr::Const(0, _)) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (DirExpr::Const(0, _), other) => {
+                    (PreHirExpr::Const(0, _), other) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (_, DirExpr::Const(1, _)) => {
-                        *expr = DirExpr::Const(1, NirType::Bool);
+                    (_, PreHirExpr::Const(1, _)) => {
+                        *expr = PreHirExpr::Const(1, NirType::Bool);
                         return true;
                     }
-                    (DirExpr::Const(1, _), _) => {
-                        *expr = DirExpr::Const(1, NirType::Bool);
+                    (PreHirExpr::Const(1, _), _) => {
+                        *expr = PreHirExpr::Const(1, NirType::Bool);
                         return true;
                     }
                     _ => {}
@@ -270,8 +270,8 @@ impl Rule for RuleCollapseZeroOffset {
         "collapse_zero_offset"
     }
 
-    fn apply_expr(&self, expr: &mut DirExpr) -> bool {
-        if let DirExpr::PtrOffset { base, offset: 0 } = expr {
+    fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
+        if let PreHirExpr::PtrOffset { base, offset: 0 } = expr {
             *expr = (**base).clone();
             return true;
         }
@@ -286,29 +286,29 @@ impl Rule for RuleSimplifyMulToShl {
         "simplify_mul_to_shl"
     }
 
-    fn apply_expr(&self, expr: &mut DirExpr) -> bool {
-        if let DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+    fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
+        if let PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ty,
         } = expr
         {
             match (lhs.as_ref(), rhs.as_ref()) {
-                (other, DirExpr::Const(2, _)) => {
-                    *expr = DirExpr::Binary {
-                        op: DirBinaryOp::Shl,
+                (other, PreHirExpr::Const(2, _)) => {
+                    *expr = PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shl,
                         lhs: Box::new(other.clone()),
-                        rhs: Box::new(DirExpr::Const(1, ty.clone())),
+                        rhs: Box::new(PreHirExpr::Const(1, ty.clone())),
                         ty: ty.clone(),
                     };
                     return true;
                 }
-                (DirExpr::Const(2, _), other) => {
-                    *expr = DirExpr::Binary {
-                        op: DirBinaryOp::Shl,
+                (PreHirExpr::Const(2, _), other) => {
+                    *expr = PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shl,
                         lhs: Box::new(other.clone()),
-                        rhs: Box::new(DirExpr::Const(1, ty.clone())),
+                        rhs: Box::new(PreHirExpr::Const(1, ty.clone())),
                         ty: ty.clone(),
                     };
                     return true;
@@ -327,8 +327,8 @@ impl Rule for RuleSimplifySelect {
         "simplify_select"
     }
 
-    fn apply_expr(&self, expr: &mut DirExpr) -> bool {
-        if let DirExpr::Select {
+    fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
+        if let PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -341,7 +341,7 @@ impl Rule for RuleSimplifySelect {
                 return true;
             }
             // Rule 2: true ? A : B -> A, false ? A : B -> B
-            if let DirExpr::Const(val, _) = cond.as_ref() {
+            if let PreHirExpr::Const(val, _) = cond.as_ref() {
                 if *val != 0 {
                     *expr = (**then_expr).clone();
                 } else {
@@ -355,7 +355,7 @@ impl Rule for RuleSimplifySelect {
 }
 
 /// Applies a list of rules to the function AST iteratively until convergence.
-pub fn apply_rule_normalization(func: &mut DirFunction) -> bool {
+pub fn apply_rule_normalization(func: &mut PreHirFunction) -> bool {
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(RuleSimplifyDoubleNegation),
         Box::new(RuleFoldConstants),
@@ -381,7 +381,7 @@ pub fn apply_rule_normalization(func: &mut DirFunction) -> bool {
     changed
 }
 
-fn apply_rules_to_stmts(stmts: &mut [DirStmt], rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_stmts(stmts: &mut [PreHirStmt], rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
     for stmt in stmts {
         changed |= apply_rules_to_stmt(stmt, rules);
@@ -389,7 +389,7 @@ fn apply_rules_to_stmts(stmts: &mut [DirStmt], rules: &[Box<dyn Rule>]) -> bool 
     changed
 }
 
-fn apply_rules_to_stmt(stmt: &mut DirStmt, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_stmt(stmt: &mut PreHirStmt, rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
 
     // Apply rules directly to the statement
@@ -399,20 +399,20 @@ fn apply_rules_to_stmt(stmt: &mut DirStmt, rules: &[Box<dyn Rule>]) -> bool {
 
     // Recurse and apply to inner expressions/statements
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             changed |= apply_rules_to_lvalue(lhs, rules);
             changed |= apply_rules_to_expr(rhs, rules);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= apply_rules_to_expr(expr, rules);
         }
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
             changed |= apply_rules_to_stmts(body, rules);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -421,7 +421,7 @@ fn apply_rules_to_stmt(stmt: &mut DirStmt, rules: &[Box<dyn Rule>]) -> bool {
             changed |= apply_rules_to_stmts(then_body, rules);
             changed |= apply_rules_to_stmts(else_body, rules);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -438,13 +438,13 @@ fn apply_rules_to_stmt(stmt: &mut DirStmt, rules: &[Box<dyn Rule>]) -> bool {
     changed
 }
 
-fn apply_rules_to_lvalue(lhs: &mut DirLValue, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_lvalue(lhs: &mut PreHirLValue, rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
     match lhs {
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Deref { ptr, .. } => {
             changed |= apply_rules_to_expr(ptr, rules);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             changed |= apply_rules_to_expr(base, rules);
             changed |= apply_rules_to_expr(index, rules);
         }
@@ -453,23 +453,23 @@ fn apply_rules_to_lvalue(lhs: &mut DirLValue, rules: &[Box<dyn Rule>]) -> bool {
     changed
 }
 
-fn apply_rules_to_expr(expr: &mut DirExpr, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_expr(expr: &mut PreHirExpr, rules: &[Box<dyn Rule>]) -> bool {
     let mut changed = false;
 
     // First apply rules to sub-expressions recursively
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::Load { ptr: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. } => {
             changed |= apply_rules_to_expr(inner, rules);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= apply_rules_to_expr(lhs, rules);
             changed |= apply_rules_to_expr(rhs, rules);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -479,12 +479,12 @@ fn apply_rules_to_expr(expr: &mut DirExpr, rules: &[Box<dyn Rule>]) -> bool {
             changed |= apply_rules_to_expr(then_expr, rules);
             changed |= apply_rules_to_expr(else_expr, rules);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= apply_rules_to_expr(arg, rules);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= apply_rules_to_expr(base, rules);
             changed |= apply_rules_to_expr(index, rules);
         }
@@ -506,9 +506,9 @@ mod tests {
 
     #[test]
     fn test_rule_simplify_select() {
-        let cond = DirExpr::Var("cond".to_string());
-        let val = DirExpr::Var("val".to_string());
-        let mut select_expr = DirExpr::Select {
+        let cond = PreHirExpr::Var("cond".to_string());
+        let val = PreHirExpr::Var("val".to_string());
+        let mut select_expr = PreHirExpr::Select {
             cond: Box::new(cond.clone()),
             then_expr: Box::new(val.clone()),
             else_expr: Box::new(val.clone()),

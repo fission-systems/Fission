@@ -8,7 +8,7 @@ members = [
     "crates/fission-analysis-db",
     "crates/fission-pcode",
     "crates/fission-midend-core",
-    "crates/fission-midend-dir",
+    "crates/fission-midend-prehir",
     "crates/fission-midend-normalize",
     "crates/fission-midend-structuring",
     "crates/fission-decompiler",
@@ -22,7 +22,7 @@ members = [
     "crates/fission-ai",
     "crates/fission-tui", "crates/fission-dioxus", "crates/fission-emulator",
     "crates/fission-solver",
-    "crates/fission-verify",
+    "crates/fission-dir",
     "crates/fission-ui",
     "crates/fission-serve",
     # fission-dioxus — Pure Rust desktop GUI (Dioxus); to be added when ready

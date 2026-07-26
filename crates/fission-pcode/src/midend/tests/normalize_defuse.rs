@@ -27,23 +27,23 @@ fn sint(bits: u32) -> NirType {
     NirType::Int { bits, signed: true }
 }
 
-fn const_expr(v: i64, bits: u32) -> DirExpr {
-    DirExpr::Const(v, int(bits))
+fn const_expr(v: i64, bits: u32) -> PreHirExpr {
+    PreHirExpr::Const(v, int(bits))
 }
 
-fn varexpr(name: &str) -> DirExpr {
-    DirExpr::Var(name.to_string())
+fn varexpr(name: &str) -> PreHirExpr {
+    PreHirExpr::Var(name.to_string())
 }
 
-fn assign(name: &str, rhs: DirExpr) -> DirStmt {
-    DirStmt::Assign {
-        lhs: DirLValue::Var(name.to_string()),
+fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
+    PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(name.to_string()),
         rhs,
     }
 }
 
-fn temp_binding(name: &str, bits: u32) -> DirBinding {
-    DirBinding {
+fn temp_binding(name: &str, bits: u32) -> PreHirBinding {
+    PreHirBinding {
         name: name.to_string(),
         ty: int(bits),
         surface_type_name: None,
@@ -52,8 +52,8 @@ fn temp_binding(name: &str, bits: u32) -> DirBinding {
     }
 }
 
-fn preserved_temp_binding(name: &str, bits: u32) -> DirBinding {
-    DirBinding {
+fn preserved_temp_binding(name: &str, bits: u32) -> PreHirBinding {
+    PreHirBinding {
         name: name.to_string(),
         ty: int(bits),
         surface_type_name: None,
@@ -62,12 +62,12 @@ fn preserved_temp_binding(name: &str, bits: u32) -> DirBinding {
     }
 }
 
-fn return_expr(expr: DirExpr) -> DirStmt {
-    DirStmt::Return(Some(expr))
+fn return_expr(expr: PreHirExpr) -> PreHirStmt {
+    PreHirStmt::Return(Some(expr))
 }
 
-fn make_func(name: &str, locals: Vec<DirBinding>, body: Vec<DirStmt>) -> DirFunction {
-    DirFunction {
+fn make_func(name: &str, locals: Vec<PreHirBinding>, body: Vec<PreHirStmt>) -> PreHirFunction {
+    PreHirFunction {
         name: name.to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
@@ -79,8 +79,8 @@ fn make_func(name: &str, locals: Vec<DirBinding>, body: Vec<DirStmt>) -> DirFunc
     }
 }
 
-fn param_binding(name: &str, bits: u32) -> DirBinding {
-    DirBinding {
+fn param_binding(name: &str, bits: u32) -> PreHirBinding {
+    PreHirBinding {
         name: name.to_string(),
         ty: int(bits),
         surface_type_name: None,
@@ -97,15 +97,15 @@ fn constant_folding_binary_add_via_normalize() {
     let mut func = make_func(
         "test_const_add",
         vec![],
-        vec![return_expr(DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        vec![return_expr(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs: Box::new(const_expr(3, 32)),
             rhs: Box::new(const_expr(5, 32)),
             ty: int(32),
         })],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("return 8;"),
         "expected 'return 8;' in: {code}"
@@ -114,17 +114,17 @@ fn constant_folding_binary_add_via_normalize() {
 
 #[test]
 fn normalize_hir_function_elides_return_cast_implied_by_return_type() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "add".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 64), param_binding("param_2", 64)],
         locals: vec![],
         return_type: int(32),
         surface_return_type_name: None,
-        body: vec![return_expr(DirExpr::Cast {
+        body: vec![return_expr(PreHirExpr::Cast {
             ty: int(32),
-            expr: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Add,
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
                 lhs: Box::new(varexpr("param_1")),
                 rhs: Box::new(varexpr("param_2")),
                 ty: int(64),
@@ -135,7 +135,7 @@ fn normalize_hir_function_elides_return_cast_implied_by_return_type() {
 
     normalize_hir_function(&mut func);
 
-    let rendered = print_dir_function(&func);
+    let rendered = print_prehir_function(&func);
     assert!(
         rendered.contains("return param_1 + param_2;"),
         "rendered:\n{}",
@@ -150,15 +150,15 @@ fn constant_folding_nested_mul() {
     let mut func = make_func(
         "test_const_mul",
         vec![],
-        vec![return_expr(DirExpr::Binary {
-            op: DirBinaryOp::Mul,
+        vec![return_expr(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
             lhs: Box::new(const_expr(7, 32)),
             rhs: Box::new(const_expr(6, 32)),
             ty: int(32),
         })],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("return 42;"),
         "expected 'return 42;' in: {code}"
@@ -171,15 +171,15 @@ fn constant_folding_does_not_fold_variable_expressions() {
     let mut func = make_func(
         "test_no_fold_var",
         vec![],
-        vec![return_expr(DirExpr::Binary {
-            op: DirBinaryOp::Add,
+        vec![return_expr(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
             lhs: Box::new(varexpr("x")),
             rhs: Box::new(const_expr(1, 64)),
             ty: int(64),
         })],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     // Should still contain a binary expression with "x".
     assert!(code.contains("x"), "x should still appear in: {code}");
     assert!(code.contains("1"), "1 should still appear in: {code}");
@@ -190,7 +190,7 @@ fn normalize_collapses_if_else_with_identical_returns() {
     let mut func = make_func(
         "test_redundant_if_else_return",
         vec![],
-        vec![DirStmt::If {
+        vec![PreHirStmt::If {
             cond: varexpr("cond"),
             then_body: vec![return_expr(const_expr(7, 32))],
             else_body: vec![return_expr(const_expr(7, 32))],
@@ -198,7 +198,7 @@ fn normalize_collapses_if_else_with_identical_returns() {
     );
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("return 7;"),
         "expected collapsed return; got: {code}"
@@ -215,7 +215,7 @@ fn normalize_collapses_guarded_return_followed_by_same_return() {
         "test_redundant_guarded_return",
         vec![],
         vec![
-            DirStmt::If {
+            PreHirStmt::If {
                 cond: varexpr("cond"),
                 then_body: vec![return_expr(const_expr(5, 32))],
                 else_body: Vec::new(),
@@ -225,7 +225,7 @@ fn normalize_collapses_guarded_return_followed_by_same_return() {
     );
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("return 5;"),
         "expected return to remain; got: {code}"
@@ -239,18 +239,18 @@ fn normalize_collapses_guarded_return_followed_by_same_return() {
 #[test]
 fn normalize_canonicalizes_minmax_return_after_type_recovery() {
     let signed_i32 = sint(32);
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "max".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![
-            DirBinding {
+            PreHirBinding {
                 name: "param_1".to_string(),
                 ty: signed_i32.clone(),
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::ParamIndex(0)),
                 initializer: None,
             },
-            DirBinding {
+            PreHirBinding {
                 name: "param_2".to_string(),
                 ty: signed_i32.clone(),
                 surface_type_name: None,
@@ -262,9 +262,9 @@ fn normalize_canonicalizes_minmax_return_after_type_recovery() {
         return_type: signed_i32.clone(),
         surface_return_type_name: None,
         body: vec![
-            DirStmt::If {
-                cond: DirExpr::Binary {
-                    op: DirBinaryOp::SLt,
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::SLt,
                     lhs: Box::new(varexpr("param_1")),
                     rhs: Box::new(varexpr("param_2")),
                     ty: NirType::Bool,
@@ -278,7 +278,7 @@ fn normalize_canonicalizes_minmax_return_after_type_recovery() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("if (param_1 > param_2)"),
         "expected max branch to prefer direct greater-than form; got: {code}"
@@ -294,8 +294,8 @@ fn normalize_preserves_side_effect_in_redundant_conditional_return() {
     let mut func = make_func(
         "test_redundant_if_side_effect",
         vec![],
-        vec![DirStmt::If {
-            cond: DirExpr::Call {
+        vec![PreHirStmt::If {
+            cond: PreHirExpr::Call {
                 target: "check".to_string(),
                 args: vec![],
                 ty: NirType::Bool,
@@ -306,7 +306,7 @@ fn normalize_preserves_side_effect_in_redundant_conditional_return() {
     );
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("check()"),
         "side-effect call must be preserved; got: {code}"
@@ -331,7 +331,7 @@ fn defuse_removes_dead_pure_temp_via_normalize() {
         ],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         !code.contains("bVar1"),
         "dead temp 'bVar1' should be eliminated; got: {code}"
@@ -354,7 +354,7 @@ fn defuse_preserves_used_temp_assignment() {
         ],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     // After inline_single_use_temps, bVar1 should be inlined to the return.
     assert!(
         code.contains("return"),
@@ -365,7 +365,7 @@ fn defuse_preserves_used_temp_assignment() {
 /// power-class: pure copy before `if (t <= 0)` inside while must inline.
 #[test]
 fn normalize_inlines_pure_copy_before_sle_zero_in_while() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_power_pure_copy_exit".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![param_binding("param_18", 32)],
@@ -373,24 +373,24 @@ fn normalize_inlines_pure_copy_before_sle_zero_in_while() {
         return_type: int(32),
         surface_return_type_name: None,
         body: vec![
-            DirStmt::While {
-                cond: DirExpr::Const(1, int(32)),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, int(32)),
                 body: vec![
                     assign("iVar36", varexpr("param_18")),
-                    DirStmt::If {
-                        cond: DirExpr::Binary {
-                            op: DirBinaryOp::SLe,
+                    PreHirStmt::If {
+                        cond: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::SLe,
                             lhs: Box::new(varexpr("iVar36")),
                             rhs: Box::new(const_expr(0, 32)),
                             ty: NirType::Bool,
                         },
-                        then_body: vec![DirStmt::Break],
+                        then_body: vec![PreHirStmt::Break],
                         else_body: vec![],
                     },
                     assign(
                         "param_18",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Shr,
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Shr,
                             lhs: Box::new(varexpr("param_18")),
                             rhs: Box::new(const_expr(1, 32)),
                             ty: sint(32),
@@ -404,7 +404,7 @@ fn normalize_inlines_pure_copy_before_sle_zero_in_while() {
     };
     // Mark param as signed-like local for type of SLe const if needed.
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         !code.contains("iVar36 ="),
         "pure copy into if (t <= 0) must inline; got:\n{code}"
@@ -417,7 +417,7 @@ fn normalize_inlines_pure_copy_before_sle_zero_in_while() {
 
 #[test]
 fn normalize_preserves_loop_assigned_temp_used_after_loop() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_loop_carried_return_temp".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
@@ -425,12 +425,12 @@ fn normalize_preserves_loop_assigned_temp_used_after_loop() {
         return_type: int(32),
         surface_return_type_name: None,
         body: vec![
-            DirStmt::DoWhile {
+            PreHirStmt::DoWhile {
                 body: vec![
                     assign(
                         "xVar27",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
                             lhs: Box::new(varexpr("param_1")),
                             rhs: Box::new(const_expr(1, 32)),
                             ty: int(32),
@@ -438,8 +438,8 @@ fn normalize_preserves_loop_assigned_temp_used_after_loop() {
                     ),
                     assign(
                         "bVar29",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Eq,
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Eq,
                             lhs: Box::new(varexpr("xVar27")),
                             rhs: Box::new(const_expr(0, 32)),
                             ty: NirType::Bool,
@@ -454,7 +454,7 @@ fn normalize_preserves_loop_assigned_temp_used_after_loop() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("xVar27 = param_1 + 1;"),
         "loop-carried return temp assignment must be preserved; got: {code}"
@@ -467,7 +467,7 @@ fn normalize_preserves_loop_assigned_temp_used_after_loop() {
 
 #[test]
 fn normalize_preserves_preheader_temp_used_inside_loop() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_preheader_loop_input_temp".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
@@ -480,13 +480,13 @@ fn normalize_preserves_preheader_temp_used_inside_loop() {
         surface_return_type_name: None,
         body: vec![
             assign("xVar10", const_expr(0, 32)),
-            DirStmt::DoWhile {
+            PreHirStmt::DoWhile {
                 body: vec![
                     assign("uVar21", varexpr("param_1")),
                     assign(
                         "uVar22",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
                             lhs: Box::new(varexpr("xVar10")),
                             rhs: Box::new(varexpr("uVar21")),
                             ty: int(32),
@@ -501,7 +501,7 @@ fn normalize_preserves_preheader_temp_used_inside_loop() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("xVar10 = 0;"),
         "preheader temp used in loop body must be preserved; got: {code}"
@@ -514,7 +514,7 @@ fn normalize_preserves_preheader_temp_used_inside_loop() {
 
 #[test]
 fn normalize_preserves_preheader_loop_carried_self_update() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_preheader_loop_carried_self_update".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![param_binding("param_1", 32), param_binding("keep_going", 8)],
@@ -527,14 +527,14 @@ fn normalize_preserves_preheader_loop_carried_self_update() {
         surface_return_type_name: None,
         body: vec![
             assign("xVar10", const_expr(0, 64)),
-            DirStmt::DoWhile {
+            PreHirStmt::DoWhile {
                 body: vec![
                     assign("uVar21", varexpr("param_1")),
                     assign(
                         "uVar22",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
-                            lhs: Box::new(DirExpr::Cast {
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Cast {
                                 ty: int(32),
                                 expr: Box::new(varexpr("xVar10")),
                             }),
@@ -544,7 +544,7 @@ fn normalize_preserves_preheader_loop_carried_self_update() {
                     ),
                     assign(
                         "xVar10",
-                        DirExpr::Cast {
+                        PreHirExpr::Cast {
                             ty: int(64),
                             expr: Box::new(varexpr("uVar22")),
                         },
@@ -558,7 +558,7 @@ fn normalize_preserves_preheader_loop_carried_self_update() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("xVar10 = 0;"),
         "loop-carried accumulator initializer must be preserved; got: {code}"
@@ -575,7 +575,7 @@ fn normalize_preserves_preheader_loop_carried_self_update() {
 
 #[test]
 fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_preheader_copy_chain_loop_carried_self_update".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![
@@ -594,8 +594,8 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
         body: vec![
             assign(
                 "uVar9",
-                DirExpr::Binary {
-                    op: DirBinaryOp::Xor,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Xor,
                     lhs: Box::new(varexpr("var_0")),
                     rhs: Box::new(varexpr("var_0")),
                     ty: int(32),
@@ -603,19 +603,19 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
             ),
             assign(
                 "xVar10",
-                DirExpr::Cast {
+                PreHirExpr::Cast {
                     ty: int(64),
                     expr: Box::new(varexpr("uVar9")),
                 },
             ),
-            DirStmt::DoWhile {
+            PreHirStmt::DoWhile {
                 body: vec![
                     assign("uVar21", varexpr("param_1")),
                     assign(
                         "uVar22",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
-                            lhs: Box::new(DirExpr::Cast {
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Cast {
                                 ty: int(32),
                                 expr: Box::new(varexpr("xVar10")),
                             }),
@@ -625,7 +625,7 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
                     ),
                     assign(
                         "xVar10",
-                        DirExpr::Cast {
+                        PreHirExpr::Cast {
                             ty: int(64),
                             expr: Box::new(varexpr("uVar22")),
                         },
@@ -639,7 +639,7 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("xVar10 = 0;"),
         "preheader loop-carried accumulator initializer must be preserved; got: {code}"
@@ -652,7 +652,7 @@ fn normalize_preserves_preheader_copy_chain_with_loop_carried_self_update() {
 
 #[test]
 fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_loop_carried_initializer_after_predicate_use".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![
@@ -666,15 +666,15 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
         body: vec![
             assign(
                 "xVar10",
-                DirExpr::Cast {
+                PreHirExpr::Cast {
                     ty: int(64),
                     expr: Box::new(varexpr("var_0")),
                 },
             ),
-            DirStmt::If {
-                cond: DirExpr::Binary {
-                    op: DirBinaryOp::Eq,
-                    lhs: Box::new(DirExpr::Cast {
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Cast {
                         ty: int(32),
                         expr: Box::new(varexpr("xVar10")),
                     }),
@@ -684,13 +684,13 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
                 then_body: vec![return_expr(const_expr(0, 64))],
                 else_body: Vec::new(),
             },
-            DirStmt::DoWhile {
+            PreHirStmt::DoWhile {
                 body: vec![
                     assign(
                         "uVar22",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
-                            lhs: Box::new(DirExpr::Cast {
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Cast {
                                 ty: int(32),
                                 expr: Box::new(varexpr("xVar10")),
                             }),
@@ -700,7 +700,7 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
                     ),
                     assign(
                         "xVar10",
-                        DirExpr::Cast {
+                        PreHirExpr::Cast {
                             ty: int(64),
                             expr: Box::new(varexpr("uVar22")),
                         },
@@ -714,7 +714,7 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     let init_idx = code
         .find("xVar10 =")
         .unwrap_or_else(|| panic!("loop-carried initializer was removed; got: {code}"));
@@ -733,7 +733,7 @@ fn normalize_preserves_loop_carried_initializer_after_predicate_use() {
 
 #[test]
 fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_sccp_loop_carried_zero".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![
@@ -749,9 +749,9 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
         return_type: int(64),
         surface_return_type_name: None,
         body: vec![
-            DirStmt::If {
-                cond: DirExpr::Binary {
-                    op: DirBinaryOp::Eq,
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
                     lhs: Box::new(varexpr("param_2")),
                     rhs: Box::new(const_expr(0, 32)),
                     ty: NirType::Bool,
@@ -760,14 +760,14 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
                 else_body: Vec::new(),
             },
             assign("xVar10", const_expr(0, 64)),
-            DirStmt::DoWhile {
+            PreHirStmt::DoWhile {
                 body: vec![
                     assign("uVar21", varexpr("param_1")),
                     assign(
                         "uVar22",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
-                            lhs: Box::new(DirExpr::Cast {
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Cast {
                                 ty: int(32),
                                 expr: Box::new(varexpr("xVar10")),
                             }),
@@ -777,7 +777,7 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
                     ),
                     assign(
                         "xVar10",
-                        DirExpr::Cast {
+                        PreHirExpr::Cast {
                             ty: int(64),
                             expr: Box::new(varexpr("uVar22")),
                         },
@@ -791,7 +791,7 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("xVar10 = (uint)xVar10 + param_1;"),
         "SCCP must not substitute the preheader constant for a loop-carried accumulator; got: {code}"
@@ -800,7 +800,7 @@ fn normalize_sccp_does_not_fold_loop_carried_zero_into_loop_body() {
 
 #[test]
 fn normalize_preserves_preheader_copy_chain_used_inside_loop() {
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_preheader_loop_input_copy_chain".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![
@@ -819,8 +819,8 @@ fn normalize_preserves_preheader_copy_chain_used_inside_loop() {
         body: vec![
             assign(
                 "uVar9",
-                DirExpr::Binary {
-                    op: DirBinaryOp::Xor,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Xor,
                     lhs: Box::new(varexpr("var_0")),
                     rhs: Box::new(varexpr("var_0")),
                     ty: int(32),
@@ -828,19 +828,19 @@ fn normalize_preserves_preheader_copy_chain_used_inside_loop() {
             ),
             assign(
                 "xVar10",
-                DirExpr::Cast {
+                PreHirExpr::Cast {
                     ty: int(64),
                     expr: Box::new(varexpr("uVar9")),
                 },
             ),
-            DirStmt::DoWhile {
+            PreHirStmt::DoWhile {
                 body: vec![
                     assign("uVar21", varexpr("param_1")),
                     assign(
                         "uVar22",
-                        DirExpr::Binary {
-                            op: DirBinaryOp::Add,
-                            lhs: Box::new(DirExpr::Cast {
+                        PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Cast {
                                 ty: int(32),
                                 expr: Box::new(varexpr("xVar10")),
                             }),
@@ -857,7 +857,7 @@ fn normalize_preserves_preheader_copy_chain_used_inside_loop() {
     };
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("xVar10 ="),
         "preheader copy chain feeding loop body must remain defined; got: {code}"
@@ -876,23 +876,23 @@ fn normalize_keeps_nontrivial_multi_use_temp_in_single_stmt() {
         vec![
             assign(
                 "uVar1",
-                DirExpr::Binary {
-                    op: DirBinaryOp::Add,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
                     lhs: Box::new(varexpr("eax")),
                     rhs: Box::new(const_expr(1, 32)),
                     ty: int(32),
                 },
             ),
-            return_expr(DirExpr::Binary {
-                op: DirBinaryOp::LogicalOr,
-                lhs: Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Eq,
+            return_expr(PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalOr,
+                lhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
                     lhs: Box::new(varexpr("uVar1")),
                     rhs: Box::new(const_expr(0, 32)),
                     ty: NirType::Bool,
                 }),
-                rhs: Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Eq,
+                rhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
                     lhs: Box::new(varexpr("uVar1")),
                     rhs: Box::new(const_expr(1, 32)),
                     ty: NirType::Bool,
@@ -903,7 +903,7 @@ fn normalize_keeps_nontrivial_multi_use_temp_in_single_stmt() {
     );
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("uVar1 = eax + 1;"),
         "nontrivial multi-use temp should remain materialized; got: {code}"
@@ -916,8 +916,8 @@ fn normalize_keeps_nontrivial_multi_use_temp_in_single_stmt() {
 
 #[test]
 fn normalize_stabilizes_repeated_nontrivial_pure_expr_in_if_condition() {
-    let diff = DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+    let diff = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs: Box::new(varexpr("eax")),
         rhs: Box::new(varexpr("uVar128")),
         ty: int(32),
@@ -925,17 +925,17 @@ fn normalize_stabilizes_repeated_nontrivial_pure_expr_in_if_condition() {
     let mut func = make_func(
         "test_stabilize_repeated_if_expr",
         vec![],
-        vec![DirStmt::If {
-            cond: DirExpr::Binary {
-                op: DirBinaryOp::LogicalOr,
-                lhs: Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Eq,
+        vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalOr,
+                lhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
                     lhs: Box::new(diff.clone()),
                     rhs: Box::new(const_expr(0, 32)),
                     ty: NirType::Bool,
                 }),
-                rhs: Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::SLt,
+                rhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::SLt,
                     lhs: Box::new(diff.clone()),
                     rhs: Box::new(varexpr("esi")),
                     ty: NirType::Bool,
@@ -948,7 +948,7 @@ fn normalize_stabilizes_repeated_nontrivial_pure_expr_in_if_condition() {
     );
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("uVar0 = eax - uVar128;"),
         "repeated nontrivial pure expr should be hoisted once; got: {code}"
@@ -967,24 +967,24 @@ fn normalize_keeps_builder_preserved_temp_in_if_condition() {
         vec![
             assign(
                 "uVar0",
-                DirExpr::Binary {
-                    op: DirBinaryOp::Sub,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Sub,
                     lhs: Box::new(varexpr("eax")),
                     rhs: Box::new(varexpr("uVar128")),
                     ty: int(32),
                 },
             ),
-            DirStmt::If {
-                cond: DirExpr::Binary {
-                    op: DirBinaryOp::LogicalOr,
-                    lhs: Box::new(DirExpr::Binary {
-                        op: DirBinaryOp::Eq,
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalOr,
+                    lhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Eq,
                         lhs: Box::new(varexpr("uVar0")),
                         rhs: Box::new(const_expr(0, 32)),
                         ty: NirType::Bool,
                     }),
-                    rhs: Box::new(DirExpr::Binary {
-                        op: DirBinaryOp::SLt,
+                    rhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SLt,
                         lhs: Box::new(varexpr("uVar0")),
                         rhs: Box::new(varexpr("esi")),
                         ty: NirType::Bool,
@@ -998,7 +998,7 @@ fn normalize_keeps_builder_preserved_temp_in_if_condition() {
     );
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("uVar0 = eax - uVar128;"),
         "builder-preserved temp should remain materialized; got: {code}"
@@ -1011,10 +1011,10 @@ fn normalize_keeps_builder_preserved_temp_in_if_condition() {
 
 #[test]
 fn normalize_does_not_materialize_low_value_single_input_repeated_expr() {
-    let repeated = DirExpr::Binary {
-        op: DirBinaryOp::Sub,
+    let repeated = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
         lhs: Box::new(const_expr(0, 64)),
-        rhs: Box::new(DirExpr::Cast {
+        rhs: Box::new(PreHirExpr::Cast {
             ty: int(64),
             expr: Box::new(varexpr("df")),
         }),
@@ -1023,12 +1023,12 @@ fn normalize_does_not_materialize_low_value_single_input_repeated_expr() {
     let mut func = make_func(
         "test_skip_single_input_repeat",
         vec![],
-        vec![DirStmt::If {
-            cond: DirExpr::Binary {
-                op: DirBinaryOp::Lt,
+        vec![PreHirStmt::If {
+            cond: PreHirExpr::Binary {
+                op: PreHirBinaryOp::Lt,
                 lhs: Box::new(repeated.clone()),
-                rhs: Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Add,
+                rhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
                     lhs: Box::new(repeated),
                     rhs: Box::new(const_expr(4, 64)),
                     ty: int(64),
@@ -1041,7 +1041,7 @@ fn normalize_does_not_materialize_low_value_single_input_repeated_expr() {
     );
 
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         !code.contains("uVar0 = 0 - (ulonglong)df;"),
         "single-input repeated expr should stay inline; got: {code}"
@@ -1051,7 +1051,7 @@ fn normalize_does_not_materialize_low_value_single_input_repeated_expr() {
 #[test]
 fn defuse_does_not_remove_stack_slot_assignment() {
     // local_10 = 5; return 0;  →  stack slot is kept (may alias)
-    let stack_binding = DirBinding {
+    let stack_binding = PreHirBinding {
         name: "local_10".to_string(),
         ty: int(64),
         surface_type_name: None,
@@ -1067,7 +1067,7 @@ fn defuse_does_not_remove_stack_slot_assignment() {
         ],
     );
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("local_10"),
         "stack slot should NOT be eliminated; got: {code}"
@@ -1078,14 +1078,14 @@ fn defuse_does_not_remove_stack_slot_assignment() {
 fn defuse_removes_dead_local_with_large_hex_offset_no_stack_origin() {
     // local_10 / local_20 / local_28 — no StackOffset origin, never read →
     // must be removed.  This was the bug: the old 0x0c threshold kept them.
-    let make_non_stack = |name: &str| DirBinding {
+    let make_non_stack = |name: &str| PreHirBinding {
         name: name.to_string(),
         ty: int(64),
         surface_type_name: None,
         origin: None, // not a stack-backed slot
         initializer: None,
     };
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_dead_local_large_offset".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
@@ -1098,15 +1098,15 @@ fn defuse_removes_dead_local_with_large_hex_offset_no_stack_origin() {
         return_type: int(32),
         body: vec![
             assign("local_c", const_expr(0, 32)),
-            assign("local_10", DirExpr::Var("x1".to_string())),
-            assign("local_20", DirExpr::Var("x2".to_string())),
-            assign("local_28", DirExpr::Var("x3".to_string())),
+            assign("local_10", PreHirExpr::Var("x1".to_string())),
+            assign("local_20", PreHirExpr::Var("x2".to_string())),
+            assign("local_28", PreHirExpr::Var("x3".to_string())),
             return_expr(varexpr("local_c")),
         ],
         ..Default::default()
     };
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         !code.contains("local_10"),
         "dead non-stack local_10 should be eliminated; got: {code}"
@@ -1124,11 +1124,11 @@ fn defuse_removes_dead_local_with_large_hex_offset_no_stack_origin() {
 #[test]
 fn defuse_preserves_live_local_with_large_hex_offset() {
     // local_20 with no stack origin but actually used → must be kept.
-    let mut func = DirFunction {
+    let mut func = PreHirFunction {
         name: "test_live_local_large_offset".to_string(),
         int_param_offsets: Vec::new(),
         params: vec![],
-        locals: vec![DirBinding {
+        locals: vec![PreHirBinding {
             name: "local_20".to_string(),
             ty: int(32),
             surface_type_name: None,
@@ -1143,7 +1143,7 @@ fn defuse_preserves_live_local_with_large_hex_offset() {
         ..Default::default()
     };
     normalize_hir_function(&mut func);
-    let code = print_dir_function(&func);
+    let code = print_prehir_function(&func);
     assert!(
         code.contains("42") || code.contains("local_20"),
         "live local_20 or its folded value should remain; got: {code}"
@@ -1195,12 +1195,12 @@ fn copy_propagation_eliminates_trivial_copy_chain() {
 #[test]
 fn consecutive_shr_merges_in_normalize_stmt() {
     // Shr(Shr(param_1, 8), 4)  →  Shr(param_1, 12)
-    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
-        op: DirBinaryOp::Shr,
-        lhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Shr,
-            lhs: Box::new(DirExpr::Var("param_1".to_string())),
-            rhs: Box::new(DirExpr::Const(
+    let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shr,
+        lhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Var("param_1".to_string())),
+            rhs: Box::new(PreHirExpr::Const(
                 8,
                 NirType::Int {
                     bits: 64,
@@ -1212,7 +1212,7 @@ fn consecutive_shr_merges_in_normalize_stmt() {
                 signed: false,
             },
         }),
-        rhs: Box::new(DirExpr::Const(
+        rhs: Box::new(PreHirExpr::Const(
             4,
             NirType::Int {
                 bits: 64,
@@ -1248,27 +1248,27 @@ fn subpiece_cast_shr_cast_chain_simplifies() {
     // With Cast(Int32, param_1) as source (bits=32), Cast(Int64) widens to 64,
     // Shr by 8 gives byte 1.  The inner widening cast should be eliminated:
     // → Cast(Int8, Shr(Cast(Int32, param_1), 8))
-    let mut stmt = DirStmt::Return(Some(DirExpr::Cast {
+    let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Cast {
         ty: NirType::Int {
             bits: 8,
             signed: false,
         },
-        expr: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Shr,
-            lhs: Box::new(DirExpr::Cast {
+        expr: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Cast {
                 ty: NirType::Int {
                     bits: 64,
                     signed: false,
                 },
-                expr: Box::new(DirExpr::Cast {
+                expr: Box::new(PreHirExpr::Cast {
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
-                    expr: Box::new(DirExpr::Var("param_1".to_string())),
+                    expr: Box::new(PreHirExpr::Var("param_1".to_string())),
                 }),
             }),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 8,
                 NirType::Int {
                     bits: 64,
@@ -1298,21 +1298,21 @@ fn wide_integer_recombine_double_cast_piece_pattern() {
     // Full end-to-end test: the piece-recombination rule should simplify
     // (Cast(Int64, Cast(Int32, Shr(x64, 32))) << 32) | Cast(Int64, Cast(Int32, x64))
     // to x64 via normalize_stmt.
-    let x64 = DirExpr::Var("x64".to_string());
-    let hi = DirExpr::Cast {
+    let x64 = PreHirExpr::Var("x64".to_string());
+    let hi = PreHirExpr::Cast {
         ty: NirType::Int {
             bits: 64,
             signed: false,
         },
-        expr: Box::new(DirExpr::Cast {
+        expr: Box::new(PreHirExpr::Cast {
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
             },
-            expr: Box::new(DirExpr::Binary {
-                op: DirBinaryOp::Shr,
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
                 lhs: Box::new(x64.clone()),
-                rhs: Box::new(DirExpr::Const(
+                rhs: Box::new(PreHirExpr::Const(
                     32,
                     NirType::Int {
                         bits: 64,
@@ -1326,12 +1326,12 @@ fn wide_integer_recombine_double_cast_piece_pattern() {
             }),
         }),
     };
-    let lo = DirExpr::Cast {
+    let lo = PreHirExpr::Cast {
         ty: NirType::Int {
             bits: 64,
             signed: false,
         },
-        expr: Box::new(DirExpr::Cast {
+        expr: Box::new(PreHirExpr::Cast {
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
@@ -1339,12 +1339,12 @@ fn wide_integer_recombine_double_cast_piece_pattern() {
             expr: Box::new(x64.clone()),
         }),
     };
-    let mut stmt = DirStmt::Return(Some(DirExpr::Binary {
-        op: DirBinaryOp::Or,
-        lhs: Box::new(DirExpr::Binary {
-            op: DirBinaryOp::Shl,
+    let mut stmt = PreHirStmt::Return(Some(PreHirExpr::Binary {
+        op: PreHirBinaryOp::Or,
+        lhs: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
             lhs: Box::new(hi),
-            rhs: Box::new(DirExpr::Const(
+            rhs: Box::new(PreHirExpr::Const(
                 32,
                 NirType::Int {
                     bits: 64,

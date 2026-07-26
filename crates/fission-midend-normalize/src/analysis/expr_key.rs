@@ -11,16 +11,16 @@ pub type PureExprMap = HashMap<PureExprKey, String>;
 pub type PureExprKey = String;
 
 /// Canonical key for a **pure** expression tree (no Load, Call, AggregateCopy, Index).
-pub fn pure_expr_key(expr: &DirExpr) -> Option<PureExprKey> {
+pub fn pure_expr_key(expr: &PreHirExpr) -> Option<PureExprKey> {
     match expr {
-        DirExpr::Const(v, ty) => Some(format!("K({},{})", v, type_key(ty))),
-        DirExpr::Var(name) => Some(format!("V({})", name)),
-        DirExpr::AddressOfGlobal(name) => Some(format!("A({})", name)),
-        DirExpr::Cast { ty, expr: inner } => {
+        PreHirExpr::Const(v, ty) => Some(format!("K({},{})", v, type_key(ty))),
+        PreHirExpr::Var(name) => Some(format!("V({})", name)),
+        PreHirExpr::AddressOfGlobal(name) => Some(format!("A({})", name)),
+        PreHirExpr::Cast { ty, expr: inner } => {
             let ik = pure_expr_key(inner)?;
             Some(format!("C({},{})", type_key(ty), ik))
         }
-        DirExpr::Unary {
+        PreHirExpr::Unary {
             op,
             expr: inner,
             ty,
@@ -28,7 +28,7 @@ pub fn pure_expr_key(expr: &DirExpr) -> Option<PureExprKey> {
             let ik = pure_expr_key(inner)?;
             Some(format!("U({:?},{},{})", op, type_key(ty), ik))
         }
-        DirExpr::Binary { op, lhs, rhs, ty } => {
+        PreHirExpr::Binary { op, lhs, rhs, ty } => {
             let lk = pure_expr_key(lhs)?;
             let rk = pure_expr_key(rhs)?;
             let (lk, rk) = if is_commutative(*op) && lk > rk {
@@ -38,16 +38,16 @@ pub fn pure_expr_key(expr: &DirExpr) -> Option<PureExprKey> {
             };
             Some(format!("B({:?},{},{},{})", op, type_key(ty), lk, rk))
         }
-        DirExpr::PtrOffset { base, offset } => {
+        PreHirExpr::PtrOffset { base, offset } => {
             let bk = pure_expr_key(base)?;
             Some(format!("P({},{})", offset, bk))
         }
-        DirExpr::Load { .. }
-        | DirExpr::Call { .. }
-        | DirExpr::AggregateCopy { .. }
-        | DirExpr::Select { .. }
-        | DirExpr::Index { .. }
-        | DirExpr::FieldAccess { .. } => None,
+        PreHirExpr::Load { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::AggregateCopy { .. }
+        | PreHirExpr::Select { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::FieldAccess { .. } => None,
     }
 }
 
@@ -62,18 +62,18 @@ pub fn type_key(ty: &NirType) -> String {
     }
 }
 
-pub fn is_commutative(op: DirBinaryOp) -> bool {
+pub fn is_commutative(op: PreHirBinaryOp) -> bool {
     matches!(
         op,
-        DirBinaryOp::Add
-            | DirBinaryOp::Mul
-            | DirBinaryOp::And
-            | DirBinaryOp::Or
-            | DirBinaryOp::Xor
-            | DirBinaryOp::Eq
-            | DirBinaryOp::Ne
-            | DirBinaryOp::LogicalAnd
-            | DirBinaryOp::LogicalOr
+        PreHirBinaryOp::Add
+            | PreHirBinaryOp::Mul
+            | PreHirBinaryOp::And
+            | PreHirBinaryOp::Or
+            | PreHirBinaryOp::Xor
+            | PreHirBinaryOp::Eq
+            | PreHirBinaryOp::Ne
+            | PreHirBinaryOp::LogicalAnd
+            | PreHirBinaryOp::LogicalOr
     )
 }
 

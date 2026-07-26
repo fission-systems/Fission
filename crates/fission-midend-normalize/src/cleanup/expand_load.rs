@@ -38,7 +38,7 @@ use crate::prelude::*;
 /// Apply the `RuleExpandLoad` simplification to an entire HIR function.
 ///
 /// Returns `true` if any transformation was made.
-pub fn apply_expand_load_pass(func: &mut DirFunction) -> bool {
+pub fn apply_expand_load_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     for stmt in &mut func.body {
         changed |= expand_load_in_stmt(stmt);
@@ -46,17 +46,17 @@ pub fn apply_expand_load_pass(func: &mut DirFunction) -> bool {
     changed
 }
 
-fn expand_load_in_stmt(stmt: &mut DirStmt) -> bool {
+fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => changed |= expand_load_in_expr(expr),
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => changed |= expand_load_in_expr(expr),
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             for s in body.iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             update,
             cond,
@@ -75,7 +75,7 @@ fn expand_load_in_stmt(stmt: &mut DirStmt) -> bool {
                 changed |= expand_load_in_stmt(s);
             }
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -88,7 +88,7 @@ fn expand_load_in_stmt(stmt: &mut DirStmt) -> bool {
                 changed |= expand_load_in_stmt(s);
             }
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -138,7 +138,7 @@ fn is_natural_narrowing(outer: &NirType, inner: &NirType) -> bool {
     }
 }
 
-fn expand_load_in_expr(expr: &mut DirExpr) -> bool {
+fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
     // -----------------------------------------------------------------------
     // Pattern A (AND-comparison form) — checked BEFORE recursion so that
     // Pattern B (below) does not eagerly collapse Cast<small>(Load<large>)
@@ -147,30 +147,30 @@ fn expand_load_in_expr(expr: &mut DirExpr) -> bool {
     //   ((Cast<u{small}>(Load<u{large}>(ptr))) & mask) == cmp_val
     //   → (Load<u{large}>(ptr) & (mask widened to u{large})) == (cmp_val widened)
     // -----------------------------------------------------------------------
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Eq | DirBinaryOp::Ne,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Eq | PreHirBinaryOp::Ne,
         lhs: cmp_lhs,
         rhs: cmp_rhs,
         ty: cmp_ty,
     } = expr
     {
-        if let DirExpr::Const(cmp_val, _) = cmp_rhs.as_ref() {
+        if let PreHirExpr::Const(cmp_val, _) = cmp_rhs.as_ref() {
             let cmp_val = *cmp_val;
-            if let DirExpr::Binary {
-                op: DirBinaryOp::And,
+            if let PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
                 lhs: and_lhs,
                 rhs: and_rhs,
                 ty: and_ty,
             } = cmp_lhs.as_mut()
             {
-                if let DirExpr::Const(mask_val, _) = and_rhs.as_ref() {
+                if let PreHirExpr::Const(mask_val, _) = and_rhs.as_ref() {
                     let mask_val = *mask_val;
-                    if let DirExpr::Cast {
+                    if let PreHirExpr::Cast {
                         ty: cast_ty,
                         expr: cast_inner,
                     } = and_lhs.as_mut()
                     {
-                        if let DirExpr::Load {
+                        if let PreHirExpr::Load {
                             ptr: load_ptr,
                             ty: load_ty,
                         } = cast_inner.as_mut()
@@ -181,13 +181,13 @@ fn expand_load_in_expr(expr: &mut DirExpr) -> bool {
                                 if sb_bits < lb_bits {
                                     let wide_ty = load_ty.clone();
                                     let wide_ptr = load_ptr.clone();
-                                    *and_lhs = Box::new(DirExpr::Load {
+                                    *and_lhs = Box::new(PreHirExpr::Load {
                                         ptr: wide_ptr,
                                         ty: wide_ty.clone(),
                                     });
                                     *and_ty = wide_ty.clone();
-                                    *and_rhs = Box::new(DirExpr::Const(mask_val, wide_ty.clone()));
-                                    *cmp_rhs = Box::new(DirExpr::Const(cmp_val, wide_ty));
+                                    *and_rhs = Box::new(PreHirExpr::Const(mask_val, wide_ty.clone()));
+                                    *cmp_rhs = Box::new(PreHirExpr::Const(cmp_val, wide_ty));
                                     *cmp_ty = NirType::Bool;
                                     return true;
                                 }
@@ -203,18 +203,18 @@ fn expand_load_in_expr(expr: &mut DirExpr) -> bool {
     // Pattern B (natural truncation):
     //   Cast<u{small}>(Load<u{large}>(ptr))  →  Load<u{small}>(ptr)
     // -----------------------------------------------------------------------
-    if let DirExpr::Cast {
+    if let PreHirExpr::Cast {
         ty: cast_ty,
         expr: inner,
     } = expr
     {
-        if let DirExpr::Load {
+        if let PreHirExpr::Load {
             ptr: load_ptr,
             ty: load_ty,
         } = inner.as_mut()
         {
             if is_natural_narrowing(cast_ty, load_ty) {
-                *expr = DirExpr::Load {
+                *expr = PreHirExpr::Load {
                     ptr: load_ptr.clone(),
                     ty: cast_ty.clone(),
                 };
@@ -226,30 +226,30 @@ fn expand_load_in_expr(expr: &mut DirExpr) -> bool {
     // Recurse into sub-expressions.
     let mut changed = false;
     match expr {
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= expand_load_in_expr(lhs);
             changed |= expand_load_in_expr(rhs);
         }
-        DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Cast { expr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= expand_load_in_expr(inner);
         }
-        DirExpr::Load { ptr, .. } => {
+        PreHirExpr::Load { ptr, .. } => {
             changed |= expand_load_in_expr(ptr);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args.iter_mut() {
                 changed |= expand_load_in_expr(arg);
             }
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= expand_load_in_expr(base);
             changed |= expand_load_in_expr(index);
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -259,7 +259,7 @@ fn expand_load_in_expr(expr: &mut DirExpr) -> bool {
             changed |= expand_load_in_expr(then_expr);
             changed |= expand_load_in_expr(else_expr);
         }
-        DirExpr::Var(_) | DirExpr::Const(_, _) | DirExpr::AddressOfGlobal(_) => {}
+        PreHirExpr::Var(_) | PreHirExpr::Const(_, _) | PreHirExpr::AddressOfGlobal(_) => {}
     }
     changed
 }
@@ -283,44 +283,44 @@ mod tests {
         make_int(32, false)
     }
 
-    fn load_expr(ty: NirType) -> DirExpr {
-        DirExpr::Load {
-            ptr: Box::new(DirExpr::Var("ptr".to_string())),
+    fn load_expr(ty: NirType) -> PreHirExpr {
+        PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Var("ptr".to_string())),
             ty,
         }
     }
 
-    fn cast_expr(ty: NirType, inner: DirExpr) -> DirExpr {
-        DirExpr::Cast {
+    fn cast_expr(ty: NirType, inner: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Cast {
             ty,
             expr: Box::new(inner),
         }
     }
 
-    fn empty_func_with_body(body: Vec<DirStmt>) -> DirFunction {
-        DirFunction {
+    fn empty_func_with_body(body: Vec<PreHirStmt>) -> PreHirFunction {
+        PreHirFunction {
             name: "test".to_string(),
             int_param_offsets: Vec::new(),
             body,
-            ..DirFunction::default()
+            ..PreHirFunction::default()
         }
     }
 
     #[test]
     fn narrow_cast_of_load_is_collapsed() {
         // Cast<u8>(Load<u32>(ptr))  →  Load<u8>(ptr)
-        let stmt = DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_string()),
+        let stmt = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
             rhs: cast_expr(u8(), load_expr(u32())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
         let changed = apply_expand_load_pass(&mut func);
         assert!(changed, "expected transformation");
-        if let DirStmt::Assign { rhs, .. } = &func.body[0] {
+        if let PreHirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(
                 matches!(
                     rhs,
-                    DirExpr::Load {
+                    PreHirExpr::Load {
                         ty: NirType::Int {
                             bits: 8,
                             signed: false
@@ -338,8 +338,8 @@ mod tests {
     #[test]
     fn no_transform_when_load_is_already_narrow() {
         // Cast<u8>(Load<u8>(ptr)) — no change because bits are equal
-        let stmt = DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_string()),
+        let stmt = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
             rhs: cast_expr(u8(), load_expr(u8())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
@@ -350,8 +350,8 @@ mod tests {
     #[test]
     fn no_transform_when_cast_widens() {
         // Cast<u32>(Load<u8>(ptr)) — this would widen, not narrow; no change
-        let stmt = DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_string()),
+        let stmt = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
             rhs: cast_expr(u32(), load_expr(u8())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
@@ -363,34 +363,34 @@ mod tests {
     fn and_comparison_load_is_widened() {
         // (Cast<u8>(Load<u32>(ptr)) & 0xFF) == 5
         // → (Load<u32>(ptr) & 0xFF_u32) == 5_u32
-        let and_expr = DirExpr::Binary {
-            op: DirBinaryOp::And,
+        let and_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
             lhs: Box::new(cast_expr(u8(), load_expr(u32()))),
-            rhs: Box::new(DirExpr::Const(0xFF, u8())),
+            rhs: Box::new(PreHirExpr::Const(0xFF, u8())),
             ty: u8(),
         };
-        let cmp_expr = DirExpr::Binary {
-            op: DirBinaryOp::Eq,
+        let cmp_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
             lhs: Box::new(and_expr),
-            rhs: Box::new(DirExpr::Const(5, u8())),
+            rhs: Box::new(PreHirExpr::Const(5, u8())),
             ty: NirType::Bool,
         };
-        let stmt = DirStmt::Expr(cmp_expr);
+        let stmt = PreHirStmt::Expr(cmp_expr);
         let mut func = empty_func_with_body(vec![stmt]);
         let changed = apply_expand_load_pass(&mut func);
         assert!(changed, "expected transformation in AND-comparison form");
-        if let DirStmt::Expr(DirExpr::Binary { lhs, rhs, .. }) = &func.body[0] {
+        if let PreHirStmt::Expr(PreHirExpr::Binary { lhs, rhs, .. }) = &func.body[0] {
             // rhs (cmp const) should now have wider type
             assert!(
                 matches!(
                     rhs.as_ref(),
-                    DirExpr::Const(5, NirType::Int { bits: 32, .. })
+                    PreHirExpr::Const(5, NirType::Int { bits: 32, .. })
                 ),
                 "expected cmp_rhs widened to u32, got: {rhs:?}"
             );
             // lhs should be And(Load<u32>, Const<u32>)
-            if let DirExpr::Binary {
-                op: DirBinaryOp::And,
+            if let PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
                 lhs: and_lhs,
                 rhs: and_rhs,
                 ..
@@ -399,7 +399,7 @@ mod tests {
                 assert!(
                     matches!(
                         and_lhs.as_ref(),
-                        DirExpr::Load {
+                        PreHirExpr::Load {
                             ty: NirType::Int { bits: 32, .. },
                             ..
                         }
@@ -409,7 +409,7 @@ mod tests {
                 assert!(
                     matches!(
                         and_rhs.as_ref(),
-                        DirExpr::Const(0xFF, NirType::Int { bits: 32, .. })
+                        PreHirExpr::Const(0xFF, NirType::Int { bits: 32, .. })
                     ),
                     "expected and_rhs widened to u32, got: {and_rhs:?}"
                 );
@@ -424,18 +424,18 @@ mod tests {
     #[test]
     fn narrow_cast_of_u16_load_u32_collapsed() {
         // Cast<u16>(Load<u32>(ptr)) → Load<u16>(ptr)
-        let stmt = DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_string()),
+        let stmt = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
             rhs: cast_expr(u16(), load_expr(u32())),
         };
         let mut func = empty_func_with_body(vec![stmt]);
         let changed = apply_expand_load_pass(&mut func);
         assert!(changed, "expected transformation");
-        if let DirStmt::Assign { rhs, .. } = &func.body[0] {
+        if let PreHirStmt::Assign { rhs, .. } = &func.body[0] {
             assert!(
                 matches!(
                     rhs,
-                    DirExpr::Load {
+                    PreHirExpr::Load {
                         ty: NirType::Int {
                             bits: 16,
                             signed: false

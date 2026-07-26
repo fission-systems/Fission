@@ -67,9 +67,10 @@ impl DwarfRegisterMappings {
             rest = &rest[close.saturating_add(1).min(rest.len())..];
 
             if tag == "register_mapping" {
-                if let (Some(dwarf_str), Some(ghidra_name)) =
-                    (extract_attr(segment, "dwarf"), extract_attr(segment, "ghidra"))
-                {
+                if let (Some(dwarf_str), Some(ghidra_name)) = (
+                    extract_attr(segment, "dwarf"),
+                    extract_attr(segment, "ghidra"),
+                ) {
                     let Some(base_dwarf) = parse_u32(dwarf_str) else {
                         continue;
                     };
@@ -86,13 +87,11 @@ impl DwarfRegisterMappings {
                             } else {
                                 // Non-conforming auto_count name (Ghidra would
                                 // reject this) — fall back to a single mapping.
-                                doc.by_dwarf_num
-                                    .insert(base_dwarf, ghidra_name.to_string());
+                                doc.by_dwarf_num.insert(base_dwarf, ghidra_name.to_string());
                             }
                         }
                         _ => {
-                            doc.by_dwarf_num
-                                .insert(base_dwarf, ghidra_name.to_string());
+                            doc.by_dwarf_num.insert(base_dwarf, ghidra_name.to_string());
                         }
                     }
                 }

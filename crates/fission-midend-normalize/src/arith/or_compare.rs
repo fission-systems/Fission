@@ -7,13 +7,13 @@ use super::util::is_zero_const;
 ///
 /// Since this pass operates bottom-up, nested bitwise ORs (e.g. `(A | B | C) == 0`)
 /// will automatically unfold to logical chains like `A == 0 && B == 0 && C == 0`.
-pub fn apply_or_compare_pass(func: &mut DirFunction) -> bool {
+pub fn apply_or_compare_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     changed |= simplify_stmts(&mut func.body);
     changed
 }
 
-fn simplify_stmts(stmts: &mut [DirStmt]) -> bool {
+fn simplify_stmts(stmts: &mut [PreHirStmt]) -> bool {
     let mut changed = false;
     for stmt in stmts {
         changed |= simplify_stmt(stmt);
@@ -21,20 +21,20 @@ fn simplify_stmts(stmts: &mut [DirStmt]) -> bool {
     changed
 }
 
-fn simplify_stmt(stmt: &mut DirStmt) -> bool {
+fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             changed |= simplify_expr(rhs);
             changed |= simplify_lvalue(lhs);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             changed |= simplify_expr(expr);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             changed |= simplify_stmts(body);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -51,7 +51,7 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
             }
             changed |= simplify_stmts(body);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -60,7 +60,7 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
             changed |= simplify_stmts(then_body);
             changed |= simplify_stmts(else_body);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -71,7 +71,7 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
             }
             changed |= simplify_stmts(default);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list);
         }
         _ => {}
@@ -79,47 +79,47 @@ fn simplify_stmt(stmt: &mut DirStmt) -> bool {
     changed
 }
 
-fn simplify_lvalue(lval: &mut DirLValue) -> bool {
+fn simplify_lvalue(lval: &mut PreHirLValue) -> bool {
     let mut changed = false;
     match lval {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => {
             changed |= simplify_expr(ptr);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::FieldAccess { base, .. } => {
             changed |= simplify_expr(base);
         }
     }
     changed
 }
 
-fn simplify_expr(expr: &mut DirExpr) -> bool {
+fn simplify_expr(expr: &mut PreHirExpr) -> bool {
     let mut changed = false;
 
     // Recurse first bottom-up
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             changed |= simplify_expr(inner);
         }
-        DirExpr::Binary { lhs, rhs, .. } => {
+        PreHirExpr::Binary { lhs, rhs, .. } => {
             changed |= simplify_expr(lhs);
             changed |= simplify_expr(rhs);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 changed |= simplify_expr(arg);
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -129,7 +129,7 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
             changed |= simplify_expr(then_expr);
             changed |= simplify_expr(else_expr);
         }
-        DirExpr::Index { base, index, .. } => {
+        PreHirExpr::Index { base, index, .. } => {
             changed |= simplify_expr(base);
             changed |= simplify_expr(index);
         }
@@ -139,15 +139,15 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
     // Match OR-of-zero (RuleOrPredicate):
     // (cond ? val : 0) | other  =>  cond ? (val | other) : other
     // (cond ? 0 : val) | other  =>  cond ? other : (val | other)
-    if let DirExpr::Binary {
-        op: DirBinaryOp::Or,
+    if let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Or,
         lhs,
         rhs,
         ty,
     } = expr
     {
         let mut target = None;
-        if let DirExpr::Select {
+        if let PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -173,7 +173,7 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
             }
         }
         if target.is_none() {
-            if let DirExpr::Select {
+            if let PreHirExpr::Select {
                 cond,
                 then_expr,
                 else_expr,
@@ -203,16 +203,16 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
             let new_then = if then_is_zero {
                 other.clone()
             } else {
-                Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Or,
+                Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
                     lhs: then_expr,
                     rhs: other.clone(),
                     ty: ty.clone(),
                 })
             };
             let new_else = if then_is_zero {
-                Box::new(DirExpr::Binary {
-                    op: DirBinaryOp::Or,
+                Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
                     lhs: else_expr,
                     rhs: other,
                     ty: ty.clone(),
@@ -220,7 +220,7 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
             } else {
                 other
             };
-            *expr = DirExpr::Select {
+            *expr = PreHirExpr::Select {
                 cond,
                 then_expr: new_then,
                 else_expr: new_else,
@@ -232,16 +232,16 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
     }
 
     // Match comparison with zero
-    if let DirExpr::Binary {
-        op: cmp_op @ (DirBinaryOp::Eq | DirBinaryOp::Ne),
+    if let PreHirExpr::Binary {
+        op: cmp_op @ (PreHirBinaryOp::Eq | PreHirBinaryOp::Ne),
         lhs,
         rhs,
         ..
     } = expr
     {
         let (or_expr, is_lhs) = if is_zero_const(rhs) {
-            if let DirExpr::Binary {
-                op: DirBinaryOp::Or,
+            if let PreHirExpr::Binary {
+                op: PreHirBinaryOp::Or,
                 ..
             } = lhs.as_ref()
             {
@@ -250,8 +250,8 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
                 return changed;
             }
         } else if is_zero_const(lhs) {
-            if let DirExpr::Binary {
-                op: DirBinaryOp::Or,
+            if let PreHirExpr::Binary {
+                op: PreHirBinaryOp::Or,
                 ..
             } = rhs.as_ref()
             {
@@ -263,23 +263,23 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
             return changed;
         };
 
-        if let DirExpr::Binary {
+        if let PreHirExpr::Binary {
             lhs: or_lhs,
             rhs: or_rhs,
             ty: or_ty,
             ..
         } = or_expr
         {
-            let mut left_cmp = DirExpr::Binary {
+            let mut left_cmp = PreHirExpr::Binary {
                 op: *cmp_op,
                 lhs: or_lhs.clone(),
-                rhs: Box::new(DirExpr::Const(0, or_ty.clone())),
+                rhs: Box::new(PreHirExpr::Const(0, or_ty.clone())),
                 ty: NirType::Bool,
             };
-            let mut right_cmp = DirExpr::Binary {
+            let mut right_cmp = PreHirExpr::Binary {
                 op: *cmp_op,
                 lhs: or_rhs.clone(),
-                rhs: Box::new(DirExpr::Const(0, or_ty.clone())),
+                rhs: Box::new(PreHirExpr::Const(0, or_ty.clone())),
                 ty: NirType::Bool,
             };
 
@@ -288,11 +288,11 @@ fn simplify_expr(expr: &mut DirExpr) -> bool {
             simplify_expr(&mut right_cmp);
 
             let logical_op = match cmp_op {
-                DirBinaryOp::Eq => DirBinaryOp::LogicalAnd,
-                DirBinaryOp::Ne => DirBinaryOp::LogicalOr,
+                PreHirBinaryOp::Eq => PreHirBinaryOp::LogicalAnd,
+                PreHirBinaryOp::Ne => PreHirBinaryOp::LogicalOr,
                 _ => unreachable!(),
             };
-            *expr = DirExpr::Binary {
+            *expr = PreHirExpr::Binary {
                 op: logical_op,
                 lhs: Box::new(left_cmp),
                 rhs: Box::new(right_cmp),

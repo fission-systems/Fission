@@ -40,17 +40,17 @@ pub(crate) struct PreviewBuilder<'a> {
     /// Empty when no splitting has been applied (all blocks are genuine pcode blocks).
     pub(crate) virtual_block_map: Vec<usize>,
     pub(crate) loop_bodies: Vec<crate::midend::structuring::loop_analysis::LoopBody>,
-    pub(crate) params: BTreeMap<usize, DirBinding>,
+    pub(crate) params: BTreeMap<usize, PreHirBinding>,
     pub(crate) locals: BTreeMap<i64, StackSlot>,
     pub(crate) locals_next_id: StackSlotId,
-    pub(crate) temps: BTreeMap<String, DirBinding>,
+    pub(crate) temps: BTreeMap<String, PreHirBinding>,
     pub(crate) temp_next_id: u32,
     pub(crate) materialized_vns: HashMap<MaterializedVarnodeKey, String>,
     pub(crate) load_address_bindings: HashSet<String>,
     pub(crate) load_value_bindings: HashSet<String>,
     pub(crate) explicit_merge_bindings: HashMap<(usize, VarnodeKey), String>,
     pub(crate) call_result_bindings: HashMap<LoweringSite, String>,
-    pub(crate) selector_representatives: BuilderCacheMap<(usize, u64, u64), DirExpr>,
+    pub(crate) selector_representatives: BuilderCacheMap<(usize, u64, u64), PreHirExpr>,
     pub(crate) current_lowering_site: Option<LoweringSite>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,
     pub(crate) entry_arity: usize,
@@ -79,14 +79,14 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) structuring_start: Option<std::time::Instant>,
     /// FAS-computed back-edges to virtualize as gotos when node-splitting is
     /// over budget. These edges are skipped during normal block terminator
-    /// lowering and emitted as explicit `DirStmt::Goto` stmts instead.
+    /// lowering and emitted as explicit `PreHirStmt::Goto` stmts instead.
     pub(crate) fas_virtual_edges: Vec<(usize, usize)>,
-    pub(crate) lowered_block_stmts_cache: BuilderCacheMap<usize, Vec<DirStmt>>,
+    pub(crate) lowered_block_stmts_cache: BuilderCacheMap<usize, Vec<PreHirStmt>>,
     pub(crate) partial_gpr_live_binding_cache: BuilderCacheMap<usize, bool>,
     pub(crate) follow_blocks: Vec<Option<usize>>,
     pub(crate) failed_loop_subgraphs: HashSet<(usize, usize)>,
-    pub(crate) lower_varnode_cache: BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), DirExpr>,
-    pub(crate) structured_body: Option<Vec<DirStmt>>,
+    pub(crate) lower_varnode_cache: BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), PreHirExpr>,
+    pub(crate) structured_body: Option<Vec<PreHirStmt>>,
     /// `options` is fixed for the builder's lifetime, so the `RegisterNamer`
     /// it derives from (including a `sla_map` clone) only needs building
     /// once instead of on every `register_namer()` call — that call is on

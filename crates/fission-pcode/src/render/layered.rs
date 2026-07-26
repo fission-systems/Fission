@@ -29,10 +29,7 @@ pub(crate) fn render_layered_pseudocode(
     let mut hir_tree = hir.clone();
     apply_hir_presentation(&mut hir_tree);
     let hir_code = render_hir_function_with_profile(&hir_tree, options, PrintProfile::Hir);
-    LayeredPseudocode {
-        nir,
-        hir: hir_code,
-    }
+    LayeredPseudocode { nir, hir: hir_code }
 }
 
 #[cfg(test)]
@@ -1288,10 +1285,7 @@ mod global_decl_tests {
             rendered.contains("uint field_0;"),
             "typedef must declare field_0:\n{rendered}"
         );
-        assert!(
-            rendered.contains("field_0"),
-            "{rendered}"
-        );
+        assert!(rendered.contains("field_0"), "{rendered}");
         assert!(
             !rendered.contains("unsigned char bytes[8]"),
             "named-field aggregates should not use bytes-only placeholder:\n{rendered}"

@@ -246,4 +246,3 @@ pub(crate) fn is_c_identifier(name: &str) -> bool {
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
-

@@ -2,7 +2,7 @@ use crate::prelude::*;
 use crate::pipeline::GLOBAL_SYMBOL_CONTEXT;
 use crate::pipeline::GlobalSymbolContext;
 
-pub fn apply_constant_ptr_recovery_pass(func: &mut DirFunction) -> bool {
+pub fn apply_constant_ptr_recovery_pass(func: &mut PreHirFunction) -> bool {
     let mut context = None;
     GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         if let Some(c) = ctx.borrow().as_ref() {
@@ -24,7 +24,7 @@ pub fn apply_constant_ptr_recovery_pass(func: &mut DirFunction) -> bool {
 }
 
 fn process_statement_list(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     context: &GlobalSymbolContext,
     changed: &mut bool,
 ) {
@@ -33,22 +33,22 @@ fn process_statement_list(
     }
 }
 
-fn process_stmt(stmt: &mut DirStmt, context: &GlobalSymbolContext, changed: &mut bool) {
+fn process_stmt(stmt: &mut PreHirStmt, context: &GlobalSymbolContext, changed: &mut bool) {
     match stmt {
-        DirStmt::Assign { lhs, rhs } => {
+        PreHirStmt::Assign { lhs, rhs } => {
             process_lvalue(lhs, context, changed);
             process_expr(rhs, context, changed);
         }
-        DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
             process_expr(expr, context, changed);
         }
-        DirStmt::VaStart { va_list, .. } => {
+        PreHirStmt::VaStart { va_list, .. } => {
             process_expr(va_list, context, changed);
         }
-        DirStmt::Block(body) | DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             process_statement_list(body, context, changed);
         }
-        DirStmt::If {
+        PreHirStmt::If {
             cond,
             then_body,
             else_body,
@@ -57,7 +57,7 @@ fn process_stmt(stmt: &mut DirStmt, context: &GlobalSymbolContext, changed: &mut
             process_statement_list(then_body, context, changed);
             process_statement_list(else_body, context, changed);
         }
-        DirStmt::Switch {
+        PreHirStmt::Switch {
             expr,
             cases,
             default,
@@ -68,7 +68,7 @@ fn process_stmt(stmt: &mut DirStmt, context: &GlobalSymbolContext, changed: &mut
             }
             process_statement_list(default, context, changed);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init,
             cond,
             update,
@@ -85,43 +85,43 @@ fn process_stmt(stmt: &mut DirStmt, context: &GlobalSymbolContext, changed: &mut
             }
             process_statement_list(body, context, changed);
         }
-        DirStmt::Return(None)
-        | DirStmt::Label(_)
-        | DirStmt::Goto(_)
-        | DirStmt::Break
-        | DirStmt::Continue => {}
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
     }
 }
 
-fn process_lvalue(lval: &mut DirLValue, context: &GlobalSymbolContext, changed: &mut bool) {
+fn process_lvalue(lval: &mut PreHirLValue, context: &GlobalSymbolContext, changed: &mut bool) {
     match lval {
-        DirLValue::Deref { ptr, .. } => {
+        PreHirLValue::Deref { ptr, .. } => {
             process_expr(ptr, context, changed);
         }
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Index { base, index, .. } => {
             process_expr(base, context, changed);
             process_expr(index, context, changed);
         }
-        DirLValue::Var(_) => {}
-        DirLValue::FieldAccess { base, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::FieldAccess { base, .. } => {
             process_expr(base, context, changed);
         }
     }
 }
 
-fn process_expr(expr: &mut DirExpr, context: &GlobalSymbolContext, changed: &mut bool) {
+fn process_expr(expr: &mut PreHirExpr, context: &GlobalSymbolContext, changed: &mut bool) {
     // Walk inner expressions first
     match expr {
-        DirExpr::Cast { expr: inner, .. }
-        | DirExpr::Unary { expr: inner, .. }
-        | DirExpr::Load { ptr: inner, .. }
-        | DirExpr::PtrOffset { base: inner, .. }
-        | DirExpr::AggregateCopy { src: inner, .. }
-        | DirExpr::FieldAccess { base: inner, .. } => {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
             process_expr(inner, context, changed);
         }
-        DirExpr::Binary { lhs, rhs, .. }
-        | DirExpr::Index {
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index {
             base: lhs,
             index: rhs,
             ..
@@ -129,12 +129,12 @@ fn process_expr(expr: &mut DirExpr, context: &GlobalSymbolContext, changed: &mut
             process_expr(lhs, context, changed);
             process_expr(rhs, context, changed);
         }
-        DirExpr::Call { args, .. } => {
+        PreHirExpr::Call { args, .. } => {
             for arg in args {
                 process_expr(arg, context, changed);
             }
         }
-        DirExpr::Select {
+        PreHirExpr::Select {
             cond,
             then_expr,
             else_expr,
@@ -144,20 +144,20 @@ fn process_expr(expr: &mut DirExpr, context: &GlobalSymbolContext, changed: &mut
             process_expr(then_expr, context, changed);
             process_expr(else_expr, context, changed);
         }
-        DirExpr::Var(_) | DirExpr::AddressOfGlobal(_) | DirExpr::Const(_, _) => {}
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 
     // Rewrite constant pointers if applicable
-    if let DirExpr::Const(val, _) = expr {
+    if let PreHirExpr::Const(val, _) = expr {
         let addr = *val as u64;
         if addr != 0 {
             if let Some((global_addr, global_name)) = find_global_symbol(addr, context) {
                 if addr == global_addr {
-                    *expr = DirExpr::AddressOfGlobal(global_name);
+                    *expr = PreHirExpr::AddressOfGlobal(global_name);
                 } else {
                     let offset = (addr - global_addr) as i64;
-                    *expr = DirExpr::PtrOffset {
-                        base: Box::new(DirExpr::AddressOfGlobal(global_name)),
+                    *expr = PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::AddressOfGlobal(global_name)),
                         offset,
                     };
                 }

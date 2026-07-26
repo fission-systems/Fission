@@ -19,18 +19,18 @@ use crate::prelude::*;
 const MAX_HOIST_PREFIX: usize = 32;
 
 /// Hoist common pure prefixes on `if` / `else` arms.  Returns `true` if changed.
-pub fn apply_branch_prefix_hoist_pass(func: &mut DirFunction) -> bool {
+pub fn apply_branch_prefix_hoist_pass(func: &mut PreHirFunction) -> bool {
     hoist_stmts(&mut func.body)
 }
 
-fn hoist_stmts(stmts: &mut Vec<DirStmt>) -> bool {
+fn hoist_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         changed |= hoist_stmt_deep(stmt);
     }
     let mut i = 0;
     while i < stmts.len() {
-        if let DirStmt::If {
+        if let PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -38,7 +38,7 @@ fn hoist_stmts(stmts: &mut Vec<DirStmt>) -> bool {
         {
             let n = common_hoist_prefix_len(then_body.as_slice(), else_body.as_slice());
             if n > 0 {
-                let lifted: Vec<DirStmt> = then_body.drain(0..n).collect();
+                let lifted: Vec<PreHirStmt> = then_body.drain(0..n).collect();
                 else_body.drain(0..n);
                 for s in lifted.into_iter().rev() {
                     stmts.insert(i, s);
@@ -53,10 +53,10 @@ fn hoist_stmts(stmts: &mut Vec<DirStmt>) -> bool {
     changed
 }
 
-fn hoist_stmt_deep(stmt: &mut DirStmt) -> bool {
+fn hoist_stmt_deep(stmt: &mut PreHirStmt) -> bool {
     let mut changed = false;
     match stmt {
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -64,10 +64,10 @@ fn hoist_stmt_deep(stmt: &mut DirStmt) -> bool {
             changed |= hoist_stmts(then_body);
             changed |= hoist_stmts(else_body);
         }
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             changed |= hoist_stmts(body);
         }
-        DirStmt::For {
+        PreHirStmt::For {
             init, body, update, ..
         } => {
             if let Some(s) = init {
@@ -78,13 +78,13 @@ fn hoist_stmt_deep(stmt: &mut DirStmt) -> bool {
                 changed |= hoist_stmt_deep(s);
             }
         }
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 changed |= hoist_stmts(&mut case.body);
             }
             changed |= hoist_stmts(default);
         }
-        DirStmt::Block(body) => {
+        PreHirStmt::Block(body) => {
             changed |= hoist_stmts(body);
         }
         _ => {}
@@ -92,7 +92,7 @@ fn hoist_stmt_deep(stmt: &mut DirStmt) -> bool {
     changed
 }
 
-fn common_hoist_prefix_len(then_body: &[DirStmt], else_body: &[DirStmt]) -> usize {
+fn common_hoist_prefix_len(then_body: &[PreHirStmt], else_body: &[PreHirStmt]) -> usize {
     let max = MAX_HOIST_PREFIX.min(then_body.len()).min(else_body.len());
     let mut n = 0;
     while n < max {
@@ -107,14 +107,14 @@ fn common_hoist_prefix_len(then_body: &[DirStmt], else_body: &[DirStmt]) -> usiz
 
 /// Both statements must be `Assign { lhs: Var(same), rhs }` with identical
 /// pure expression keys and no RHS side effects (Call, Load, etc.).
-fn same_hoistable_pair(a: &DirStmt, b: &DirStmt) -> bool {
+fn same_hoistable_pair(a: &PreHirStmt, b: &PreHirStmt) -> bool {
     let (
-        DirStmt::Assign {
-            lhs: DirLValue::Var(na),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(na),
             rhs: ra,
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var(nb),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(nb),
             rhs: rb,
         },
     ) = (a, b)

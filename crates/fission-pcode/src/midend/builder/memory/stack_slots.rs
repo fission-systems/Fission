@@ -69,7 +69,7 @@ impl<'a> PreviewBuilder<'a> {
             let alias_name = abi.param_name(param_index);
             self.params
                 .entry(param_index)
-                .or_insert_with(|| DirBinding {
+                .or_insert_with(|| PreHirBinding {
                     name: alias_name.clone(),
                     ty: type_from_size(vn.size, false),
                     surface_type_name: None,
@@ -86,7 +86,7 @@ impl<'a> PreviewBuilder<'a> {
             return None;
         }
         let name = abi.param_name(index);
-        self.params.entry(index).or_insert_with(|| DirBinding {
+        self.params.entry(index).or_insert_with(|| PreHirBinding {
             name: name.clone(),
             ty: type_from_size(vn.size, false),
             surface_type_name: None,
@@ -129,17 +129,17 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         ptr: &Varnode,
         ty: NirType,
-    ) -> Option<DirLValue> {
+    ) -> Option<PreHirLValue> {
         if let Some(name) = self.relocation_name_for_pcode_op(op.address) {
-            return Some(DirLValue::Var(name));
+            return Some(PreHirLValue::Var(name));
         }
         if let Some(global) = self.resolve_relocated_pointer(ptr, 16) {
             return Some(if global.byte_offset == 0 {
-                DirLValue::Var(global.name)
+                PreHirLValue::Var(global.name)
             } else {
-                DirLValue::Deref {
-                    ptr: Box::new(DirExpr::PtrOffset {
-                        base: Box::new(DirExpr::AddressOfGlobal(global.name)),
+                PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::AddressOfGlobal(global.name)),
                         offset: global.byte_offset,
                     }),
                     ty,
@@ -151,7 +151,7 @@ impl<'a> PreviewBuilder<'a> {
             .global_names
             .get(&addr)
             .cloned()
-            .map(DirLValue::Var)
+            .map(PreHirLValue::Var)
     }
 
     fn resolve_relocated_pointer_symbol(&self, ptr: &Varnode, budget: usize) -> Option<String> {
@@ -608,18 +608,21 @@ impl<'a> PreviewBuilder<'a> {
     /// the direct "does this pointer resolve to a *known, named* TEB
     /// field" query the `Load`-lowering path needs. Returns the name
     /// wrapped in a `Cast` to the field's real type -- a bare, type-less
-    /// `DirExpr::Var` (matching the untyped `DAT_XXXXXXXX` convention)
+    /// `PreHirExpr::Var` (matching the untyped `DAT_XXXXXXXX` convention)
     /// left downstream return-type inference with nothing to work with
     /// (`undefined is_debugged(void)` on a real fixture); registering a
     /// full `self.temps`/`self.locals` binding instead (mirroring how a
     /// stack slot's `Var` is backed by one) was tried and rejected -- it
     /// makes the renderer treat the name as a genuine local needing a
     /// declaration + initializer, which it isn't (there's no assigning
-    /// `DirStmt` for it anywhere in the body, since it's a read from a
+    /// `PreHirStmt` for it anywhere in the body, since it's a read from a
     /// fixed location, not a computed value), producing a *worse*,
     /// uninitialized-looking declaration. A `Cast` gives the use site a
     /// real type without implying local storage that needs to exist.
-    pub(in crate::midend::builder) fn try_teb_field_var(&self, ptr: &Varnode) -> Option<DirExpr> {
+    pub(in crate::midend::builder) fn try_teb_field_var(
+        &self,
+        ptr: &Varnode,
+    ) -> Option<PreHirExpr> {
         let offset = self.resolve_teb_field_offset(ptr)?;
         let (name, is_pointer) = teb_field_name(offset, self.options.is_64bit)?;
         let ty = if is_pointer {
@@ -627,9 +630,9 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             type_from_size(4, false)
         };
-        Some(DirExpr::Cast {
+        Some(PreHirExpr::Cast {
             ty,
-            expr: Box::new(DirExpr::Var(name.to_string())),
+            expr: Box::new(PreHirExpr::Var(name.to_string())),
         })
     }
 
@@ -712,7 +715,10 @@ impl<'a> PreviewBuilder<'a> {
     /// mirroring [`try_teb_field_var`]'s `Cast`-wrapping approach (same
     /// rationale: a real type at the use site without implying a local
     /// declaration that doesn't exist).
-    pub(in crate::midend::builder) fn try_peb_field_var(&self, ptr: &Varnode) -> Option<DirExpr> {
+    pub(in crate::midend::builder) fn try_peb_field_var(
+        &self,
+        ptr: &Varnode,
+    ) -> Option<PreHirExpr> {
         let offset = self.resolve_peb_field_offset(ptr)?;
         let (name, is_pointer) = peb_field_name(offset)?;
         let ty = if is_pointer {
@@ -720,9 +726,9 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             type_from_size(1, false)
         };
-        Some(DirExpr::Cast {
+        Some(PreHirExpr::Cast {
             ty,
-            expr: Box::new(DirExpr::Var(name.to_string())),
+            expr: Box::new(PreHirExpr::Var(name.to_string())),
         })
     }
 
@@ -905,7 +911,7 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 placeholder_ty.clone()
             };
-            self.params.entry(slot).or_insert_with(|| DirBinding {
+            self.params.entry(slot).or_insert_with(|| PreHirBinding {
                 name: format!("param_{}", slot + 1),
                 ty: slot_ty,
                 surface_type_name: None,
@@ -1034,7 +1040,7 @@ fn parse_stack_displacement(text: &str) -> Option<i64> {
 
 /// Name for a well-known Windows TEB field at the given `FS_OFFSET`/
 /// `GS_OFFSET`-relative byte offset, if any -- `None` for anything else
-/// (still renders as a plain, correct `DirExpr::Load`, just without a
+/// (still renders as a plain, correct `PreHirExpr::Load`, just without a
 /// descriptive name; this table isn't meant to be exhaustive, only to
 /// cover the handful of fields that come up often enough in practice to
 /// be worth naming, especially the classic `PEB.BeingDebugged` anti-debug

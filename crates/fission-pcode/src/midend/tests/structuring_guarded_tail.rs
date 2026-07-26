@@ -3,9 +3,9 @@ use crate::midend::structuring::{
     discover_guarded_tail_candidates_for_test, promote_single_entry_guarded_tail_regions_for_test,
 };
 
-fn extract_promoted_guarded_tail_merge_name(body: &[DirStmt]) -> Option<String> {
+fn extract_promoted_guarded_tail_merge_name(body: &[PreHirStmt]) -> Option<String> {
     let outer_if = body.iter().find_map(|stmt| match stmt {
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -13,18 +13,18 @@ fn extract_promoted_guarded_tail_merge_name(body: &[DirStmt]) -> Option<String> 
         _ => None,
     })?;
     let ret_name = match body.last() {
-        Some(DirStmt::Return(Some(DirExpr::Var(name)))) => name,
+        Some(PreHirStmt::Return(Some(PreHirExpr::Var(name)))) => name,
         _ => return None,
     };
     match (outer_if.0.last(), outer_if.1.last()) {
         (
-            Some(DirStmt::Assign {
-                lhs: DirLValue::Var(then_name),
-                rhs: DirExpr::Var(then_rhs),
+            Some(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(then_name),
+                rhs: PreHirExpr::Var(then_rhs),
             }),
-            Some(DirStmt::Assign {
-                lhs: DirLValue::Var(else_name),
-                rhs: DirExpr::Var(else_rhs),
+            Some(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(else_name),
+                rhs: PreHirExpr::Var(else_rhs),
             }),
         ) if then_rhs == "probe"
             && else_rhs == "seed"
@@ -40,19 +40,19 @@ fn extract_promoted_guarded_tail_merge_name(body: &[DirStmt]) -> Option<String> 
 #[test]
 fn structuring_promotes_single_entry_guarded_tail_region() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::If {
-            cond: DirExpr::Var("flag".to_string()),
-            then_body: vec![DirStmt::Expr(DirExpr::Var("side".to_string()))],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("flag".to_string()),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -62,23 +62,23 @@ fn structuring_promotes_single_entry_guarded_tail_region() {
     assert_eq!(
         body,
         vec![
-            DirStmt::If {
-                cond: DirExpr::Unary {
-                    op: DirUnaryOp::Not,
-                    expr: Box::new(DirExpr::Var("reg".to_string())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(PreHirExpr::Var("reg".to_string())),
                     ty: NirType::Bool,
                 },
                 then_body: vec![
-                    DirStmt::Expr(DirExpr::Var("middle".to_string())),
-                    DirStmt::If {
-                        cond: DirExpr::Var("flag".to_string()),
-                        then_body: vec![DirStmt::Expr(DirExpr::Var("side".to_string()))],
+                    PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+                    PreHirStmt::If {
+                        cond: PreHirExpr::Var("flag".to_string()),
+                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
                         else_body: Vec::new(),
                     },
                 ],
                 else_body: Vec::new(),
             },
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ],
         "stats={:#?}\nbody={:#?}",
         stats,
@@ -89,13 +89,13 @@ fn structuring_promotes_single_entry_guarded_tail_region() {
 #[test]
 fn structuring_promotes_terminal_single_entry_guarded_tail_region() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -103,13 +103,13 @@ fn structuring_promotes_terminal_single_entry_guarded_tail_region() {
     assert_eq!(stats.promotion_rejected_by_shape_count, 0);
     assert_eq!(
         body,
-        vec![DirStmt::If {
-            cond: DirExpr::Unary {
-                op: DirUnaryOp::Not,
-                expr: Box::new(DirExpr::Var("reg".to_string())),
+        vec![PreHirStmt::If {
+            cond: PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
+                expr: Box::new(PreHirExpr::Var("reg".to_string())),
                 ty: NirType::Bool,
             },
-            then_body: vec![DirStmt::Expr(DirExpr::Var("middle".to_string()))],
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("middle".to_string()))],
             else_body: Vec::new(),
         },]
     );
@@ -118,18 +118,18 @@ fn structuring_promotes_terminal_single_entry_guarded_tail_region() {
 #[test]
 fn structuring_promotes_guarded_tail_when_only_deleted_alias_chain_references_join_label() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Goto("block_join_1".to_string()),
-        DirStmt::Label("block_join_1".to_string()),
-        DirStmt::Goto("block_join_2".to_string()),
-        DirStmt::Label("block_join_2".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Goto("block_join_1".to_string()),
+        PreHirStmt::Label("block_join_1".to_string()),
+        PreHirStmt::Goto("block_join_2".to_string()),
+        PreHirStmt::Label("block_join_2".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -139,16 +139,16 @@ fn structuring_promotes_guarded_tail_when_only_deleted_alias_chain_references_jo
     assert_eq!(
         body,
         vec![
-            DirStmt::If {
-                cond: DirExpr::Unary {
-                    op: DirUnaryOp::Not,
-                    expr: Box::new(DirExpr::Var("reg".to_string())),
+            PreHirStmt::If {
+                cond: PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(PreHirExpr::Var("reg".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![DirStmt::Expr(DirExpr::Var("middle".to_string()))],
+                then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("middle".to_string()))],
                 else_body: Vec::new(),
             },
-            DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+            PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ]
     );
 }
@@ -156,35 +156,35 @@ fn structuring_promotes_guarded_tail_when_only_deleted_alias_chain_references_jo
 #[test]
 fn structuring_guarded_tail_rejects_local_forward_label_branch_under_hard_cutover() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("probe".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("tmp".to_string()),
-            then_body: vec![DirStmt::Goto("block_taken".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("tmp".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_taken".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("fallthrough".to_string())),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("block_taken".to_string()),
-        DirStmt::If {
-            cond: DirExpr::Unary {
-                op: DirUnaryOp::Not,
-                expr: Box::new(DirExpr::Var("tmp".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("fallthrough".to_string())),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("block_taken".to_string()),
+        PreHirStmt::If {
+            cond: PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
+                expr: Box::new(PreHirExpr::Var("tmp".to_string())),
                 ty: NirType::Bool,
             },
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("taken".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("taken".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let original = body.clone();
@@ -203,26 +203,26 @@ fn structuring_guarded_tail_rejects_local_forward_label_branch_under_hard_cutove
 #[test]
 fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_else_source() {
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("seed".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("seed".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("probe".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("tmp".to_string()),
-            then_body: vec![DirStmt::Expr(DirExpr::Var("side".to_string()))],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("tmp".to_string()),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("tmp".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -231,12 +231,12 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
     assert!(stats.guarded_tail_replacement_plan_completed_count >= 1);
     assert!(matches!(
         body.first(),
-        Some(DirStmt::Assign {
-            lhs: DirLValue::Var(name),
-            rhs: DirExpr::Var(seed),
+        Some(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs: PreHirExpr::Var(seed),
         }) if name == "tmp" && seed == "seed"
     ));
-    let Some(DirStmt::If {
+    let Some(PreHirStmt::If {
         cond,
         then_body,
         else_body,
@@ -246,18 +246,18 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
     };
     assert!(matches!(
         cond,
-        DirExpr::Unary {
-            op: DirUnaryOp::Not,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
             expr,
             ..
-        } if expr.as_ref() == &DirExpr::Var("reg".to_string())
+        } if expr.as_ref() == &PreHirExpr::Var("reg".to_string())
     ));
     assert!(
         then_body.iter().all(|stmt| {
             !matches!(
                 stmt,
-                DirStmt::Assign {
-                    lhs: DirLValue::Var(name),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
                     ..
                 } if name == "tmp"
             )
@@ -267,21 +267,21 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
     assert!(
         then_body.iter().any(|stmt| matches!(
             stmt,
-            DirStmt::If { cond: DirExpr::Var(name), .. } if name == "probe"
+            PreHirStmt::If { cond: PreHirExpr::Var(name), .. } if name == "probe"
         )),
         "{body:#?}"
     );
     let replacement_name = match (then_body.last(), else_body.last(), body.last()) {
         (
-            Some(DirStmt::Assign {
-                lhs: DirLValue::Var(then_name),
-                rhs: DirExpr::Var(then_rhs),
+            Some(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(then_name),
+                rhs: PreHirExpr::Var(then_rhs),
             }),
-            Some(DirStmt::Assign {
-                lhs: DirLValue::Var(else_name),
-                rhs: DirExpr::Var(else_rhs),
+            Some(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(else_name),
+                rhs: PreHirExpr::Var(else_rhs),
             }),
-            Some(DirStmt::Return(Some(DirExpr::Var(ret_name)))),
+            Some(PreHirStmt::Return(Some(PreHirExpr::Var(ret_name)))),
         ) if then_rhs == "probe"
             && else_rhs == "seed"
             && then_name == else_name
@@ -297,40 +297,40 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
 #[test]
 fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
     let mut body = vec![
-        DirStmt::Expr(DirExpr::Const(
+        PreHirStmt::Expr(PreHirExpr::Const(
             0,
             NirType::Int {
                 bits: 8,
                 signed: false,
             },
         )),
-        DirStmt::Expr(DirExpr::Const(
+        PreHirStmt::Expr(PreHirExpr::Const(
             1,
             NirType::Int {
                 bits: 8,
                 signed: false,
             },
         )),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("seed".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("seed".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("probe".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("tmp".to_string()),
-            then_body: vec![DirStmt::Expr(DirExpr::Var("side".to_string()))],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("tmp".to_string()),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("tmp".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -342,7 +342,7 @@ fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
     );
     assert!(matches!(
         body.first(),
-        Some(DirStmt::Expr(DirExpr::Const(
+        Some(PreHirStmt::Expr(PreHirExpr::Const(
             0,
             NirType::Int {
                 bits: 8,
@@ -352,7 +352,7 @@ fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
     ));
     assert!(matches!(
         body.get(1),
-        Some(DirStmt::Expr(DirExpr::Const(
+        Some(PreHirStmt::Expr(PreHirExpr::Const(
             1,
             NirType::Int {
                 bits: 8,
@@ -367,28 +367,28 @@ fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
 #[test]
 fn structuring_guarded_tail_execute_rewrite_survives_forwarding_tail_label_chain() {
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("seed".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("seed".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("probe".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("tmp".to_string()),
-            then_body: vec![DirStmt::Expr(DirExpr::Var("side".to_string()))],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("tmp".to_string()),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Goto("block_ret".to_string()),
-        DirStmt::Label("block_ret".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("tmp".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Goto("block_ret".to_string()),
+        PreHirStmt::Label("block_ret".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -405,30 +405,32 @@ fn structuring_guarded_tail_execute_rewrite_survives_forwarding_tail_label_chain
 #[test]
 fn structuring_guarded_tail_execute_rewrite_survives_padded_middle_depth() {
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("seed".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("seed".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Block(vec![
-            DirStmt::Expr(DirExpr::Var("middle_a".to_string())),
-            DirStmt::Block(vec![DirStmt::Expr(DirExpr::Var("middle_b".to_string()))]),
+        PreHirStmt::Block(vec![
+            PreHirStmt::Expr(PreHirExpr::Var("middle_a".to_string())),
+            PreHirStmt::Block(vec![PreHirStmt::Expr(PreHirExpr::Var(
+                "middle_b".to_string(),
+            ))]),
         ]),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("probe".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("tmp".to_string()),
-            then_body: vec![DirStmt::Expr(DirExpr::Var("side".to_string()))],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("tmp".to_string()),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("tmp".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -445,17 +447,17 @@ fn structuring_guarded_tail_execute_rewrite_survives_padded_middle_depth() {
 #[test]
 fn structuring_guarded_tail_rejects_export_without_dominating_else_source() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("probe".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("tmp".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
     ];
 
     let original = body.clone();
@@ -469,16 +471,16 @@ fn structuring_guarded_tail_rejects_export_without_dominating_else_source() {
 #[test]
 fn structuring_candidate_discovery_counts_internal_label_gate_rejection() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_inner".to_string()),
-        DirStmt::Expr(DirExpr::Var("inner".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_inner".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("inner".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -494,19 +496,19 @@ fn structuring_candidate_discovery_counts_internal_label_gate_rejection() {
 #[test]
 fn structuring_candidate_discovery_allows_rewritable_middle_join_ref_after_gate_alignment() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("inner".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("inner".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -525,19 +527,19 @@ fn structuring_candidate_discovery_allows_rewritable_middle_join_ref_after_gate_
 #[test]
 fn structuring_guarded_tail_promotes_rewritable_middle_join_ref_after_gate_alignment() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("inner".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("inner".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -552,15 +554,15 @@ fn structuring_guarded_tail_promotes_rewritable_middle_join_ref_after_gate_align
 #[test]
 fn structuring_candidate_discovery_relaxes_trailing_middle_goto_to_join_label() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -572,16 +574,16 @@ fn structuring_candidate_discovery_relaxes_trailing_middle_goto_to_join_label() 
 fn structuring_candidate_discovery_join_glue_middle_elides_all_goto_refs() {
     // Middle is only ignorable labels and `Goto(join)` hops — not just a trailing suffix.
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("glue".to_string()),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("glue".to_string()),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -595,22 +597,22 @@ fn structuring_candidate_discovery_join_glue_middle_elides_all_goto_refs() {
 #[test]
 fn structuring_candidate_discovery_counts_owner_conflict_gate_rejection() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
-        DirStmt::If {
-            cond: DirExpr::Var("other_a".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("other_a".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("other_b".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("other_b".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
     ];
@@ -625,16 +627,16 @@ fn structuring_candidate_discovery_counts_owner_conflict_gate_rejection() {
 #[test]
 fn structuring_candidate_discovery_rejects_same_owner_forward_refs_under_hard_cutover() {
     let body = vec![
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -649,16 +651,16 @@ fn structuring_candidate_discovery_rejects_same_owner_forward_refs_under_hard_cu
 #[test]
 fn structuring_guarded_tail_rejects_forward_external_refs_that_need_join_label() {
     let mut body = vec![
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let original = body.clone();
@@ -673,29 +675,29 @@ fn structuring_guarded_tail_rejects_forward_external_refs_that_need_join_label()
 #[test]
 fn structuring_guarded_tail_rejects_replacement_reads_after_follow_redefinition() {
     let mut body = vec![
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("seed".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("seed".to_string()),
         },
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("probe".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_string()),
-            rhs: DirExpr::Var("tmp".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
+            rhs: PreHirExpr::Var("tmp".to_string()),
         },
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("late".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("late".to_string()),
         },
-        DirStmt::Return(Some(DirExpr::Var("tmp".to_string()))),
+        PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
     ];
 
     let original = body.clone();
@@ -712,15 +714,15 @@ fn structuring_guarded_tail_rejects_replacement_reads_after_follow_redefinition(
 #[test]
 fn structuring_candidate_discovery_allows_single_forward_external_ref_when_elidable() {
     let body = vec![
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -739,15 +741,15 @@ fn structuring_candidate_discovery_allows_single_forward_external_ref_when_elida
 #[test]
 fn structuring_candidate_discovery_keeps_post_label_external_ref_rejected() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
-        DirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_tail".to_string()),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -759,15 +761,15 @@ fn structuring_candidate_discovery_keeps_post_label_external_ref_rejected() {
 #[test]
 fn structuring_guarded_tail_promotion_keeps_post_label_external_ref_rejected() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
-        DirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_tail".to_string()),
     ];
     let original = body.clone();
 
@@ -785,13 +787,13 @@ fn structuring_guarded_tail_promotion_keeps_post_label_external_ref_rejected() {
 #[test]
 fn structuring_terminal_guarded_tail_promotion_keeps_direct_shape_subtypes_zero() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
     ];
 
     let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
@@ -811,15 +813,15 @@ fn structuring_terminal_guarded_tail_promotion_keeps_direct_shape_subtypes_zero(
 #[test]
 fn structuring_candidate_discovery_allows_leading_label_before_payload() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_leading".to_string()),
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_leading".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -834,13 +836,13 @@ fn structuring_candidate_discovery_allows_leading_label_before_payload() {
 #[test]
 fn structuring_candidate_discovery_counts_missing_target_as_noncanonical_shape() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -855,15 +857,15 @@ fn structuring_candidate_discovery_counts_missing_target_as_noncanonical_shape()
 #[test]
 fn structuring_candidate_discovery_skips_backward_target_without_nonterminal_failure() {
     let body = vec![
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Expr(DirExpr::Var("seed".to_string())),
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("seed".to_string())),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -876,16 +878,16 @@ fn structuring_candidate_discovery_skips_backward_target_without_nonterminal_fai
 #[test]
 fn structuring_candidate_discovery_terminalizes_nonterminal_join_label_forwarder() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -900,19 +902,19 @@ fn structuring_candidate_discovery_terminalizes_nonterminal_join_label_forwarder
 #[test]
 fn structuring_candidate_discovery_terminalizes_multihop_nonterminal_join_forwarder() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Goto("block_join_1".to_string()),
-        DirStmt::Label("block_join_1".to_string()),
-        DirStmt::Goto("block_join_2".to_string()),
-        DirStmt::Label("block_join_2".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Goto("block_join_1".to_string()),
+        PreHirStmt::Label("block_join_1".to_string()),
+        PreHirStmt::Goto("block_join_2".to_string()),
+        PreHirStmt::Label("block_join_2".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -924,19 +926,19 @@ fn structuring_candidate_discovery_terminalizes_multihop_nonterminal_join_forwar
 #[test]
 fn structuring_candidate_discovery_canonicalizes_safe_interleaved_alias_stub() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_alias".to_string()),
-        DirStmt::Label("block_alias".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("payload".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_alias".to_string()),
+        PreHirStmt::Label("block_alias".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -949,20 +951,20 @@ fn structuring_candidate_discovery_canonicalizes_safe_interleaved_alias_stub() {
 fn structuring_candidate_discovery_canonicalizes_interleaved_join_stub_with_multiple_forward_gotos()
 {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_alias".to_string()),
-        DirStmt::Label("block_alias".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("payload".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_alias".to_string()),
+        PreHirStmt::Label("block_alias".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -974,17 +976,17 @@ fn structuring_candidate_discovery_canonicalizes_interleaved_join_stub_with_mult
 #[test]
 fn structuring_candidate_discovery_counts_nested_tail_escape() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("after_escape".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("after_escape".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1000,15 +1002,15 @@ fn structuring_candidate_discovery_counts_nested_tail_escape() {
 #[test]
 fn structuring_candidate_discovery_allows_tail_terminal_return_after_payload() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Return(Some(DirExpr::Var("ret_mid".to_string()))),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1021,15 +1023,15 @@ fn structuring_candidate_discovery_allows_tail_terminal_return_after_payload() {
 #[test]
 fn structuring_candidate_discovery_allows_tail_terminal_goto_after_payload() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_exit".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_exit".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1041,24 +1043,24 @@ fn structuring_candidate_discovery_allows_tail_terminal_goto_after_payload() {
 #[test]
 fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_gap() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_exit_1".to_string()),
-        DirStmt::Label("block_exit_1".to_string()),
-        DirStmt::Expr(DirExpr::Var("pure_gap".to_string())),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("v".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_exit_1".to_string()),
+        PreHirStmt::Label("block_exit_1".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("pure_gap".to_string())),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("v".to_string()),
         },
-        DirStmt::Goto("block_exit_2".to_string()),
-        DirStmt::Label("block_exit_2".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_mid".to_string()))),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Goto("block_exit_2".to_string()),
+        PreHirStmt::Label("block_exit_2".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1076,26 +1078,26 @@ fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_gap() {
 #[test]
 fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_return_hop() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_exit".to_string()),
-        DirStmt::Label("block_exit".to_string()),
-        DirStmt::Expr(DirExpr::Var("gap_expr".to_string())),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("x".to_string()),
-            rhs: DirExpr::Unary {
-                op: DirUnaryOp::Not,
-                expr: Box::new(DirExpr::Var("flag".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_exit".to_string()),
+        PreHirStmt::Label("block_exit".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("gap_expr".to_string())),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
+            rhs: PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
+                expr: Box::new(PreHirExpr::Var("flag".to_string())),
                 ty: NirType::Bool,
             },
         },
-        DirStmt::Return(Some(DirExpr::Var("ret_mid".to_string()))),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1113,22 +1115,22 @@ fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_return_h
 #[test]
 fn structuring_candidate_discovery_keeps_ambiguous_terminal_tail_target_rejected() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_exit".to_string()),
-        DirStmt::Label("block_exit".to_string()),
-        DirStmt::Goto("block_ret_1".to_string()),
-        DirStmt::Goto("block_ret_2".to_string()),
-        DirStmt::Label("block_ret_1".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret1".to_string()))),
-        DirStmt::Label("block_ret_2".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret2".to_string()))),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_exit".to_string()),
+        PreHirStmt::Label("block_exit".to_string()),
+        PreHirStmt::Goto("block_ret_1".to_string()),
+        PreHirStmt::Goto("block_ret_2".to_string()),
+        PreHirStmt::Label("block_ret_1".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret1".to_string()))),
+        PreHirStmt::Label("block_ret_2".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret2".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1147,29 +1149,29 @@ fn structuring_candidate_discovery_keeps_ambiguous_terminal_tail_target_rejected
 #[test]
 fn structuring_candidate_discovery_keeps_side_effectful_terminal_tail_rejected() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_exit".to_string()),
-        DirStmt::Label("block_exit".to_string()),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Load {
-                ptr: Box::new(DirExpr::Var("ptr".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_exit".to_string()),
+        PreHirStmt::Label("block_exit".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("ptr".to_string())),
                 ty: NirType::Int {
                     bits: 32,
                     signed: false,
                 },
             },
         },
-        DirStmt::Goto("block_ret".to_string()),
-        DirStmt::Label("block_ret".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_mid".to_string()))),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Goto("block_ret".to_string()),
+        PreHirStmt::Label("block_ret".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1188,18 +1190,18 @@ fn structuring_candidate_discovery_keeps_side_effectful_terminal_tail_rejected()
 #[test]
 fn structuring_candidate_discovery_keeps_terminal_tail_reentry_rejected() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_exit".to_string()),
-        DirStmt::Goto("block_exit".to_string()),
-        DirStmt::Label("block_exit".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_mid".to_string()))),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_exit".to_string()),
+        PreHirStmt::Goto("block_exit".to_string()),
+        PreHirStmt::Label("block_exit".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1218,23 +1220,23 @@ fn structuring_candidate_discovery_keeps_terminal_tail_reentry_rejected() {
 #[test]
 fn structuring_candidate_discovery_keeps_terminal_tail_loop_crossing_rejected() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_exit".to_string()),
-        DirStmt::Label("block_exit".to_string()),
-        DirStmt::While {
-            cond: DirExpr::Var("loop_c".to_string()),
-            body: vec![DirStmt::Break],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_exit".to_string()),
+        PreHirStmt::Label("block_exit".to_string()),
+        PreHirStmt::While {
+            cond: PreHirExpr::Var("loop_c".to_string()),
+            body: vec![PreHirStmt::Break],
         },
-        DirStmt::Goto("block_ret".to_string()),
-        DirStmt::Label("block_ret".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_mid".to_string()))),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Goto("block_ret".to_string()),
+        PreHirStmt::Label("block_ret".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1253,17 +1255,17 @@ fn structuring_candidate_discovery_keeps_terminal_tail_loop_crossing_rejected() 
 #[test]
 fn structuring_candidate_discovery_rejects_goto_to_return_only_tail_label_under_hard_cutover() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_ret".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_tail".to_string()))),
-        DirStmt::Label("block_ret".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret_mid".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_ret".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_tail".to_string()))),
+        PreHirStmt::Label("block_ret".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1284,17 +1286,17 @@ fn structuring_candidate_discovery_rejects_goto_to_return_only_tail_label_under_
 #[test]
 fn structuring_candidate_discovery_counts_interleaved_referenced_label_use() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1317,25 +1319,25 @@ fn structuring_candidate_discovery_counts_interleaved_referenced_label_use() {
 #[test]
 fn structuring_candidate_discovery_counts_interleaved_join_use_with_nontrivial_segment() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Block(vec![
-            DirStmt::If {
-                cond: DirExpr::Var("inner".to_string()),
-                then_body: vec![DirStmt::Goto("block_alias".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Block(vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("inner".to_string()),
+                then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("block_alias".to_string()),
-            DirStmt::Expr(DirExpr::Var("payload".to_string())),
-            DirStmt::Label("block_join".to_string()),
-            DirStmt::Expr(DirExpr::Var("after_join".to_string())),
+            PreHirStmt::Label("block_alias".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
+            PreHirStmt::Label("block_join".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
         ]),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1355,28 +1357,28 @@ fn structuring_candidate_discovery_counts_interleaved_join_use_with_nontrivial_s
 fn structuring_candidate_discovery_keeps_interleaved_join_use_with_side_effectful_segment_rejected()
 {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Block(vec![
-            DirStmt::If {
-                cond: DirExpr::Var("inner".to_string()),
-                then_body: vec![DirStmt::Goto("block_alias".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Block(vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("inner".to_string()),
+                then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("block_alias".to_string()),
-            DirStmt::Assign {
-                lhs: DirLValue::Var("tmp".to_string()),
-                rhs: DirExpr::Var("payload".to_string()),
+            PreHirStmt::Label("block_alias".to_string()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("tmp".to_string()),
+                rhs: PreHirExpr::Var("payload".to_string()),
             },
-            DirStmt::Label("block_join".to_string()),
-            DirStmt::Expr(DirExpr::Var("after_join".to_string())),
+            PreHirStmt::Label("block_join".to_string()),
+            PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
         ]),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1394,22 +1396,22 @@ fn structuring_candidate_discovery_keeps_interleaved_join_use_with_side_effectfu
 #[test]
 fn structuring_candidate_discovery_counts_nested_after_label_alias_not_fallthrough() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::If {
-            cond: DirExpr::Var("late".to_string()),
-            then_body: vec![DirStmt::Goto("block_mid".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("late".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1428,17 +1430,17 @@ fn structuring_candidate_discovery_counts_nested_after_label_alias_not_fallthrou
 #[test]
 fn structuring_candidate_discovery_canonicalizes_local_fallthrough_alias_label() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1453,20 +1455,20 @@ fn structuring_candidate_discovery_canonicalizes_local_fallthrough_alias_label()
 #[test]
 fn structuring_candidate_discovery_canonicalizes_alias_forward_chain() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid_1".to_string()),
-        DirStmt::Label("block_mid_1".to_string()),
-        DirStmt::Block(vec![]),
-        DirStmt::Goto("block_mid_2".to_string()),
-        DirStmt::Label("block_mid_2".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid_1".to_string()),
+        PreHirStmt::Label("block_mid_1".to_string()),
+        PreHirStmt::Block(vec![]),
+        PreHirStmt::Goto("block_mid_2".to_string()),
+        PreHirStmt::Label("block_mid_2".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1481,29 +1483,29 @@ fn structuring_candidate_discovery_canonicalizes_alias_forward_chain() {
 #[test]
 fn structuring_candidate_discovery_canonicalizes_pure_multi_goto_alias_chain() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Var("skip_l".to_string())),
-            rhs: Box::new(DirExpr::Var("skip_r".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("skip_l".to_string())),
+            rhs: Box::new(PreHirExpr::Var("skip_r".to_string())),
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
             },
         }),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1520,20 +1522,20 @@ fn structuring_candidate_discovery_canonicalizes_pure_multi_goto_alias_chain() {
 #[test]
 fn structuring_candidate_discovery_canonicalizes_local_nonfallthrough_alias() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("skipped".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("skipped".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1546,20 +1548,20 @@ fn structuring_candidate_discovery_canonicalizes_local_nonfallthrough_alias() {
 #[test]
 fn structuring_candidate_discovery_canonicalizes_safe_top_level_after_label_alias() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1575,24 +1577,24 @@ fn structuring_candidate_discovery_canonicalizes_safe_top_level_after_label_alia
 #[test]
 fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_top_level_post_ref() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_alias".to_string()),
-        DirStmt::Label("block_alias".to_string()),
-        DirStmt::Goto("block_join_1".to_string()),
-        DirStmt::Goto("block_alias".to_string()),
-        DirStmt::Label("block_join_1".to_string()),
-        DirStmt::Expr(DirExpr::Var("pure_gap".to_string())),
-        DirStmt::Goto("block_join_2".to_string()),
-        DirStmt::Label("block_join_2".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
-        DirStmt::Goto("block_alias".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_alias".to_string()),
+        PreHirStmt::Label("block_alias".to_string()),
+        PreHirStmt::Goto("block_join_1".to_string()),
+        PreHirStmt::Goto("block_alias".to_string()),
+        PreHirStmt::Label("block_join_1".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("pure_gap".to_string())),
+        PreHirStmt::Goto("block_join_2".to_string()),
+        PreHirStmt::Label("block_join_2".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_alias".to_string()),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1615,25 +1617,25 @@ fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_top_l
 fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_nested_post_ref_rejected()
  {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_alias".to_string()),
-        DirStmt::Label("block_alias".to_string()),
-        DirStmt::Goto("block_join_1".to_string()),
-        DirStmt::Goto("block_alias".to_string()),
-        DirStmt::Label("block_join_1".to_string()),
-        DirStmt::Goto("block_join_2".to_string()),
-        DirStmt::Label("block_join_2".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
-        DirStmt::If {
-            cond: DirExpr::Var("late".to_string()),
-            then_body: vec![DirStmt::Goto("block_alias".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_alias".to_string()),
+        PreHirStmt::Label("block_alias".to_string()),
+        PreHirStmt::Goto("block_join_1".to_string()),
+        PreHirStmt::Goto("block_alias".to_string()),
+        PreHirStmt::Label("block_join_1".to_string()),
+        PreHirStmt::Goto("block_join_2".to_string()),
+        PreHirStmt::Label("block_join_2".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("late".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
             else_body: Vec::new(),
         },
     ];
@@ -1650,29 +1652,29 @@ fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_neste
 #[test]
 fn structuring_candidate_discovery_canonicalizes_pure_value_top_level_after_label_alias() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Var("skip_l".to_string())),
-            rhs: Box::new(DirExpr::Var("skip_r".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("skip_l".to_string())),
+            rhs: Box::new(PreHirExpr::Var("skip_r".to_string())),
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
             },
         }),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1687,28 +1689,28 @@ fn structuring_candidate_discovery_canonicalizes_pure_value_top_level_after_labe
 #[test]
 fn structuring_candidate_discovery_canonicalizes_pure_assign_top_level_after_label_alias() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Unary {
-                op: DirUnaryOp::Not,
-                expr: Box::new(DirExpr::Var("flag".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
+                expr: Box::new(PreHirExpr::Var("flag".to_string())),
                 ty: NirType::Bool,
             },
         },
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1723,30 +1725,30 @@ fn structuring_candidate_discovery_canonicalizes_pure_assign_top_level_after_lab
 #[test]
 fn structuring_candidate_discovery_keeps_side_effectful_top_level_after_label_alias_rejected() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Load {
-                ptr: Box::new(DirExpr::Var("ptr".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("ptr".to_string())),
                 ty: NirType::Int {
                     bits: 32,
                     signed: false,
                 },
             },
         },
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1761,25 +1763,25 @@ fn structuring_candidate_discovery_keeps_side_effectful_top_level_after_label_al
 #[test]
 fn structuring_candidate_discovery_counts_join_external_ref_inside_nested_if() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::If {
-            cond: DirExpr::Var("other".to_string()),
-            then_body: vec![DirStmt::Goto("block_mid".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("other".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("more".to_string()),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("more".to_string()),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1806,26 +1808,26 @@ fn structuring_candidate_discovery_counts_join_external_ref_inside_nested_if() {
 #[test]
 fn structuring_candidate_discovery_counts_true_nonlocal_alias_ref() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("more".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("more".to_string()),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
     body.insert(
         0,
-        DirStmt::If {
-            cond: DirExpr::Var("outer".to_string()),
-            then_body: vec![DirStmt::Goto("block_mid".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("outer".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
             else_body: Vec::new(),
         },
     );
@@ -1853,17 +1855,17 @@ fn structuring_candidate_discovery_counts_true_nonlocal_alias_ref() {
 #[test]
 fn structuring_candidate_discovery_counts_external_before_alias_nonlocal_ref() {
     let body = vec![
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1881,19 +1883,19 @@ fn structuring_candidate_discovery_counts_external_before_alias_nonlocal_ref() {
 #[test]
 fn structuring_candidate_discovery_counts_post_segment_alias_nonlocal_ref() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_inner".to_string()),
-        DirStmt::Expr(DirExpr::Var("inner_work".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
-        DirStmt::If {
-            cond: DirExpr::Var("late".to_string()),
-            then_body: vec![DirStmt::Goto("block_inner".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_inner".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("inner_work".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("late".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_inner".to_string())],
             else_body: Vec::new(),
         },
     ];
@@ -1913,17 +1915,17 @@ fn structuring_candidate_discovery_counts_post_segment_alias_nonlocal_ref() {
 #[test]
 fn structuring_candidate_discovery_rewrites_safe_external_alias_ref() {
     let body = vec![
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1937,31 +1939,31 @@ fn structuring_candidate_discovery_rewrites_safe_external_alias_ref() {
 #[test]
 fn structuring_candidate_discovery_internalizes_same_guard_family_nested_before_alias_ref() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::If {
-            cond: DirExpr::Var("cond".to_string()),
-            then_body: vec![DirStmt::Goto("block_mid".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::If {
-            cond: DirExpr::Unary {
-                op: DirUnaryOp::Not,
-                expr: Box::new(DirExpr::Var("cond".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::If {
+            cond: PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
+                expr: Box::new(PreHirExpr::Var("cond".to_string())),
                 ty: NirType::Bool,
             },
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -1980,22 +1982,22 @@ fn structuring_candidate_discovery_internalizes_same_guard_family_nested_before_
 #[test]
 fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection_after_alignment() {
     let mut body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Goto("block_tail".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Goto("block_tail".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
     body.insert(
         0,
-        DirStmt::If {
-            cond: DirExpr::Var("outer".to_string()),
-            then_body: vec![DirStmt::Goto("block_mid".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("outer".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
             else_body: Vec::new(),
         },
     );
@@ -2012,21 +2014,21 @@ fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection
 #[test]
 fn structuring_candidate_discovery_counts_alias_multiple_internal_predecessors() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("skip_1".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("skip_2".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("skip_1".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("skip_2".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -2044,18 +2046,18 @@ fn structuring_candidate_discovery_counts_alias_multiple_internal_predecessors()
 #[test]
 fn structuring_candidate_discovery_counts_alias_body_not_trivial() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("skip".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("local_work".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("skip".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("local_work".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -2072,26 +2074,26 @@ fn structuring_candidate_discovery_counts_alias_body_not_trivial() {
 #[test]
 fn structuring_candidate_discovery_accepts_alias_body_with_pure_value_exprs() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Var("skip_l".to_string())),
-            rhs: Box::new(DirExpr::Var("skip_r".to_string())),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("skip_l".to_string())),
+            rhs: Box::new(PreHirExpr::Var("skip_r".to_string())),
             ty: NirType::Int {
                 bits: 32,
                 signed: false,
             },
         }),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("local_work".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("local_work".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -2108,28 +2110,28 @@ fn structuring_candidate_discovery_accepts_alias_body_with_pure_value_exprs() {
 #[test]
 fn structuring_candidate_discovery_counts_alias_nonlocal_ref() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::If {
-            cond: DirExpr::Var("other".to_string()),
-            then_body: vec![DirStmt::Goto("block_mid".to_string())],
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("other".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("skip".to_string())),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Goto("block_join".to_string()),
-        DirStmt::Label("block_join".to_string()),
-        DirStmt::Assign {
-            lhs: DirLValue::Var("tmp".to_string()),
-            rhs: DirExpr::Var("more".to_string()),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("skip".to_string())),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Goto("block_join".to_string()),
+        PreHirStmt::Label("block_join".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("more".to_string()),
         },
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -2151,20 +2153,20 @@ fn structuring_candidate_discovery_counts_alias_nonlocal_ref() {
 #[test]
 fn structuring_candidate_discovery_counts_alias_payload_crossing_join() {
     let body = vec![
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Goto("block_mid".to_string()),
-        DirStmt::Label("block_mid".to_string()),
-        DirStmt::Expr(DirExpr::Var("more".to_string())),
-        DirStmt::Goto("block_next".to_string()),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
-        DirStmt::Label("block_next".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret2".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Goto("block_mid".to_string()),
+        PreHirStmt::Label("block_mid".to_string()),
+        PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
+        PreHirStmt::Goto("block_next".to_string()),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+        PreHirStmt::Label("block_next".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret2".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
@@ -2183,17 +2185,17 @@ fn structuring_candidate_discovery_counts_alias_payload_crossing_join() {
 #[test]
 fn structuring_candidate_discovery_counts_ambiguous_follow_witness_rejection() {
     let body = vec![
-        DirStmt::Block(vec![DirStmt::Goto("block_after".to_string())]),
-        DirStmt::If {
-            cond: DirExpr::Var("reg".to_string()),
-            then_body: vec![DirStmt::Goto("block_tail".to_string())],
+        PreHirStmt::Block(vec![PreHirStmt::Goto("block_after".to_string())]),
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
             else_body: Vec::new(),
         },
-        DirStmt::Expr(DirExpr::Var("middle".to_string())),
-        DirStmt::Label("block_tail".to_string()),
-        DirStmt::Block(Vec::new()),
-        DirStmt::Label("block_after".to_string()),
-        DirStmt::Return(Some(DirExpr::Var("ret".to_string()))),
+        PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Block(Vec::new()),
+        PreHirStmt::Label("block_after".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
 
     let stats = discover_guarded_tail_candidates_for_test(&body);

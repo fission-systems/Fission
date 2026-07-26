@@ -1309,13 +1309,9 @@ fn assigns_var_name(stmt: &HirStmt, name: &str) -> bool {
             b.iter().any(|s| assigns_var_name(s, name))
         }
         HirStmt::For {
-            init,
-            update,
-            body,
-            ..
+            init, update, body, ..
         } => {
-            init.as_ref()
-                .is_some_and(|s| assigns_var_name(s, name))
+            init.as_ref().is_some_and(|s| assigns_var_name(s, name))
                 || update.as_ref().is_some_and(|s| assigns_var_name(s, name))
                 || body.iter().any(|s| assigns_var_name(s, name))
         }
@@ -1328,7 +1324,9 @@ fn assigns_var_name(stmt: &HirStmt, name: &str) -> bool {
                 || else_body.iter().any(|s| assigns_var_name(s, name))
         }
         HirStmt::Switch { cases, default, .. } => {
-            cases.iter().any(|c| c.body.iter().any(|s| assigns_var_name(s, name)))
+            cases
+                .iter()
+                .any(|c| c.body.iter().any(|s| assigns_var_name(s, name)))
                 || default.iter().any(|s| assigns_var_name(s, name))
         }
         _ => false,
@@ -1825,10 +1823,7 @@ fn fold_empty_then_invert_else(stmts: &mut Vec<HirStmt>) -> bool {
                     && !else_body.is_empty()
                     && !body_is_effectively_empty(else_body)
                 {
-                    *cond = invert_cond(std::mem::replace(
-                        cond,
-                        HirExpr::Const(0, NirType::Bool),
-                    ));
+                    *cond = invert_cond(std::mem::replace(cond, HirExpr::Const(0, NirType::Bool)));
                     std::mem::swap(then_body, else_body);
                     else_body.clear();
                     changed = true;
@@ -2026,13 +2021,7 @@ fn rewrite_presentation_condition_form(expr: &mut HirExpr) -> bool {
     }
 
     // Const-left comparisons → var/expr-left with flipped op.
-    if let HirExpr::Binary {
-        op,
-        lhs,
-        rhs,
-        ty,
-    } = expr
-    {
+    if let HirExpr::Binary { op, lhs, rhs, ty } = expr {
         let lhs_is_const = matches!(lhs.as_ref(), HirExpr::Const(_, _));
         let rhs_is_const = matches!(rhs.as_ref(), HirExpr::Const(_, _));
         if lhs_is_const && !rhs_is_const {
@@ -2090,10 +2079,12 @@ fn single_var_assign(stmts: &[HirStmt]) -> Option<(&str, &HirExpr)> {
         .filter(|s| !is_presentation_noise_stmt(s))
         .collect();
     match meaningful.as_slice() {
-        [HirStmt::Assign {
-            lhs: HirLValue::Var(name),
-            rhs,
-        }] => Some((name.as_str(), rhs)),
+        [
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            },
+        ] => Some((name.as_str(), rhs)),
         [HirStmt::Block(inner)] => single_var_assign(inner),
         _ => None,
     }
@@ -2873,7 +2864,9 @@ fn collect_goto_targets(stmts: &[HirStmt], out: &mut HashSet<String>) {
             HirStmt::Goto(label) => {
                 out.insert(label.clone());
             }
-            HirStmt::Block(b) | HirStmt::While { body: b, .. } | HirStmt::DoWhile { body: b, .. } => {
+            HirStmt::Block(b)
+            | HirStmt::While { body: b, .. }
+            | HirStmt::DoWhile { body: b, .. } => {
                 collect_goto_targets(b, out);
             }
             HirStmt::If {
@@ -3331,8 +3324,8 @@ fn collect_used_names_expr(expr: &HirExpr, out: &mut HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::render_layered_pseudocode;
     use crate::midend::MlilPreviewOptions;
+    use crate::render::render_layered_pseudocode;
 
     fn int_ty(bits: u32, signed: bool) -> NirType {
         NirType::Int { bits, signed }
@@ -4377,8 +4370,7 @@ mod tests {
             "expected pure if/else assign fold into select:\n{code}"
         );
         assert!(
-            code.contains("return")
-                && (code.contains("param_1") || code.contains('0')),
+            code.contains("return") && (code.contains("param_1") || code.contains('0')),
             "must keep both branch values:\n{code}"
         );
     }
@@ -4634,7 +4626,10 @@ mod tests {
         apply_hir_presentation(&mut func);
         let code = crate::midend::print_hir_function(&func);
         let else_count = code.matches("else").count();
-        assert_eq!(else_count, 0, "empty then should invert to single if:\n{code}");
+        assert_eq!(
+            else_count, 0,
+            "empty then should invert to single if:\n{code}"
+        );
         assert!(
             code.contains("if (") || code.contains('?'),
             "must retain a branch form:\n{code}"

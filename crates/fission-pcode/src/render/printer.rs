@@ -4,8 +4,8 @@
 //! Policy: `crates/fission-pcode/src/render/AGENTS.md`, ADR 0011.
 
 use super::{
-    HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding, NirBindingOrigin,
-    NirType, PrintProfile, expr_type,
+    HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding,
+    NirBindingOrigin, NirType, PrintProfile, expr_type,
 };
 use std::collections::{HashMap, HashSet};
 

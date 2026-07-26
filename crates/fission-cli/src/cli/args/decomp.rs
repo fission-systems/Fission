@@ -45,13 +45,12 @@ pub struct DecompArgs {
     #[arg(long = "layer", value_name = "LAYER", value_parser = ["nir", "hir", "both"])]
     pub layer: Option<String>,
 
-    /// Also emit DIR: the flattened, goto/label-based body structuring
-    /// received as input, captured before its CFG-to-AST rewrite runs.
-    /// Compares against HIR to show whether structuring changed a
-    /// function's control flow (plain text: extra "DIR" section; JSON:
-    /// extra "code_dir" field).
-    #[arg(long)]
-    pub dir: bool,
+    /// Also emit the mutable PreHIR body captured before structuring.
+    ///
+    /// `--dir` remains a compatibility alias for the former, ambiguous name;
+    /// product DIR is the independent P-code-rooted validation path.
+    #[arg(long = "prehir", visible_alias = "dir")]
+    pub prehir: bool,
 
     /// Decompilation engine (auto|nir|rust-sleigh; mlil-preview is a deprecated alias, legacy is a hidden compat mode)
     #[arg(long, value_name = "ENGINE")]

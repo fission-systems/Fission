@@ -1,0 +1,32 @@
+[package]
+name = "fission-dir"
+version = "0.1.6"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "P-code-rooted validated reconstruction contracts and solver/emulator-backed DIR verification"
+repository = "https://github.com/fission-systems/Fission"
+license = "AGPL-3.0-or-later"
+readme = "../../README.md"
+keywords = ["decompiler", "verification", "solver", "emulator"]
+categories = ["development-tools"]
+
+[lib]
+name = "fission_dir"
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+fission-static = { path = "../fission-static" }
+fission-midend-core = { path = "../fission-midend-core" }
+fission-midend-prehir = { path = "../fission-midend-prehir" }
+fission-pcode = { path = "../fission-pcode" }
+fission-decompiler = { path = "../fission-decompiler" }
+fission-solver = { path = "../fission-solver" }
+fission-emulator = { path = "../fission-emulator" }
+fission-sleigh = { path = "../fission-sleigh" }
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+
+[dev-dependencies]
+serde_json = "1.0"

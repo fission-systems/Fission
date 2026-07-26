@@ -64,9 +64,7 @@ pub(crate) fn check_hir_presentation_invariants(
     if empty_after > empty_before {
         violations.push(PresentationViolation {
             code: "empty_if_shell",
-            detail: format!(
-                "empty if shells increased: before={empty_before} after={empty_after}"
-            ),
+            detail: format!("empty if shells increased: before={empty_before} after={empty_after}"),
         });
     }
 
@@ -263,9 +261,9 @@ fn count_real_calls_in_stmt(stmt: &HirStmt) -> usize {
     match stmt {
         HirStmt::Assign { rhs, .. } => count_real_calls_in_expr(rhs),
         HirStmt::Expr(e) | HirStmt::Return(Some(e)) => count_real_calls_in_expr(e),
-        HirStmt::Block(b)
-        | HirStmt::While { body: b, .. }
-        | HirStmt::DoWhile { body: b, .. } => count_real_calls_in_stmts(b),
+        HirStmt::Block(b) | HirStmt::While { body: b, .. } | HirStmt::DoWhile { body: b, .. } => {
+            count_real_calls_in_stmts(b)
+        }
         HirStmt::If {
             cond,
             then_body,
@@ -345,9 +343,9 @@ fn count_loads_in_stmt(stmt: &HirStmt) -> usize {
     match stmt {
         HirStmt::Assign { rhs, .. } => count_loads_in_expr(rhs),
         HirStmt::Expr(e) | HirStmt::Return(Some(e)) => count_loads_in_expr(e),
-        HirStmt::Block(b)
-        | HirStmt::While { body: b, .. }
-        | HirStmt::DoWhile { body: b, .. } => count_loads_in_stmts(b),
+        HirStmt::Block(b) | HirStmt::While { body: b, .. } | HirStmt::DoWhile { body: b, .. } => {
+            count_loads_in_stmts(b)
+        }
         HirStmt::If {
             cond,
             then_body,
@@ -463,7 +461,9 @@ fn count_empty_if_shells(stmts: &[HirStmt], out: &mut usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::midend::{HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType};
+    use crate::midend::{
+        HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBinding, NirBindingOrigin, NirType,
+    };
 
     fn int_ty(bits: u32, signed: bool) -> NirType {
         NirType::Int { bits, signed }

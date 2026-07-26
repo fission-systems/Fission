@@ -48,7 +48,7 @@ impl<'a> PreviewBuilder<'a> {
             && saw_named_incoming
             && let Some(binding) = self.temps.get_mut(name)
         {
-            binding.initializer = Some(DirExpr::Const(0, type_from_size(output.size, false)));
+            binding.initializer = Some(PreHirExpr::Const(0, type_from_size(output.size, false)));
         }
     }
 

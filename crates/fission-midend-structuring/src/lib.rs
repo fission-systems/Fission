@@ -123,7 +123,7 @@ pub use switch::{
 };
 
 pub use fission_midend_core::{NirBuildStats, SWITCH_FALLTHROUGH_SENTINEL};
-pub use fission_midend_dir::{DirFunction, DirStmt};
+pub use fission_midend_prehir::{PreHirFunction, PreHirStmt};
 pub use regions::{
     BlockGraphLegalityReason, BlockGraphRegionKind, BlockGraphRegionProof, EmitReadyDecision,
     EmitReadyFailureFamily, RegionKind, RegionLegality, RegionProof, RegionRejectionReason,

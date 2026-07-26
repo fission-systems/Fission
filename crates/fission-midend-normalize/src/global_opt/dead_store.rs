@@ -1,6 +1,6 @@
 /// Dead store elimination using Memory SSA.
 ///
-/// Removes `DirStmt::Assign { lhs: Deref { .. } | Index { .. }, rhs }` nodes
+/// Removes `PreHirStmt::Assign { lhs: Deref { .. } | Index { .. }, rhs }` nodes
 /// that write to a stack slot which is:
 /// 1. Never read after the write (use_count == 0 in MemSSA), AND
 /// 2. No `MemPhi` depends on this def, AND
@@ -22,7 +22,7 @@ use super::mem_ssa::{AliasKey, MemDef, build_mem_ssa};
 use crate::prelude::*;
 
 /// Apply dead store elimination and return `true` if any stores were removed.
-pub fn apply_dead_store_elimination(func: &mut DirFunction) -> bool {
+pub fn apply_dead_store_elimination(func: &mut PreHirFunction) -> bool {
     let mem_ssa = build_mem_ssa(func);
 
     // Collect the def ids that are eligible for removal:
@@ -77,7 +77,7 @@ struct DeadStoreCollector<'a> {
 }
 
 impl<'a> DeadStoreCollector<'a> {
-    fn collect_stmts(&mut self, stmts: &[DirStmt]) -> Vec<StmtPath> {
+    fn collect_stmts(&mut self, stmts: &[PreHirStmt]) -> Vec<StmtPath> {
         let mut result = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             self.collect_stmt(stmt, vec![i], &mut result);
@@ -85,10 +85,10 @@ impl<'a> DeadStoreCollector<'a> {
         result
     }
 
-    fn collect_stmt(&mut self, stmt: &DirStmt, path: Vec<usize>, out: &mut Vec<StmtPath>) {
+    fn collect_stmt(&mut self, stmt: &PreHirStmt, path: Vec<usize>, out: &mut Vec<StmtPath>) {
         match stmt {
-            DirStmt::Assign { lhs, .. } => {
-                let is_mem_write = matches!(lhs, DirLValue::Deref { .. } | DirLValue::Index { .. });
+            PreHirStmt::Assign { lhs, .. } => {
+                let is_mem_write = matches!(lhs, PreHirLValue::Deref { .. } | PreHirLValue::Index { .. });
                 if is_mem_write {
                     // Find the matching MemDef by scanning in order.
                     while self.current_def_idx < self.dead_defs.len()
@@ -108,7 +108,7 @@ impl<'a> DeadStoreCollector<'a> {
                     }
                 }
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -118,11 +118,11 @@ impl<'a> DeadStoreCollector<'a> {
                 let sub = self.collect_sub(else_body, path.clone(), 1);
                 out.extend(sub);
             }
-            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 let sub = self.collect_sub(body, path.clone(), 0);
                 out.extend(sub);
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init, body, update, ..
             } => {
                 if let Some(s) = init {
@@ -150,7 +150,7 @@ impl<'a> DeadStoreCollector<'a> {
                     );
                 }
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for (i, case) in cases.iter().enumerate() {
                     let sub = self.collect_sub(&case.body, path.clone(), i);
                     out.extend(sub);
@@ -158,7 +158,7 @@ impl<'a> DeadStoreCollector<'a> {
                 let sub = self.collect_sub(default, path.clone(), cases.len());
                 out.extend(sub);
             }
-            DirStmt::Block(stmts) => {
+            PreHirStmt::Block(stmts) => {
                 let sub = self.collect_sub(stmts, path, 0);
                 out.extend(sub);
             }
@@ -168,7 +168,7 @@ impl<'a> DeadStoreCollector<'a> {
 
     fn collect_sub(
         &mut self,
-        stmts: &[DirStmt],
+        stmts: &[PreHirStmt],
         mut path: Vec<usize>,
         branch: usize,
     ) -> Vec<StmtPath> {
@@ -191,7 +191,7 @@ struct StmtPath(Vec<usize>);
 ///
 /// We use a simple approach: rebuild each statement list, skipping
 /// the statements marked for removal.
-fn remove_dead_stores(stmts: &mut Vec<DirStmt>, paths: &[StmtPath]) {
+fn remove_dead_stores(stmts: &mut Vec<PreHirStmt>, paths: &[StmtPath]) {
     // Collect top-level indices to remove.
     let top_level: crate::HashSet<usize> = paths
         .iter()
@@ -223,9 +223,9 @@ fn remove_dead_stores(stmts: &mut Vec<DirStmt>, paths: &[StmtPath]) {
     }
 }
 
-fn recurse_remove(stmt: &mut DirStmt, paths: &[&StmtPath], depth: usize) {
+fn recurse_remove(stmt: &mut PreHirStmt, paths: &[&StmtPath], depth: usize) {
     match stmt {
-        DirStmt::If {
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -233,13 +233,13 @@ fn recurse_remove(stmt: &mut DirStmt, paths: &[&StmtPath], depth: usize) {
             remove_at_branch(then_body, paths, depth, 0);
             remove_at_branch(else_body, paths, depth, 1);
         }
-        DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+        PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             remove_at_branch(body, paths, depth, 0);
         }
-        DirStmt::For { body, .. } => {
+        PreHirStmt::For { body, .. } => {
             remove_at_branch(body, paths, depth, 1);
         }
-        DirStmt::Block(stmts) => {
+        PreHirStmt::Block(stmts) => {
             let top: crate::HashSet<usize> = paths
                 .iter()
                 .filter(|p| p.0.len() == depth + 1)
@@ -262,7 +262,7 @@ fn recurse_remove(stmt: &mut DirStmt, paths: &[&StmtPath], depth: usize) {
     }
 }
 
-fn remove_at_branch(body: &mut Vec<DirStmt>, paths: &[&StmtPath], depth: usize, branch: usize) {
+fn remove_at_branch(body: &mut Vec<PreHirStmt>, paths: &[&StmtPath], depth: usize, branch: usize) {
     let relevant: Vec<&StmtPath> = paths
         .iter()
         .copied()
@@ -298,8 +298,8 @@ fn remove_at_branch(body: &mut Vec<DirStmt>, paths: &[&StmtPath], depth: usize, 
 mod tests {
     use super::*;
 
-    fn ptr_binding(name: &str) -> DirBinding {
-        DirBinding {
+    fn ptr_binding(name: &str) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_string(),
             ty: NirType::Ptr(Box::new(NirType::Int {
                 bits: 32,
@@ -311,8 +311,8 @@ mod tests {
         }
     }
 
-    fn int_binding(name: &str) -> DirBinding {
-        DirBinding {
+    fn int_binding(name: &str) -> PreHirBinding {
+        PreHirBinding {
             name: name.to_string(),
             ty: NirType::Int {
                 bits: 32,
@@ -324,8 +324,8 @@ mod tests {
         }
     }
 
-    fn base_func(body: Vec<DirStmt>, locals: Vec<DirBinding>) -> DirFunction {
-        DirFunction {
+    fn base_func(body: Vec<PreHirStmt>, locals: Vec<PreHirBinding>) -> PreHirFunction {
+        PreHirFunction {
             name: "f".to_string(),
             int_param_offsets: Vec::new(),
             params: Vec::new(),
@@ -352,10 +352,10 @@ mod tests {
     /// elimination), the store must still survive.
     #[test]
     fn dead_store_elimination_keeps_write_through_stack_spilled_pointer_with_runtime_index() {
-        let index_expr = DirExpr::Binary {
-            op: DirBinaryOp::Mul,
-            lhs: Box::new(DirExpr::Var("i".to_string())),
-            rhs: Box::new(DirExpr::Const(
+        let index_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs: Box::new(PreHirExpr::Var("i".to_string())),
+            rhs: Box::new(PreHirExpr::Const(
                 4,
                 NirType::Int {
                     bits: 32,
@@ -367,9 +367,9 @@ mod tests {
                 signed: true,
             },
         };
-        let addr_expr = DirExpr::Binary {
-            op: DirBinaryOp::Add,
-            lhs: Box::new(DirExpr::Var("local_18".to_string())),
+        let addr_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("local_18".to_string())),
             rhs: Box::new(index_expr),
             ty: NirType::Ptr(Box::new(NirType::Int {
                 bits: 32,
@@ -377,15 +377,15 @@ mod tests {
             })),
         };
         let mut func = base_func(
-            vec![DirStmt::Assign {
-                lhs: DirLValue::Deref {
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
                     ptr: Box::new(addr_expr),
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
-                rhs: DirExpr::Const(
+                rhs: PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -417,16 +417,16 @@ mod tests {
     #[test]
     fn dead_store_elimination_keeps_index_store_through_stack_spilled_pointer() {
         let mut func = base_func(
-            vec![DirStmt::Assign {
-                lhs: DirLValue::Index {
-                    base: Box::new(DirExpr::Var("local_18".to_string())),
-                    index: Box::new(DirExpr::Var("i".to_string())),
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Index {
+                    base: Box::new(PreHirExpr::Var("local_18".to_string())),
+                    index: Box::new(PreHirExpr::Var("i".to_string())),
                     elem_ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
-                rhs: DirExpr::Const(
+                rhs: PreHirExpr::Const(
                     1,
                     NirType::Int {
                         bits: 32,
@@ -453,15 +453,15 @@ mod tests {
     #[test]
     fn dead_store_elimination_still_removes_genuinely_dead_local_write() {
         let mut func = base_func(
-            vec![DirStmt::Assign {
-                lhs: DirLValue::Deref {
-                    ptr: Box::new(DirExpr::Var("local_10".to_string())),
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("local_10".to_string())),
                     ty: NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 },
-                rhs: DirExpr::Const(
+                rhs: PreHirExpr::Const(
                     5,
                     NirType::Int {
                         bits: 32,

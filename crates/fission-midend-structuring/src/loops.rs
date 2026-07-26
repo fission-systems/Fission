@@ -15,8 +15,8 @@ use crate::linear_types::{
 };
 use crate::switch::try_lower_switch;
 use fission_midend_core::ir::{MlilPreviewError, NirType};
-use fission_midend_dir::{DirExpr, DirLValue, DirStmt, DirSwitchCase};
-use fission_midend_dir::util::negate_expr;
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt, PreHirSwitchCase};
+use fission_midend_prehir::util::negate_expr;
 use crate::HashSet;
 
 // ---------------------------------------------------------------------------
@@ -42,13 +42,13 @@ enum ScopeFrame {
 }
 
 fn rewrite_loop_control_gotos_with_stack(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     stack: &mut Vec<ScopeFrame>,
     stats: &mut LoopControlRewriteStats,
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            DirStmt::Goto(label) => {
+            PreHirStmt::Goto(label) => {
                 let target_label = label.clone();
                 // 1. try matching continue: scan top-to-bottom for the innermost Loop frame
                 let mut continue_matched = false;
@@ -58,7 +58,7 @@ fn rewrite_loop_control_gotos_with_stack(
                     } = frame
                     {
                         if continue_labels.contains(&target_label) {
-                            *stmt = DirStmt::Continue;
+                            *stmt = PreHirStmt::Continue;
                             stats.continue_rewrites += 1;
                             continue_matched = true;
                         }
@@ -78,13 +78,13 @@ fn rewrite_loop_control_gotos_with_stack(
                         ScopeFrame::Switch { break_labels } => break_labels.contains(&target_label),
                     };
                     if break_matched {
-                        *stmt = DirStmt::Break;
+                        *stmt = PreHirStmt::Break;
                         stats.break_rewrites += 1;
                         continue;
                     }
                 }
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -92,10 +92,10 @@ fn rewrite_loop_control_gotos_with_stack(
                 rewrite_loop_control_gotos_with_stack(then_body, stack, stats);
                 rewrite_loop_control_gotos_with_stack(else_body, stack, stats);
             }
-            DirStmt::Block(body) => {
+            PreHirStmt::Block(body) => {
                 rewrite_loop_control_gotos_with_stack(body, stack, stats);
             }
-            DirStmt::While { body, .. } | DirStmt::DoWhile { body, .. } => {
+            PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 stats.skipped_nested_scope_count += 1;
                 stack.push(ScopeFrame::Loop {
                     continue_labels: std::collections::HashSet::default(),
@@ -104,7 +104,7 @@ fn rewrite_loop_control_gotos_with_stack(
                 rewrite_loop_control_gotos_with_stack(body, stack, stats);
                 stack.pop();
             }
-            DirStmt::For { body, .. } => {
+            PreHirStmt::For { body, .. } => {
                 stats.skipped_nested_scope_count += 1;
                 stack.push(ScopeFrame::Loop {
                     continue_labels: std::collections::HashSet::default(),
@@ -113,7 +113,7 @@ fn rewrite_loop_control_gotos_with_stack(
                 rewrite_loop_control_gotos_with_stack(body, stack, stats);
                 stack.pop();
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 stats.skipped_nested_scope_count += 1;
                 stack.push(ScopeFrame::Switch {
                     break_labels: std::collections::HashSet::default(),
@@ -124,19 +124,19 @@ fn rewrite_loop_control_gotos_with_stack(
                 rewrite_loop_control_gotos_with_stack(default, stack, stats);
                 stack.pop();
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Label(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
 }
 
 fn rewrite_loop_control_gotos_in_stmts(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     continue_label: Option<&str>,
     break_label: Option<&str>,
     stats: &mut LoopControlRewriteStats,
@@ -158,7 +158,7 @@ fn rewrite_loop_control_gotos_in_stmts(
 }
 
 fn rewrite_loop_control_gotos_multi(
-    stmts: &mut [DirStmt],
+    stmts: &mut [PreHirStmt],
     continue_labels: &std::collections::HashSet<String>,
     break_labels: &std::collections::HashSet<String>,
     stats: &mut LoopControlRewriteStats,
@@ -170,13 +170,13 @@ fn rewrite_loop_control_gotos_multi(
     rewrite_loop_control_gotos_with_stack(stmts, &mut stack, stats);
 }
 
-fn collect_defined_labels(stmts: &[DirStmt], labels: &mut HashSet<String>) {
+fn collect_defined_labels(stmts: &[PreHirStmt], labels: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            DirStmt::Label(label) => {
+            PreHirStmt::Label(label) => {
                 labels.insert(label.clone());
             }
-            DirStmt::If {
+            PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
@@ -184,45 +184,45 @@ fn collect_defined_labels(stmts: &[DirStmt], labels: &mut HashSet<String>) {
                 collect_defined_labels(then_body, labels);
                 collect_defined_labels(else_body, labels);
             }
-            DirStmt::Block(body)
-            | DirStmt::While { body, .. }
-            | DirStmt::DoWhile { body, .. }
-            | DirStmt::For { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
                 collect_defined_labels(body, labels);
             }
-            DirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     collect_defined_labels(&case.body, labels);
                 }
                 collect_defined_labels(default, labels);
             }
-            DirStmt::Assign { .. }
-            | DirStmt::VaStart { .. }
-            | DirStmt::Expr(_)
-            | DirStmt::Goto(_)
-            | DirStmt::Return(_)
-            | DirStmt::Break
-            | DirStmt::Continue => {}
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
         }
     }
 }
 
-fn has_goto_to_undefined_label(stmts: &[DirStmt]) -> bool {
+fn has_goto_to_undefined_label(stmts: &[PreHirStmt]) -> bool {
     let mut labels = HashSet::default();
     collect_defined_labels(stmts, &mut labels);
     stmts_have_goto_to_undefined_label(stmts, &labels)
 }
 
-fn stmts_have_goto_to_undefined_label(stmts: &[DirStmt], labels: &HashSet<String>) -> bool {
+fn stmts_have_goto_to_undefined_label(stmts: &[PreHirStmt], labels: &HashSet<String>) -> bool {
     stmts
         .iter()
         .any(|stmt| stmt_has_goto_to_undefined_label(stmt, labels))
 }
 
-fn stmt_has_goto_to_undefined_label(stmt: &DirStmt, labels: &HashSet<String>) -> bool {
+fn stmt_has_goto_to_undefined_label(stmt: &PreHirStmt, labels: &HashSet<String>) -> bool {
     match stmt {
-        DirStmt::Goto(label) => !labels.contains(label),
-        DirStmt::If {
+        PreHirStmt::Goto(label) => !labels.contains(label),
+        PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -230,29 +230,29 @@ fn stmt_has_goto_to_undefined_label(stmt: &DirStmt, labels: &HashSet<String>) ->
             stmts_have_goto_to_undefined_label(then_body, labels)
                 || stmts_have_goto_to_undefined_label(else_body, labels)
         }
-        DirStmt::Block(body)
-        | DirStmt::While { body, .. }
-        | DirStmt::DoWhile { body, .. }
-        | DirStmt::For { body, .. } => stmts_have_goto_to_undefined_label(body, labels),
-        DirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => stmts_have_goto_to_undefined_label(body, labels),
+        PreHirStmt::Switch { cases, default, .. } => {
             cases
                 .iter()
                 .any(|case| stmts_have_goto_to_undefined_label(&case.body, labels))
                 || stmts_have_goto_to_undefined_label(default, labels)
         }
-        DirStmt::Assign { .. }
-        | DirStmt::VaStart { .. }
-        | DirStmt::Expr(_)
-        | DirStmt::Label(_)
-        | DirStmt::Return(_)
-        | DirStmt::Break
-        | DirStmt::Continue => false,
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
     }
 }
 
 pub fn try_lower_infloop_with_break(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         let block_addr = host.block_start_address(idx);
         let LoweredTerminator::Cond {
             cond,
@@ -282,16 +282,16 @@ pub fn try_lower_infloop_with_break(host: &mut impl StructuringHost,
         }
 
         let mut body = host.lower_block_stmts(idx)?;
-        body.push(DirStmt::If {
+        body.push(PreHirStmt::If {
             cond: break_cond,
-            then_body: vec![DirStmt::Break],
+            then_body: vec![PreHirStmt::Break],
             else_body: Vec::new(),
         });
         host.bump_loop_control_explicit_reducer();
 
         Ok(Some((
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
                 body,
             },
             exit_idx,
@@ -300,7 +300,7 @@ pub fn try_lower_infloop_with_break(host: &mut impl StructuringHost,
 
 pub fn try_lower_infloop(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         if host.successors().get(idx).map(|s| s.len()).unwrap_or(0) != 1 {
             return Ok(None);
         }
@@ -324,8 +324,8 @@ pub fn try_lower_infloop(host: &mut impl StructuringHost,
         rewrite_loop_control_gotos_in_stmts(&mut body, Some(&continue_label), None, &mut stats);
         host.track_loop_control_rewrite_stats(stats.break_rewrites, stats.continue_rewrites, stats.skipped_nested_scope_count);
         Ok(Some((
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
                 body,
             },
             idx + 1,
@@ -334,7 +334,7 @@ pub fn try_lower_infloop(host: &mut impl StructuringHost,
 
 pub fn try_lower_dowhile(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         let Some((mut body, cond, cond_idx, skip_to)) = lower_do_while_region(host, idx)? else {
             return Ok(None);
         };
@@ -348,7 +348,7 @@ pub fn try_lower_dowhile(host: &mut impl StructuringHost,
             &mut stats,
         );
         host.track_loop_control_rewrite_stats(stats.break_rewrites, stats.continue_rewrites, stats.skipped_nested_scope_count);
-        Ok(Some((DirStmt::DoWhile { body, cond }, skip_to)))
+        Ok(Some((PreHirStmt::DoWhile { body, cond }, skip_to)))
     }
 
 /// Deterministic replacement for the old shared 5000ms wall-clock "total
@@ -364,7 +364,7 @@ fn structuring_total_work_budget_exceeded(host: &impl StructuringHost) -> bool {
 
 pub fn try_lower_while(host: &mut impl StructuringHost,
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         if structuring_total_work_budget_exceeded(host) {
             return Ok(None);
         }
@@ -505,19 +505,19 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
             );
             host.track_loop_control_rewrite_stats(stats.break_rewrites, stats.continue_rewrites, stats.skipped_nested_scope_count);
             if cond_prefix.is_empty() {
-                return Ok(Some((DirStmt::While { cond, body }, exit_idx)));
+                return Ok(Some((PreHirStmt::While { cond, body }, exit_idx)));
             }
 
             let mut guarded_body = cond_prefix;
-            guarded_body.push(DirStmt::If {
+            guarded_body.push(PreHirStmt::If {
                 cond: negate_expr(cond),
-                then_body: vec![DirStmt::Break],
+                then_body: vec![PreHirStmt::Break],
                 else_body: Vec::new(),
             });
             guarded_body.extend(body);
             Ok(Some((
-                DirStmt::While {
-                    cond: DirExpr::Const(1, NirType::Bool),
+                PreHirStmt::While {
+                    cond: PreHirExpr::Const(1, NirType::Bool),
                     body: guarded_body,
                 },
                 exit_idx,
@@ -541,7 +541,7 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
         // Subgraph fallback: use the full body-set lowering when the linear
         // chain traversal failed (body has internal branching / multi-exit).
         // ------------------------------------------------------------------
-        let subgraph_result = (|| -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+        let subgraph_result = (|| -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
             // Re-derive the loop shape from LoopBody (must be valid while-loop).
             let Some(loop_body) = host.get_loop_body(idx) else {
                 return Ok(None);
@@ -605,22 +605,22 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
                 lowered_body
             } else {
                 let mut guarded = cond_prefix;
-                guarded.push(DirStmt::If {
+                guarded.push(PreHirStmt::If {
                     cond: negate_expr(cond.clone()),
-                    then_body: vec![DirStmt::Break],
+                    then_body: vec![PreHirStmt::Break],
                     else_body: Vec::new(),
                 });
                 guarded.extend(lowered_body);
                 return Ok(Some((
-                    DirStmt::While {
-                        cond: DirExpr::Const(1, NirType::Bool),
+                    PreHirStmt::While {
+                        cond: PreHirExpr::Const(1, NirType::Bool),
                         body: guarded,
                     },
                     exit_idx,
                 )));
             };
 
-            Ok(Some((DirStmt::While { cond, body }, exit_idx)))
+            Ok(Some((PreHirStmt::While { cond, body }, exit_idx)))
         })();
 
         if diag {
@@ -639,7 +639,7 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
 
 pub fn lower_do_while_region(host: &mut impl StructuringHost, 
         start_idx: usize,
-    ) -> Result<Option<(Vec<DirStmt>, DirExpr, usize, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(Vec<PreHirStmt>, PreHirExpr, usize, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
         let mut idx = start_idx;
         let mut visited = HashSet::default();
@@ -731,7 +731,7 @@ pub fn lower_do_while_region(host: &mut impl StructuringHost,
 
 pub fn try_lower_multiblock_dowhile(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         if structuring_total_work_budget_exceeded(host) {
             return Ok(None);
         }
@@ -796,8 +796,8 @@ pub fn try_lower_multiblock_dowhile(host: &mut impl StructuringHost,
         }
 
         Ok(Some((
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
                 body: lowered,
             },
             exit_idx,
@@ -821,11 +821,11 @@ pub fn try_lower_multiblock_dowhile(host: &mut impl StructuringHost,
     ///    `Assign` statement (the loop counter update).
     /// 5. **Variable invariant**: init's LHS and update's LHS name the same variable.
     ///
-    /// On success emits `DirStmt::For { init, cond, update, body }` and returns
+    /// On success emits `PreHirStmt::For { init, cond, update, body }` and returns
     /// `(stmt, exit_idx)`. The init block is skipped by returning the adjusted `skip_to`.
 pub fn try_lower_for(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         // ── Invariant 1: valid while-loop head (CBranch + LoopBody with exit) ──
         // Extract all needed data from LoopBody before taking &mut host borrows.
         let (exit_idx, latch_idx, body_set) = {
@@ -894,14 +894,14 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
         if init_stmts.len() != 1 {
             return Ok(None);
         }
-        let DirStmt::Assign {
+        let PreHirStmt::Assign {
             lhs: ref init_lhs, ..
         } = init_stmts[0]
         else {
             return Ok(None);
         };
         let init_var_name = match init_lhs {
-            DirLValue::Var(name) => name.clone(),
+            PreHirLValue::Var(name) => name.clone(),
             _ => return Ok(None),
         };
 
@@ -911,7 +911,7 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
         if latch_stmts.len() != 1 {
             return Ok(None);
         }
-        let DirStmt::Assign {
+        let PreHirStmt::Assign {
             lhs: ref update_lhs,
             ..
         } = latch_stmts[0]
@@ -921,7 +921,7 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
 
         // ── Invariant 5: init and update assign to the same variable ──
         let update_var_name = match update_lhs {
-            DirLValue::Var(name) => name.clone(),
+            PreHirLValue::Var(name) => name.clone(),
             _ => return Ok(None),
         };
         if init_var_name != update_var_name {
@@ -957,7 +957,7 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
         host.bump_loop_for_lowered();
 
         Ok(Some((
-            DirStmt::For {
+            PreHirStmt::For {
                 init: Some(init_box),
                 cond: Some(while_cond),
                 update: Some(update_box),
@@ -987,7 +987,7 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
         start_idx: usize,
         break_idx: Option<usize>,
         head_idx: usize,
-    ) -> Result<Option<Vec<DirStmt>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
         if structuring_total_work_budget_exceeded(host) {
             return Ok(None);
         }
@@ -1026,7 +1026,7 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
             return Ok(None);
         };
 
-        let mut result_stmts: Vec<DirStmt> = Vec::new();
+        let mut result_stmts: Vec<PreHirStmt> = Vec::new();
         let mut emitted_labels: HashSet<u64> = HashSet::default();
         // Graph-native exclusive emission (Ghidra CollapseStructure invariant):
         // each body_set block index is lowered at most once. Nested structured
@@ -1138,20 +1138,20 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                 || force_labels.contains(&block_key))
                 && emitted_labels.insert(block_key)
             {
-                result_stmts.push(DirStmt::Label(block_label(block_key)));
+                result_stmts.push(PreHirStmt::Label(block_label(block_key)));
             }
             result_stmts.extend(host.lower_block_stmts(idx)?);
 
             match host.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => {
-                    result_stmts.push(DirStmt::Return(expr));
+                    result_stmts.push(PreHirStmt::Return(expr));
                 }
                 LoweredTerminator::Goto(target) | LoweredTerminator::Fallthrough(Some(target)) => {
                     if break_addrs.contains(&target) {
-                        result_stmts.push(DirStmt::Break);
+                        result_stmts.push(PreHirStmt::Break);
                         host.bump_loop_multi_exit_break();
                     } else if target == head_addr {
-                        result_stmts.push(DirStmt::Continue);
+                        result_stmts.push(PreHirStmt::Continue);
                     } else if host.next_block_address(idx) != Some(target) {
                         // Track this target as requiring a label if it is in the body.
                         if let Some(target_idx) = host.find_block_index_by_address(target) {
@@ -1159,7 +1159,7 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                                 force_labels.insert(target);
                             }
                         }
-                        result_stmts.push(DirStmt::Goto(block_label(target)));
+                        result_stmts.push(PreHirStmt::Goto(block_label(target)));
                     }
                 }
                 LoweredTerminator::Fallthrough(None) => {}
@@ -1177,45 +1177,45 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                     let false_is_continue = false_target == Some(head_addr);
 
                     if true_is_break && false_is_continue {
-                        result_stmts.push(DirStmt::If {
+                        result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![DirStmt::Break],
-                            else_body: vec![DirStmt::Continue],
+                            then_body: vec![PreHirStmt::Break],
+                            else_body: vec![PreHirStmt::Continue],
                         });
                         host.bump_loop_multi_exit_break();
                     } else if false_is_break && true_is_continue {
-                        result_stmts.push(DirStmt::If {
+                        result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![DirStmt::Break],
-                            else_body: vec![DirStmt::Continue],
+                            then_body: vec![PreHirStmt::Break],
+                            else_body: vec![PreHirStmt::Continue],
                         });
                         host.bump_loop_multi_exit_break();
                     } else if true_is_break && !false_is_break {
                         // `if (cond) break;` then continue with false arm
-                        result_stmts.push(DirStmt::If {
+                        result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![DirStmt::Break],
+                            then_body: vec![PreHirStmt::Break],
                             else_body: Vec::new(),
                         });
                         host.bump_loop_multi_exit_break();
                     } else if false_is_break && !true_is_break {
                         // `if (!cond) break;` then continue with true arm
-                        result_stmts.push(DirStmt::If {
+                        result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![DirStmt::Break],
+                            then_body: vec![PreHirStmt::Break],
                             else_body: Vec::new(),
                         });
                         host.bump_loop_multi_exit_break();
                     } else if true_is_continue && !false_is_continue {
-                        result_stmts.push(DirStmt::If {
+                        result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![DirStmt::Continue],
+                            then_body: vec![PreHirStmt::Continue],
                             else_body: Vec::new(),
                         });
                     } else if false_is_continue && !true_is_continue {
-                        result_stmts.push(DirStmt::If {
+                        result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![DirStmt::Continue],
+                            then_body: vec![PreHirStmt::Continue],
                             else_body: Vec::new(),
                         });
                     } else {
@@ -1230,7 +1230,7 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                                     force_labels.insert(true_target);
                                 }
                             }
-                            vec![DirStmt::Goto(block_label(true_target))]
+                            vec![PreHirStmt::Goto(block_label(true_target))]
                         };
                         let else_body = match false_target {
                             Some(ft) if Some(ft) != next_addr => {
@@ -1240,11 +1240,11 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                                         force_labels.insert(ft);
                                     }
                                 }
-                                vec![DirStmt::Goto(block_label(ft))]
+                                vec![PreHirStmt::Goto(block_label(ft))]
                             }
                             _ => Vec::new(),
                         };
-                        result_stmts.push(DirStmt::If {
+                        result_stmts.push(PreHirStmt::If {
                             cond,
                             then_body,
                             else_body,
@@ -1271,17 +1271,17 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                     );
                     let cases = case_values
                         .into_iter()
-                        .map(|(value, target)| DirSwitchCase {
+                        .map(|(value, target)| PreHirSwitchCase {
                             values: vec![value],
-                            body: vec![DirStmt::Goto(block_label(target))],
+                            body: vec![PreHirStmt::Goto(block_label(target))],
                         })
                         .collect();
-                    result_stmts.push(DirStmt::Switch {
+                    result_stmts.push(PreHirStmt::Switch {
                         expr,
                         cases,
                         default: default_target
                             .map(block_label)
-                            .map(DirStmt::Goto)
+                            .map(PreHirStmt::Goto)
                             .into_iter()
                             .collect(),
                     });
@@ -1334,7 +1334,7 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
         // Strip trailing `Continue` at the end of the body: the latch block naturally jumps back
         // to the head, so a Continue there is redundant. Only strip at the very end; a Continue
         // inside an if-branch earlier in the body must be preserved.
-        while result_stmts.last() == Some(&DirStmt::Continue) {
+        while result_stmts.last() == Some(&PreHirStmt::Continue) {
             result_stmts.pop();
         }
 
@@ -1350,7 +1350,7 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
     /// `while(true) { body }`.
 pub fn try_lower_multiblock_infloop(host: &mut impl StructuringHost, 
         idx: usize,
-    ) -> Result<Option<(DirStmt, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         let body_blocks: Vec<usize> = {
             let Some(loop_body) = host.get_loop_body(idx) else {
                 return Ok(None);
@@ -1380,8 +1380,8 @@ pub fn try_lower_multiblock_infloop(host: &mut impl StructuringHost,
 
         let max_body_idx = body_blocks.iter().copied().max().unwrap_or(idx);
         Ok(Some((
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
                 body: lowered,
             },
             max_body_idx + 1,
@@ -1393,17 +1393,17 @@ pub fn try_lower_multiblock_infloop(host: &mut impl StructuringHost,
 mod tests {
     use super::*;
     use fission_midend_core::ir::{NirType};
-use fission_midend_dir::{DirExpr, DirStmt};
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
     #[test]
     fn rewrite_loop_control_gotos_converts_break_and_continue_targets() {
         let mut body = vec![
-            DirStmt::Goto("block_header".to_string()),
-            DirStmt::Goto("block_exit".to_string()),
-            DirStmt::If {
-                cond: DirExpr::Const(1, NirType::Bool),
-                then_body: vec![DirStmt::Goto("block_header".to_string())],
-                else_body: vec![DirStmt::Goto("block_exit".to_string())],
+            PreHirStmt::Goto("block_header".to_string()),
+            PreHirStmt::Goto("block_exit".to_string()),
+            PreHirStmt::If {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                then_body: vec![PreHirStmt::Goto("block_header".to_string())],
+                else_body: vec![PreHirStmt::Goto("block_exit".to_string())],
             },
         ];
 
@@ -1415,9 +1415,9 @@ use fission_midend_dir::{DirExpr, DirStmt};
             &mut stats,
         );
 
-        assert!(matches!(body[0], DirStmt::Continue));
-        assert!(matches!(body[1], DirStmt::Break));
-        let DirStmt::If {
+        assert!(matches!(body[0], PreHirStmt::Continue));
+        assert!(matches!(body[1], PreHirStmt::Break));
+        let PreHirStmt::If {
             then_body,
             else_body,
             ..
@@ -1425,8 +1425,8 @@ use fission_midend_dir::{DirExpr, DirStmt};
         else {
             panic!("expected if statement in rewritten loop body");
         };
-        assert!(matches!(then_body.as_slice(), [DirStmt::Continue]));
-        assert!(matches!(else_body.as_slice(), [DirStmt::Break]));
+        assert!(matches!(then_body.as_slice(), [PreHirStmt::Continue]));
+        assert!(matches!(else_body.as_slice(), [PreHirStmt::Break]));
         assert_eq!(stats.break_rewrites, 2);
         assert_eq!(stats.continue_rewrites, 2);
         assert_eq!(stats.skipped_nested_scope_count, 0);
@@ -1435,23 +1435,23 @@ use fission_midend_dir::{DirExpr, DirStmt};
     #[test]
     fn rewrite_loop_control_gotos_does_not_rewrite_inside_nested_loop_or_switch() {
         let mut body = vec![
-            DirStmt::While {
-                cond: DirExpr::Const(1, NirType::Bool),
-                body: vec![DirStmt::Goto("block_header".to_string())],
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                body: vec![PreHirStmt::Goto("block_header".to_string())],
             },
-            DirStmt::Switch {
-                expr: DirExpr::Const(
+            PreHirStmt::Switch {
+                expr: PreHirExpr::Const(
                     0,
                     NirType::Int {
                         bits: 32,
                         signed: false,
                     },
                 ),
-                cases: vec![DirSwitchCase {
+                cases: vec![PreHirSwitchCase {
                     values: vec![1],
-                    body: vec![DirStmt::Goto("block_exit".to_string())],
+                    body: vec![PreHirStmt::Goto("block_exit".to_string())],
                 }],
-                default: vec![DirStmt::Goto("block_header".to_string())],
+                default: vec![PreHirStmt::Goto("block_header".to_string())],
             },
         ];
 
@@ -1463,7 +1463,7 @@ use fission_midend_dir::{DirExpr, DirStmt};
             &mut stats,
         );
 
-        let DirStmt::While {
+        let PreHirStmt::While {
             body: nested_while_body,
             ..
         } = &body[0]
@@ -1471,18 +1471,18 @@ use fission_midend_dir::{DirExpr, DirStmt};
             panic!("expected nested while");
         };
         assert!(
-            matches!(nested_while_body.as_slice(), [DirStmt::Goto(label)] if label == "block_header")
+            matches!(nested_while_body.as_slice(), [PreHirStmt::Goto(label)] if label == "block_header")
         );
 
-        let DirStmt::Switch { cases, default, .. } = &body[1] else {
+        let PreHirStmt::Switch { cases, default, .. } = &body[1] else {
             panic!("expected switch statement");
         };
         // Inside switch, outer loop break target is shielded (Goto)
         assert!(
-            matches!(cases[0].body.as_slice(), [DirStmt::Goto(label)] if label == "block_exit")
+            matches!(cases[0].body.as_slice(), [PreHirStmt::Goto(label)] if label == "block_exit")
         );
         // Inside switch, outer loop continue target is propagated (Continue)
-        assert!(matches!(default.as_slice(), [DirStmt::Continue]));
+        assert!(matches!(default.as_slice(), [PreHirStmt::Continue]));
         assert_eq!(stats.break_rewrites, 0);
         assert_eq!(stats.continue_rewrites, 1); // 1 continue propagated through switch
         assert_eq!(stats.skipped_nested_scope_count, 2);
@@ -1490,13 +1490,13 @@ use fission_midend_dir::{DirExpr, DirStmt};
 
     #[test]
     fn rewrite_loop_control_gotos_with_nested_switch_converts_continue_but_preserves_break() {
-        let mut body = vec![DirStmt::Switch {
-            expr: DirExpr::Const(1, NirType::Bool),
-            cases: vec![DirSwitchCase {
+        let mut body = vec![PreHirStmt::Switch {
+            expr: PreHirExpr::Const(1, NirType::Bool),
+            cases: vec![PreHirSwitchCase {
                 values: vec![1],
                 body: vec![
-                    DirStmt::Goto("outer_continue".to_string()),
-                    DirStmt::Goto("outer_break".to_string()),
+                    PreHirStmt::Goto("outer_continue".to_string()),
+                    PreHirStmt::Goto("outer_break".to_string()),
                 ],
             }],
             default: Vec::new(),
@@ -1510,21 +1510,21 @@ use fission_midend_dir::{DirExpr, DirStmt};
             &mut stats,
         );
 
-        let DirStmt::Switch { cases, .. } = &body[0] else {
+        let PreHirStmt::Switch { cases, .. } = &body[0] else {
             panic!("expected switch");
         };
         let case_body = &cases[0].body;
-        assert!(matches!(case_body[0], DirStmt::Continue)); // Outer continue is permitted in switch
-        assert!(matches!(case_body[1], DirStmt::Goto(ref l) if l == "outer_break")); // Outer break is shielded by switch
+        assert!(matches!(case_body[0], PreHirStmt::Continue)); // Outer continue is permitted in switch
+        assert!(matches!(case_body[1], PreHirStmt::Goto(ref l) if l == "outer_break")); // Outer break is shielded by switch
     }
 
     #[test]
     fn rewrite_loop_control_gotos_with_nested_loop_preserves_both() {
-        let mut body = vec![DirStmt::While {
-            cond: DirExpr::Const(1, NirType::Bool),
+        let mut body = vec![PreHirStmt::While {
+            cond: PreHirExpr::Const(1, NirType::Bool),
             body: vec![
-                DirStmt::Goto("outer_continue".to_string()),
-                DirStmt::Goto("outer_break".to_string()),
+                PreHirStmt::Goto("outer_continue".to_string()),
+                PreHirStmt::Goto("outer_break".to_string()),
             ],
         }];
 
@@ -1536,22 +1536,22 @@ use fission_midend_dir::{DirExpr, DirStmt};
             &mut stats,
         );
 
-        let DirStmt::While {
+        let PreHirStmt::While {
             body: inner_body, ..
         } = &body[0]
         else {
             panic!("expected while");
         };
         // Both are shielded by the inner loop frame
-        assert!(matches!(inner_body[0], DirStmt::Goto(ref l) if l == "outer_continue"));
-        assert!(matches!(inner_body[1], DirStmt::Goto(ref l) if l == "outer_break"));
+        assert!(matches!(inner_body[0], PreHirStmt::Goto(ref l) if l == "outer_continue"));
+        assert!(matches!(inner_body[1], PreHirStmt::Goto(ref l) if l == "outer_break"));
     }
 
     #[test]
     fn undefined_goto_guard_rejects_missing_label_in_structured_loop_body() {
-        let body = vec![DirStmt::If {
-            cond: DirExpr::Const(1, NirType::Bool),
-            then_body: vec![DirStmt::Goto("block_missing".to_string())],
+        let body = vec![PreHirStmt::If {
+            cond: PreHirExpr::Const(1, NirType::Bool),
+            then_body: vec![PreHirStmt::Goto("block_missing".to_string())],
             else_body: Vec::new(),
         }];
 
@@ -1561,13 +1561,13 @@ use fission_midend_dir::{DirExpr, DirStmt};
     #[test]
     fn undefined_goto_guard_allows_labels_defined_in_loop_body() {
         let body = vec![
-            DirStmt::If {
-                cond: DirExpr::Const(1, NirType::Bool),
-                then_body: vec![DirStmt::Goto("block_join".to_string())],
+            PreHirStmt::If {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                then_body: vec![PreHirStmt::Goto("block_join".to_string())],
                 else_body: Vec::new(),
             },
-            DirStmt::Label("block_join".to_string()),
-            DirStmt::Break,
+            PreHirStmt::Label("block_join".to_string()),
+            PreHirStmt::Break,
         ];
 
         assert!(!has_goto_to_undefined_label(&body));

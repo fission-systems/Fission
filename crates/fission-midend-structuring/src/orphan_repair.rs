@@ -5,7 +5,7 @@ use crate::helpers::block_label;
 use crate::host::StructuringHost;
 use crate::linear_types::LoweredTerminator;
 use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_dir::{DirStmt};
+use fission_midend_prehir::{PreHirStmt};
 
 /// Resolve a block index from a structured `block_<addr>` label.
 pub fn find_block_index_by_label(host: &impl StructuringHost, label: &str) -> Option<usize> {
@@ -21,15 +21,15 @@ pub fn find_block_index_by_label(host: &impl StructuringHost, label: &str) -> Op
 pub fn emit_orphan_target_block(
     host: &mut impl StructuringHost,
     block_idx: usize,
-) -> Result<Vec<DirStmt>, MlilPreviewError> {
+) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
     let label = block_label(host.block_target_key(block_idx));
-    let mut stmts = vec![DirStmt::Label(label)];
+    let mut stmts = vec![PreHirStmt::Label(label)];
     stmts.extend(host.lower_block_stmts(block_idx)?);
     match host.lower_block_terminator(block_idx)? {
-        LoweredTerminator::Return(expr) => stmts.push(DirStmt::Return(expr)),
+        LoweredTerminator::Return(expr) => stmts.push(PreHirStmt::Return(expr)),
         LoweredTerminator::Goto(target) => {
             if host.next_block_address(block_idx) != Some(target) {
-                stmts.push(DirStmt::Goto(block_label(target)));
+                stmts.push(PreHirStmt::Goto(block_label(target)));
             }
         }
         LoweredTerminator::Fallthrough(Some(target)) => {
@@ -37,9 +37,9 @@ pub fn emit_orphan_target_block(
                 && let Some(expr) =
                     host.lower_return_join_expr_for_predecessor(block_idx, target_idx)?
             {
-                stmts.push(DirStmt::Return(Some(expr)));
+                stmts.push(PreHirStmt::Return(Some(expr)));
             } else if host.next_block_address(block_idx) != Some(target) {
-                stmts.push(DirStmt::Goto(block_label(target)));
+                stmts.push(PreHirStmt::Goto(block_label(target)));
             }
         }
         LoweredTerminator::Cond {
@@ -51,23 +51,23 @@ pub fn emit_orphan_target_block(
                 && let Some(expr) =
                     host.lower_return_join_expr_for_predecessor(block_idx, true_idx)?
             {
-                vec![DirStmt::Return(Some(expr))]
+                vec![PreHirStmt::Return(Some(expr))]
             } else {
-                vec![DirStmt::Goto(block_label(true_target))]
+                vec![PreHirStmt::Goto(block_label(true_target))]
             };
             let else_body = if let Some(false_target) = false_target {
                 if let Some(false_idx) = host.find_block_index_by_address(false_target)
                     && let Some(expr) =
                         host.lower_return_join_expr_for_predecessor(block_idx, false_idx)?
                 {
-                    vec![DirStmt::Return(Some(expr))]
+                    vec![PreHirStmt::Return(Some(expr))]
                 } else {
-                    vec![DirStmt::Goto(block_label(false_target))]
+                    vec![PreHirStmt::Goto(block_label(false_target))]
                 }
             } else {
                 Vec::new()
             };
-            stmts.push(DirStmt::If {
+            stmts.push(PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -91,8 +91,8 @@ pub fn emit_orphan_target_block(
 /// missing block labels/bodies instead of rebuilding the whole function.
 pub fn try_repair_orphan_gotos(
     host: &mut impl StructuringHost,
-    body: Vec<DirStmt>,
-) -> Option<Vec<DirStmt>> {
+    body: Vec<PreHirStmt>,
+) -> Option<Vec<PreHirStmt>> {
     if !has_orphan_goto_labels(&body) {
         return Some(body);
     }

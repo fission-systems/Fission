@@ -1,7 +1,7 @@
 //! Composable backward-liveness summaries for structured HIR statements.
 
 use crate::analysis::defuse::collect_expr_vars;
-use fission_midend_dir::{DirExpr, DirLValue, DirStmt};
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
 use crate::HashSet;
 
 /// Transfer summary for `live_in = uses_before_definition U (live_out - must_definitions)`.
@@ -17,14 +17,14 @@ pub struct LivenessTransfer {
 }
 
 impl LivenessTransfer {
-    pub fn for_stmt(stmt: &DirStmt) -> Self {
+    pub fn for_stmt(stmt: &PreHirStmt) -> Self {
         match stmt {
-            DirStmt::Assign { lhs, rhs } => {
+            PreHirStmt::Assign { lhs, rhs } => {
                 let mut uses = HashSet::default();
                 collect_lvalue_reads(lhs, &mut uses);
                 collect_expr_vars(rhs, &mut uses);
                 let must_definitions = match lhs {
-                    DirLValue::Var(name) => [name.clone()].into_iter().collect::<HashSet<_>>(),
+                    PreHirLValue::Var(name) => [name.clone()].into_iter().collect::<HashSet<_>>(),
                     _ => HashSet::default(),
                 };
                 Self {
@@ -33,16 +33,16 @@ impl LivenessTransfer {
                     may_diverge: false,
                 }
             }
-            DirStmt::Expr(expr) | DirStmt::Return(Some(expr)) => {
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
                 let mut uses = HashSet::default();
                 collect_expr_vars(expr, &mut uses);
                 Self {
                     uses_before_definition: uses,
-                    may_diverge: matches!(stmt, DirStmt::Return(_)),
+                    may_diverge: matches!(stmt, PreHirStmt::Return(_)),
                     ..Self::default()
                 }
             }
-            DirStmt::VaStart { va_list, .. } => {
+            PreHirStmt::VaStart { va_list, .. } => {
                 let mut uses = HashSet::default();
                 collect_expr_vars(va_list, &mut uses);
                 Self {
@@ -50,13 +50,13 @@ impl LivenessTransfer {
                     ..Self::default()
                 }
             }
-            DirStmt::Return(None) | DirStmt::Goto(_) | DirStmt::Break | DirStmt::Continue => Self {
+            PreHirStmt::Return(None) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => Self {
                 may_diverge: true,
                 ..Self::default()
             },
-            DirStmt::Label(_) => Self::default(),
-            DirStmt::Block(body) => Self::for_stmts(body),
-            DirStmt::If {
+            PreHirStmt::Label(_) => Self::default(),
+            PreHirStmt::Block(body) => Self::for_stmts(body),
+            PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
@@ -78,7 +78,7 @@ impl LivenessTransfer {
                     may_diverge: then_transfer.may_diverge || else_transfer.may_diverge,
                 }
             }
-            DirStmt::While { cond, body } => {
+            PreHirStmt::While { cond, body } => {
                 let mut uses = HashSet::default();
                 collect_expr_vars(cond, &mut uses);
                 let body_transfer = Self::for_stmts(body);
@@ -89,7 +89,7 @@ impl LivenessTransfer {
                     may_diverge: body_transfer.may_diverge,
                 }
             }
-            DirStmt::DoWhile { body, cond } => {
+            PreHirStmt::DoWhile { body, cond } => {
                 let body_transfer = Self::for_stmts(body);
                 let mut cond_uses = HashSet::default();
                 collect_expr_vars(cond, &mut cond_uses);
@@ -99,7 +99,7 @@ impl LivenessTransfer {
                     may_diverge: false,
                 })
             }
-            DirStmt::For {
+            PreHirStmt::For {
                 init,
                 cond,
                 update,
@@ -121,7 +121,7 @@ impl LivenessTransfer {
                     may_diverge: body_transfer.may_diverge,
                 })
             }
-            DirStmt::Switch {
+            PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
@@ -150,7 +150,7 @@ impl LivenessTransfer {
         }
     }
 
-    pub fn for_stmts(stmts: &[DirStmt]) -> Self {
+    pub fn for_stmts(stmts: &[PreHirStmt]) -> Self {
         stmts
             .iter()
             .map(Self::for_stmt)
@@ -188,15 +188,15 @@ impl LivenessTransfer {
     }
 }
 
-fn collect_lvalue_reads(lhs: &DirLValue, out: &mut HashSet<String>) {
+fn collect_lvalue_reads(lhs: &PreHirLValue, out: &mut HashSet<String>) {
     match lhs {
-        DirLValue::Var(_) => {}
-        DirLValue::Deref { ptr, .. } => collect_expr_vars(ptr, out),
-        DirLValue::Index { base, index, .. } => {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => collect_expr_vars(ptr, out),
+        PreHirLValue::Index { base, index, .. } => {
             collect_expr_vars(base, out);
             collect_expr_vars(index, out);
         }
-        DirLValue::FieldAccess { base, .. } => collect_expr_vars(base, out),
+        PreHirLValue::FieldAccess { base, .. } => collect_expr_vars(base, out),
     }
 }
 
@@ -205,22 +205,22 @@ mod tests {
     use super::*;
 // prelude via parent
     use fission_midend_core::NirType;
-    use fission_midend_dir::DirBinaryOp;
+    use fission_midend_prehir::PreHirBinaryOp;
 
-    fn var(name: &str) -> DirExpr {
-        DirExpr::Var(name.to_string())
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
     }
 
-    fn assign(name: &str, rhs: DirExpr) -> DirStmt {
-        DirStmt::Assign {
-            lhs: DirLValue::Var(name.to_string()),
+    fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
             rhs,
         }
     }
 
-    fn lt(lhs: &str, rhs: &str) -> DirExpr {
-        DirExpr::Binary {
-            op: DirBinaryOp::Lt,
+    fn lt(lhs: &str, rhs: &str) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
             lhs: Box::new(var(lhs)),
             rhs: Box::new(var(rhs)),
             ty: NirType::Bool,
@@ -229,11 +229,11 @@ mod tests {
 
     #[test]
     fn inner_definition_hides_structured_use_from_entry() {
-        let stmt = DirStmt::While {
-            cond: DirExpr::Const(1, NirType::Bool),
+        let stmt = PreHirStmt::While {
+            cond: PreHirExpr::Const(1, NirType::Bool),
             body: vec![
                 assign("cf", lt("value", "limit")),
-                DirStmt::If {
+                PreHirStmt::If {
                     cond: var("cf"),
                     then_body: Vec::new(),
                     else_body: Vec::new(),
@@ -247,10 +247,10 @@ mod tests {
 
     #[test]
     fn structured_use_before_definition_remains_live_in() {
-        let stmt = DirStmt::While {
-            cond: DirExpr::Const(1, NirType::Bool),
+        let stmt = PreHirStmt::While {
+            cond: PreHirExpr::Const(1, NirType::Bool),
             body: vec![
-                DirStmt::If {
+                PreHirStmt::If {
                     cond: var("cf"),
                     then_body: Vec::new(),
                     else_body: Vec::new(),

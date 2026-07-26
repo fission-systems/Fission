@@ -955,7 +955,8 @@ fn preview_type_hints_renames_register_resident_dwarf_local_when_unambiguous() {
         return_type_name: None,
         register_local_names: HashMap::from([(EBX_ORIGIN.0, "counter".to_string())]),
     });
-    let register_origins: crate::midend::HashMap<String, (u64, u32)> = [("EBX".to_string(), EBX_ORIGIN)].into_iter().collect();
+    let register_origins: crate::midend::HashMap<String, (u64, u32)> =
+        [("EBX".to_string(), EBX_ORIGIN)].into_iter().collect();
 
     let stats = apply_preview_type_hints(&mut func, &context, &register_origins);
     assert_eq!(stats.explicit_register_local_name_hits, 1);
@@ -1005,7 +1006,8 @@ fn preview_type_hints_renames_synthetic_named_register_binding_by_identity() {
         return_type_name: None,
         register_local_names: HashMap::from([(EBX_ORIGIN.0, "total".to_string())]),
     });
-    let register_origins: crate::midend::HashMap<String, (u64, u32)> = [("uVar0".to_string(), EBX_ORIGIN)].into_iter().collect();
+    let register_origins: crate::midend::HashMap<String, (u64, u32)> =
+        [("uVar0".to_string(), EBX_ORIGIN)].into_iter().collect();
 
     let stats = apply_preview_type_hints(&mut func, &context, &register_origins);
     assert_eq!(stats.explicit_register_local_name_hits, 1);
@@ -1066,7 +1068,8 @@ fn preview_type_hints_renames_register_local_written_more_than_once() {
         return_type_name: None,
         register_local_names: HashMap::from([(EBX_ORIGIN.0, "counter".to_string())]),
     });
-    let register_origins: crate::midend::HashMap<String, (u64, u32)> = [("EBX".to_string(), EBX_ORIGIN)].into_iter().collect();
+    let register_origins: crate::midend::HashMap<String, (u64, u32)> =
+        [("EBX".to_string(), EBX_ORIGIN)].into_iter().collect();
 
     let stats = apply_preview_type_hints(&mut func, &context, &register_origins);
     assert_eq!(stats.explicit_register_local_name_hits, 1);

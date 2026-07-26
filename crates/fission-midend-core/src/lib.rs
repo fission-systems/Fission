@@ -8,13 +8,13 @@
 //!
 //! The DIR-side counterpart -- `Dir*` IR types, the action-pipeline
 //! framework, VSA, and their own pure-helper twins -- lives in
-//! `fission-midend-dir` (depends on this crate, not the other way around):
+//! `fission-midend-prehir` (depends on this crate, not the other way around):
 //! `action_pipeline`/`vsa` turned out to have zero HIR-side callers when
 //! this crate was split, and `render`/printer (the only HIR-side consumer
-//! of `util`'s functions) never needs `DirStmt`, so keeping this crate to
+//! of `util`'s functions) never needs `PreHirStmt`, so keeping this crate to
 //! just HIR-and-shared keeps it the smaller dependency for anything
 //! downstream of a finished decompile (`fission-decompiler`, `fission-cli`,
-//! ...), which never needs to compile in `DirStmt`/`action_pipeline`/`vsa`
+//! ...), which never needs to compile in `PreHirStmt`/`action_pipeline`/`vsa`
 //! at all.
 
 #![allow(clippy::all)]

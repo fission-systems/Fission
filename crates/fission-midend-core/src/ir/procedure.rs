@@ -629,14 +629,14 @@ pub enum NirTerminator {
     Unsupported,
 }
 
-/// The function-level container structuring's real `DirFunction ->
-/// HirFunction` conversion (`fission_midend_dir::ir::dir_stmts_to_hir_stmts`)
+/// The function-level container structuring's real `PreHirFunction ->
+/// HirFunction` conversion (`fission_midend_prehir::ir::prehir_stmts_to_hir_stmts`)
 /// produces. `params`/`locals`/`calling_convention`/etc. are shared
 /// substrate metadata (declarations and ABI facts that don't change shape
-/// across structuring) -- only `body`'s statement grammar (`DirStmt` vs.
-/// `HirStmt`) actually differs between `DirFunction`
-/// (`fission_midend_dir::ir::DirFunction`, downstream of this crate) and
-/// this type. See `hir.rs`'s module doc for why `DirStmt`/`HirStmt` are
+/// across structuring) -- only `body`'s statement grammar (`PreHirStmt` vs.
+/// `HirStmt`) actually differs between `PreHirFunction`
+/// (`fission_midend_prehir::ir::PreHirFunction`, downstream of this crate) and
+/// this type. See `hir.rs`'s module doc for why `PreHirStmt`/`HirStmt` are
 /// independently defined rather than one type under two names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HirFunction {

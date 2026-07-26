@@ -351,7 +351,6 @@ impl<'a> PreviewBuilder<'a> {
         let rhs_end = rhs.offset.saturating_add(u64::from(rhs.size));
         lhs.offset < rhs_end && rhs.offset < lhs_end
     }
-
 }
 
 #[cfg(test)]
@@ -415,7 +414,7 @@ mod tests {
         builder.terminator_cache.insert(
             0,
             LoweredTerminator::Switch {
-                expr: DirExpr::Var("selector".to_string()),
+                expr: PreHirExpr::Var("selector".to_string()),
                 targets: vec![0x1100],
                 default_target: Some(0x1300),
                 min_val: 0,

@@ -8,10 +8,12 @@ fn resolve_add_op_stack_address(
         return None;
     }
     if let Some((base, offset)) = builder.resolve_stack_address(&add.inputs[0]) {
-        return crate::midend::cfg::const_offset(&add.inputs[1]).map(|delta| (base, offset + delta));
+        return crate::midend::cfg::const_offset(&add.inputs[1])
+            .map(|delta| (base, offset + delta));
     }
     if let Some((base, offset)) = builder.resolve_stack_address(&add.inputs[1]) {
-        return crate::midend::cfg::const_offset(&add.inputs[0]).map(|delta| (base, offset + delta));
+        return crate::midend::cfg::const_offset(&add.inputs[0])
+            .map(|delta| (base, offset + delta));
     }
     None
 }
@@ -69,14 +71,14 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn normalize_recovered_call_arg(&self, expr: DirExpr) -> DirExpr {
+    fn normalize_recovered_call_arg(&self, expr: PreHirExpr) -> PreHirExpr {
         let (value, fallback) = match expr {
-            DirExpr::Const(value, ty) => (value, DirExpr::Const(value, ty)),
-            DirExpr::Cast { ty, expr } => {
-                let DirExpr::Const(value, _) = *expr else {
-                    return DirExpr::Cast { ty, expr };
+            PreHirExpr::Const(value, ty) => (value, PreHirExpr::Const(value, ty)),
+            PreHirExpr::Cast { ty, expr } => {
+                let PreHirExpr::Const(value, _) = *expr else {
+                    return PreHirExpr::Cast { ty, expr };
                 };
-                (value, DirExpr::Const(value, ty))
+                (value, PreHirExpr::Const(value, ty))
             }
             expr => return expr,
         };
@@ -88,7 +90,7 @@ impl<'a> PreviewBuilder<'a> {
         };
         ctx.call_target_refs
             .get(&(value as u64))
-            .map(|target_ref| DirExpr::Var(target_ref.symbol.clone()))
+            .map(|target_ref| PreHirExpr::Var(target_ref.symbol.clone()))
             .unwrap_or(fallback)
     }
 
@@ -182,7 +184,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<PreHirExpr>, MlilPreviewError> {
         let abi = self.abi_state();
         if !self.options.is_64bit && self.x86_32_stack_call_args_enabled() {
             return self.recover_x86_32_stack_args_from_block(block, call_idx);
@@ -193,7 +195,7 @@ impl<'a> PreviewBuilder<'a> {
 
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
-        let mut recovered = std::collections::BTreeMap::<usize, DirExpr>::new();
+        let mut recovered = std::collections::BTreeMap::<usize, PreHirExpr>::new();
         for prev_idx in (0..scan_end).rev() {
             let prev = &block.ops[prev_idx];
             if prev.opcode.is_control_flow() {
@@ -228,7 +230,10 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             let value = self.with_lowering_site(site, |this| {
-                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::default())
+                this.lower_varnode(
+                    prev.inputs.last().expect("store rhs"),
+                    &mut HashSet::default(),
+                )
             })?;
             recovered.insert(stack_index, value);
         }
@@ -253,7 +258,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<PreHirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
 
         // Prefer ESP-staged [esp+k] (k≥0) for CallInd/Call: gcc -O0 writes
@@ -306,7 +311,10 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx: prev_idx,
             };
             let value = self.with_lowering_site(site, |this| {
-                this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::default())
+                this.lower_varnode(
+                    prev.inputs.last().expect("store rhs"),
+                    &mut HashSet::default(),
+                )
             })?;
             out.push(self.normalize_recovered_call_arg(value));
             current_push_address = Some(prev.address);
@@ -332,7 +340,7 @@ impl<'a> PreviewBuilder<'a> {
     fn lower_x86_32_staged_store_value(
         &mut self,
         rhs: &Varnode,
-    ) -> Result<DirExpr, MlilPreviewError> {
+    ) -> Result<PreHirExpr, MlilPreviewError> {
         if let Some((def_site, def_op)) = self.lookup_def_site(rhs)
             && matches!(
                 def_op.opcode,
@@ -343,13 +351,13 @@ impl<'a> PreviewBuilder<'a> {
             let src = def_op.inputs[0].clone();
             return self.with_lowering_site(def_site, |this| {
                 if let Some(name) = this.try_x86_32_stack_param_snapshot(&src) {
-                    return Ok(DirExpr::Var(name));
+                    return Ok(PreHirExpr::Var(name));
                 }
                 this.lower_varnode(&src, &mut HashSet::default())
             });
         }
         if let Some(name) = self.try_x86_32_stack_param_snapshot(rhs) {
-            return Ok(DirExpr::Var(name));
+            return Ok(PreHirExpr::Var(name));
         }
         self.lower_varnode(rhs, &mut HashSet::default())
     }
@@ -393,7 +401,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<PreHirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
         let ptr_size = i64::from(self.options.pointer_size);
         if ptr_size <= 0 {
@@ -401,7 +409,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
-        let mut recovered = std::collections::BTreeMap::<usize, DirExpr>::new();
+        let mut recovered = std::collections::BTreeMap::<usize, PreHirExpr>::new();
 
         for prev_idx in (0..scan_end).rev() {
             if recovered.len() >= MAX_STACK_ARGS {
@@ -476,12 +484,12 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Vec<DirExpr>, MlilPreviewError> {
+    ) -> Result<Vec<PreHirExpr>, MlilPreviewError> {
         const MAX_STACK_ARGS: usize = 32;
         let abi = self.abi_state();
         let scan_end = call_idx.min(block.ops.len());
         let call_address = block.ops.get(call_idx).map(|op| op.address);
-        let mut recovered = std::collections::BTreeMap::<usize, DirExpr>::new();
+        let mut recovered = std::collections::BTreeMap::<usize, PreHirExpr>::new();
 
         let mut scan_blocks: Vec<(&crate::pcode::PcodeBasicBlock, usize)> = vec![(block, scan_end)];
         if matches!(
@@ -541,7 +549,10 @@ impl<'a> PreviewBuilder<'a> {
                     continue;
                 }
                 let value = self.with_lowering_site(site, |this| {
-                    this.lower_varnode(prev.inputs.last().expect("store rhs"), &mut HashSet::default())
+                    this.lower_varnode(
+                        prev.inputs.last().expect("store rhs"),
+                        &mut HashSet::default(),
+                    )
                 })?;
                 recovered.insert(stack_index, self.normalize_recovered_call_arg(value));
             }
@@ -756,7 +767,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Option<Vec<DirExpr>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<PreHirExpr>>, MlilPreviewError> {
         self.recover_call_args_from_block_with_mode(block, call_idx, false)
     }
 
@@ -764,7 +775,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
-    ) -> Result<Option<Vec<DirExpr>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<PreHirExpr>>, MlilPreviewError> {
         self.recover_call_args_from_block_with_mode(block, call_idx, true)
     }
 
@@ -877,7 +888,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
         prefer_source_values: bool,
-    ) -> Result<Option<Vec<DirExpr>>, MlilPreviewError> {
+    ) -> Result<Option<Vec<PreHirExpr>>, MlilPreviewError> {
         if !self.options.is_64bit
             && !self.x86_32_stack_call_args_enabled()
             && !matches!(
@@ -894,7 +905,7 @@ impl<'a> PreviewBuilder<'a> {
         let abi = self.abi_state();
         let param_slots = abi.effective_param_reg_slots();
         let param_count = param_slots.len();
-        let mut recovered: Vec<Option<DirExpr>> = vec![None; param_count];
+        let mut recovered: Vec<Option<PreHirExpr>> = vec![None; param_count];
         let skip_param = self.callind_target_param_slot_index(block, call_idx);
         // Also skip BranchInd target register if it aliases a param slot (rare).
         let skip_param = skip_param.or_else(|| {
@@ -988,14 +999,14 @@ impl<'a> PreviewBuilder<'a> {
                 } else if prefer_source_values
                     && let Some(name) = self.surface_call_carrier_name(&source)
                 {
-                    DirExpr::Var(name)
+                    PreHirExpr::Var(name)
                 } else {
                     match self.lower_varnode(&source, &mut HashSet::default()) {
                         Ok(expr) => expr,
                         Err(MlilPreviewError::UnsupportedPattern("opcode"))
                             if self.surface_call_carrier_name(output).is_some() =>
                         {
-                            DirExpr::Var(
+                            PreHirExpr::Var(
                                 self.surface_call_carrier_name(output)
                                     .expect("surface carrier exists after guard"),
                             )

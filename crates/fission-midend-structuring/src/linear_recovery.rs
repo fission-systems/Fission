@@ -11,7 +11,7 @@ use crate::linear_types::{
     LinearBodyLoweringOutcome, LinearExit, structuring_diag_enabled,
 };
 use fission_midend_core::ir::{MlilPreviewError};
-use fission_midend_dir::{DirStmt};
+use fission_midend_prehir::{PreHirStmt};
 use crate::HashSet;
 
 /// Soft SESE region proof budget, in `sese_region_proof_budget_exceeded()`
@@ -110,7 +110,7 @@ pub fn try_recover_region_linearized_body(
     err: &MlilPreviewError,
     targeted: &HashSet<u64>,
     emitted_labels: &mut HashSet<u64>,
-) -> Result<Option<(Vec<DirStmt>, usize)>, MlilPreviewError> {
+) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError> {
     if !host.options().region_linearize_structuring {
         return Ok(None);
     }
@@ -161,7 +161,7 @@ pub fn try_recover_region_linearized_body(
 
     let block_key = host.block_target_key(start_idx);
     if (start_idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
-        body.insert(0, DirStmt::Label(block_label(block_key)));
+        body.insert(0, PreHirStmt::Label(block_label(block_key)));
     }
 
     host.bump_region_linearize_structuring();
@@ -173,7 +173,7 @@ pub fn build_linear_sese_child_fallback(
     host: &mut impl StructuringHost,
     entry: usize,
     exit: usize,
-) -> Result<Vec<DirStmt>, MlilPreviewError> {
+) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
     if host.sese_region_proof_budget_exceeded() {
         if structuring_diag_enabled() {
             eprintln!(
@@ -197,9 +197,9 @@ pub fn build_linear_sese_child_fallback(
     if (entry == 0 || targeted.contains(&block_key))
         && !body
             .iter()
-            .any(|stmt| matches!(stmt, DirStmt::Label(label) if label == &entry_label))
+            .any(|stmt| matches!(stmt, PreHirStmt::Label(label) if label == &entry_label))
     {
-        body.insert(0, DirStmt::Label(entry_label));
+        body.insert(0, PreHirStmt::Label(entry_label));
     }
     Ok(cleanup_redundant_labels(body, None))
 }

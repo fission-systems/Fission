@@ -38,7 +38,7 @@ use tracing::trace_span;
 // hint by binding *name* only catches the narrow case where the raw hw name survived
 // (call-result registers). Carrying the real `(offset, size)` alongside lets the
 // DWARF-register-local rename in `type_hints.rs` match by identity instead, without
-// adding a field to `DirBinding` (constructed at ~300 call sites across the workspace --
+// adding a field to `PreHirBinding` (constructed at ~300 call sites across the workspace --
 // far riskier to touch than this thread-local, mirroring the existing
 // `LAST_LAYERED_PSEUDOCODE` pattern in `orchestrate.rs`). Explicit `take` + pass-as-parameter
 // into `apply_preview_type_hints` (rather than reading the thread-local inside
@@ -61,8 +61,8 @@ pub(super) fn take_register_origins() -> HashMap<String, (u64, u32)> {
 }
 
 /// Runs after structuring finishes (see `orchestrate.rs`'s call order) --
-/// operates on the real, final `HirFunction`, not `DirFunction`, despite
-/// living under `builder/` (historical location, not a Dir/Hir statement).
+/// operates on the real, final `HirFunction`, not `PreHirFunction`, despite
+/// living under `builder/` (historical location, not a PreHIR/HIR statement).
 pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
@@ -187,7 +187,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.temps.insert(
             name.clone(),
-            DirBinding {
+            PreHirBinding {
                 name: name.clone(),
                 ty,
                 surface_type_name: None,
@@ -254,7 +254,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         name: &str,
         address: u64,
-    ) -> Result<DirFunction, MlilPreviewError> {
+    ) -> Result<PreHirFunction, MlilPreviewError> {
         self.current_function_name = Some(name.to_string());
         let _build = trace_span!(
             "preview_build_hir",
@@ -285,21 +285,21 @@ impl<'a> PreviewBuilder<'a> {
             let block = &self.pcode.blocks[0];
             body.extend(self.lower_block_stmts(block)?);
             match self.lower_block_terminator(0)? {
-                LoweredTerminator::Return(expr) => body.push(DirStmt::Return(expr)),
+                LoweredTerminator::Return(expr) => body.push(PreHirStmt::Return(expr)),
                 LoweredTerminator::Fallthrough(None) => {}
                 LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
-                    body.push(DirStmt::Goto(block_label(target)))
+                    body.push(PreHirStmt::Goto(block_label(target)))
                 }
                 LoweredTerminator::Cond {
                     cond,
                     true_target,
                     false_target,
-                } => body.push(DirStmt::If {
+                } => body.push(PreHirStmt::If {
                     cond,
-                    then_body: vec![DirStmt::Goto(block_label(true_target))],
+                    then_body: vec![PreHirStmt::Goto(block_label(true_target))],
                     else_body: false_target
                         .map(block_label)
-                        .map(DirStmt::Goto)
+                        .map(PreHirStmt::Goto)
                         .into_iter()
                         .collect(),
                 }),
@@ -334,7 +334,7 @@ impl<'a> PreviewBuilder<'a> {
                         let evidence = UnsupportedControlEvidence {
                             opcode: "Switch".to_string(),
                             source_block: Some(block.start_address),
-                            target_expr: Some(print_dir_expr(&expr)),
+                            target_expr: Some(print_prehir_expr(&expr)),
                             successor_targets: targets.clone(),
                             failure_family: UnsupportedControlFamily::NonStructuralDispatcher,
                             surface: IndirectControlSurface::DispatcherLike,
@@ -353,17 +353,17 @@ impl<'a> PreviewBuilder<'a> {
                         }
                         let cases = case_values
                             .into_iter()
-                            .map(|(value, target)| fission_midend_dir::DirSwitchCase {
+                            .map(|(value, target)| fission_midend_prehir::PreHirSwitchCase {
                                 values: vec![value],
-                                body: vec![DirStmt::Goto(block_label(target))],
+                                body: vec![PreHirStmt::Goto(block_label(target))],
                             })
                             .collect();
-                        body.push(DirStmt::Switch {
+                        body.push(PreHirStmt::Switch {
                             expr,
                             cases,
                             default: default_target
                                 .map(block_label)
-                                .map(DirStmt::Goto)
+                                .map(PreHirStmt::Goto)
                                 .into_iter()
                                 .collect(),
                         });
@@ -399,8 +399,8 @@ impl<'a> PreviewBuilder<'a> {
             .iter()
             .rev()
             .find_map(|stmt| match stmt {
-                DirStmt::Return(Some(expr)) => Some(expr_type(expr)),
-                DirStmt::Return(None) => Some(NirType::Unknown),
+                PreHirStmt::Return(Some(expr)) => Some(expr_type(expr)),
+                PreHirStmt::Return(None) => Some(NirType::Unknown),
                 _ => None,
             })
             .unwrap_or(NirType::Unknown);
@@ -426,13 +426,13 @@ impl<'a> PreviewBuilder<'a> {
             .map(seed_callee_summaries_from_type_context)
             .unwrap_or_default();
 
-        Ok(DirFunction {
+        Ok(PreHirFunction {
             name: name.to_string(),
             params: self.params.values().cloned().collect(),
             locals: self
                 .locals
                 .iter()
-                .map(|(offset, slot)| DirBinding {
+                .map(|(offset, slot)| PreHirBinding {
                     name: slot.name.clone(),
                     ty: slot.ty.clone(),
                     surface_type_name: None,
@@ -461,22 +461,22 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn return_surface_shape(stmts: &[DirStmt]) -> (bool, bool) {
+    fn return_surface_shape(stmts: &[PreHirStmt]) -> (bool, bool) {
         let mut has_bare_return = false;
         let mut has_value_return = false;
         for stmt in stmts {
             match stmt {
-                DirStmt::Return(None) => has_bare_return = true,
-                DirStmt::Return(Some(_)) => has_value_return = true,
-                DirStmt::Block(body)
-                | DirStmt::While { body, .. }
-                | DirStmt::DoWhile { body, .. }
-                | DirStmt::For { body, .. } => {
+                PreHirStmt::Return(None) => has_bare_return = true,
+                PreHirStmt::Return(Some(_)) => has_value_return = true,
+                PreHirStmt::Block(body)
+                | PreHirStmt::While { body, .. }
+                | PreHirStmt::DoWhile { body, .. }
+                | PreHirStmt::For { body, .. } => {
                     let (bare, value) = Self::return_surface_shape(body);
                     has_bare_return |= bare;
                     has_value_return |= value;
                 }
-                DirStmt::If {
+                PreHirStmt::If {
                     then_body,
                     else_body,
                     ..
@@ -486,7 +486,7 @@ impl<'a> PreviewBuilder<'a> {
                     has_bare_return |= then_bare || else_bare;
                     has_value_return |= then_value || else_value;
                 }
-                DirStmt::Switch { cases, default, .. } => {
+                PreHirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         let (bare, value) = Self::return_surface_shape(&case.body);
                         has_bare_return |= bare;
@@ -496,13 +496,13 @@ impl<'a> PreviewBuilder<'a> {
                     has_bare_return |= bare;
                     has_value_return |= value;
                 }
-                DirStmt::Assign { .. }
-                | DirStmt::Expr(_)
-                | DirStmt::VaStart { .. }
-                | DirStmt::Label(_)
-                | DirStmt::Goto(_)
-                | DirStmt::Break
-                | DirStmt::Continue => {}
+                PreHirStmt::Assign { .. }
+                | PreHirStmt::Expr(_)
+                | PreHirStmt::VaStart { .. }
+                | PreHirStmt::Label(_)
+                | PreHirStmt::Goto(_)
+                | PreHirStmt::Break
+                | PreHirStmt::Continue => {}
             }
         }
         (has_bare_return, has_value_return)
@@ -512,7 +512,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         opcode: PcodeOpcode,
         source_block: Option<u64>,
-        target_expr: Option<&DirExpr>,
+        target_expr: Option<&PreHirExpr>,
         successor_targets: Vec<u64>,
         failure_family: UnsupportedControlFamily,
         surface: IndirectControlSurface,
@@ -539,7 +539,7 @@ impl<'a> PreviewBuilder<'a> {
         UnsupportedControlEvidence {
             opcode: format!("{opcode:?}"),
             source_block,
-            target_expr: target_expr.map(print_dir_expr),
+            target_expr: target_expr.map(print_prehir_expr),
             successor_targets,
             failure_family,
             surface,
@@ -550,12 +550,12 @@ impl<'a> PreviewBuilder<'a> {
     pub(crate) fn emit_unsupported_control_surface(
         &mut self,
         evidence: UnsupportedControlEvidence,
-        target_expr: Option<DirExpr>,
-    ) -> DirStmt {
+        target_expr: Option<PreHirExpr>,
+    ) -> PreHirStmt {
         if matches!(
             evidence.surface,
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
-        ) && let Some(DirExpr::Call { .. }) = target_expr.as_ref()
+        ) && let Some(PreHirExpr::Call { .. }) = target_expr.as_ref()
         {
             // Every site that reaches here (`recover_known_external_tail_call_expr`,
             // `recover_tail_call_expr_from_target_expr`,
@@ -571,16 +571,16 @@ impl<'a> PreviewBuilder<'a> {
             // every direct-address tail call -- `jmp known_func` rendered as
             // a bare `known_func();` statement with fallthrough implied,
             // instead of `return known_func();`).
-            return DirStmt::Return(target_expr);
+            return PreHirStmt::Return(target_expr);
         }
 
         if matches!(
             evidence.surface,
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
-        ) && let Some(DirExpr::Var(target_name)) = target_expr.as_ref()
+        ) && let Some(PreHirExpr::Var(target_name)) = target_expr.as_ref()
             && let Some(resolved_target) = self.resolve_address_like_call_target_name(target_name)
         {
-            return DirStmt::Expr(DirExpr::Call {
+            return PreHirStmt::Expr(PreHirExpr::Call {
                 target: resolved_target,
                 args: Vec::new(),
                 ty: NirType::Unknown,
@@ -600,13 +600,13 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry
                 .indirect_control
                 .indirect_surface_preserved_count += 1;
-            return DirStmt::Expr(DirExpr::Call {
+            return PreHirStmt::Expr(PreHirExpr::Call {
                 target: pseudo_target.to_string(),
                 args: target_expr.into_iter().collect(),
                 ty: NirType::Unknown,
             });
         }
-        DirStmt::Expr(DirExpr::Call {
+        PreHirStmt::Expr(PreHirExpr::Call {
             target: "__fission_indirect_cf_unsupported".to_string(),
             args: Vec::new(),
             ty: NirType::Unknown,
@@ -651,7 +651,7 @@ impl<'a> PreviewBuilder<'a> {
         op: &PcodeOp,
         output: &Varnode,
         preserve_materialization: bool,
-    ) -> DirBinding {
+    ) -> PreHirBinding {
         let key = MaterializedVarnodeKey::new(output, op);
         if let Some(name) = self.materialized_vns.get(&key)
             && let Some(binding) = self.temps.get_mut(name)
@@ -721,16 +721,14 @@ impl<'a> PreviewBuilder<'a> {
             if matches!(&ty, NirType::Float { .. })
                 && matches!(
                     &updated.ty,
-                    NirType::Aggregate { .. }
-                        | NirType::Unknown
-                        | NirType::Int { .. }
+                    NirType::Aggregate { .. } | NirType::Unknown | NirType::Int { .. }
                 )
             {
                 updated.ty = ty.clone();
             }
             updated
         } else {
-            DirBinding {
+            PreHirBinding {
                 name: name.clone(),
                 ty,
                 surface_type_name: None,
@@ -754,7 +752,7 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         block_idx: usize,
         output: &Varnode,
-    ) -> DirBinding {
+    ) -> PreHirBinding {
         let key = (block_idx, VarnodeKey::from(output));
         if let Some(name) = self.explicit_merge_bindings.get(&key)
             && let Some(binding) = self.temps.get(name)
@@ -805,7 +803,7 @@ impl<'a> PreviewBuilder<'a> {
         if !output.is_constant && is_register_space_id(output.space_id) {
             record_register_origin(&name, output.offset, output.size);
         }
-        let binding = DirBinding {
+        let binding = PreHirBinding {
             name: name.clone(),
             ty,
             surface_type_name: None,
@@ -826,7 +824,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         self.temps
             .entry(name.to_string())
-            .or_insert_with(|| DirBinding {
+            .or_insert_with(|| PreHirBinding {
                 name: name.to_string(),
                 ty: type_from_size(size, false),
                 surface_type_name: None,

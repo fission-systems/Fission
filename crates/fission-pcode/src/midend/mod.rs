@@ -36,13 +36,13 @@ mod cfg;
 pub mod cspec;
 /// Normalize owner (implementation in `fission-midend-normalize`, ADR 0012).
 pub use fission_midend_normalize as normalize;
-mod tail_wrapper;
 mod orchestrate;
 pub(crate) mod pass;
 mod piece;
 /// Structuring owner (future extraction: `fission-midend-structuring`, ADR 0012).
 pub mod structuring;
 mod support;
+mod tail_wrapper;
 mod telemetry;
 #[cfg(test)]
 mod tests;
@@ -52,12 +52,12 @@ mod vsa;
 // ── Shared substrate re-exports (owned by fission-midend-core) ──────────────
 /// Structured IR substrate (`Hir*`, options, `NirBuildStats`).
 pub use fission_midend_core::ir;
-/// Action-pipeline framework (Pass / ActionGroup / budget helpers).
-pub use fission_midend_dir::action_pipeline;
-/// Shared quality-wave telemetry counters.
-pub use fission_midend_core::wave_stats;
 /// Shared label sentinels.
 pub use fission_midend_core::labels;
+/// Shared quality-wave telemetry counters.
+pub use fission_midend_core::wave_stats;
+/// Action-pipeline framework (Pass / ActionGroup / budget helpers).
+pub use fission_midend_prehir::action_pipeline;
 
 pub(crate) use self::abi::{
     AbiKind, AbiState, CarrierAssignment, CarrierResource, GenericAbiProvider,
@@ -72,18 +72,17 @@ pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,
 };
-pub use ir::*;
-/// DIR-side IR types (`DirStmt`/`DirExpr`/etc, from `fission-midend-dir`) --
+use self::{action_pipeline::*, builder::*, cfg::*, structuring::*};
+/// PreHIR-side IR types (`PreHirStmt`/`PreHirExpr`/etc, from `fission-midend-prehir`) --
 /// `builder`/`structuring` submodules construct these directly via
 /// `use super::*`, `render` never does (stays on the `Hir*` re-export
 /// above). Also re-exports the same `NirType`/`NirBinding`/etc `ir::*`
 /// already brought in -- identical underlying items via two paths, not a
 /// conflict for glob imports.
-pub use fission_midend_dir::ir::*;
-use self::{action_pipeline::*, builder::*, cfg::*, structuring::*};
+pub use fission_midend_prehir::ir::*;
+pub use ir::*;
 #[cfg(test)]
 use normalize::{normalize_function_body, normalize_stmt};
-
 
 // Presentation/print surface lives at crate root `render` (ADR 0011).
 // `pub(crate)` so tests and owners can keep using `crate::midend::print_*`.
@@ -93,32 +92,34 @@ pub(crate) use crate::render::{
     render_hir_function_with_global_decls, render_layered_pseudocode,
 };
 
-/// Builder-side (DIR) counterpart to [`print_expr`] -- builder embeds
-/// rendered text of `DirExpr` values into diagnostics and evidence/summary
+/// Builder-side (PreHIR) counterpart to [`print_expr`] -- builder embeds
+/// rendered text of `PreHirExpr` values into diagnostics and evidence/summary
 /// string fields (target-expression descriptions, dispatcher proof units,
 /// `[DIAG]` traces), not into the AST itself, so reusing the real printer
-/// via [`ir::dir_expr_to_hir_expr`] is correct and avoids duplicating
-/// printer.rs's rendering logic for DIR. Not on any hot path -- every call
+/// via [`ir::prehir_expr_to_hir_expr`] is correct and avoids duplicating
+/// printer.rs's rendering logic for PreHIR. Not on any hot path -- every call
 /// site is diagnostic-ish or a one-shot summary field, not per-node
 /// expression evaluation.
-pub(crate) fn print_dir_expr(expr: &fission_midend_dir::DirExpr) -> String {
-    print_expr(&fission_midend_dir::ir::dir_expr_to_hir_expr(expr.clone()))
+pub(crate) fn print_prehir_expr(expr: &fission_midend_prehir::PreHirExpr) -> String {
+    print_expr(&fission_midend_prehir::ir::prehir_expr_to_hir_expr(
+        expr.clone(),
+    ))
 }
 
-/// Render a captured DIR snapshot (see `take_last_dir_snapshot`) as C-like
-/// text, via the same printer HIR output goes through. `DirStmt` and
+/// Render a captured PreHIR snapshot (see `take_last_prehir_snapshot`) as C-like
+/// text, via the same printer HIR output goes through. `PreHirStmt` and
 /// `HirStmt` share the identical `Goto`/`Label` variants (the printer
 /// already has to render those for any real HIR that structuring couldn't
-/// fully eliminate), so converting via `dir_stmts_to_hir_stmts` and
-/// printing the result is a faithful, unmodified dump of DIR's actual
+/// fully eliminate), so converting via `prehir_stmts_to_hir_stmts` and
+/// printing the result is a faithful, unmodified dump of PreHIR's actual
 /// flattened, goto/label-based shape -- not HIR's structured if/while/for,
 /// which is the whole point of dumping it (comparing this against the real
 /// HIR text is how a human, or an external script, sees whether
 /// structuring changed anything for a given function). `pub`, not
 /// `pub(crate)`, since this is meant to be called from outside this crate
-/// (`fission-cli`'s `decomp --dir`).
-pub fn print_dir_function(func: &fission_midend_dir::DirFunction) -> String {
-    let hir_body = fission_midend_dir::ir::dir_stmts_to_hir_stmts(func.body.clone());
+/// (`fission-cli`'s `decomp --prehir`).
+pub fn print_prehir_function(func: &fission_midend_prehir::PreHirFunction) -> String {
+    let hir_body = fission_midend_prehir::ir::prehir_stmts_to_hir_stmts(func.body.clone());
     print_hir_function(&func.clone().into_hir_function(hir_body))
 }
 
@@ -127,22 +128,22 @@ pub use fission_core::CallingConvention;
 pub use self::abi::infer_entry_register_param_arity;
 pub use self::cfg::structuring_cfg_edges;
 pub use self::cspec::RegisterNamer;
-pub use fission_midend_normalize::{
-    is_known_api_signature, normalize_hir_function, take_normalize_wave_stats,
-};
 pub use self::tail_wrapper::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
 pub use crate::render::{
     LayeredPseudocode, PrintProfile, PseudocodeLayer, render_contracted_wrapper_summary,
 };
+pub use fission_midend_normalize::{
+    is_known_api_signature, normalize_hir_function, take_normalize_wave_stats,
+};
 
 // Top-level preview/NIR entrypoints (builder → normalize → structure → print).
 pub use self::orchestrate::{
     render_mlil_preview, render_mlil_preview_with_binary_and_context,
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
-    render_nir_with_context, take_last_dir_snapshot, take_last_hir_function_snapshot,
-    take_last_layered_pseudocode, test_refine_partitions,
+    render_nir_with_context, take_last_hir_function_snapshot, take_last_layered_pseudocode,
+    take_last_prehir_snapshot, test_refine_partitions,
 };
 
 /// Seed [`NirRenderOptions`] from a loaded binary and populate SLA register map.
@@ -176,7 +177,7 @@ pub fn nir_admission_facts_from_pcode(pcode: &crate::pcode::PcodeFunction) -> Ni
 pub fn indirect_control_classification_from_pcode(
     pcode: &crate::pcode::PcodeFunction,
 ) -> IndirectControlClassification {
-    IndirectControlClassification::from_indirect_observation(crate::pcode_has_indirect_control_flow(
-        pcode,
-    ))
+    IndirectControlClassification::from_indirect_observation(
+        crate::pcode_has_indirect_control_flow(pcode),
+    )
 }
