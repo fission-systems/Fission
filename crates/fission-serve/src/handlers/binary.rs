@@ -57,7 +57,11 @@ pub async fn handle_upload_binary(
             match store.create(binary, filename).await {
                 Ok(session_id) => (
                     StatusCode::OK,
-                    Json(UploadResponse { session_id, fn_count, summary }),
+                    Json(UploadResponse {
+                        session_id: session_id.to_string(),
+                        fn_count,
+                        summary,
+                    }),
                 )
                     .into_response(),
                 Err(e) => (

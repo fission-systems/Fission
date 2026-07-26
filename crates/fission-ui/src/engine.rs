@@ -369,8 +369,12 @@ pub use native::{
 #[cfg(target_arch = "wasm32")]
 mod wasm_api {
     use super::*;
+    use fission_analysis_protocol::{
+        DecompileResponse as ApiDecompileResponse, FnEntry as ApiFnEntry,
+        UploadResponse as ApiUploadResponse, XrefRow as ApiXrefRow,
+        XrefsResponse as ApiXrefsResponse,
+    };
     use gloo_net::http::Request;
-    use serde::Deserialize;
 
     // Thread-local server URL (configurable from UI)
     thread_local! {
@@ -384,48 +388,6 @@ mod wasm_api {
 
     pub fn get_server_url() -> String {
         SERVER_URL.with(|u| u.borrow().clone())
-    }
-
-    // ── Wire types (mirror serve.rs) ──────────────────────────────────────
-
-    #[derive(Deserialize)]
-    struct ApiFnEntry {
-        addr:      u64,
-        name:      String,
-        is_import: bool,
-        is_export: bool,
-        is_thunk:  bool,
-        size:      u64,
-    }
-
-    #[derive(Deserialize)]
-    struct ApiUploadResponse {
-        session_id: String,   // UUID from fission-serve
-        fn_count:   usize,
-        summary:    String,
-    }
-
-    #[derive(Deserialize)]
-    struct ApiDecompileResponse {
-        pseudocode: String,
-        nir:        Option<String>,
-        fell_back:  bool,
-        reason:     Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct ApiXrefRow {
-        from_addr: u64,
-        to_addr:   Option<u64>,
-        kind:      String,
-        symbol:    Option<String>,
-        fn_name:   Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct ApiXrefsResponse {
-        callers: Vec<ApiXrefRow>,
-        callees: Vec<ApiXrefRow>,
     }
 
     fn to_xref_row(r: ApiXrefRow) -> XrefRow {

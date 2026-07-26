@@ -2523,6 +2523,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-analysis-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fission-automation"
 version = "0.1.6"
 dependencies = [
@@ -2857,8 +2865,11 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "fission-analysis-protocol",
+ "fission-core",
  "fission-decompiler",
  "fission-loader",
+ "fission-sleigh",
  "fission-static",
  "serde",
  "serde_json",
@@ -2983,6 +2994,7 @@ name = "fission-ui"
 version = "0.1.6"
 dependencies = [
  "dioxus",
+ "fission-analysis-protocol",
  "fission-core",
  "fission-decompiler",
  "fission-loader",

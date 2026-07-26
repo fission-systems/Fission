@@ -16,8 +16,11 @@ name = "fission-serve"
 path = "src/bin/main.rs"
 
 [dependencies]
+fission-analysis-protocol = { path = "../fission-analysis-protocol" }
+fission-core       = { path = "../fission-core" }
 fission-loader     = { path = "../fission-loader" }
 fission-decompiler = { path = "../fission-decompiler" }
+fission-sleigh     = { path = "../fission-sleigh" }
 fission-static     = { path = "../fission-static" }
 
 axum           = { version = "0.8", features = ["multipart"] }

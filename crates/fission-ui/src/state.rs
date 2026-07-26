@@ -1,5 +1,6 @@
 use crate::engine::{CfgGraphData, XrefRow};
 use dioxus::prelude::*;
+use fission_analysis_protocol::StatusResponse;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -137,6 +138,8 @@ pub struct AppState {
     /// Only used when running as WASM in the browser.
     pub server_url:        String,
     pub server_connected:  bool,
+    /// Last capability/resource report returned by the active backend.
+    pub backend_status:    Option<StatusResponse>,
     /// Session token returned by POST /api/binary.
     /// All subsequent WASM API calls include this in the path.
     pub server_session_id: Option<String>,
@@ -232,6 +235,7 @@ impl AppState {
             functions: Vec::new(),
             server_url:        "http://localhost:7331".to_string(),
             server_connected:  false,
+            backend_status:    None,
             server_session_id: None,
             current_function_addr: None,
             current_function_kind: FunctionKind::Code,
