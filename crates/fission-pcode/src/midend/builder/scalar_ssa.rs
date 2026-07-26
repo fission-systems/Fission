@@ -1,9 +1,9 @@
-//! Exact-storage scalar SSA construction for the first Heritage phase.
+//! Guarded scalar SSA and conservative out-of-SSA construction.
 //!
 //! This runs on the original lifted CFG, before structuring removes
-//! irreducible edges. Register and unique varnodes participate when their
-//! storage tuple matches exactly; overlapping/subregister handling and memory
-//! SSA are deliberately later phases.
+//! irreducible edges. Register and unique varnodes are refined into disjoint
+//! overlapping-storage pieces. Dynamic memory/call effects remain guard facts;
+//! RAM/stack promotion stays deferred until an alias/object model owns it.
 
 use super::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -55,6 +55,9 @@ pub(super) enum ScalarSsaValidationError {
         predecessor: u32,
         value: SsaValueId,
     },
+    DynamicGuardsMismatch,
+    OutOfSsaCopiesMismatch,
+    HighVariablesMismatch,
 }
 
 #[derive(Debug)]
@@ -475,6 +478,13 @@ pub(super) fn build_scalar_ssa(
         ssa.phis.insert(block as u32, phis);
     }
 
+    ssa.dynamic_guards = build_dynamic_guards(pcode, &dominance.reachable, &ssa);
+    let (out_of_ssa_copies, high_variables, value_high_variables) =
+        build_out_of_ssa_facts(&ssa, successors, &dominance);
+    ssa.out_of_ssa_copies = out_of_ssa_copies;
+    ssa.high_variables = high_variables;
+    ssa.value_high_variables = value_high_variables;
+
     ssa
 }
 
@@ -585,6 +595,507 @@ fn rename_block(
             .pop();
         debug_assert!(popped.is_some());
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PointerRange {
+    minimum: u64,
+    maximum: u64,
+    step: u64,
+    exact: bool,
+}
+
+impl PointerRange {
+    fn exact(offset: u64) -> Self {
+        Self {
+            minimum: offset,
+            maximum: offset,
+            step: 0,
+            exact: true,
+        }
+    }
+
+    fn shifted(self, delta: i64) -> Option<Self> {
+        let shift = |value: u64| {
+            if delta >= 0 {
+                value.checked_add(delta as u64)
+            } else {
+                value.checked_sub(delta.unsigned_abs())
+            }
+        };
+        Some(Self {
+            minimum: shift(self.minimum)?,
+            maximum: shift(self.maximum)?,
+            ..self
+        })
+    }
+
+    fn union(self, other: Self) -> Self {
+        if self.exact && other.exact {
+            let minimum = self.minimum.min(other.minimum);
+            let maximum = self.maximum.max(other.maximum);
+            Self {
+                minimum,
+                maximum,
+                step: if minimum == maximum {
+                    0
+                } else {
+                    maximum - minimum
+                },
+                exact: minimum == maximum,
+            }
+        } else {
+            Self {
+                minimum: self.minimum.min(other.minimum),
+                maximum: self.maximum.max(other.maximum),
+                step: 0,
+                exact: false,
+            }
+        }
+    }
+}
+
+fn build_dynamic_guards(
+    pcode: &PcodeFunction,
+    reachable: &BTreeSet<usize>,
+    ssa: &NirScalarSsa,
+) -> BTreeMap<SsaOpSite, SsaDynamicGuard> {
+    let mut guards = BTreeMap::new();
+    for &block in reachable {
+        let Some(pcode_block) = pcode.blocks.get(block) else {
+            continue;
+        };
+        for (op_index, op) in pcode_block.ops.iter().enumerate() {
+            let site = SsaOpSite {
+                block: block as u32,
+                op: op_index as u32,
+            };
+            let guard = match op.opcode {
+                PcodeOpcode::Load if op.inputs.len() >= 2 => memory_guard(
+                    pcode,
+                    ssa,
+                    site,
+                    SsaDynamicGuardKind::Load,
+                    op.inputs.first().and_then(encoded_space_id),
+                    1,
+                    op.output.as_ref().map_or(0, |output| output.size),
+                ),
+                PcodeOpcode::Store if op.inputs.len() >= 2 => {
+                    let (space_id, pointer_input) = if op.inputs.len() >= 3 {
+                        (op.inputs.first().and_then(encoded_space_id), 1)
+                    } else {
+                        (None, 0)
+                    };
+                    let width = op.inputs.last().map_or(0, |value| value.size);
+                    memory_guard(
+                        pcode,
+                        ssa,
+                        site,
+                        SsaDynamicGuardKind::Store,
+                        space_id,
+                        pointer_input,
+                        width,
+                    )
+                }
+                PcodeOpcode::Call | PcodeOpcode::CallInd => SsaDynamicGuard {
+                    site,
+                    kind: SsaDynamicGuardKind::Call,
+                    effect: SsaMemoryEffect::ReadWrite,
+                    space_id: None,
+                    minimum_offset: 0,
+                    maximum_offset_exclusive: None,
+                    step: 0,
+                    precision: SsaGuardRangePrecision::Unknown,
+                },
+                _ => continue,
+            };
+            guards.insert(site, guard);
+        }
+    }
+    guards
+}
+
+fn encoded_space_id(varnode: &Varnode) -> Option<u64> {
+    varnode.is_constant.then_some(varnode.offset)
+}
+
+fn memory_guard(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    site: SsaOpSite,
+    kind: SsaDynamicGuardKind,
+    space_id: Option<u64>,
+    pointer_input: usize,
+    width: u32,
+) -> SsaDynamicGuard {
+    let effect = match kind {
+        SsaDynamicGuardKind::Load => SsaMemoryEffect::Read,
+        SsaDynamicGuardKind::Store => SsaMemoryEffect::Write,
+        SsaDynamicGuardKind::Call => unreachable!("calls do not have pointer ranges"),
+    };
+    let resolved = if width == 0 || space_id.is_none() {
+        None
+    } else {
+        resolve_pointer_input(pcode, ssa, site, pointer_input, &mut BTreeSet::new(), 64)
+    };
+    let Some(range) = resolved else {
+        return SsaDynamicGuard {
+            site,
+            kind,
+            effect,
+            space_id,
+            minimum_offset: 0,
+            maximum_offset_exclusive: None,
+            step: 0,
+            precision: SsaGuardRangePrecision::Unknown,
+        };
+    };
+    let Some(maximum_offset_exclusive) = range.maximum.checked_add(u64::from(width)) else {
+        return SsaDynamicGuard {
+            site,
+            kind,
+            effect,
+            space_id,
+            minimum_offset: 0,
+            maximum_offset_exclusive: None,
+            step: 0,
+            precision: SsaGuardRangePrecision::Unknown,
+        };
+    };
+    SsaDynamicGuard {
+        site,
+        kind,
+        effect,
+        space_id,
+        minimum_offset: range.minimum,
+        maximum_offset_exclusive: Some(maximum_offset_exclusive),
+        step: range.step,
+        precision: if range.exact {
+            SsaGuardRangePrecision::Exact
+        } else {
+            SsaGuardRangePrecision::Bounded
+        },
+    }
+}
+
+fn resolve_pointer_input(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    site: SsaOpSite,
+    input_index: usize,
+    visiting: &mut BTreeSet<SsaValueId>,
+    budget: usize,
+) -> Option<PointerRange> {
+    if budget == 0 {
+        return None;
+    }
+    let op = pcode
+        .blocks
+        .get(site.block as usize)?
+        .ops
+        .get(site.op as usize)?;
+    let input = op.inputs.get(input_index)?;
+    if input.is_constant {
+        return Some(PointerRange::exact(input.offset));
+    }
+    let pieces = ssa.operation_inputs.get(&SsaUseSite {
+        block: site.block,
+        op: site.op,
+        input: input_index as u32,
+    })?;
+    if pieces.len() != 1 {
+        return None;
+    }
+    let value = ssa.value(pieces[0].value)?;
+    if value.storage.size != input.size {
+        return None;
+    }
+    resolve_pointer_value(pcode, ssa, value.id, visiting, budget - 1)
+}
+
+fn resolve_pointer_value(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    value_id: SsaValueId,
+    visiting: &mut BTreeSet<SsaValueId>,
+    budget: usize,
+) -> Option<PointerRange> {
+    if budget == 0 || !visiting.insert(value_id) {
+        return None;
+    }
+    let value = ssa.value(value_id)?;
+    let resolved = match value.definition {
+        SsaValueDefinition::Input => None,
+        SsaValueDefinition::Phi { block } => {
+            let phi = ssa
+                .phis
+                .get(&block)?
+                .iter()
+                .find(|phi| phi.output == value_id)?;
+            let mut range = None;
+            for operand in &phi.operands {
+                let operand_range =
+                    resolve_pointer_value(pcode, ssa, operand.value, visiting, budget - 1)?;
+                range = Some(range.map_or(operand_range, |current: PointerRange| {
+                    current.union(operand_range)
+                }));
+            }
+            range
+        }
+        SsaValueDefinition::Operation(site) => {
+            let op = pcode
+                .blocks
+                .get(site.block as usize)?
+                .ops
+                .get(site.op as usize)?;
+            let outputs = ssa.operation_outputs.get(&site)?;
+            if outputs.len() != 1 || outputs[0].value != value_id {
+                None
+            } else {
+                match op.opcode {
+                    PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt => {
+                        resolve_pointer_input(pcode, ssa, site, 0, visiting, budget - 1)
+                    }
+                    PcodeOpcode::IntAdd if op.inputs.len() == 2 => {
+                        if let Some(delta) = signed_constant_delta(&op.inputs[0]) {
+                            resolve_pointer_input(pcode, ssa, site, 1, visiting, budget - 1)?
+                                .shifted(delta)
+                        } else if let Some(delta) = signed_constant_delta(&op.inputs[1]) {
+                            resolve_pointer_input(pcode, ssa, site, 0, visiting, budget - 1)?
+                                .shifted(delta)
+                        } else {
+                            None
+                        }
+                    }
+                    PcodeOpcode::IntSub if op.inputs.len() == 2 => {
+                        let delta = signed_constant_delta(&op.inputs[1])?;
+                        resolve_pointer_input(pcode, ssa, site, 0, visiting, budget - 1)?
+                            .shifted(delta.checked_neg()?)
+                    }
+                    _ => None,
+                }
+            }
+        }
+    };
+    visiting.remove(&value_id);
+    resolved
+}
+
+fn signed_constant_delta(varnode: &Varnode) -> Option<i64> {
+    if !varnode.is_constant {
+        return None;
+    }
+    let bits = varnode.size.checked_mul(8)?;
+    match bits {
+        1..=63 => {
+            let mask = (1_u64 << bits) - 1;
+            let value = varnode.offset & mask;
+            let sign_bit = 1_u64 << (bits - 1);
+            if value & sign_bit == 0 {
+                i64::try_from(value).ok()
+            } else {
+                Some((value | !mask) as i64)
+            }
+        }
+        64 => Some(varnode.offset as i64),
+        _ => None,
+    }
+}
+
+fn build_out_of_ssa_facts(
+    ssa: &NirScalarSsa,
+    successors: &[Vec<usize>],
+    dominance: &Dominance,
+) -> (
+    Vec<SsaOutOfSsaCopy>,
+    Vec<SsaHighVariable>,
+    Vec<SsaHighVariableId>,
+) {
+    let mut copies = Vec::new();
+    let mut parents = (0..ssa.values.len()).collect::<Vec<_>>();
+    for (&successor, phis) in &ssa.phis {
+        for phi in phis {
+            for operand in &phi.operands {
+                copies.push(SsaOutOfSsaCopy {
+                    predecessor: operand.predecessor,
+                    successor,
+                    storage: phi.storage,
+                    source: operand.value,
+                    destination: phi.output,
+                });
+                union_values(
+                    &mut parents,
+                    phi.output.0 as usize,
+                    operand.value.0 as usize,
+                );
+            }
+        }
+    }
+    copies.sort_unstable();
+    copies.dedup();
+
+    let mut grouped = BTreeMap::<usize, Vec<SsaValueId>>::new();
+    for index in 0..ssa.values.len() {
+        let root = find_root(&mut parents, index);
+        grouped
+            .entry(root)
+            .or_default()
+            .push(SsaValueId(index as u32));
+    }
+    let mut member_groups = grouped.into_values().collect::<Vec<_>>();
+    member_groups.sort_unstable_by_key(|members| members[0]);
+
+    let uses = collect_value_uses(ssa);
+    let reachability = guard_reachability(ssa, successors);
+    let mut high_variables = Vec::with_capacity(member_groups.len());
+    let mut value_high_variables = vec![SsaHighVariableId(0); ssa.values.len()];
+    for members in member_groups {
+        let id = SsaHighVariableId(high_variables.len() as u32);
+        let mut storage_family = members
+            .iter()
+            .map(|member| ssa.value(*member).expect("known member").storage)
+            .collect::<Vec<_>>();
+        storage_family.sort_unstable();
+        storage_family.dedup();
+        let crossing_guards = ssa
+            .dynamic_guards
+            .keys()
+            .copied()
+            .filter(|guard| {
+                members.iter().any(|member| {
+                    value_crosses_guard(
+                        ssa,
+                        dominance,
+                        *member,
+                        *guard,
+                        uses.get(member).map_or(&[], Vec::as_slice),
+                        reachability
+                            .get(&guard.block)
+                            .expect("every guard block has a reachability set"),
+                    )
+                })
+            })
+            .collect();
+        for member in &members {
+            value_high_variables[member.0 as usize] = id;
+        }
+        high_variables.push(SsaHighVariable {
+            id,
+            members,
+            storage_family,
+            crossing_guards,
+        });
+    }
+
+    (copies, high_variables, value_high_variables)
+}
+
+fn find_root(parents: &mut [usize], value: usize) -> usize {
+    if parents[value] != value {
+        parents[value] = find_root(parents, parents[value]);
+    }
+    parents[value]
+}
+
+fn union_values(parents: &mut [usize], left: usize, right: usize) {
+    let left_root = find_root(parents, left);
+    let right_root = find_root(parents, right);
+    if left_root == right_root {
+        return;
+    }
+    let (minimum, maximum) = if left_root < right_root {
+        (left_root, right_root)
+    } else {
+        (right_root, left_root)
+    };
+    parents[maximum] = minimum;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ValueUsePoint {
+    block: u32,
+    op: Option<u32>,
+}
+
+fn collect_value_uses(ssa: &NirScalarSsa) -> BTreeMap<SsaValueId, Vec<ValueUsePoint>> {
+    let mut uses = BTreeMap::<SsaValueId, Vec<ValueUsePoint>>::new();
+    for (site, pieces) in &ssa.operation_inputs {
+        for piece in pieces {
+            uses.entry(piece.value).or_default().push(ValueUsePoint {
+                block: site.block,
+                op: Some(site.op),
+            });
+        }
+    }
+    for phis in ssa.phis.values() {
+        for phi in phis {
+            for operand in &phi.operands {
+                uses.entry(operand.value).or_default().push(ValueUsePoint {
+                    block: operand.predecessor,
+                    op: None,
+                });
+            }
+        }
+    }
+    uses
+}
+
+fn guard_reachability(
+    ssa: &NirScalarSsa,
+    successors: &[Vec<usize>],
+) -> BTreeMap<u32, BTreeSet<usize>> {
+    let mut result = BTreeMap::new();
+    for guard_block in ssa.dynamic_guards.keys().map(|site| site.block) {
+        result.entry(guard_block).or_insert_with(|| {
+            let mut reachable = BTreeSet::new();
+            let mut queue = VecDeque::new();
+            for successor in successors.get(guard_block as usize).into_iter().flatten() {
+                queue.push_back(*successor);
+            }
+            while let Some(block) = queue.pop_front() {
+                if !reachable.insert(block) {
+                    continue;
+                }
+                for successor in successors.get(block).into_iter().flatten() {
+                    queue.push_back(*successor);
+                }
+            }
+            reachable
+        });
+    }
+    result
+}
+
+fn value_crosses_guard(
+    ssa: &NirScalarSsa,
+    dominance: &Dominance,
+    value_id: SsaValueId,
+    guard: SsaOpSite,
+    uses: &[ValueUsePoint],
+    reachable_after_guard: &BTreeSet<usize>,
+) -> bool {
+    let definition_reaches_guard = match ssa.value(value_id).expect("known value").definition {
+        SsaValueDefinition::Input => true,
+        SsaValueDefinition::Operation(definition) => {
+            if definition.block == guard.block {
+                definition.op < guard.op
+            } else {
+                dominance.dominates(definition.block as usize, guard.block as usize)
+            }
+        }
+        SsaValueDefinition::Phi { block } => {
+            block == guard.block || dominance.dominates(block as usize, guard.block as usize)
+        }
+    };
+    definition_reaches_guard
+        && uses.iter().any(|use_point| {
+            if use_point.block == guard.block {
+                use_point.op.is_none_or(|op| op > guard.op)
+                    || reachable_after_guard.contains(&(guard.block as usize))
+            } else {
+                reachable_after_guard.contains(&(use_point.block as usize))
+            }
+        })
 }
 
 pub(super) fn validate_scalar_ssa(
@@ -741,6 +1252,18 @@ pub(super) fn validate_scalar_ssa(
         }
     }
 
+    if ssa.dynamic_guards != build_dynamic_guards(pcode, &dominance.reachable, ssa) {
+        return Err(ScalarSsaValidationError::DynamicGuardsMismatch);
+    }
+    let (out_of_ssa_copies, high_variables, value_high_variables) =
+        build_out_of_ssa_facts(ssa, successors, &dominance);
+    if ssa.out_of_ssa_copies != out_of_ssa_copies {
+        return Err(ScalarSsaValidationError::OutOfSsaCopiesMismatch);
+    }
+    if ssa.high_variables != high_variables || ssa.value_high_variables != value_high_variables {
+        return Err(ScalarSsaValidationError::HighVariablesMismatch);
+    }
+
     Ok(())
 }
 
@@ -823,6 +1346,22 @@ mod tests {
             address,
             output: Some(output),
             inputs: vec![input],
+            asm_mnemonic: None,
+        }
+    }
+
+    fn op(
+        address: u64,
+        opcode: PcodeOpcode,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num: 0,
+            opcode,
+            address,
+            output,
+            inputs,
             asm_mnemonic: None,
         }
     }
@@ -1195,6 +1734,180 @@ mod tests {
         assert!(ssa.address_spaces.is_empty());
         assert!(ssa.values.is_empty());
         assert!(ssa.operation_outputs.is_empty());
+    }
+
+    #[test]
+    fn affine_load_pointer_produces_exact_dynamic_guard() {
+        let pointer = unique_sized(0, 8);
+        let adjusted_pointer = unique_sized(8, 8);
+        let pcode = function(vec![vec![
+            copy(0x1000, pointer.clone(), Varnode::constant(0x2000, 8)),
+            op(
+                0x1001,
+                PcodeOpcode::IntAdd,
+                Some(adjusted_pointer.clone()),
+                vec![pointer, Varnode::constant(0x10, 8)],
+            ),
+            op(
+                0x1002,
+                PcodeOpcode::Load,
+                Some(unique_sized(0x20, 4)),
+                vec![Varnode::constant(3, 8), adjusted_pointer],
+            ),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        assert_eq!(
+            ssa.dynamic_guards[&SsaOpSite { block: 0, op: 2 }],
+            SsaDynamicGuard {
+                site: SsaOpSite { block: 0, op: 2 },
+                kind: SsaDynamicGuardKind::Load,
+                effect: SsaMemoryEffect::Read,
+                space_id: Some(3),
+                minimum_offset: 0x2010,
+                maximum_offset_exclusive: Some(0x2014),
+                step: 0,
+                precision: SsaGuardRangePrecision::Exact,
+            }
+        );
+    }
+
+    #[test]
+    fn phi_pointer_produces_bounded_guard_and_high_variable() {
+        let pointer = register_sized(0, 8);
+        let pcode = function(vec![
+            vec![],
+            vec![copy(0x1010, pointer.clone(), Varnode::constant(0x1000, 8))],
+            vec![copy(0x1020, pointer.clone(), Varnode::constant(0x1100, 8))],
+            vec![op(
+                0x1030,
+                PcodeOpcode::Load,
+                Some(unique_sized(0, 4)),
+                vec![Varnode::constant(3, 8), pointer],
+            )],
+        ]);
+        let successors = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let predecessors = vec![vec![], vec![0], vec![0], vec![1, 2]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let guard = ssa.dynamic_guards[&SsaOpSite { block: 3, op: 0 }];
+        assert_eq!(guard.precision, SsaGuardRangePrecision::Bounded);
+        assert_eq!(guard.minimum_offset, 0x1000);
+        assert_eq!(guard.maximum_offset_exclusive, Some(0x1104));
+        assert_eq!(guard.step, 0x100);
+
+        let phi = &ssa.phis[&3][0];
+        assert_eq!(ssa.out_of_ssa_copies.len(), 2);
+        let high = ssa.value_high_variables[phi.output.0 as usize];
+        assert!(
+            phi.operands
+                .iter()
+                .all(|operand| { ssa.value_high_variables[operand.value.0 as usize] == high })
+        );
+        assert_eq!(ssa.high_variables[high.0 as usize].members.len(), 3);
+    }
+
+    #[test]
+    fn unknown_store_and_call_guard_live_high_variable() {
+        let value = register_sized(0, 4);
+        let unknown_pointer = register_sized(8, 8);
+        let pcode = function(vec![vec![
+            copy(0x1000, value.clone(), Varnode::constant(7, 4)),
+            op(
+                0x1001,
+                PcodeOpcode::Store,
+                None,
+                vec![Varnode::constant(3, 8), unknown_pointer, value.clone()],
+            ),
+            op(
+                0x1002,
+                PcodeOpcode::Call,
+                None,
+                vec![Varnode::constant(0x4000, 8)],
+            ),
+            copy(0x1003, unique_sized(0, 4), value),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let store_site = SsaOpSite { block: 0, op: 1 };
+        let call_site = SsaOpSite { block: 0, op: 2 };
+        assert_eq!(
+            ssa.dynamic_guards[&store_site].precision,
+            SsaGuardRangePrecision::Unknown
+        );
+        assert_eq!(
+            ssa.dynamic_guards[&call_site],
+            SsaDynamicGuard {
+                site: call_site,
+                kind: SsaDynamicGuardKind::Call,
+                effect: SsaMemoryEffect::ReadWrite,
+                space_id: None,
+                minimum_offset: 0,
+                maximum_offset_exclusive: None,
+                step: 0,
+                precision: SsaGuardRangePrecision::Unknown,
+            }
+        );
+        let definition = ssa.operation_outputs[&SsaOpSite { block: 0, op: 0 }][0].value;
+        let high = ssa.value_high_variables[definition.0 as usize];
+        assert_eq!(
+            ssa.high_variables[high.0 as usize].crossing_guards,
+            vec![store_site, call_site]
+        );
+    }
+
+    #[test]
+    fn validator_rejects_malformed_dynamic_guard() {
+        let pcode = function(vec![vec![op(
+            0x1000,
+            PcodeOpcode::Call,
+            None,
+            vec![Varnode::constant(0x4000, 8)],
+        )]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+        let mut ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        ssa.dynamic_guards
+            .get_mut(&SsaOpSite { block: 0, op: 0 })
+            .unwrap()
+            .effect = SsaMemoryEffect::Read;
+
+        assert!(matches!(
+            validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa),
+            Err(ScalarSsaValidationError::Shape(
+                ScalarSsaShapeError::MalformedDynamicGuard { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn validator_rejects_malformed_high_variable_map() {
+        let pcode = function(vec![vec![copy(
+            0x1000,
+            register(0),
+            Varnode::constant(1, 4),
+        )]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+        let mut ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        ssa.value_high_variables.pop();
+
+        assert!(matches!(
+            validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa),
+            Err(ScalarSsaValidationError::Shape(
+                ScalarSsaShapeError::HighVariableMapLength { .. }
+            ))
+        ));
     }
 
     #[test]

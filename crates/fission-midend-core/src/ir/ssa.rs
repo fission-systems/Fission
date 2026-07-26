@@ -1,10 +1,10 @@
 //! Typed scalar-SSA facts shared by builder, type recovery, and later
 //! out-of-SSA/HighVariable recovery.
 //!
-//! The first Heritage phase intentionally models exact scalar storage
-//! locations only. Overlapping/subregister refinement and memory guards are
-//! separate phases because they change which storage locations are eligible
-//! for SSA, while these types only describe identities after that decision.
+//! Scalar Heritage models guarded register/unique storage, overlapping byte
+//! partitions, dynamic memory/call effects, and the first conservative
+//! out-of-SSA/HighVariable congruence. Memory guards remain facts rather than
+//! promoted scalar values until a stack/object alias model owns that decision.
 
 use std::collections::BTreeMap;
 
@@ -78,6 +78,70 @@ pub struct SsaAccessPiece {
     pub value: SsaValueId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SsaDynamicGuardKind {
+    Load,
+    Store,
+    Call,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SsaMemoryEffect {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SsaGuardRangePrecision {
+    Unknown,
+    Exact,
+    Bounded,
+}
+
+/// Conservative indirect-effect range for a dynamic memory operation or call.
+///
+/// Offsets are half-open. `maximum_offset_exclusive == None` means that no
+/// finite upper bound is proven. Calls use `space_id == None` until a typed
+/// call-effect model can enumerate affected address spaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SsaDynamicGuard {
+    pub site: SsaOpSite,
+    pub kind: SsaDynamicGuardKind,
+    pub effect: SsaMemoryEffect,
+    pub space_id: Option<u64>,
+    pub minimum_offset: u64,
+    pub maximum_offset_exclusive: Option<u64>,
+    pub step: u64,
+    pub precision: SsaGuardRangePrecision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SsaHighVariableId(pub u32);
+
+/// Conservative source-variable congruence recovered from scalar SSA.
+///
+/// The first phase performs forced phi congruence only. `crossing_guards`
+/// records indirect effects crossed by a member's live range so later
+/// speculative coalescing can fail closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SsaHighVariable {
+    pub id: SsaHighVariableId,
+    pub members: Vec<SsaValueId>,
+    pub storage_family: Vec<SsaStorageKey>,
+    pub crossing_guards: Vec<SsaOpSite>,
+}
+
+/// One parallel-copy requirement for destroying a phi on an incoming edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SsaOutOfSsaCopy {
+    pub successor: u32,
+    pub predecessor: u32,
+    pub storage: SsaStorageKey,
+    pub source: SsaValueId,
+    pub destination: SsaValueId,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NirPhiNode {
     pub storage: SsaStorageKey,
@@ -95,6 +159,13 @@ pub struct NirScalarSsa {
     pub operation_inputs: BTreeMap<SsaUseSite, Vec<SsaAccessPiece>>,
     /// Phi nodes keyed by their dense CFG block index.
     pub phis: BTreeMap<u32, Vec<NirPhiNode>>,
+    pub dynamic_guards: BTreeMap<SsaOpSite, SsaDynamicGuard>,
+    /// Parallel copies, ordered by successor, predecessor, then storage.
+    pub out_of_ssa_copies: Vec<SsaOutOfSsaCopy>,
+    /// Dense by `SsaHighVariableId`.
+    pub high_variables: Vec<SsaHighVariable>,
+    /// Dense by `SsaValueId`.
+    pub value_high_variables: Vec<SsaHighVariableId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +211,32 @@ pub enum ScalarSsaShapeError {
     UnsortedPhiPredecessors {
         block: u32,
         output: SsaValueId,
+    },
+    MalformedDynamicGuard {
+        site: SsaOpSite,
+    },
+    UnsortedOutOfSsaCopies,
+    InvalidOutOfSsaCopy {
+        copy: SsaOutOfSsaCopy,
+    },
+    HighVariableMapLength {
+        expected: usize,
+        actual: usize,
+    },
+    NonDenseHighVariable {
+        index: usize,
+        high: SsaHighVariableId,
+    },
+    MalformedHighVariable {
+        high: SsaHighVariableId,
+    },
+    HighVariableMembershipMismatch {
+        value: SsaValueId,
+        expected: SsaHighVariableId,
+        actual: SsaHighVariableId,
+    },
+    MissingHighVariableMember {
+        value: SsaValueId,
     },
 }
 
@@ -246,6 +343,92 @@ impl NirScalarSsa {
             }
         }
 
+        for (site, guard) in &self.dynamic_guards {
+            if guard.site != *site || !guard.is_well_formed() {
+                return Err(ScalarSsaShapeError::MalformedDynamicGuard { site: *site });
+            }
+        }
+
+        if !self
+            .out_of_ssa_copies
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        {
+            return Err(ScalarSsaShapeError::UnsortedOutOfSsaCopies);
+        }
+        for copy in &self.out_of_ssa_copies {
+            require_value(copy.source)?;
+            require_value(copy.destination)?;
+            if self.value(copy.source).expect("validated value").storage != copy.storage
+                || self
+                    .value(copy.destination)
+                    .expect("validated value")
+                    .storage
+                    != copy.storage
+            {
+                return Err(ScalarSsaShapeError::InvalidOutOfSsaCopy { copy: *copy });
+            }
+        }
+
+        if self.value_high_variables.len() != self.values.len() {
+            return Err(ScalarSsaShapeError::HighVariableMapLength {
+                expected: self.values.len(),
+                actual: self.value_high_variables.len(),
+            });
+        }
+        let mut seen_values = vec![false; self.values.len()];
+        for (index, high) in self.high_variables.iter().enumerate() {
+            let expected_id = SsaHighVariableId(index as u32);
+            if high.id != expected_id {
+                return Err(ScalarSsaShapeError::NonDenseHighVariable {
+                    index,
+                    high: high.id,
+                });
+            }
+            if high.members.is_empty()
+                || !high.members.windows(2).all(|pair| pair[0] < pair[1])
+                || !high.storage_family.windows(2).all(|pair| pair[0] < pair[1])
+                || !high
+                    .crossing_guards
+                    .windows(2)
+                    .all(|pair| pair[0] < pair[1])
+                || high
+                    .crossing_guards
+                    .iter()
+                    .any(|site| !self.dynamic_guards.contains_key(site))
+            {
+                return Err(ScalarSsaShapeError::MalformedHighVariable { high: high.id });
+            }
+            let mut actual_storage_family = Vec::new();
+            for member in &high.members {
+                require_value(*member)?;
+                let member_index = member.0 as usize;
+                if seen_values[member_index] {
+                    return Err(ScalarSsaShapeError::MalformedHighVariable { high: high.id });
+                }
+                seen_values[member_index] = true;
+                actual_storage_family.push(self.value(*member).expect("validated value").storage);
+                let actual = self.value_high_variables[member_index];
+                if actual != high.id {
+                    return Err(ScalarSsaShapeError::HighVariableMembershipMismatch {
+                        value: *member,
+                        expected: high.id,
+                        actual,
+                    });
+                }
+            }
+            actual_storage_family.sort_unstable();
+            actual_storage_family.dedup();
+            if actual_storage_family != high.storage_family {
+                return Err(ScalarSsaShapeError::MalformedHighVariable { high: high.id });
+            }
+        }
+        if let Some((index, _)) = seen_values.iter().enumerate().find(|(_, seen)| !**seen) {
+            return Err(ScalarSsaShapeError::MissingHighVariableMember {
+                value: SsaValueId(index as u32),
+            });
+        }
+
         Ok(())
     }
 
@@ -293,5 +476,44 @@ impl NirScalarSsa {
                 && right.storage.space_id == left.storage.space_id
                 && right.storage.offset == next_storage_offset
         })
+    }
+}
+
+impl SsaDynamicGuard {
+    fn is_well_formed(self) -> bool {
+        let expected_effect = match self.kind {
+            SsaDynamicGuardKind::Load => SsaMemoryEffect::Read,
+            SsaDynamicGuardKind::Store => SsaMemoryEffect::Write,
+            SsaDynamicGuardKind::Call => SsaMemoryEffect::ReadWrite,
+        };
+        if self.effect != expected_effect {
+            return false;
+        }
+        if self.kind == SsaDynamicGuardKind::Call
+            && (self.space_id.is_some() || self.precision != SsaGuardRangePrecision::Unknown)
+        {
+            return false;
+        }
+        match self.precision {
+            SsaGuardRangePrecision::Unknown => {
+                self.minimum_offset == 0
+                    && self.maximum_offset_exclusive.is_none()
+                    && self.step == 0
+            }
+            SsaGuardRangePrecision::Exact => {
+                self.maximum_offset_exclusive
+                    .is_some_and(|maximum| maximum > self.minimum_offset)
+                    && self.step == 0
+                    && self.space_id.is_some()
+            }
+            SsaGuardRangePrecision::Bounded => {
+                self.maximum_offset_exclusive
+                    .is_some_and(|maximum| maximum > self.minimum_offset)
+                    && self.space_id.is_some()
+                    && self.maximum_offset_exclusive.is_some_and(|maximum| {
+                        self.step == 0 || self.step <= maximum - self.minimum_offset
+                    })
+            }
+        }
     }
 }
