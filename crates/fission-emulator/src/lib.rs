@@ -8,6 +8,14 @@ pub mod trace;
 pub mod sym;
 pub mod jit;
 pub mod metrics;
+// Unix-only: `codebuf.rs`'s executable-memory management is written
+// directly against `libc::mmap`/`mprotect`/`munmap`, which don't exist on
+// Windows (`libc`'s Windows build has none of the POSIX mmap API). selfjit
+// is an experimental, not-yet-wired-in JIT backend (see its own module doc)
+// with no callers outside this module, so gating the whole thing out on
+// Windows rather than porting `codebuf.rs` to `VirtualAlloc`/`VirtualProtect`
+// is the right scope for now.
+#[cfg(unix)]
 pub mod selfjit;
 pub mod srd;
 
