@@ -57,17 +57,18 @@
 //! proof). As of this phase, `selfjit::differential`'s two hand-picked
 //! real-corpus fixtures both replay with **zero unsupported-opcode
 //! skips** -- every TB either backend reaches from those entry points now
-//! matches cleanly -- and a third, broader test walks entry-point TBs
-//! across all 16 binaries `scripts/quality/golden_corpus_check.py` uses,
-//! also clean (see `selfjit::differential`'s own doc for the honest
-//! caveat: that sweep is shallow -- CRT startup only, not each family's
-//! real logic -- reaching deeper needs per-binary symbol resolution, not
-//! attempted here). The >8-byte `Load`/`Store` path is done now too (a
-//! fixed per-TB scratch buffer, `compiler.rs`'s own `SCRATCH_BUF_BYTES`
-//! doc has the full story). The remaining real gap is `CallOther` (item 1
-//! below) -- it needs *more* than the scratch buffer alone: writing its
-//! variadic arguments into that buffer directly from native code, a
-//! primitive this file doesn't have yet (see `compiler.rs`'s own doc).
+//! matches cleanly -- and two broader sweeps, one across all 16 binaries
+//! `scripts/quality/golden_corpus_check.py` uses from their raw entry
+//! points, one from each of those same 16 binaries' own `main` function
+//! (reaching real family-specific logic -- `crypto`'s real hashing,
+//! `math`'s real arithmetic, not just shared CRT startup), are also both
+//! clean (see `selfjit::differential`'s own doc for both). The >8-byte
+//! `Load`/`Store` path is done now too (a fixed per-TB scratch buffer,
+//! `compiler.rs`'s own `SCRATCH_BUF_BYTES` doc has the full story). The
+//! remaining real gap is `CallOther` (item 1 below) -- it needs *more*
+//! than the scratch buffer alone: writing its variadic arguments into
+//! that buffer directly from native code, a primitive this file doesn't
+//! have yet (see `compiler.rs`'s own doc).
 //!
 //! Closing that gap by writing a second Cranelift (full instruction
 //! selection + register allocation + multi-ISA emission) would be a

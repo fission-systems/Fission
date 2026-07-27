@@ -434,15 +434,18 @@ mod tests {
     /// *correctness* divergences specifically, not universal harness
     /// robustness across every binary format/arch variant.
     ///
-    /// Honest caveat: every binary here reports `matched=4` -- all 16 hit
-    /// the same wall after their shared CRT startup path (same toolchain,
+    /// Honest caveat (now addressed by
+    /// `selfjit_matches_cranelift_across_golden_corpus_main_functions`
+    /// below): every binary here reports `matched=4` -- all 16 hit the
+    /// same wall after their shared CRT startup path (same toolchain,
     /// same libc init sequence), not their family-specific logic
     /// (`crypto`'s real hashing, `math`'s real arithmetic, etc.). Still a
     /// genuine addition, not a redundant rerun: real, independently-
     /// compiled machine code and memory content per binary, not the same
-    /// bytes 16 times -- but reaching deeper (each family's actual `main`
-    /// or a named function) needs per-binary symbol-address resolution,
-    /// a separate undertaking not attempted here.
+    /// bytes 16 times -- kept alongside the deeper sweep rather than
+    /// replaced by it, since it's much cheaper (no per-binary symbol
+    /// resolution, walks a handful of TBs instead of dozens) and still
+    /// catches anything the CRT startup path itself might regress.
     #[test]
     fn selfjit_matches_cranelift_across_golden_corpus_entry_points() {
         const FAMILIES: [&str; 8] = [

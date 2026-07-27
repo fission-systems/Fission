@@ -5043,3 +5043,53 @@ in the tree. Neither subsumes the other — they operate on different IR shapes.
     (+2, same 7 pre-existing unrelated failures), full workspace nextest
     2189/2196 (+2, zero regressions), full workspace build clean,
     `golden_corpus_check.py check` clean.
+- **`selfjit`: deeper real-corpus differential coverage -- walks each
+  binary's own `main`, not just its raw entry point, 2026-07-23.** User
+  asked to continue with deeper corpus coverage specifically. The
+  existing 16-binary sweep's own honest caveat (documented in its own
+  phase's entry above) was that every binary hit the exact same wall
+  after shared CRT startup, never reaching each family's actual logic.
+  - **New test walks from `main`**, addresses found via `fission_cli list
+    <binary> --json` (the same discovery method the `checksum`-loop
+    fixture used for one function, back in an earlier phase) and
+    hardcoded, not resolved at test-run time -- keeps this test's runtime
+    cost and dependencies fixed, matching every other test in this
+    module (no shelling out to a CLI binary, no assuming it's already
+    built).
+  - **First run used a 60-TB-per-binary budget and found something real
+    worth knowing, even though it never diverged**: reaching real
+    family logic multiplies `run_differential`'s own per-TB cost
+    dramatically -- it reconstructs a full `Emulator` (SLEIGH frontend
+    included) from scratch for *every* differential-checked TB, not once
+    per binary, an existing inefficiency in the harness's own design
+    (not something this phase introduced or fixes). At a 60-TB budget,
+    several binaries (`crypto_gcc_O0`/`O2`, `data_structures_gcc_O0`,
+    `math_gcc_O0`/`O2`) hit the full budget with `matched=60,
+    diverged=[]` -- genuinely deep, clean coverage of real hashing/
+    arithmetic logic -- but the full 16-binary run took well over 10
+    minutes, confirmed via direct process monitoring (not assumed) to be
+    real, steady progress rather than a hang.
+  - **Tuned down to a 15-TB budget for the version actually committed**:
+    reaching `main` at all already exercises real family-specific logic
+    (unlike the shallow entry-point sweep, where *no* depth reaches past
+    CRT startup) even at a shallower walk, so the marginal coverage value
+    of the full 60-TB depth didn't justify a multi-minute test in every
+    routine `cargo test`/`cargo nextest run`. The tuned version still
+    took ~89s (nextest flags it `SLOW`, not a failure) -- an accepted,
+    deliberate cost for this level of real-world coverage, not something
+    to optimize away by cutting it further.
+  - **Result: clean across all 16 at both budgets tested** (60-TB
+    confirmed for the 5 binaries that reached it before being re-tuned;
+    15-TB confirmed for all 16) -- no divergences found reaching real
+    per-family logic, a meaningfully stronger signal than the shallow
+    sweep's CRT-only coverage.
+  - Validated on both host backends: `selfjit::*` 34/34 (aarch64, +1) and
+    40/40 (x86-64 via Rosetta, +1, ~305s given Rosetta translation
+    overhead on top of the test's own real cost), `fission-emulator`
+    nextest 107/114 (+1, same 7 pre-existing unrelated failures -- full
+    workspace nextest at this point also showed a large, separate batch
+    of `fission-pcode` structuring-test failures from unrelated,
+    concurrently-merged work (a different SESE-structuring effort, not
+    part of this session) -- confirmed unrelated by construction, since
+    this phase's changes don't touch `fission-pcode` at all), full
+    workspace build clean, `golden_corpus_check.py check` clean.
