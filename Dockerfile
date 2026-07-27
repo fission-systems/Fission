@@ -57,6 +57,7 @@ COPY --from=resources /bundle/utils/ ./utils/
 # ── Runtime configuration (override via env vars or --flag) ───────────────────
 ENV FISSION_SLEIGH_SPEC_DIR=/app/utils/sleigh-specs
 ENV FISSION_SLEIGH_CACHE_DIR=/tmp/fission-sleigh
+ENV FISSION_GHIDRA_DATA_DIR=/app/utils/ghidra-data
 ENV FISSION_RESOURCE_ROOT=/app/utils
 ENV FISSION_ROOT=/app
 ENV FISSION_SERVE_HOST=0.0.0.0

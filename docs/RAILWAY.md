@@ -10,6 +10,10 @@ before either the Rust build or runtime image can use it. When updating
 `FISSION_UTILS_TAG` in `Dockerfile`, update `FISSION_UTILS_SHA256` from the same
 release asset at the same time.
 
+The runtime explicitly maps the packaged SLEIGH specifications and Ghidra
+opinion data through `FISSION_SLEIGH_SPEC_DIR` and
+`FISSION_GHIDRA_DATA_DIR`.
+
 ## Required service variables
 
 ```text
