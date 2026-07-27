@@ -36,8 +36,8 @@ pub struct ServeConfig {
     pub api_token: Option<String>,
 
     /// CORS allowed origins (comma-separated, can repeat flag).
-    /// Defaults include localhost ports for local development and
-    /// the canonical Vercel deployment.
+    /// Defaults include localhost ports for local development. Production uses
+    /// the same-origin Railway gateway and does not require browser CORS.
     #[arg(
         long,
         value_delimiter = ',',
@@ -45,7 +45,6 @@ pub struct ServeConfig {
             "http://localhost:3000",
             "http://localhost:8080",
             "http://localhost:7331",
-            "https://fission-system-web.vercel.app",
         ],
         env = "FISSION_ALLOWED_ORIGINS"
     )]
@@ -66,7 +65,6 @@ impl Default for ServeConfig {
                 "http://localhost:3000".into(),
                 "http://localhost:8080".into(),
                 "http://localhost:7331".into(),
-                "https://fission-system-web.vercel.app".into(),
             ],
         }
     }

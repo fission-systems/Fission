@@ -14,7 +14,7 @@ release asset at the same time.
 
 ```text
 FISSION_SERVE_API_TOKEN=<random value of at least 32 characters>
-FISSION_ALLOWED_ORIGINS=https://<fission-web-domain>
+PORT=7331
 ```
 
 Generate the token locally and store it only in Railway and the analyst's
@@ -24,7 +24,7 @@ browser session:
 openssl rand -hex 32
 ```
 
-Do not put the token in the Vercel build environment: values compiled into a
+Do not put the token in any frontend build environment: values compiled into a
 WASM bundle are public. The web client prompts for the token and keeps it only
 in memory.
 
@@ -39,16 +39,21 @@ RUST_LOG=fission_serve=info,tower_http=info
 
 ## Deploy
 
-1. Create a Railway service from `fission-systems/Fission`.
+1. Create the private `fission-backend` Railway service from
+   `fission-systems/Fission`.
 2. Keep the repository root as the service root. Railway detects `Dockerfile`
    and `railway.json`.
-3. Configure the required variables before the first deployment.
-4. Generate a public Railway domain.
-5. Build `fission-web` with `FISSION_WEB_API_URL` set to that HTTPS domain.
-6. Open the web application and enter the bearer token when connecting.
+3. Configure the required backend variables before the first deployment.
+4. Create the public `fission-web` service from
+   `fission-systems/fission-web`.
+5. Keep both services in the same Railway project and environment.
+6. Generate a public domain only for `fission-web`.
+7. Open the web application and enter the bearer token when connecting.
 
-`/healthz` is intentionally public for Railway deployment healthchecks. All
-`/api/*` routes require the configured bearer token in cloud mode.
+The public Nginx service serves the WASM application and proxies same-origin
+`/api/*` requests to `fission-backend.railway.internal:7331`. The backend does
+not need a public domain. Its `/api/*` routes still require the configured
+bearer token in cloud mode.
 
 ## Current scaling boundary
 
