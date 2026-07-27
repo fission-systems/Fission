@@ -1071,6 +1071,12 @@ memory, not in the build.</p>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>RUST_LOG=fission_serve=info,tower_http=info
 </span></code></pre></div>
 <h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
+<p>Both services deploy on a <strong>version-tag push</strong>, not on every push to <code>main</code>.
+<code>fission-backend</code> deploys via a <code>cd.yml</code> job (<code>deploy-railway-backend</code>) that
+runs after the same L0/L1/L2-gated tag build the CLI release assets go
+through; <code>fission-web</code> deploys the matching way from its own repo. Railway's
+own GitHub auto-deploy is turned <strong>off</strong> for both services -- pushing to
+<code>main</code> alone no longer ships anything.</p>
 <ol>
 <li>Create the private <code>fission-backend</code> Railway service from
    <code>fission-systems/Fission</code>.</li>
@@ -1082,8 +1088,22 @@ memory, not in the build.</p>
    <code>fission-systems/fission-web</code>.</li>
 <li>Keep both services in the same Railway project and environment.</li>
 <li>Generate a public domain only for <code>fission-web</code>.</li>
+<li>In each service's Railway dashboard settings (Source), disable
+   auto-deploy-on-push, or point the tracked branch at something that never
+   moves -- deploys should only come from the tag-triggered GitHub Actions
+   job below.</li>
+<li>Create a Railway <strong>project token</strong> scoped to this project/environment
+   (Project Settings → Tokens) and add it as the <code>RAILWAY_TOKEN</code> secret in
+   both the <code>fission-systems/Fission</code> and <code>fission-systems/fission-web</code>
+   GitHub repos.</li>
+<li>Push a version tag (<code>vX.Y.Z</code>) to deploy. <code>fission-backend</code> deploys from
+   <code>fission-systems/Fission</code>'s tag via <code>cd.yml</code>;
+   <code>fission-web</code> deploys from its own matching tag, pinned to the same
+   Fission release through its <code>fission-ui</code> git dependency (<code>Cargo.toml</code>:
+   <code>fission-ui = { git = "...", tag = "vX.Y.Z" }</code> instead of tracking <code>main</code>
+   HEAD).</li>
 <li>Open the web application -- it connects automatically; no token needed
-   unless you configured one in step 3.</li>
+    unless you configured one in step 3.</li>
 </ol>
 <p>The public Nginx service serves the WASM application and proxies same-origin
 <code>/api/*</code> requests to <code>fission-backend.railway.internal:7331</code>, rate-limiting
