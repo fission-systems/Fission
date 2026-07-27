@@ -1054,6 +1054,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#release-gate-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release-gate fixes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#known-issues" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1299,6 +1310,31 @@ note):</p>
   organization (<code>36918a6c</code>); all cross-repo references (including
   <code>fission-web</code>'s <code>fission-ui</code> git dependency and Railway deploy configs)
   now point at <code>fission-systems/Fission</code>.</li>
+</ul>
+<h2 id="release-gate-fixes">Release-gate fixes<a class="headerlink" href="#release-gate-fixes" title="Permanent link">&para;</a></h2>
+<p>Found and fixed while cutting this release itself (CI Heavy failed on the
+version-bump commit; all four were real, pre-existing issues on <code>main</code>
+unrelated to the work above, not caused by the version bump):</p>
+<ul>
+<li>Reverted an over-broad "keep write-only stack locals declared" rule
+  (<code>446dc4b9</code>) that let a genuinely-dead stack-resident shadow of a
+  heritage-promoted variable linger long enough to break loop-condition
+  folding elsewhere; the undeclared-identifier bug it was meant to fix is
+  still closed by the existing end-of-pipeline rescue pass.</li>
+<li>Flipped collapse-loop virtualization (<code>347a4343</code>) back to opt-in
+  (<code>FISSION_COLLAPSE_LOOP=1</code>) after it broke real switch-structuring by
+  defaulting on; the feature itself is untouched, just not default yet.</li>
+<li>Added a missing side-effect guard to a live-return-register recovery
+  fallback (<code>446dc4b9</code>) that was synthesizing a return value for a register
+  already consumed by an unrelated store before a genuine void return.</li>
+<li>Gated <code>fission-emulator</code>'s <code>selfjit</code> module to <code>#[cfg(unix)]</code> -- its
+  executable-memory management is written directly against
+  <code>libc::mmap</code>/<code>mprotect</code>, which don't exist on Windows, and nothing
+  outside the module depends on it yet.</li>
+<li>Cleared 8 pre-existing <code>clippy -D warnings</code> failures and 3 <code>cargo-deny</code>
+  license rejections (BSL-1.0, NCSA -- both OSI-approved/FSF-Free,
+  transitive via <code>arboard</code>'s desktop clipboard support) that were also
+  independently blocking the Fast Gate.</li>
 </ul>
 <h2 id="known-issues">Known issues<a class="headerlink" href="#known-issues" title="Permanent link">&para;</a></h2>
 <ul>
