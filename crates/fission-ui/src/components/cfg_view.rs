@@ -28,7 +28,6 @@ fn node_h(n: &CfgNodeData) -> f64 {
 #[derive(Clone)]
 struct LNode {
     idx: usize,
-    layer: usize,
     x: f64,
     y: f64,
     h: f64,
@@ -162,7 +161,6 @@ fn compute_layout(cfg: &CfgGraphData) -> Vec<LNode> {
     let mut result = vec![
         LNode {
             idx: 0,
-            layer: 0,
             x: 0.0,
             y: 0.0,
             h: NODE_H_BASE
@@ -173,7 +171,6 @@ fn compute_layout(cfg: &CfgGraphData) -> Vec<LNode> {
         for (pos, &idx) in group.iter().enumerate() {
             result[idx] = LNode {
                 idx,
-                layer: l,
                 x: SVG_PAD + pos as f64 * (NODE_W + NODE_GAP),
                 y: layer_y[l],
                 h: node_h(&cfg.nodes[idx]),

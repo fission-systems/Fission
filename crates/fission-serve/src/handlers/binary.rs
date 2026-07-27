@@ -18,12 +18,11 @@ pub async fn handle_upload_binary(
 ) -> impl IntoResponse {
     // Extract the file field from the multipart body
     let mut data: Option<(String, Vec<u8>)> = None;
-    while let Ok(Some(field)) = multipart.next_field().await {
+    if let Ok(Some(field)) = multipart.next_field().await {
         let name = field.file_name().unwrap_or("binary").to_string();
         match field.bytes().await {
             Ok(bytes) => {
                 data = Some((name, bytes.to_vec()));
-                break;
             }
             Err(e) => {
                 return (

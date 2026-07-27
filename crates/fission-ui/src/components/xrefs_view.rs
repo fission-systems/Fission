@@ -4,7 +4,6 @@
 //! triggers auto-decompile, and switches the bottom panel to Output.
 
 use crate::components::sidebar::run_decompile;
-use crate::engine::XrefRow;
 use crate::state::{use_app_state, BottomTab, FunctionKind, LogEntry};
 use dioxus::prelude::*;
 

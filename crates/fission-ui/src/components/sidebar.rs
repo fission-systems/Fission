@@ -3,7 +3,6 @@
 //!   • Virtual scroll — only renders the visible window of items
 //!   • Import / Thunk classification before decompile
 
-use crate::engine::DecompileOutput;
 use crate::state::{use_app_state, AppState, FunctionKind, LogEntry, SidebarKindFilter};
 use dioxus::prelude::*;
 use std::sync::Arc;

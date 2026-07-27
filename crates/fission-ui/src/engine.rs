@@ -229,8 +229,6 @@ mod native {
     /// `.rdata`/`.rodata` and string-literal analysis). Falls back to a raw
     /// ASCII scan if string_map is empty, so something is always shown.
     pub fn extract_strings_blocking(binary: &LoadedBinary) -> Vec<BinaryString> {
-        use fission_loader::loader::SectionInfo;
-
         // Helper: find which section a virtual address falls into
         let section_for = |va: u64| -> String {
             binary.sections.iter()

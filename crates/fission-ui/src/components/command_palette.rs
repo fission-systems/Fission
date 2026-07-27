@@ -9,7 +9,6 @@
 
 use crate::state::{use_app_state, AppState, FunctionKind, LogEntry};
 use dioxus::prelude::*;
-use std::sync::Arc;
 
 // ── SVG icons (palette-local) ────────────────────────────────────────────────
 
@@ -99,7 +98,7 @@ pub fn CommandPalette() -> Element {
 
     // ── Keyboard handler (on the palette card) ───────────────────────────────
     let results_key = std::sync::Arc::clone(&results);
-    let mut handle_key = move |e: Event<KeyboardData>| match e.key() {
+    let handle_key = move |e: Event<KeyboardData>| match e.key() {
         Key::Escape => {
             let mut s = state.write();
             s.is_palette_open = false;
@@ -193,7 +192,7 @@ pub fn CommandPalette() -> Element {
                     }
                 } else {
                     div { class: "palette-results",
-                        for (idx, (score, name, addr, is_import, is_thunk, lib, thunk_target)) in results.iter().enumerate() {
+                        for (idx, (_score, name, addr, is_import, is_thunk, lib, thunk_target)) in results.iter().enumerate() {
                             {
                                 let is_focused = idx == focused;
                                 let display = if name.is_empty() {

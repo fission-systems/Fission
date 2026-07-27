@@ -122,6 +122,14 @@ allow = [
     # Transitive via Dioxus/reqwest dependencies
     "CC0-1.0",
     "CDLA-Permissive-2.0",
+    # Transitive via arboard (desktop clipboard support) -- clipboard-win and
+    # its own error-code dependency on the Windows target. Permissive,
+    # OSI-approved, FSF Free/Libre.
+    "BSL-1.0",
+    # Transitive via arboard -> image -> ravif -> rav1e -> libfuzzer-sys
+    # (part of rav1e's own dev/fuzz tooling, not code this workspace calls).
+    # Permissive, OSI-approved, FSF Free/Libre.
+    "NCSA",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the

@@ -515,6 +515,7 @@ pub fn Editor() -> Element {
                                 title: "Copy pseudocode to clipboard",
                                 onclick: move |_| {
                                     let code = state.read().editor_code().map(str::to_string);
+                                    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
                                     if let Some(code) = code {
                                         #[cfg(not(target_arch = "wasm32"))]
                                         {
