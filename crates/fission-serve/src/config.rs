@@ -31,7 +31,11 @@ pub struct ServeConfig {
     #[arg(long, default_value_t = false, env = "FISSION_CLOUD_MODE")]
     pub cloud_mode: bool,
 
-    /// Bearer token required by cloud-mode API routes.
+    /// Optional bearer token for cloud-mode API routes. When unset, cloud
+    /// mode relies on the deployment's own front door (e.g. an nginx
+    /// `limit_req` gateway) for abuse protection instead of auth -- see
+    /// `fission-web/deploy/nginx/default.conf.template` for the reference
+    /// setup this option is meant to pair with.
     #[arg(long, env = "FISSION_SERVE_API_TOKEN")]
     pub api_token: Option<String>,
 
@@ -72,16 +76,16 @@ impl Default for ServeConfig {
 
 impl ServeConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if self.cloud_mode
-            && self
-                .api_token
-                .as_deref()
-                .is_none_or(|token| token.trim().len() < 32)
-        {
-            return Err(
-                "cloud mode requires FISSION_SERVE_API_TOKEN with at least 32 characters"
-                    .to_string(),
-            );
+        // Cloud mode no longer *requires* a token -- a deployment can rely
+        // on a front-door rate limiter instead (see `api_token`'s own doc).
+        // A token, if supplied, still has to be a real secret, not a short
+        // placeholder someone forgot to fill in.
+        if let Some(token) = self.api_token.as_deref() {
+            if token.trim().len() < 32 {
+                return Err(
+                    "FISSION_SERVE_API_TOKEN, if set, must be at least 32 characters".to_string(),
+                );
+            }
         }
         Ok(())
     }
@@ -97,13 +101,21 @@ mod tests {
     }
 
     #[test]
-    fn cloud_mode_rejects_missing_or_short_tokens() {
-        let mut config = ServeConfig {
+    fn cloud_mode_without_a_token_relies_on_the_front_door_rate_limiter() {
+        let config = ServeConfig {
             cloud_mode: true,
             ..ServeConfig::default()
         };
-        assert!(config.validate().is_err());
-        config.api_token = Some("short".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn cloud_mode_rejects_a_short_token_if_one_is_set() {
+        let config = ServeConfig {
+            cloud_mode: true,
+            api_token: Some("short".to_string()),
+            ..ServeConfig::default()
+        };
         assert!(config.validate().is_err());
     }
 
