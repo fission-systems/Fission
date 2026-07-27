@@ -1,0 +1,1376 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/changelog/v0.1.7/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Fission v0.1.7 - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#fission-v017" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Fission v0.1.7
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../v0.1.5/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#release-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#self-implemented-jit-selfjit-toward-removing-the-cranelift-dependency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-implemented JIT (selfjit) — toward removing the Cranelift dependency
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#browser-frontend-shared-ui-crate-and-cloud-api-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browser frontend, shared UI crate, and cloud API server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dir-an-independently-validated-decompiler-product-not-a-hir-clone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DIR: an independently-validated decompiler product, not a HIR clone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#structuring-and-ssaheritage-correctness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Structuring and SSA/heritage correctness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#desktop-gui-fission-dioxus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Desktop GUI (fission-dioxus)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other fixes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known issues
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="fission-v017">Fission v0.1.7<a class="headerlink" href="#fission-v017" title="Permanent link">&para;</a></h1>
+<p>Fission 0.1.7 is a <strong>new-frontends and JIT-independence</strong> release. Where
+0.1.6 closed a debug-info and Ghidra-parity audit, 0.1.7's headline work is
+architectural: a self-implemented AArch64/x86-64 JIT (<code>selfjit</code>) that is now
+differentially verified against Cranelift across a real 16-binary corpus and
+covers the large majority of opcodes real functions use, a browser-native
+frontend (<code>fission-web</code>) sharing all UI logic with the desktop app through a
+newly-extracted <code>fission-ui</code> crate and a new multi-user HTTP API server
+(<code>fission-serve</code>), and a genuine architectural split between DIR and HIR
+that makes DIR an independent IR rather than a HIR-shaped clone. Alongside
+these, a run of real structuring and SSA/heritage correctness fixes were
+found and fixed via continued Ghidra-parity auditing, and the desktop GUI
+gained a full round of feature and performance work (command palette,
+virtual scroll, CFG/Xrefs viewers, batch decompile, FactStore caching).</p>
+<p>This remains a pre-1.0 minor release: the documented CLI is the primary
+interface. <strong>NIR remains the semantic oracle</strong>; HIR is a clone-only
+readability polish layer, and DIR is now explicitly independent of both.</p>
+<p>Tagged commit: <code>&lt;filled in by the tagging workflow&gt;</code>
+Release: https://github.com/fission-systems/Fission/releases/tag/v0.1.7</p>
+<h2 id="release-summary">Release summary<a class="headerlink" href="#release-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>v0.1.6</th>
+<th>v0.1.7</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>JIT backend</td>
+<td>Cranelift-only; <code>selfjit</code> scaffold existed but covered a handful of opcodes and had no differential verification</td>
+<td><code>selfjit</code> covers ~40+ p-code opcodes (all <code>Float*</code>, <code>Load</code>/<code>Store</code> narrow+wide, <code>Call</code>/<code>CallInd</code>/<code>BranchInd</code>/<code>Return</code>/<code>MultiEqual</code>/<code>Indirect</code>, <code>Extract</code>/<code>Insert</code>, <code>PtrAdd</code>/<code>PtrSub</code>/<code>Piece</code>/<code>SubPiece</code>/<code>LzCount</code>, <code>IntCarry</code>/<code>IntSCarry</code>/<code>IntSBorrow</code>/<code>PopCount</code>, <code>SegmentOp</code>, intra-instruction relative branch loops), an x86-64 host backend (verified via Rosetta), and a differential-testing harness run against a 16-binary real corpus including deep per-function coverage from each binary's actual <code>main()</code>; two real Cranelift-parity bugs found and fixed along the way</td>
+</tr>
+<tr>
+<td>Frontends</td>
+<td>Desktop only (<code>fission-dioxus</code>)</td>
+<td>UI logic extracted into a shared <code>fission-ui</code> crate; a new browser-native <code>fission-web</code> (Dioxus WASM) frontend reuses it entirely, talking to a new multi-user <code>fission-serve</code> HTTP API server through a portable analysis-backend protocol (native / local-http / cloud-http / browser-worker)</td>
+</tr>
+<tr>
+<td>Cloud deployment</td>
+<td>None</td>
+<td><code>fission-serve</code> + <code>fission-web</code> deployable to Railway; abuse protection is nginx per-client-IP rate limiting at the gateway (bearer-token auth kept as an opt-in, not required)</td>
+</tr>
+<tr>
+<td>DIR product</td>
+<td>DIR was effectively a HIR-shaped clone, verified only by diffing two snapshots of the same static pipeline</td>
+<td>Pre-structuring substrate renamed to <code>PreHir*</code> (<code>fission-midend-prehir</code>, no assurance, never the oracle); a new <code>fission-dir</code> product crate (renamed from <code>fission-verify</code>) reconstructs a p-code-rooted candidate and validates it via <code>fission-emulator</code> + <code>fission-solver</code>, rejecting rather than approximating unsupported cases</td>
+</tr>
+<tr>
+<td>Structuring / SSA correctness</td>
+<td>—</td>
+<td>Several real bugs found via continued Ghidra-parity auditing: orphan loop-continue/break rewriting, wide-stride struct field recovery, XMM float-lane retyping, multi-emitted label stripping after infinite-loop regions, heritage SSA + ownership facts, typed memory heritage promotion, overlapping scalar storage refinement</td>
+</tr>
+<tr>
+<td>Desktop GUI</td>
+<td>Baseline Dioxus GUI</td>
+<td>Command palette, virtual scroll, drag-resize panels, CFG viewer, Xrefs viewer, batch decompile, nav history (Back/Forward), View menu, Ctrl+F find bar, strings browser, inline rename, hex view; migrated to Dioxus 0.7; FactStore caching/preload removes per-decompile rebuild cost</td>
+</tr>
+</tbody>
+</table>
+<h2 id="self-implemented-jit-selfjit-toward-removing-the-cranelift-dependency">Self-implemented JIT (<code>selfjit</code>) — toward removing the Cranelift dependency<a class="headerlink" href="#self-implemented-jit-selfjit-toward-removing-the-cranelift-dependency" title="Permanent link">&para;</a></h2>
+<p><code>selfjit</code> is a from-scratch AArch64-host JIT compiler for p-code translation
+blocks, built as a drop-in alternative <code>TbBackend</code> next to the existing
+Cranelift-backed <code>JitCompiler</code>. This release is the bulk of the work toward
+the documented end goal of retiring <code>cranelift-*</code> from the dependency tree
+entirely (not yet done — <code>Emulator</code>'s default backend is still Cranelift).</p>
+<ul>
+<li>Implemented <code>Load</code>/<code>Store</code> (narrow and &gt;8-byte wide paths), all 18
+  <code>Float*</code> opcodes, <code>Call</code>/<code>CallInd</code>/<code>BranchInd</code>/<code>Return</code>/<code>MultiEqual</code>/
+  <code>Indirect</code>, <code>Extract</code>/<code>Insert</code>, <code>PtrAdd</code>/<code>PtrSub</code>/<code>Piece</code>/<code>SubPiece</code>/
+  <code>LzCount</code>, <code>IntCarry</code>/<code>IntSCarry</code>/<code>IntSBorrow</code>/<code>PopCount</code>, <code>SegmentOp</code>, and
+  intra-instruction relative <code>Branch</code>/<code>CBranch</code> loops (TZCNT-style p-code
+  loops that previously made <code>selfjit</code> refuse to compile the containing TB).</li>
+<li>Implemented and verified an x86-64 host backend, exercised on Apple
+  Silicon via Rosetta since no native x86-64 dev machine was available.</li>
+<li>Built a differential-testing harness that captures real <code>GuestInsn</code>
+  sequences from real corpus binaries, compiles and runs each translation
+  block through both <code>JitCompiler</code> and <code>SelfJitCompiler</code> independently, and
+  diffs the resulting register-space bytes. Widened from a handful of
+  synthetic cases to a 16-binary corpus sweep, then to deep coverage walking
+  from each binary's actual <code>main()</code> entry point rather than only shared CRT
+  startup code.</li>
+<li>Two real Cranelift-parity bugs found and fixed purely because the
+  differential harness exercised real code the synthetic unit tests never
+  reached: signed narrow-operand sign-extension, and shift-amount clamping
+  to a value's declared width. A third, pre-existing bug in the <em>Cranelift</em>
+  JIT itself was also found and fixed (<code>ensure_var!</code>'s <code>Variable</code> cache was
+  keyed by <code>(space, offset)</code> only, not size, silently aliasing distinct
+  widths at the same offset).</li>
+<li>Fixed a related emulator bug found along the way: intra-instruction
+  relative branch deltas were miscomputed against the wrong instruction
+  boundary.</li>
+</ul>
+<h2 id="browser-frontend-shared-ui-crate-and-cloud-api-server">Browser frontend, shared UI crate, and cloud API server<a class="headerlink" href="#browser-frontend-shared-ui-crate-and-cloud-api-server" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>fission-ui</code></strong>: the desktop GUI's state, engine, and component logic
+  (sidebar, editor, CFG view, command palette, xrefs view, bottom panel)
+  extracted into a shared crate. <code>fission-dioxus</code> (desktop) and the new
+  <code>fission-web</code> (browser) both consume it; only platform-specific glue
+  (title bar, file I/O, dropzone) lives in each frontend crate itself.</li>
+<li><strong><code>fission-serve</code></strong>: a new multi-user, session-based decompilation HTTP
+  API server (<code>/api/status</code>, <code>/api/binary</code>, <code>/api/functions/:session</code>,
+  <code>/api/decompile/:session/:addr</code>, <code>/api/xrefs/:session/:addr</code>,
+  <code>/api/session/:session</code>), reachable via <code>fission_cli serve</code> or the
+  standalone binary. Sessions are TTL-swept and bounded by a configurable
+  max-session count and upload size.</li>
+<li><strong><code>fission-analysis-protocol</code></strong>: a portable <code>BackendCapabilities</code>/
+  <code>StatusResponse</code> contract describing what a connected backend can do
+  (native process, local HTTP, cloud HTTP, or in-browser worker; resource
+  access mode; whether it accepts binary uploads or executes on the
+  client), so <code>fission-ui</code> can render an accurate connection status
+  regardless of which backend it's actually talking to.</li>
+<li><strong>Railway cloud deployment</strong>: <code>fission-serve</code> + <code>fission-web</code> are
+  deployable to Railway as a private-backend/public-gateway pair. The
+  original design required a mandatory bearer token in cloud mode; this was
+  changed mid-release to make the token optional, with nginx per-client-IP
+  rate limiting at the <code>fission-web</code> gateway as the default abuse guard
+  instead (see <code>docs/RAILWAY.md</code>). Getting rate limiting actually working
+  required two failed attempts (keying on the raw TCP peer address, then on
+  <code>ngx_http_realip_module</code>'s CIDR trust chain) before landing on directly
+  extracting the first <code>X-Forwarded-For</code> entry — Railway's edge proxies
+  through multiple undocumented, rotating internal hops that defeated both
+  earlier approaches.</li>
+<li>Deployment itself moves from "every push to <code>main</code> auto-deploys" to
+  tag-triggered: a new <code>cd.yml</code> job deploys the exact tagged commit to
+  Railway after the existing release gates pass, and <code>fission-web</code> pins its
+  <code>fission-ui</code> git dependency to the matching Fission release tag instead of
+  floating on <code>main</code> HEAD.</li>
+</ul>
+<h2 id="dir-an-independently-validated-decompiler-product-not-a-hir-clone">DIR: an independently-validated decompiler product, not a HIR clone<a class="headerlink" href="#dir-an-independently-validated-decompiler-product-not-a-hir-clone" title="Permanent link">&para;</a></h2>
+<p>The pre-structuring decompiler IR was, in practice, shaped like a clone of
+HIR, and the original DIR/HIR verifier just diffed two snapshots from the
+same static pipeline — a check blind to any bug the two snapshots shared.
+This release replaces that with a genuinely independent, p-code-rooted
+product, landing in stages culminating in an explicit architecture proposal
+(<code>docs/proposals/2026-07-26-dir-product-foundation-refactor.md</code>,
+<code>docs/adr/0014-dir-product-vs-prestructure-substrate.md</code>):</p>
+<ul>
+<li>The static pre-structuring substrate's <code>Dir*</code> types were mechanically
+  renamed to <code>PreHir*</code> and now live in <code>fission-midend-prehir</code> (split out of
+  <code>fission-midend-core</code>) — explicitly documented as internal pipeline
+  substrate that carries no assurance and is never the semantic oracle.</li>
+<li><code>fission-verify</code> (the crate that built the emulator-grounded and
+  solver-backed differential checking this release started with) was
+  renamed and refactored into the new <code>fission-dir</code> product crate. It now
+  owns an independent p-code-rooted reconstruction with an explicit
+  assurance report: a first <code>PcodeNative</code> candidate slice (contiguous,
+  side-effect-free single-block integer regions, with a typed expression
+  rather than parsed pseudocode as its executable meaning) is validated by
+  replaying the original operations through <code>fission-emulator</code> for concrete
+  observations and proved or refuted universally by <code>fission-solver</code>, with
+  solver counterexamples replayed back through the emulator before being
+  surfaced. Memory, calls, control flow, wide values, and overlapping
+  storage are rejected outright rather than approximated. The earlier
+  three-tier PreHIR/HIR differential comparison (concrete eval/diff,
+  emulator ground-truth, solver-backed symbolic) is kept as transitional
+  backend infrastructure inside this crate, not as the product's oracle.</li>
+<li>A <code>fission_cli decomp --dir</code> flag (plus a Python-side consistency check)
+  exposes this validated product from the CLI. One real HIR content-loss
+  bug was found and fixed while building the earlier differential-tier
+  infrastructure this replaced.</li>
+</ul>
+<h2 id="structuring-and-ssaheritage-correctness">Structuring and SSA/heritage correctness<a class="headerlink" href="#structuring-and-ssaheritage-correctness" title="Permanent link">&para;</a></h2>
+<p>Found via continued Ghidra-parity auditing against real fixtures (each
+verified before landing, several with a focused <code>docs/audits/</code> remeasure
+note):</p>
+<ul>
+<li>Orphan loop-continue/break edges rewritten correctly instead of leaving
+  dangling gotos (<code>1ea1a26f</code>, <code>867f4380</code>, <code>ee492fb6</code>).</li>
+<li>Wide-stride struct field recovery and <code>PtrOffset</code> rescaling
+  (<code>cb94c87a</code>), live return-value recovery alongside write-only stack
+  locals (<code>446dc4b9</code>).</li>
+<li>XMM float-lane retyping off full-vector <code>Aggregate</code> bindings
+  (<code>a6624943</code>); <code>Index</code> out-param stores kept and float matrix types
+  recovered (<code>3ca1a786</code>).</li>
+<li>Multi-emitted labels stripped after total-infinite-loop regions
+  (<code>516a33bc</code>); <code>CollapseStructure</code> <code>selectGoto</code> + graph-only residual
+  emission (<code>b8442d08</code>); <code>TraceDAG</code> likely-goto detection + heritage float
+  type witness (<code>347a4343</code>); exclusive block emission for structured
+  regions (<code>a07a64c1</code>).</li>
+<li>Named fields now render on recovered <code>fission_agg</code> typedefs (<code>912b4347</code>).</li>
+<li>New midend passes: heritage SSA + ownership facts (<code>144f9049</code>),
+  overlapping scalar storage refinement (<code>d81cf147</code>), dynamic-effects
+  guarding + high-variable recovery (<code>5227f74a</code>), typed memory heritage
+  promotion (<code>74450b7c</code>).</li>
+</ul>
+<h2 id="desktop-gui-fission-dioxus">Desktop GUI (<code>fission-dioxus</code>)<a class="headerlink" href="#desktop-gui-fission-dioxus" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Migrated to Dioxus 0.7.</li>
+<li>New: command palette, virtual scroll, drag-resize panels, CFG viewer,
+  Xrefs viewer, batch decompile, nav history (Back/Forward), View menu
+  handlers, Ctrl+F find bar, strings browser, function hex view, inline
+  rename, kind-filter chips, copy-pseudocode, log timestamps.</li>
+<li>Fixed: import thunks (IAT stubs) no longer produce self-recursive
+  pseudocode; CSS inlined into the custom head so desktop dev builds
+  reliably load styling.</li>
+<li>Performance: <code>FactStore</code> is now cached in <code>AppState</code> and eagerly
+  preloaded/prebuilt once per binary load instead of being rebuilt on every
+  single decompile or batch-decompile iteration.</li>
+</ul>
+<h2 id="other-fixes">Other fixes<a class="headerlink" href="#other-fixes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>SLEIGH oversized pattern shifts are now masked instead of producing
+  undefined shift behavior; non-x86 targets' return-register space
+  resolution fixed (<code>d168056f</code>).</li>
+<li>The float/double return register is now recognized from <code>.cspec</code>
+  (<code>81c5c364</code>), closing a gap where x64 float-returning functions lost
+  their return value.</li>
+<li>Removed the dead <code>native_decomp</code>/Ghidra-FFI architecture entirely
+  (<code>7e207d14</code>) after an audit confirmed nothing depended on it.</li>
+<li>Project migrated from the <code>sjkim1127</code> to the <code>fission-systems</code> GitHub
+  organization (<code>36918a6c</code>); all cross-repo references (including
+  <code>fission-web</code>'s <code>fission-ui</code> git dependency and Railway deploy configs)
+  now point at <code>fission-systems/Fission</code>.</li>
+</ul>
+<h2 id="known-issues">Known issues<a class="headerlink" href="#known-issues" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>selfjit</code> is not yet the emulator's default backend and <code>cranelift-*</code> has
+  not been removed from the dependency tree — this release builds
+  correctness evidence toward that switch but does not make it.</li>
+<li><code>selfjit</code>'s differential harness reports (does not fail on) any real
+  translation block using an opcode it doesn't yet cover; full-function
+  coverage across the corpus is not yet complete.</li>
+<li><code>.debug_line</code> line-number extraction (landed in v0.1.6) still has no
+  rendering consumer wired up.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
