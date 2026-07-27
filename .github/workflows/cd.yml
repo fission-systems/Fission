@@ -303,3 +303,31 @@ jobs:
           echo "  - fission_cli-x86_64-unknown-linux-gnu (Linux CLI only, for benchmark consumers)"
           echo "Release assets will be available at:"
           echo "https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"
+
+  # Deploys the tagged commit to the private `fission-backend` Railway service.
+  # Replaces Railway's own branch-based auto-deploy (which was firing on every
+  # push to main) -- production now only moves on a gated release tag, same as
+  # the CLI binaries above. `railway up` uploads and builds the checked-out
+  # tag directly, so this is exact regardless of Railway dashboard branch
+  # settings. Requires the RAILWAY_TOKEN repo secret (a project token scoped
+  # to the `generous-art` project / `production` environment) -- see
+  # docs/RAILWAY.md.
+  deploy-railway-backend:
+    name: 🚂 Deploy fission-backend (Railway)
+    needs: [release-summary]
+    if: needs.release-summary.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service fission-backend --ci --yes

@@ -56,6 +56,13 @@ RUST_LOG=fission_serve=info,tower_http=info
 
 ## Deploy
 
+Both services deploy on a **version-tag push**, not on every push to `main`.
+`fission-backend` deploys via a `cd.yml` job (`deploy-railway-backend`) that
+runs after the same L0/L1/L2-gated tag build the CLI release assets go
+through; `fission-web` deploys the matching way from its own repo. Railway's
+own GitHub auto-deploy is turned **off** for both services -- pushing to
+`main` alone no longer ships anything.
+
 1. Create the private `fission-backend` Railway service from
    `fission-systems/Fission`.
 2. Keep the repository root as the service root. Railway detects `Dockerfile`
@@ -66,8 +73,22 @@ RUST_LOG=fission_serve=info,tower_http=info
    `fission-systems/fission-web`.
 5. Keep both services in the same Railway project and environment.
 6. Generate a public domain only for `fission-web`.
-7. Open the web application -- it connects automatically; no token needed
-   unless you configured one in step 3.
+7. In each service's Railway dashboard settings (Source), disable
+   auto-deploy-on-push, or point the tracked branch at something that never
+   moves -- deploys should only come from the tag-triggered GitHub Actions
+   job below.
+8. Create a Railway **project token** scoped to this project/environment
+   (Project Settings → Tokens) and add it as the `RAILWAY_TOKEN` secret in
+   both the `fission-systems/Fission` and `fission-systems/fission-web`
+   GitHub repos.
+9. Push a version tag (`vX.Y.Z`) to deploy. `fission-backend` deploys from
+   `fission-systems/Fission`'s tag via `cd.yml`;
+   `fission-web` deploys from its own matching tag, pinned to the same
+   Fission release through its `fission-ui` git dependency (`Cargo.toml`:
+   `fission-ui = { git = "...", tag = "vX.Y.Z" }` instead of tracking `main`
+   HEAD).
+10. Open the web application -- it connects automatically; no token needed
+    unless you configured one in step 3.
 
 The public Nginx service serves the WASM application and proxies same-origin
 `/api/*` requests to `fission-backend.railway.internal:7331`, rate-limiting
