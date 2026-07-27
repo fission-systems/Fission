@@ -1040,13 +1040,13 @@ before either the Rust build or runtime image can use it. When updating
 release asset at the same time.</p>
 <h2 id="required-service-variables">Required service variables<a class="headerlink" href="#required-service-variables" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>FISSION_SERVE_API_TOKEN=&lt;random value of at least 32 characters&gt;
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>FISSION_ALLOWED_ORIGINS=https://&lt;fission-web-domain&gt;
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>PORT=7331
 </span></code></pre></div>
 <p>Generate the token locally and store it only in Railway and the analyst's
 browser session:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span>
 </span></code></pre></div>
-<p>Do not put the token in the Vercel build environment: values compiled into a
+<p>Do not put the token in any frontend build environment: values compiled into a
 WASM bundle are public. The web client prompts for the token and keeps it only
 in memory.</p>
 <p>Optional controls:</p>
@@ -1057,16 +1057,21 @@ in memory.</p>
 </span></code></pre></div>
 <h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Create a Railway service from <code>fission-systems/Fission</code>.</li>
+<li>Create the private <code>fission-backend</code> Railway service from
+   <code>fission-systems/Fission</code>.</li>
 <li>Keep the repository root as the service root. Railway detects <code>Dockerfile</code>
    and <code>railway.json</code>.</li>
-<li>Configure the required variables before the first deployment.</li>
-<li>Generate a public Railway domain.</li>
-<li>Build <code>fission-web</code> with <code>FISSION_WEB_API_URL</code> set to that HTTPS domain.</li>
+<li>Configure the required backend variables before the first deployment.</li>
+<li>Create the public <code>fission-web</code> service from
+   <code>fission-systems/fission-web</code>.</li>
+<li>Keep both services in the same Railway project and environment.</li>
+<li>Generate a public domain only for <code>fission-web</code>.</li>
 <li>Open the web application and enter the bearer token when connecting.</li>
 </ol>
-<p><code>/healthz</code> is intentionally public for Railway deployment healthchecks. All
-<code>/api/*</code> routes require the configured bearer token in cloud mode.</p>
+<p>The public Nginx service serves the WASM application and proxies same-origin
+<code>/api/*</code> requests to <code>fission-backend.railway.internal:7331</code>. The backend does
+not need a public domain. Its <code>/api/*</code> routes still require the configured
+bearer token in cloud mode.</p>
 <h2 id="current-scaling-boundary">Current scaling boundary<a class="headerlink" href="#current-scaling-boundary" title="Permanent link">&para;</a></h2>
 <p>Analysis sessions are currently held in process memory. Use exactly one Railway
 replica; a restart or deployment expires active sessions. Horizontal scaling
