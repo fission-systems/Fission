@@ -1125,10 +1125,19 @@ impl<'a> PreviewBuilder<'a> {
                 .lower_wrapped_varnode(input, &mut HashSet::default())
                 .map(Some);
         }
-        // Last resort: control-target RET with no pred map / side-effect gate
-        // still recovers the live ABI return register when the function wrote it.
+        // Last resort: control-target RET with no pred map still recovers the
+        // live ABI return register when the function wrote it -- but only if
+        // that write wasn't already consumed by an intervening side effect
+        // (e.g. stored to a global) before this RET, same guard the more
+        // specific branch above respects. Without this, a function that
+        // writes the primary return register for an unrelated reason (a
+        // value later stored elsewhere, not actually returned) then returns
+        // void via the link register got a return value synthesized for it
+        // that was never live (`aarch64_return_join_with_terminal_store_
+        // does_not_synthesize_live_return`-class).
         if self.uses_primary_return_registers()
             && self.function_has_primary_return_def()
+            && !self.side_effect_consumes_primary_return_register_before(block, term_idx)
             && let Some(expr) = self.live_primary_return_register_expr(block, term_idx)?
         {
             if preview_builder_diag_enabled() {

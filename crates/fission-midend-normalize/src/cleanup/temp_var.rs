@@ -1264,7 +1264,6 @@ pub fn prune_unused_dead_local_bindings(func: &mut PreHirFunction) -> bool {
             || binding.name.starts_with("slot_")
             || matches!(binding.ty, NirType::Aggregate { .. })
             || count_uses_in_stmt_list(&func.body, &binding.name) > 0
-            || stmt_list_defines_var(&func.body, &binding.name)
             || binding
                 .initializer
                 .as_ref()

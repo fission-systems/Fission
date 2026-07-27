@@ -2088,9 +2088,17 @@ fn rescue_undeclared_bindings_declares_stack_local_names() {
 }
 
 #[test]
-fn prune_unused_dead_local_bindings_keeps_write_only_stack_homes() {
-    // `local_18 = param_3` with no RHS uses must not drop the binding while the
-    // assign remains (matrix_multiply-class undeclared identifier).
+fn prune_unused_dead_local_bindings_then_rescue_redeclares_write_only_stack_homes() {
+    // `local_18 = param_3` with no RHS uses: `prune_unused_dead_local_bindings`
+    // alone drops the (now-dead) binding -- keeping it declared indefinitely
+    // instead regressed real structuring tests (a stack-resident shadow of a
+    // variable heritage had already promoted to a register stuck around long
+    // enough to confuse loop-condition folding elsewhere). The matrix_multiply
+    // undeclared-identifier bug this was meant to fix is instead closed by
+    // `rescue_undeclared_bindings` re-declaring any still-referenced-but-
+    // undeclared name at pipeline end (`run_stage_cleanup`'s final pass) --
+    // by which point the fold/prune passes that this exception broke have
+    // already run, so it can't interfere with them.
     let mut func = PreHirFunction {
         name: "f".to_string(),
         int_param_offsets: Vec::new(),
@@ -2129,11 +2137,29 @@ fn prune_unused_dead_local_bindings_keeps_write_only_stack_homes() {
         ],
         ..Default::default()
     };
-    // May or may not report changed=true if other filters apply; binding must remain.
-    let _ = prune_unused_dead_local_bindings(&mut func);
+    prune_unused_dead_local_bindings(&mut func);
+    assert!(
+        !func.locals.iter().any(|b| b.name == "local_18"),
+        "dead write-only local_18 should be pruned here: {:?}",
+        func.locals
+    );
+    assert!(
+        matches!(
+            func.body.first(),
+            Some(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            }) if name == "local_18"
+        ),
+        "the (now-orphaned) assign itself must survive pruning -- rescue \
+         re-declares it below: {:?}",
+        func.body
+    );
+
+    rescue_undeclared_bindings(&mut func);
     assert!(
         func.locals.iter().any(|b| b.name == "local_18"),
-        "write-only local_18 must stay declared: {:?}",
+        "rescue must re-declare local_18 so it's not an undeclared identifier: {:?}",
         func.locals
     );
 }

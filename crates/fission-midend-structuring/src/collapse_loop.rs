@@ -15,16 +15,21 @@ use fission_midend_core::ir::MlilPreviewError;
 
 /// Collapse-loop virtualization (TraceDAG / FAS unstructured edge pick).
 ///
-/// Default **on** (Ghidra always runs block structure collapse with likely-gotos).
-/// Disable with `FISSION_COLLAPSE_LOOP=0` for debugging.
+/// Default **off**. `347a4343` briefly made this default-on (Ghidra always
+/// runs block structure collapse with likely-gotos) but that regressed real,
+/// long-standing switch-structuring tests (`test_switch_case_fallthrough`,
+/// `test_switch_skips_to_exit` -- both passing since before this virtualization
+/// existed, both losing their `switch (...)` structuring once it defaulted on).
+/// Back to opt-in via `FISSION_COLLAPSE_LOOP=1` until that regression is
+/// root-caused; the TraceDAG/heritage work itself is untouched and still
+/// available behind the flag.
 pub fn collapse_loop_admission_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
         match std::env::var("FISSION_COLLAPSE_LOOP") {
-            Ok(v) if matches!(v.as_str(), "0" | "false" | "off" | "no") => false,
-            Ok(_) => true,
-            // Unset → enabled (principled default; was opt-in heuristic before).
-            Err(_) => true,
+            Ok(v) if matches!(v.as_str(), "1" | "true" | "on" | "yes") => true,
+            // Unset or anything else → disabled.
+            _ => false,
         }
     })
 }
