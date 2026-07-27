@@ -52,6 +52,12 @@ pub use session::SessionStore;
 #[derive(Debug, Clone, Copy)]
 pub struct ServeRuntimeInfo {
     pub cloud_mode: bool,
+    /// Whether `require_bearer` is actually wired in for this run (i.e. a
+    /// real `api_token` was configured) -- distinct from `cloud_mode`
+    /// itself now that a token is optional in cloud mode. Reported to
+    /// clients via `/api/status` so the UI doesn't assume auth is
+    /// required just because it's talking to a cloud deployment.
+    pub requires_authentication: bool,
 }
 
 #[derive(Clone)]
@@ -130,6 +136,7 @@ pub async fn run_serve(config: ServeConfig) -> Result<()> {
         .with_state(store)
         .layer(Extension(ServeRuntimeInfo {
             cloud_mode: config.cloud_mode,
+            requires_authentication: config.api_token.is_some(),
         }))
         .layer(cors)
         .layer(DefaultBodyLimit::max(config.max_upload_bytes));

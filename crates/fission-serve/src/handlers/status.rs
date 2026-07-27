@@ -17,10 +17,20 @@ pub async fn handle_status(
         version: env!("CARGO_PKG_VERSION").to_string(),
         active_sessions: store.count().await,
         max_sessions: store.max_sessions,
-        capabilities: if runtime.cloud_mode {
-            BackendCapabilities::cloud_http()
-        } else {
-            BackendCapabilities::local_http()
+        capabilities: BackendCapabilities {
+            // `cloud_http()`/`local_http()` set a static per-category
+            // default for `requires_authentication`; override it with the
+            // actual runtime fact (whether this run was started with a
+            // real `api_token`) since a token is optional in cloud mode
+            // now -- a client shouldn't be told "auth required" just
+            // because it's talking to a cloud deployment that happens not
+            // to have one configured.
+            requires_authentication: runtime.requires_authentication,
+            ..if runtime.cloud_mode {
+                BackendCapabilities::cloud_http()
+            } else {
+                BackendCapabilities::local_http()
+            }
         },
         resources: AnalysisResourceStatus {
             sleigh_artifacts: checked_in_compiled_sla_available(),
