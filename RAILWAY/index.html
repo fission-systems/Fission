@@ -1042,16 +1042,28 @@ release asset at the same time.</p>
 opinion data through <code>FISSION_SLEIGH_SPEC_DIR</code> and
 <code>FISSION_GHIDRA_DATA_DIR</code>.</p>
 <h2 id="required-service-variables">Required service variables<a class="headerlink" href="#required-service-variables" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>FISSION_SERVE_API_TOKEN=&lt;random value of at least 32 characters&gt;
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>PORT=7331
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>PORT=7331
 </span></code></pre></div>
-<p>Generate the token locally and store it only in Railway and the analyst's
-browser session:</p>
+<p><code>FISSION_SERVE_API_TOKEN</code> is no longer required in cloud mode. The reference
+deployment's abuse guard is <code>fission-web</code>'s own nginx gateway
+(<code>deploy/nginx/default.conf.template</code>), which rate-limits <code>/api/*</code> per client
+IP (10 req/s, burst 20, <code>429</code> past that) before a request ever reaches the
+backend. This removes the "generate a token, paste it into the browser"
+friction for a public demo deployment; it is a deliberate tradeoff, not an
+oversight -- an unauthenticated deployment is easier to abuse in aggregate
+even with rate limiting, so keep the CPU/memory/usage limits from
+<a href="#current-scaling-boundary">Current scaling boundary</a> in place regardless.</p>
+<p>If you do want bearer-token auth back (e.g. a private deployment, or
+rate-limiting alone isn't enough for your traffic), set
+<code>FISSION_SERVE_API_TOKEN</code> to a random value of at least 32 characters and the
+existing <code>require_bearer</code> middleware re-engages automatically -- both
+mechanisms can run at once (nginx still rate-limits in front either way):</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">32</span>
 </span></code></pre></div>
-<p>Do not put the token in any frontend build environment: values compiled into a
-WASM bundle are public. The web client prompts for the token and keeps it only
-in memory.</p>
+<p>Do not put the token in any frontend build environment if you do set one:
+values compiled into a WASM bundle are public. The web client only sends a
+token if one has been entered in its own connection banner, and keeps it in
+memory, not in the build.</p>
 <p>Optional controls:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>FISSION_MAX_SESSIONS=10
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>FISSION_SESSION_TTL=1800
@@ -1064,17 +1076,19 @@ in memory.</p>
    <code>fission-systems/Fission</code>.</li>
 <li>Keep the repository root as the service root. Railway detects <code>Dockerfile</code>
    and <code>railway.json</code>.</li>
-<li>Configure the required backend variables before the first deployment.</li>
+<li>Configure <code>PORT</code> (and, optionally, <code>FISSION_SERVE_API_TOKEN</code> -- see above)
+   before the first deployment.</li>
 <li>Create the public <code>fission-web</code> service from
    <code>fission-systems/fission-web</code>.</li>
 <li>Keep both services in the same Railway project and environment.</li>
 <li>Generate a public domain only for <code>fission-web</code>.</li>
-<li>Open the web application and enter the bearer token when connecting.</li>
+<li>Open the web application -- it connects automatically; no token needed
+   unless you configured one in step 3.</li>
 </ol>
 <p>The public Nginx service serves the WASM application and proxies same-origin
-<code>/api/*</code> requests to <code>fission-backend.railway.internal:7331</code>. The backend does
-not need a public domain. Its <code>/api/*</code> routes still require the configured
-bearer token in cloud mode.</p>
+<code>/api/*</code> requests to <code>fission-backend.railway.internal:7331</code>, rate-limiting
+those requests per client IP on the way through. The backend does not need a
+public domain.</p>
 <h2 id="current-scaling-boundary">Current scaling boundary<a class="headerlink" href="#current-scaling-boundary" title="Permanent link">&para;</a></h2>
 <p>Analysis sessions are currently held in process memory. Use exactly one Railway
 replica; a restart or deployment expires active sessions. Horizontal scaling
