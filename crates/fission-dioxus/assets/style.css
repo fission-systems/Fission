@@ -887,8 +887,8 @@ mark.find-match { background: rgba(255,210,80,0.25); color: inherit; border-radi
 .xrefs-empty { padding: 16px 12px; font-size: 12px; color: var(--ink-3); font-style: italic; }
 .xrefs-row { display: grid; grid-template-columns: 56px 100px 1fr; align-items: center; padding: 4px 12px; font-family: var(--font-code); font-size: 11.5px; border-bottom: 1px solid var(--bdr-faint); cursor: default; transition: background var(--t-fast); }
 .xrefs-row:hover { background: rgba(255,255,255,0.02); }
-.xrefs-row.clickable { cursor: pointer; }
-.xrefs-row.clickable:hover .xrefs-name { color: var(--accent); }
+.xrefs-row-clickable { cursor: pointer; }
+.xrefs-row-clickable:hover .xrefs-name { color: var(--accent); }
 .xrefs-kind { font-size: 10px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
 .xrefs-addr { font-family: var(--font-code); font-size: 11px; color: var(--clr-cyan); opacity: 0.7; }
 .xrefs-name { font-family: var(--font-code); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color var(--t-fast); }
