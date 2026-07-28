@@ -383,7 +383,7 @@ pub fn Editor() -> Element {
                         }
                     }
                 } else {
-                    let msg = if state.read().binary.is_some() {
+                    let msg = if state.read().has_binary_loaded() {
                         "Select a function from the sidebar to decompile."
                     } else {
                         "Open a binary to begin."

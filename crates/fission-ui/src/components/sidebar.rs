@@ -218,7 +218,7 @@ pub fn Sidebar() -> Element {
     };
 
     // ── Read once for rendering ───────────────────────────────────────────────
-    let has_binary   = state.read().binary.is_some();
+    let has_binary   = state.read().has_binary_loaded();
     let is_loading   = state.read().is_loading_binary;
     let fn_count     = fn_total;
     let search_val   = state.read().sidebar_search.clone();

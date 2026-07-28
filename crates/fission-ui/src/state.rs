@@ -273,6 +273,17 @@ impl AppState {
         }
     }
 
+    /// True once a binary is loaded, regardless of backend architecture.
+    /// `binary` only carries the actual `LoadedBinary` on the native path --
+    /// the cloud/web path (`fission-serve`) keeps the binary server-side and
+    /// leaves this `None` by design (see `engine::run_load`'s wasm arm), so
+    /// checking `binary.is_some()` alone left every cloud/web session
+    /// permanently "no binary loaded" in the UI despite a real, populated
+    /// `functions` list. `binary_name` is set on both paths.
+    pub fn has_binary_loaded(&self) -> bool {
+        self.binary.is_some() || self.binary_name.is_some()
+    }
+
     pub fn push_log(&mut self, entry: LogEntry) {
         if self.log_entries.len() >= 500 {
             self.log_entries.remove(0);
