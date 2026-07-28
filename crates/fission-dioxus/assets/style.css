@@ -306,12 +306,20 @@ body::after {
 
 /* ─── SIDEBAR ─── */
 .sidebar-wrapper {
+  /* `container-type: inline-size` contains this element's own inline size --
+     it can no longer size itself from its child's (.sidebar's) width, which
+     collapses it to 0 in a flex/grid track with no explicit width of its
+     own (reproduced on fission-web; ported the fix back here too). Give it
+     the same explicit width as .sidebar so containment has something to
+     measure against. */
   container-type: inline-size;
   container-name: sidebar;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
+  width: var(--w-sidebar);
+  min-width: 160px;
 }
 
 .sidebar {
