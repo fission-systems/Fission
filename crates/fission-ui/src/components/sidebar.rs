@@ -210,6 +210,7 @@ pub fn Sidebar() -> Element {
     // ── Read once for rendering ───────────────────────────────────────────────
     let has_binary   = state.read().has_binary_loaded();
     let is_loading   = state.read().is_loading_binary;
+    let is_analyzing = state.read().is_analyzing;
     let fn_count     = fn_total;
     let search_val   = state.read().sidebar_search.clone();
     let selected     = state.read().current_function_addr;
@@ -238,6 +239,9 @@ pub fn Sidebar() -> Element {
                     "Functions"
                     if has_binary {
                         span { class: "sidebar-tab-count", "{fn_count}" }
+                    }
+                    if is_analyzing {
+                        span { class: "decompiling-label sidebar-analyzing-label", "analyzing…" }
                     }
                 }
                 div {

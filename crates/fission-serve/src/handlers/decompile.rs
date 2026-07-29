@@ -27,7 +27,7 @@ pub async fn handle_decompile(
             .into_response();
     };
 
-    let binary = sess.binary.clone();
+    let binary = sess.binary().await;
     let name = binary.functions.iter()
         .find(|f| f.address == addr)
         .map(|f| f.name.clone())

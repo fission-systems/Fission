@@ -1,4 +1,4 @@
-use crate::{SessionStore, types::{ErrorResponse, FnEntry}};
+use crate::{SessionStore, types::{ErrorResponse, FnEntry, FunctionsResponse}};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -20,7 +20,8 @@ pub async fn handle_list_functions(
             .into_response();
     };
 
-    let fns: Vec<FnEntry> = sess.binary.functions.iter().map(|f| FnEntry {
+    let binary = sess.binary().await;
+    let fns: Vec<FnEntry> = binary.functions.iter().map(|f| FnEntry {
         addr:      f.address,
         name:      f.name.clone(),
         is_import: f.is_import,
@@ -29,5 +30,5 @@ pub async fn handle_list_functions(
         size:      f.size,
     }).collect();
 
-    Json(fns).into_response()
+    Json(FunctionsResponse { functions: fns, analyzing: sess.is_analyzing() }).into_response()
 }

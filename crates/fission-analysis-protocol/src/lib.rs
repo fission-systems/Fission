@@ -88,8 +88,18 @@ pub struct StatusResponse {
 pub struct UploadResponse {
     /// Opaque session token; include it in all subsequent requests.
     pub session_id: String,
+    /// Functions known at response time (loader symbols only). CFG-based
+    /// discovery runs in the background after this response is sent --
+    /// see `analyzing`.
     pub fn_count: usize,
     pub summary: String,
+    /// `true` while CFG-based function discovery is still running in the
+    /// background. `GET /api/functions/:session` returns the same flag;
+    /// poll it until it flips to `false` to get the full function list
+    /// (discovery on a large binary can take significantly longer than
+    /// the upload itself, so the response isn't held open for it).
+    #[serde(default)]
+    pub analyzing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +110,14 @@ pub struct FnEntry {
     pub is_export: bool,
     pub is_thunk: bool,
     pub size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FunctionsResponse {
+    pub functions: Vec<FnEntry>,
+    /// See `UploadResponse::analyzing`.
+    #[serde(default)]
+    pub analyzing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

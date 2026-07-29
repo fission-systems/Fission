@@ -28,7 +28,7 @@ pub async fn handle_xrefs(
             .into_response();
     };
 
-    let binary = sess.binary.clone();
+    let binary = sess.binary().await;
     let result = tokio::task::spawn_blocking(move || {
         let index = build_xref_index(&binary, false);
         let name_map: HashMap<u64, String> = binary.functions.iter()

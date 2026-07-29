@@ -173,6 +173,11 @@ pub struct AppState {
     // ── Async guards ────────────────────────────────────────────────────────
     pub is_loading_binary: bool,
     pub is_decompiling: bool,
+    /// WASM only: `true` while the server is still running background CFG
+    /// function discovery after an upload (see `engine::poll_functions`).
+    /// The binary is already usable (loader symbols are in) while this is
+    /// set; it just means more functions may still appear.
+    pub is_analyzing: bool,
 
     // ── Batch decompile ──────────────────────────────────────────────────────
     pub is_batch_running: bool,
@@ -250,6 +255,7 @@ impl AppState {
             log_entries: Vec::new(),
             is_loading_binary: false,
             is_decompiling: false,
+            is_analyzing: false,
             is_batch_running: false,
             batch_done: 0,
             batch_total: 0,

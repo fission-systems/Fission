@@ -43,20 +43,15 @@ pub async fn handle_upload_binary(
             .into_response();
     };
 
-    // Parse the binary on a blocking thread
+    // Parse only (exports/imports/COFF/PDB symbol harvest) on a blocking
+    // thread -- fast, no CFG walk. This alone never finds unexported
+    // internal functions (e.g. every export in an MSVC-built DLL can be a
+    // 5-byte `jmp` thunk to the real, unnamed implementation elsewhere in
+    // .text, which the loader has no way to follow), so it's not the final
+    // function list -- just enough to respond and open a session with.
     let filename_clone = filename.clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<LoadedBinary> {
-        let mut binary = LoadedBinary::from_bytes(bytes, filename_clone)?;
-        // Loader-time symbol harvesting alone (exports/imports/COFF/PDB) never
-        // finds unexported internal functions -- e.g. every export in an
-        // MSVC-built DLL can be a 5-byte `jmp` thunk to the real, unnamed
-        // implementation elsewhere in .text, which the loader has no way to
-        // follow. `fission_cli decomp`'s own default profile is Conservative;
-        // matching it here so a served binary's function list isn't just the
-        // export/import table by itself (confirmed missing hundreds of real
-        // functions on a real sqlite3.dll before this fix).
-        discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
-        Ok(binary)
+        Ok(LoadedBinary::from_bytes(bytes, filename_clone)?)
     })
     .await;
 
@@ -64,16 +59,31 @@ pub async fn handle_upload_binary(
         Ok(Ok(binary)) => {
             let fn_count = binary.functions.len();
             let summary  = binary.summary().to_string();
-            match store.create(binary, filename).await {
-                Ok(session_id) => (
-                    StatusCode::OK,
-                    Json(UploadResponse {
-                        session_id: session_id.to_string(),
-                        fn_count,
-                        summary,
-                    }),
-                )
-                    .into_response(),
+            match store.create(binary, filename, true).await {
+                Ok(session_id) => {
+                    // CFG-based discovery (`fission_cli decomp`'s own
+                    // default profile is Conservative; matched here so a
+                    // served binary's function list isn't just the
+                    // export/import table by itself -- confirmed missing
+                    // hundreds of real functions on a real sqlite3.dll
+                    // before this was added) can take far longer than
+                    // parsing on a large binary. Run it after responding
+                    // instead of blocking the upload on it; the session
+                    // starts usable with loader-only symbols and
+                    // `analyzing` flips false once discovery lands.
+                    tokio::spawn(run_discovery_in_background(store.clone(), session_id));
+
+                    (
+                        StatusCode::OK,
+                        Json(UploadResponse {
+                            session_id: session_id.to_string(),
+                            fn_count,
+                            summary,
+                            analyzing: true,
+                        }),
+                    )
+                        .into_response()
+                }
                 Err(e) => (
                     StatusCode::SERVICE_UNAVAILABLE,
                     Json(ErrorResponse::new(e)),
@@ -92,6 +102,23 @@ pub async fn handle_upload_binary(
         )
             .into_response(),
     }
+}
+
+async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid) {
+    let Some(session) = store.get(&session_id).await else {
+        return;
+    };
+    let mut binary = (*session.binary().await).clone();
+    let discovered = tokio::task::spawn_blocking(move || {
+        discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
+        binary
+    })
+    .await;
+    match discovered {
+        Ok(binary) => session.set_binary(binary).await,
+        Err(e) => tracing::warn!("background function discovery panicked: {e}"),
+    }
+    session.set_analyzing(false);
 }
 
 /// DELETE /api/session/:session — explicitly release a session.

@@ -8,7 +8,10 @@
 use fission_loader::loader::LoadedBinary;
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::RwLock;
@@ -18,18 +21,43 @@ use uuid::Uuid;
 // ── Session data ─────────────────────────────────────────────────────────────
 
 pub struct SessionData {
-    pub binary:      Arc<LoadedBinary>,
+    binary:          RwLock<Arc<LoadedBinary>>,
     pub binary_name: String,
+    /// `true` while CFG-based function discovery is still running on this
+    /// session's binary in the background. The upload handler returns as
+    /// soon as loader-only parsing is done and spawns discovery separately
+    /// -- on a large binary it can take far longer than parsing, and
+    /// nothing about it needs to hold the HTTP response open.
+    analyzing:       AtomicBool,
     last_used:       RwLock<Instant>,
 }
 
 impl SessionData {
-    pub fn new(binary: LoadedBinary, binary_name: String) -> Self {
+    pub fn new(binary: LoadedBinary, binary_name: String, analyzing: bool) -> Self {
         Self {
-            binary:      Arc::new(binary),
+            binary:      RwLock::new(Arc::new(binary)),
             binary_name,
+            analyzing:   AtomicBool::new(analyzing),
             last_used:   RwLock::new(Instant::now()),
         }
+    }
+
+    pub async fn binary(&self) -> Arc<LoadedBinary> {
+        self.binary.read().await.clone()
+    }
+
+    /// Swap in a new binary snapshot (e.g. once background discovery adds
+    /// its functions to the loader-only set the session started with).
+    pub async fn set_binary(&self, binary: LoadedBinary) {
+        *self.binary.write().await = Arc::new(binary);
+    }
+
+    pub fn is_analyzing(&self) -> bool {
+        self.analyzing.load(Ordering::Acquire)
+    }
+
+    pub fn set_analyzing(&self, value: bool) {
+        self.analyzing.store(value, Ordering::Release);
     }
 
     pub async fn touch(&self) {
@@ -64,13 +92,14 @@ impl SessionStore {
         &self,
         binary: LoadedBinary,
         binary_name: String,
+        analyzing: bool,
     ) -> Result<Uuid, &'static str> {
         let mut map = self.sessions.write().await;
         if map.len() >= self.max_sessions {
             return Err("server at capacity — try again later");
         }
         let id = Uuid::new_v4();
-        map.insert(id, Arc::new(SessionData::new(binary, binary_name)));
+        map.insert(id, Arc::new(SessionData::new(binary, binary_name, analyzing)));
         info!("session created: {id}  (total: {})", map.len());
         Ok(id)
     }

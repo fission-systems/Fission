@@ -26,6 +26,11 @@ pub struct LoadResult {
     pub summary:    String,
     pub session_id: Option<String>,
     pub strings:    Vec<BinaryString>,
+    /// `true` on WASM when the server is still running CFG-based function
+    /// discovery in the background — `functions` is loader-symbols-only
+    /// until a follow-up `poll_functions` call reports `false`. Always
+    /// `false` on native (analysis is synchronous there).
+    pub analyzing:  bool,
 }
 
 /// CFG edge classification for the GUI renderer.
@@ -220,7 +225,7 @@ mod native {
             binary.entry_point,
         );
         let strings = extract_strings_blocking(&binary);
-        Ok(LoadResult { binary: Some(Arc::new(binary)), functions, summary, session_id: None, strings })
+        Ok(LoadResult { binary: Some(Arc::new(binary)), functions, summary, session_id: None, strings, analyzing: false })
     }
 
     /// Extract printable strings from a loaded binary.
@@ -380,7 +385,7 @@ mod wasm_api {
     use super::*;
     use fission_analysis_protocol::{
         DecompileResponse as ApiDecompileResponse, FnEntry as ApiFnEntry,
-        StatusResponse,
+        FunctionsResponse as ApiFunctionsResponse, StatusResponse,
         UploadResponse as ApiUploadResponse, XrefRow as ApiXrefRow,
         XrefsResponse as ApiXrefsResponse,
     };
@@ -467,18 +472,31 @@ mod wasm_api {
         let upload: ApiUploadResponse = resp.json().await
             .map_err(|e| format!("Parse upload response: {e:?}"))?;
 
-        // Fetch function list scoped to this session
-        let fn_resp = authorized(Request::get(&format!(
-            "{base}/api/functions/{}",
-            upload.session_id
-        )))
+        // Fetch function list scoped to this session. While the server is
+        // still running background CFG discovery (`upload.analyzing`),
+        // this only has loader symbols -- the caller re-polls via
+        // `poll_functions` until it reports `analyzing: false`.
+        let (functions, analyzing) = fetch_functions(&base, &upload.session_id).await?;
+
+        Ok(LoadResult {
+            binary:     None,   // server holds the binary
+            functions,
+            summary:    upload.summary,
+            session_id: Some(upload.session_id),
+            strings:    Vec::new(),   // server-side; not yet serialised
+            analyzing,
+        })
+    }
+
+    async fn fetch_functions(base: &str, session_id: &str) -> Result<(Vec<FunctionInfo>, bool), String> {
+        let fn_resp = authorized(Request::get(&format!("{base}/api/functions/{session_id}")))
             .send().await
             .map_err(|e| format!("Functions fetch failed: {e:?}"))?;
 
-        let api_fns: Vec<ApiFnEntry> = fn_resp.json().await
+        let parsed: ApiFunctionsResponse = fn_resp.json().await
             .map_err(|e| format!("Parse functions: {e:?}"))?;
 
-        let functions: Vec<FunctionInfo> = api_fns.into_iter().map(|f| FunctionInfo {
+        let functions: Vec<FunctionInfo> = parsed.functions.into_iter().map(|f: ApiFnEntry| FunctionInfo {
             name:          f.name,
             address:       f.addr,
             size:          f.size,
@@ -488,13 +506,15 @@ mod wasm_api {
             ..Default::default()
         }).collect();
 
-        Ok(LoadResult {
-            binary:     None,   // server holds the binary
-            functions,
-            summary:    upload.summary,
-            session_id: Some(upload.session_id),
-            strings:    Vec::new(),   // server-side; not yet serialised
-        })
+        Ok((functions, parsed.analyzing))
+    }
+
+    /// Re-fetch the function list for a session already opened via
+    /// `run_load` -- used to poll while background discovery is running.
+    /// Returns `(functions, still_analyzing)`.
+    pub async fn poll_functions(session_id: &str) -> Result<(Vec<FunctionInfo>, bool), String> {
+        let base = get_server_url();
+        fetch_functions(&base, session_id).await
     }
 
     pub async fn run_decompile(

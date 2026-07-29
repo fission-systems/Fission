@@ -415,6 +415,8 @@ body::after {
 
 .sidebar-tab.is-active .sidebar-tab-count { background: var(--accent); color: #fff; }
 
+.sidebar-analyzing-label { font-size: 9.5px; margin-left: 4px; white-space: nowrap; }
+
 .sidebar-header {
   display: flex;
   align-items: center;
