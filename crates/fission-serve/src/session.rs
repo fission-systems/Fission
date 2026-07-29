@@ -6,6 +6,7 @@
 //! on the same server instance (Ghidra Server model).
 
 use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::decomp::facts::FactStore;
 use std::{
     collections::HashMap,
     sync::{
@@ -29,6 +30,14 @@ pub struct SessionData {
     /// -- on a large binary it can take far longer than parsing, and
     /// nothing about it needs to hold the HTTP response open.
     analyzing:       AtomicBool,
+    /// Lazily built, cached on first use, invalidated (`None`) whenever
+    /// `set_binary` changes what the binary's function set looks like.
+    /// `FactStore::from_binary` isn't cheap -- it walks every function and
+    /// symbol into a `ProgramSnapshot` and runs FID/signature-database
+    /// matching -- and was previously rebuilt from scratch on every single
+    /// decompile request in a session, even back-to-back requests against
+    /// the exact same unchanged binary state.
+    facts:           RwLock<Option<Arc<FactStore>>>,
     last_used:       RwLock<Instant>,
 }
 
@@ -38,6 +47,7 @@ impl SessionData {
             binary:      RwLock::new(Arc::new(binary)),
             binary_name,
             analyzing:   AtomicBool::new(analyzing),
+            facts:       RwLock::new(None),
             last_used:   RwLock::new(Instant::now()),
         }
     }
@@ -48,8 +58,29 @@ impl SessionData {
 
     /// Swap in a new binary snapshot (e.g. once background discovery adds
     /// its functions to the loader-only set the session started with).
+    /// Invalidates the cached `FactStore`, since it's built from the
+    /// binary's current function/symbol set.
     pub async fn set_binary(&self, binary: LoadedBinary) {
         *self.binary.write().await = Arc::new(binary);
+        *self.facts.write().await = None;
+    }
+
+    /// The session's cached facts, building them from the current binary
+    /// on first use (or after `set_binary` invalidated a stale copy).
+    pub async fn facts(&self) -> Arc<FactStore> {
+        if let Some(facts) = self.facts.read().await.as_ref() {
+            return Arc::clone(facts);
+        }
+        let mut slot = self.facts.write().await;
+        // Another task may have built it while we were waiting for the
+        // write lock -- check again before doing the work twice.
+        if let Some(facts) = slot.as_ref() {
+            return Arc::clone(facts);
+        }
+        let binary = self.binary().await;
+        let built = Arc::new(FactStore::from_binary(&binary));
+        *slot = Some(Arc::clone(&built));
+        built
     }
 
     pub fn is_analyzing(&self) -> bool {

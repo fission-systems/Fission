@@ -5,7 +5,6 @@ use axum::{
     response::{IntoResponse, Json},
 };
 use fission_decompiler::{RustSleighDecompileConfig, decompile_with_rust_sleigh_with_facts};
-use fission_static::analysis::decomp::facts::FactStore;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -32,10 +31,13 @@ pub async fn handle_decompile(
         .find(|f| f.address == addr)
         .map(|f| f.name.clone())
         .unwrap_or_else(|| format!("sub_{addr:x}"));
+    // Session-cached: built once from the binary's current function/symbol
+    // set (FID/signature-database matching included), not redone on every
+    // decompile request against an unchanged binary state.
+    let facts = sess.facts().await;
 
     let result = tokio::task::spawn_blocking(move || {
-        let facts = FactStore::from_binary(&binary);
-        let cfg   = RustSleighDecompileConfig::cli_defaults();
+        let cfg = RustSleighDecompileConfig::cli_defaults();
         decompile_with_rust_sleigh_with_facts(&binary, &facts, addr, &name, &cfg, None, None)
     })
     .await;
