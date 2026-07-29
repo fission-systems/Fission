@@ -161,6 +161,14 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                 }
                 let build_stats = take_last_nir_build_stats();
                 let hint_stats = take_last_nir_hint_stats();
+                if let Some(raw_hir) = fission_pcode::take_last_raw_hir_snapshot() {
+                    crate::facts::record_interprocedural_arity_facts(
+                        &mut decomp_ctx.facts,
+                        &decomp_ctx.type_context,
+                        &raw_hir,
+                        address,
+                    );
+                }
                 nir_diag_stage(address, "render_preview_done", render_start);
                 return Ok(Some((code, build_stats, hint_stats, decomp_ctx.facts)));
             }

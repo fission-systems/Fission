@@ -426,6 +426,162 @@ fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'static str> 
     }
 }
 
+/// Walk a raw (pre-normalize) PreHIR body and record, per callee name, the
+/// highest `Call` argument count seen -- mirrors
+/// `fission-midend-normalize`'s `apply_interproc_callsite_arity_pass`, but
+/// deliberately re-implemented here rather than reused: that pass reads
+/// `PreHirFunction::callee_observed_max_arity` *after* normalize's early
+/// type-signature fixed point has already run
+/// `apply_callsite_type_prop_pass`, which truncates each call's `args` down
+/// to the callee's own body-inferred arity (`prune_known_api_call_args_stmts`
+/// in `callsite_type_prop.rs`) -- so by the time it runs, a call site can
+/// never be observed as wider than what the callee's own preview-inferred
+/// signature already implied. Walking the *raw*, pre-normalize body (as
+/// captured by `fission_pcode::take_last_raw_hir_snapshot`) reads the
+/// builder's real, uncapped argument recovery instead.
+fn collect_raw_call_arities(stmts: &[fission_pcode::PreHirStmt], out: &mut HashMap<String, usize>) {
+    use fission_pcode::{PreHirExpr, PreHirStmt};
+
+    fn visit_expr(expr: &PreHirExpr, out: &mut HashMap<String, usize>) {
+        match expr {
+            PreHirExpr::Call { target, args, .. } => {
+                for arg in args {
+                    visit_expr(arg, out);
+                }
+                out.entry(target.clone())
+                    .and_modify(|max| *max = (*max).max(args.len()))
+                    .or_insert(args.len());
+            }
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                visit_expr(lhs, out);
+                visit_expr(rhs, out);
+            }
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => visit_expr(expr, out),
+            PreHirExpr::Index { base, index, .. } => {
+                visit_expr(base, out);
+                visit_expr(index, out);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                visit_expr(cond, out);
+                visit_expr(then_expr, out);
+                visit_expr(else_expr, out);
+            }
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+        }
+    }
+
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
+                visit_expr(rhs, out);
+            }
+            PreHirStmt::VaStart { va_list, .. } => visit_expr(va_list, out),
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_raw_call_arities(body, out),
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                visit_expr(expr, out);
+                for case in cases {
+                    collect_raw_call_arities(&case.body, out);
+                }
+                collect_raw_call_arities(default, out);
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                visit_expr(cond, out);
+                collect_raw_call_arities(then_body, out);
+                collect_raw_call_arities(else_body, out);
+            }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+}
+
+/// Record real, observed call-site arity as a structuring hint for each
+/// resolved callee of the function that was just built.
+///
+/// The highest argument count any real call site in this function passed
+/// to a callee is a sound, structural fact. Feeding it forward into
+/// `FactStore` lets a *later* decompile of that callee -- in this same
+/// session -- widen its own rendered signature via
+/// `ensure_missing_hinted_params` (`fission-pcode`'s `type_hints.rs`) when
+/// the callee's own body doesn't clearly reveal all of its parameters (e.g.
+/// a trailing register param it never reads). Recorded directly on the
+/// `FactStore`, not via `DecompFacts::record_discovered_hints` -- that
+/// trait method also flips `hints_changed` and rebuilds `type_context`
+/// centered on whatever address is passed in, which is the right behavior
+/// for the self-referential "rebuild the function I'm currently building"
+/// round trip (see `render.rs`'s 3-round loop), not for recording facts
+/// about a *different* function.
+pub(crate) fn record_interprocedural_arity_facts(
+    fact_store: &mut FactStore,
+    type_context: &NirTypeContext,
+    raw_hir: &fission_pcode::PreHirFunction,
+    self_address: u64,
+) {
+    let mut observed_arity = HashMap::new();
+    collect_raw_call_arities(&raw_hir.body, &mut observed_arity);
+    if observed_arity.is_empty() {
+        return;
+    }
+    // Bounded by this one function's own direct call targets, not the
+    // whole binary's call_target index.
+    let name_to_addr: HashMap<&str, u64> = type_context
+        .call_targets
+        .iter()
+        .map(|(addr, name)| (name.as_str(), *addr))
+        .collect();
+
+    for (callee_name, arity) in observed_arity {
+        if arity == 0 {
+            continue; // uninformative / can't distinguish from "not a real call"
+        }
+        let Some(&callee_addr) = name_to_addr.get(callee_name.as_str()) else {
+            continue; // unresolved symbol (external import, indirect, etc.)
+        };
+        if callee_addr == self_address {
+            continue; // recursive call carries no new arity info
+        }
+        // `nir_function_hints_are_empty` (this file, below) treats an
+        // all-blank `param_names` as "no real hint" and
+        // `merge_nir_function_hints` discards it before it ever reaches
+        // `ensure_missing_hinted_params` -- so a pure arity signal needs
+        // *some* non-empty name per slot to survive that gate. Using the
+        // same `param_{index+1}` default `ensure_missing_hinted_params`
+        // itself falls back to (`type_hints.rs`) makes this a no-op rename
+        // for any slot a function's own body already reveals (matches its
+        // own default naming exactly) and only has visible effect on the
+        // slots this hint is actually widening arity for.
+        let hints = NirFunctionHints {
+            param_names: (1..=arity).map(|i| format!("param_{i}")).collect(),
+            ..Default::default()
+        };
+        fact_store.record_structuring_hints(callee_addr, hints);
+    }
+}
+
 pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
     binary: &LoadedBinary,
     pcode: &PcodeFunction,
@@ -1078,15 +1234,83 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 #[cfg(test)]
 mod tests {
     use super::{
-        build_nir_call_param_rules, merge_nir_function_hints, resolve_nir_struct_name,
-        summarize_preview_callee_effects,
+        build_nir_call_param_rules, merge_nir_function_hints, record_interprocedural_arity_facts,
+        resolve_nir_struct_name, summarize_preview_callee_effects,
     };
     use crate::{
-        CallEdgeKind, CallTargetProvenance, CallTargetRef, PcodeBasicBlock, PcodeFunction, PcodeOp,
-        PcodeOpcode, Varnode,
+        CallEdgeKind, CallTargetProvenance, CallTargetRef, NirTypeContext, PcodeBasicBlock,
+        PcodeFunction, PcodeOp, PcodeOpcode, Varnode,
     };
     use fission_signatures::win_types::WindowsStructures;
+    use fission_static::analysis::decomp::facts::FactStore;
     use std::collections::HashMap;
+
+    fn type_context_with_call_target(addr: u64, name: &str) -> NirTypeContext {
+        let mut ctx = NirTypeContext::default();
+        ctx.call_targets.insert(addr, name.to_string());
+        ctx
+    }
+
+    fn raw_hir_calling(callee_name: &str, arg_count: usize) -> fission_pcode::PreHirFunction {
+        use fission_pcode::{NirType, PreHirExpr, PreHirStmt};
+        let args = (0..arg_count)
+            .map(|i| PreHirExpr::Const(i as i64, NirType::Unknown))
+            .collect();
+        fission_pcode::PreHirFunction {
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                target: callee_name.to_string(),
+                args,
+                ty: NirType::Unknown,
+            })],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn records_observed_arity_for_resolved_callee() {
+        let mut facts = FactStore::default();
+        let ctx = type_context_with_call_target(0x401000, "target_fn");
+        let raw_hir = raw_hir_calling("target_fn", 3);
+
+        record_interprocedural_arity_facts(&mut facts, &ctx, &raw_hir, 0x400000);
+
+        let hints = facts.structuring_hints(0x401000).expect("hints recorded");
+        assert_eq!(hints.param_names.len(), 3);
+    }
+
+    #[test]
+    fn skips_zero_arity() {
+        let mut facts = FactStore::default();
+        let ctx = type_context_with_call_target(0x401000, "target_fn");
+        let raw_hir = raw_hir_calling("target_fn", 0);
+
+        record_interprocedural_arity_facts(&mut facts, &ctx, &raw_hir, 0x400000);
+
+        assert!(facts.structuring_hints(0x401000).is_none());
+    }
+
+    #[test]
+    fn skips_unresolved_callee_name() {
+        let mut facts = FactStore::default();
+        let ctx = type_context_with_call_target(0x401000, "target_fn");
+        let raw_hir = raw_hir_calling("some_other_fn", 2);
+
+        record_interprocedural_arity_facts(&mut facts, &ctx, &raw_hir, 0x400000);
+
+        assert!(facts.structuring_hints(0x401000).is_none());
+    }
+
+    #[test]
+    fn skips_self_recursive_call() {
+        let mut facts = FactStore::default();
+        // The function being built (0x400000) calls itself.
+        let ctx = type_context_with_call_target(0x400000, "self_fn");
+        let raw_hir = raw_hir_calling("self_fn", 4);
+
+        record_interprocedural_arity_facts(&mut facts, &ctx, &raw_hir, 0x400000);
+
+        assert!(facts.structuring_hints(0x400000).is_none());
+    }
 
     #[test]
     fn debug_hints_keep_precedence_over_structuring_overlay() {

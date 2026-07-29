@@ -142,6 +142,23 @@ pub fn render_mlil_preview_with_binary_and_context(
         debug_log("build_hir_error");
         err
     })?;
+    // Observation side channel, same rationale as `store_last_prehir_snapshot`
+    // below, but captured *before* `normalize_hir_function` runs rather than
+    // after: `apply_callsite_type_prop_pass` (an early pass inside
+    // `normalize_hir_function`'s type-signature fixed point) truncates each
+    // call's `args` down to the callee's own body-inferred arity via
+    // `prune_known_api_call_args_stmts`, and only afterwards does
+    // `apply_interproc_callsite_arity_pass` (a later cleanup-stage pass)
+    // observe `args.len()` per call site into
+    // `PreHirFunction::callee_observed_max_arity` -- so by construction that
+    // field can never see more args than the callee's own preview-inferred
+    // arity already implied, making it useless for the one thing it was
+    // meant for (recovering a caller-observed arity *wider* than what the
+    // callee's own body reveals). This snapshot captures `hir` right after
+    // the builder's raw argument recovery (`call_recovery.rs`, which reads
+    // real register writes at each call site with no arity cap at all) and
+    // before any pruning touches it.
+    store_last_raw_hir_snapshot(hir.clone());
     let mut build_stats = builder.preview_build_stats();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::FuncdataBuild);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::HeritageValueRecovery);
@@ -302,6 +319,27 @@ fn store_last_layered_pseudocode(layered: LayeredPseudocode) {
 /// on this thread (observation / CLI layer selection).
 pub fn take_last_layered_pseudocode() -> Option<LayeredPseudocode> {
     LAST_LAYERED_PSEUDOCODE.with(|slot| slot.borrow_mut().take())
+}
+
+thread_local! {
+    static LAST_RAW_HIR_SNAPSHOT: std::cell::RefCell<Option<super::PreHirFunction>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn store_last_raw_hir_snapshot(func: super::PreHirFunction) {
+    LAST_RAW_HIR_SNAPSHOT.with(|slot| {
+        *slot.borrow_mut() = Some(func);
+    });
+}
+
+/// Take the builder's raw [`super::PreHirFunction`] output from the most
+/// recent `render_mlil_preview*`/`render_nir*` call on this thread, captured
+/// before `normalize_hir_function` runs any pass on it -- see the comment at
+/// this snapshot's capture site for why call-site argument counts here can
+/// be wider (more accurate) than what [`take_last_prehir_snapshot`]'s
+/// post-normalize `callee_observed_max_arity` field ever sees.
+pub fn take_last_raw_hir_snapshot() -> Option<super::PreHirFunction> {
+    LAST_RAW_HIR_SNAPSHOT.with(|slot| slot.borrow_mut().take())
 }
 
 thread_local! {
