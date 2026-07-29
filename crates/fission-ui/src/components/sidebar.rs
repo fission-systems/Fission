@@ -1,16 +1,18 @@
 //! Sidebar — function list with:
 //!   • `use_memo` for O(1) re-render on unrelated state changes
-//!   • Virtual scroll — only renders the visible window of items
+//!   • Full list render, off-screen rows skipped by native CSS
+//!     `content-visibility: auto` (see .function-item/.str-item) rather
+//!     than hand-rolled virtual scrolling -- a manual windowed-render
+//!     approach here went through two failed fix attempts (wheel-delta
+//!     tracking racing real scroll, then a real onscroll listener still
+//!     fighting the browser's own scroll-position adjustments as the
+//!     DOM changed under it) before landing on this simpler, native
+//!     alternative.
 //!   • Import / Thunk classification before decompile
 
 use crate::state::{use_app_state, AppState, FunctionKind, LogEntry, SidebarKindFilter};
 use dioxus::prelude::*;
 use std::sync::Arc;
-
-// ── Layout constants ─────────────────────────────────────────────────────────
-const ITEM_H: f64 = 32.0; // must match .function-item CSS height
-const VISIBLE_H: f64 = 680.0; // pessimistic list-area height
-const OVERSCAN: usize = 4; // extra items rendered above/below viewport
 
 // ── SVGs ─────────────────────────────────────────────────────────────────────
 fn svg_search() -> Element {
@@ -91,34 +93,23 @@ pub fn Sidebar() -> Element {
     });
 
 
-    // ── Virtual scroll state ─────────────────────────────────────────────────
-    let mut scroll_top: Signal<f64> = use_signal(|| 0.0);
-    let mut str_scroll_top: Signal<f64> = use_signal(|| 0.0);
-
     // Inline rename state: Some(addr) when editing
     let mut rename_addr: Signal<Option<u64>> = use_signal(|| None);
     let mut rename_draft: Signal<String>     = use_signal(|| String::new());
 
-    // When sidebar_scroll_target changes, adjust virtual scroll position
+    // When sidebar_scroll_target changes (e.g. jumping here from an Xrefs
+    // click-through), scroll the real DOM element into view -- every item is
+    // rendered now (no virtual window to position), so it always exists.
     use_effect(move || {
         let target = state.read().sidebar_scroll_target;
         let Some(addr) = target else { return; };
-        let idx = filtered.read().iter().position(|e| e.addr == addr);
-        if let Some(idx) = idx {
-            let desired_top = (idx as f64 * ITEM_H - VISIBLE_H / 2.0 + ITEM_H / 2.0).max(0.0);
-            *scroll_top.write() = desired_top;
-        }
+        document::eval(&format!(
+            "document.getElementById('fn-item-{addr:x}')?.scrollIntoView({{block: 'center'}});"
+        ));
         state.write().sidebar_scroll_target = None;
     });
 
-    // ── Derived slice for function list ──────────────────────────────────────
     let fn_total = filtered.read().len();
-    let fn_start = ((*scroll_top.read() / ITEM_H) as usize).saturating_sub(OVERSCAN);
-    let fn_visible = (VISIBLE_H / ITEM_H).ceil() as usize + OVERSCAN * 2;
-    let fn_end = (fn_start + fn_visible).min(fn_total);
-
-    let fn_offset_top = fn_start as f64 * ITEM_H;
-    let fn_spacer_bot = if fn_end < fn_total { (fn_total - fn_end) as f64 * ITEM_H } else { 0.0 };
 
     // ── Decompile on click ───────────────────────────────────────────────────
     let mut on_select = move |entry: FnEntry| {
@@ -236,13 +227,6 @@ pub fn Sidebar() -> Element {
             .collect()
     };
     let str_total    = strings_list.len();
-    let str_item_h   = 36.0_f64;
-    let str_visible_h = VISIBLE_H;
-    let str_start    = ((*str_scroll_top.read() / str_item_h) as usize).saturating_sub(OVERSCAN);
-    let str_vis      = (str_visible_h / str_item_h).ceil() as usize + OVERSCAN * 2;
-    let str_end      = (str_start + str_vis).min(str_total);
-    let str_off_top  = str_start as f64 * str_item_h;
-    let str_spc_bot  = if str_end < str_total { (str_total - str_end) as f64 * str_item_h } else { 0.0 };
 
     rsx! {
         div { class: "sidebar",
@@ -344,19 +328,8 @@ pub fn Sidebar() -> Element {
                     } else {
                         ul {
                             class: "function-list",
-                            // Drive the virtual window from the browser's own scroll position
-                            // (`.function-list` has CSS `overflow-y: auto`) rather than
-                            // accumulating wheel deltas by hand -- a manual onwheel handler
-                            // ran *alongside* the real native scroll (prevent_default() on a
-                            // wheel event didn't stop it here), so both advanced on every
-                            // tick and the virtual window drifted out of sync with the real
-                            // content, opening a growing blank gap at the top.
-                            onscroll: move |e| {
-                                *scroll_top.write() = e.scroll_top();
-                            },
-                            li { key: "spacer-top", style: "height: {fn_offset_top}px; padding:0; pointer-events:none;" }
 
-                            for entry in filtered.read()[fn_start..fn_end].iter() {
+                            for entry in filtered.read().iter() {
                                 {
                                     let is_sel   = selected == Some(entry.addr);
                                     let addr     = entry.addr;
@@ -388,6 +361,7 @@ pub fn Sidebar() -> Element {
                                     rsx! {
                                         li {
                                             key: "{addr}",
+                                            id: "fn-item-{addr:x}",
                                             class: "{item_cls}",
                                             onclick: move |_| {
                                                 if !is_rename {
@@ -445,10 +419,6 @@ pub fn Sidebar() -> Element {
                                     }
                                 }
                             }
-
-                            if fn_spacer_bot > 0.0 {
-                                li { key: "{fn_spacer_bot}", style: "height: {fn_spacer_bot}px; padding:0; pointer-events:none;" }
-                            }
                         }
                     }
                 } else {
@@ -467,13 +437,8 @@ pub fn Sidebar() -> Element {
                     } else {
                         ul {
                             class: "str-list",
-                            // Same native-scroll fix as `.function-list` above.
-                            onscroll: move |e| {
-                                *str_scroll_top.write() = e.scroll_top();
-                            },
-                            li { key: "str-spacer-top", style: "height: {str_off_top}px; padding:0; pointer-events:none;" }
 
-                            for bs in strings_list[str_start..str_end].iter() {
+                            for bs in strings_list.iter() {
                                 {
                                     let va      = bs.offset;
                                     let val     = bs.value.clone();
@@ -505,10 +470,6 @@ pub fn Sidebar() -> Element {
                                         }
                                     }
                                 }
-                            }
-
-                            if str_spc_bot > 0.0 {
-                                li { key: "{str_spc_bot}", style: "height: {str_spc_bot}px; padding:0; pointer-events:none;" }
                             }
                         }
                     }

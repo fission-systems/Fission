@@ -576,7 +576,7 @@ body::after {
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
 .str-list { list-style: none; overflow-y: auto; flex: 1; padding: 4px 0; }
-.str-item { display: flex; flex-direction: column; gap: 2px; padding: 5px 14px; cursor: pointer; transition: background var(--t-fast) var(--ease-out); border-left: 2px solid transparent; }
+.str-item { display: flex; flex-direction: column; gap: 2px; padding: 5px 14px; cursor: pointer; transition: background var(--t-fast) var(--ease-out); border-left: 2px solid transparent; content-visibility: auto; contain-intrinsic-size: auto 36px; }
 .str-item:hover { background: var(--sf-3); border-left-color: var(--bdr-strong); }
 .str-value { font-family: var(--font-code); font-size: 11.5px; color: var(--clr-green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .str-meta { font-family: var(--font-code); font-size: 10px; color: var(--ink-3); display: flex; gap: 8px; }
