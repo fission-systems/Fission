@@ -211,9 +211,7 @@ pub fn discover_functions_with_runtime(
         );
         data_refs.retain(|&addr| !tracker.is_overlap(addr));
         eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
-        for &dr in &data_refs {
-            tracker.add_function(binary, &frontend, dr);
-        }
+        tracker.add_functions_batch(binary, &frontend, &data_refs);
         candidates.extend(data_refs.clone());
         all_known.extend(data_refs.clone());
 
@@ -229,9 +227,7 @@ pub fn discover_functions_with_runtime(
         );
         xml_hits.retain(|&addr| !tracker.is_overlap(addr));
         eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
-        for &xh in &xml_hits {
-            tracker.add_function(binary, &frontend, xh);
-        }
+        tracker.add_functions_batch(binary, &frontend, &xml_hits);
         candidates.extend(xml_hits.clone());
         all_known.extend(xml_hits.clone());
 
@@ -256,9 +252,7 @@ pub fn discover_functions_with_runtime(
         };
         dynamic.retain(|&addr| !tracker.is_overlap(addr));
         eprintln!("SCANNER_STATS: dynamic_prologues={}", dynamic.len());
-        for &dyn_addr in &dynamic {
-            tracker.add_function(binary, &frontend, dyn_addr);
-        }
+        tracker.add_functions_batch(binary, &frontend, &dynamic);
         candidates.extend(dynamic.clone());
         all_known.extend(dynamic.clone());
 
@@ -396,9 +390,7 @@ pub fn discover_functions_with_runtime(
                 "SCANNER_STATS: tail_calls={}",
                 validated_shared_returns.len()
             );
-            for &sr in &validated_shared_returns {
-                tracker.add_function(binary, &frontend, sr);
-            }
+            tracker.add_functions_batch(binary, &frontend, &validated_shared_returns);
             candidates.extend(validated_shared_returns.clone());
             all_known.extend(validated_shared_returns);
         }
@@ -625,13 +617,7 @@ impl InstructionBoundaryTracker {
         use rayon::prelude::*;
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
-            .flat_map(|&addr| {
-                let mut local_tracker = Self {
-                    boundaries: Vec::new(),
-                };
-                local_tracker.add_function(binary, frontend, addr);
-                local_tracker.boundaries
-            })
+            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr))
             .collect();
 
         let mut tracker = Self { boundaries };
@@ -640,7 +626,58 @@ impl InstructionBoundaryTracker {
         tracker
     }
 
-    fn add_function(&mut self, binary: &LoadedBinary, frontend: &RuntimeSleighFrontend, addr: u64) {
+    /// Register a batch of newly-accepted candidates in one pass instead of
+    /// one `add_function` call each. Each address's CFG walk only ever
+    /// *reads* `binary`/`frontend`, never `self` (see
+    /// `walk_function_boundaries`), so the walks themselves are independent
+    /// and safe to run in parallel; the only genuinely shared-state part is
+    /// merging the results in, which this now does once per batch instead
+    /// of once per address.
+    ///
+    /// This is why a scanner stage calling `add_function` once per accepted
+    /// candidate in a plain sequential loop was the actual bottleneck for
+    /// large candidate batches (Balanced profile in particular): each call
+    /// re-sorted and re-deduped the *entire* accumulated `boundaries`
+    /// list -- O(n log n) on a list that only grows -- so a stage adding a
+    /// few thousand candidates paid that full-list sort a few thousand
+    /// times over. One sort at the end of the batch is the same net
+    /// bookkeeping this loop always needed, just done once.
+    fn add_functions_batch(
+        &mut self,
+        binary: &LoadedBinary,
+        frontend: &RuntimeSleighFrontend,
+        addrs: &[u64],
+    ) {
+        if addrs.is_empty() {
+            return;
+        }
+        use rayon::prelude::*;
+        let new_boundaries: Vec<(u64, u64)> = addrs
+            .par_iter()
+            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr))
+            .collect();
+        self.boundaries.extend(new_boundaries);
+        self.boundaries.sort_unstable_by_key(|&(start, _)| start);
+        self.boundaries.dedup_by_key(|&mut (start, _)| start);
+    }
+
+}
+
+/// The actual CFG-following instruction-boundary walk used by both
+/// [`InstructionBoundaryTracker::build`] and
+/// [`InstructionBoundaryTracker::add_functions_batch`], factored out
+/// because it never reads tracker state (only `binary`/`frontend`) --
+/// every call is independent, which is what lets `add_functions_batch`
+/// run a whole batch of these in parallel and merge once instead of
+/// merging (and re-sorting the whole accumulated list) after every single
+/// one.
+fn walk_function_boundaries(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    addr: u64,
+) -> Vec<(u64, u64)> {
+    let mut boundaries = Vec::new();
+    {
         let exec_ranges = super::ranges::executable_ranges(binary);
         let mut visited = std::collections::HashSet::new();
         let mut worklist = vec![addr];
@@ -673,7 +710,7 @@ impl InstructionBoundaryTracker {
                     break;
                 }
 
-                self.boundaries.push((ip, ip + inst.length as u64));
+                boundaries.push((ip, ip + inst.length as u64));
                 count += 1;
 
                 match inst.flow_kind {
@@ -705,12 +742,11 @@ impl InstructionBoundaryTracker {
                 }
             }
         }
-
-        // Merge into boundaries and deduplicate
-        self.boundaries.sort_unstable_by_key(|&(start, _)| start);
-        self.boundaries.dedup_by_key(|&mut (start, _)| start);
     }
+    boundaries
+}
 
+impl InstructionBoundaryTracker {
     fn is_overlap(&self, addr: u64) -> bool {
         self.is_in_body(addr) || self.is_offcut(addr)
     }
