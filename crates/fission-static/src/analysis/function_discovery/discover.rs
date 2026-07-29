@@ -253,6 +253,30 @@ pub fn discover_functions_with_runtime(
         candidates.extend(eh_funcinfo_hits.clone());
         all_known.extend(eh_funcinfo_hits);
 
+        // SafeSEH handler table + Control Flow Guard check-function
+        // pointer, from IMAGE_LOAD_CONFIG_DIRECTORY (x86 only -- see
+        // load_config's module doc). Same "PE-metadata-only reachability"
+        // rationale and same trust level as msvc_eh_funcinfo above: every
+        // SafeSEH entry is, by construction, a real handler the OS loader
+        // itself validates before ever running it.
+        let raw_load_config_candidates = super::load_config::scan_load_config_candidates(binary);
+        let mut load_config_hits: Vec<u64> = raw_load_config_candidates
+            .into_iter()
+            .filter(|&addr| {
+                !tracker.is_overlap(addr)
+                    && !all_known.contains(&addr)
+                    && crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                        addr,
+                        &executable_ranges,
+                    )
+            })
+            .collect();
+        load_config_hits.sort_unstable();
+        eprintln!("SCANNER_STATS: load_config={}", load_config_hits.len());
+        tracker.add_functions_batch(binary, &frontend, &load_config_hits);
+        candidates.extend(load_config_hits.clone());
+        all_known.extend(load_config_hits);
+
         // Ghidra XML static patterns (x86-64win / x86win)
         let mut xml_hits = scan_ghidra_patterns(
             binary,

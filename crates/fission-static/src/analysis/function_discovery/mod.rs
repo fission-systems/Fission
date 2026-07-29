@@ -5,6 +5,7 @@
 //! derived from decoded instructions here.
 
 mod discover;
+mod load_config;
 mod msvc_eh;
 pub(crate) mod ranges;
 pub(crate) mod targets;
