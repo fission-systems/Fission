@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Json},
 };
 use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -44,8 +45,18 @@ pub async fn handle_upload_binary(
 
     // Parse the binary on a blocking thread
     let filename_clone = filename.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        LoadedBinary::from_bytes(bytes, filename_clone)
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<LoadedBinary> {
+        let mut binary = LoadedBinary::from_bytes(bytes, filename_clone)?;
+        // Loader-time symbol harvesting alone (exports/imports/COFF/PDB) never
+        // finds unexported internal functions -- e.g. every export in an
+        // MSVC-built DLL can be a 5-byte `jmp` thunk to the real, unnamed
+        // implementation elsewhere in .text, which the loader has no way to
+        // follow. `fission_cli decomp`'s own default profile is Conservative;
+        // matching it here so a served binary's function list isn't just the
+        // export/import table by itself (confirmed missing hundreds of real
+        // functions on a real sqlite3.dll before this fix).
+        discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
+        Ok(binary)
     })
     .await;
 
