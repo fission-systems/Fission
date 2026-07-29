@@ -110,7 +110,16 @@ async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid)
     };
     let mut binary = (*session.binary().await).clone();
     let discovered = tokio::task::spawn_blocking(move || {
-        discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Conservative);
+        // Balanced matches Ghidra's own function set almost exactly on a
+        // real-world test binary (~99% overlap) where Conservative misses
+        // a large fraction of real, non-exported functions. It used to be
+        // impractically slow (19+ minutes on that same binary, from a
+        // handful of accidentally-sequential validation loops in the
+        // scanners); those are now fixed, and it runs in the same
+        // ballpark as Conservative used to. Discovery already runs here in
+        // the background, off the upload response's critical path, so the
+        // added cost doesn't block the client either way.
+        discover_functions_with_runtime(&mut binary, FunctionDiscoveryProfile::Balanced);
         binary
     })
     .await;
