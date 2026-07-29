@@ -274,6 +274,106 @@ impl RuntimeSleighFrontend {
         }
     }
 
+    /// Decode a single instruction without emitting p-code. For callers that
+    /// only need the disassembly-level view (mnemonic, length, flow kind,
+    /// references) -- e.g. function-discovery candidate validation, which
+    /// can call this thousands of times per candidate across hundreds of
+    /// thousands of candidates -- this skips a full, and then immediately
+    /// discarded, p-code lift per instruction. See
+    /// `compiled_table::decode_instruction_no_pcode`'s doc comment for the
+    /// full rationale.
+    pub fn decode_single_no_pcode(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        context_override: Option<PackedContextOverride>,
+    ) -> Result<DecodedInstruction> {
+        if bytes.is_empty() {
+            return Err(RuntimeSleighError::DecodeNoMatch {
+                language: self.entry.entry_id.clone(),
+                address,
+            }
+            .into());
+        }
+        match self.status {
+            RuntimeFrontendStatus::RegisteredCompileOnly => {
+                Err(RuntimeSleighError::UnsupportedGeneratedSemantic {
+                    language: self.entry.entry_id.clone(),
+                    status: self.status,
+                }
+                .into())
+            }
+            RuntimeFrontendStatus::ExecutableCandidate => engine::decode_instruction_no_pcode(
+                &self.entry,
+                self.compiled.as_ref().ok_or_else(|| {
+                    anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                })?,
+                bytes,
+                address,
+                context_override,
+            ),
+        }
+    }
+
+    /// [`decode_window`](Self::decode_window), but without emitting p-code
+    /// per instruction -- see [`decode_single_no_pcode`](Self::decode_single_no_pcode)'s
+    /// doc comment. Same multi-instruction/context-commit-propagation loop
+    /// as `decode_window_with_context_override`, just calling the no-pcode
+    /// primitive per step.
+    pub fn decode_window_no_pcode(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+    ) -> Result<Vec<DecodedInstruction>> {
+        if limit == 0 || bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut pending_overrides: std::collections::BTreeMap<u64, PackedContextOverride> =
+            std::collections::BTreeMap::new();
+        let mut decoded = Vec::with_capacity(limit.min(64));
+        let mut offset = 0usize;
+        let mut current = address;
+        while offset < bytes.len() && decoded.len() < limit {
+            let remaining = &bytes[offset..];
+
+            let ctx_override = pending_overrides.get(&current).copied();
+
+            let instruction = match self.decode_single_no_pcode(remaining, current, ctx_override) {
+                Ok(instruction) => instruction,
+                Err(err) if decoded.is_empty() => return Err(err),
+                Err(_) => break,
+            };
+            if instruction.length == 0 {
+                bail!("decoder returned zero length at 0x{:x}", current);
+            }
+            let step = instruction.length;
+            if step > remaining.len() {
+                bail!(
+                    "decoded length {} exceeds available bytes {} at 0x{:x}",
+                    step,
+                    remaining.len(),
+                    current
+                );
+            }
+
+            for (target_addr, word_index, mask_u32, value_u32) in
+                &instruction.pending_context_commits
+            {
+                let entry = pending_overrides.entry(*target_addr).or_default();
+                entry.merge_commit_word(*word_index, *mask_u32, *value_u32)?;
+            }
+
+            current = checked_instruction_fallthrough(current, step as u64)?;
+            offset = offset
+                .checked_add(step)
+                .ok_or_else(|| anyhow!("decode byte offset overflowed at 0x{current:x}"))?;
+            decoded.push(instruction);
+        }
+        Ok(decoded)
+    }
+
     pub(super) fn decode_instruction_with_len(
         &self,
         bytes: &[u8],

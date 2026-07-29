@@ -477,7 +477,7 @@ fn terminal_import_thunk_target(
     let Some(bytes) = binary.view_bytes(address, 15) else {
         return None;
     };
-    let Ok(decoded) = frontend.decode_window(bytes, address, 1) else {
+    let Ok(decoded) = frontend.decode_window_no_pcode(bytes, address, 1) else {
         return None;
     };
     let Some(instruction) = decoded.first() else {
@@ -524,7 +524,7 @@ fn collect_section_targets(
     jump_edges: &mut Vec<(u64, u64)>,
 ) -> usize {
     if profile == FunctionDiscoveryProfile::Conservative {
-        let Ok(decoded) = frontend.decode_window(bytes, base_address, bytes.len()) else {
+        let Ok(decoded) = frontend.decode_window_no_pcode(bytes, base_address, bytes.len()) else {
             return 0;
         };
         let decoded_count = decoded.len();
@@ -567,7 +567,7 @@ fn collect_section_targets_resync(
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
         if let Ok(instructions) =
-            frontend.decode_window(remaining, current, remaining.len().min(4096))
+            frontend.decode_window_no_pcode(remaining, current, remaining.len().min(4096))
         {
             if !instructions.is_empty() {
                 let mut batch_bytes = 0;
@@ -588,7 +588,7 @@ fn collect_section_targets_resync(
             }
         }
 
-        match frontend.decode_instruction_with_context_override(remaining, current, None) {
+        match frontend.decode_single_no_pcode(remaining, current, None) {
             Ok(instruction) if instruction.length > 0 && instruction.length <= remaining.len() => {
                 let step = instruction.length;
                 collect_instruction_targets(
@@ -662,7 +662,7 @@ impl InstructionBoundaryTracker {
                 let Some(bytes) = binary.view_bytes(ip, 15) else {
                     break;
                 };
-                let Ok(decoded) = frontend.decode_window(bytes, ip, 1) else {
+                let Ok(decoded) = frontend.decode_window_no_pcode(bytes, ip, 1) else {
                     break;
                 };
                 if decoded.is_empty() {
@@ -1591,7 +1591,7 @@ fn function_start_fingerprint(
     address: u64,
 ) -> Option<(String, String)> {
     let bytes = binary.view_bytes(address, 32)?;
-    let decoded = frontend.decode_window(bytes, address, 2).ok()?;
+    let decoded = frontend.decode_window_no_pcode(bytes, address, 2).ok()?;
     if decoded.len() < 2 {
         return None;
     }
@@ -1621,7 +1621,7 @@ fn scan_jmp_thunks(
                 let addr = section.virtual_address + offset as u64;
                 if is_strict_boundary(binary, addr) {
                     if let Some(target_bytes) = binary.view_bytes(addr, 15) {
-                        if let Ok(decoded) = frontend.decode_window(target_bytes, addr, 1) {
+                        if let Ok(decoded) = frontend.decode_window_no_pcode(target_bytes, addr, 1) {
                             if !decoded.is_empty() && decoded[0].flow_kind == DecodedFlowKind::Jump
                             {
                                 if let Some(target) = decoded[0].direct_target {
@@ -1713,17 +1713,21 @@ pub(crate) fn validate_subroutine_candidate(
                     break;
                 };
 
-                let Ok(decoded) = frontend.decode_window(bytes, ip, 1) else {
+                // `validate_subroutine_candidate` only ever looks at
+                // mnemonic/length/flow_kind/direct_target below -- never
+                // p-code -- so this uses the decode-only path instead of
+                // `decode_window` (which always does a full p-code lift per
+                // instruction and discards it). This loop is exactly the
+                // hot path profiled as the Balanced discovery profile's
+                // dominant cost: up to `max_instructions` decodes per
+                // candidate, across every candidate from every scanner
+                // (ghidra-patterns, tail-call recovery, dynamic prologues).
+                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, None) else {
                     invalid = true;
                     break;
                 };
+                let inst = &inst;
 
-                if decoded.is_empty() {
-                    invalid = true;
-                    break;
-                }
-
-                let inst = &decoded[0];
                 if inst.mnemonic.is_empty() || inst.mnemonic.to_lowercase() == "invalid" {
                     invalid = true;
                     break;

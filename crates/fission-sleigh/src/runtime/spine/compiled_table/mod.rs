@@ -358,6 +358,77 @@ pub(crate) fn decode_instruction(
     decode_instruction_with_context(compiled, bytes, address, None)
 }
 
+/// Decode a single instruction to a [`DecodedInstruction`] without emitting
+/// p-code. Mirrors `decode_instruction_and_lift_with_context_override`'s
+/// candidate-selection + `bind_instruction` steps -- same decode, same
+/// mnemonic/operands/flow-kind/references/`pending_context_commits` result
+/// (`decoded_instruction_from_state` already resolves context commits
+/// itself; nothing here is lost by skipping p-code) -- but never calls
+/// `emit_pcode_for_state_with_bytes`, whose result
+/// (`Vec<PcodeOp>` + `RuntimeExecutionDetails`, including an unconditional
+/// `compiled.userops.clone()` of the whole SLEIGH spec's userop table) a
+/// decode-only caller throws away immediately anyway.
+///
+/// For callers that only need the disassembly-level view of an instruction
+/// (control-flow shape, byte length, references) -- e.g. function-discovery
+/// candidate validation, which can decode thousands of instructions per
+/// candidate across hundreds of thousands of candidates -- this avoids
+/// doing (and discarding) a full p-code lift per instruction. Mirrors
+/// Ghidra's own architecture: `PseudoDisassembler` deliberately never
+/// touches p-code, which Ghidra only generates on demand.
+///
+/// Reuses the same `decode_instruction_raw_state` bind-only primitive FID
+/// hashing already relies on (see its doc comment) -- that function already
+/// only gates on a successful `bind_instruction`, not p-code emission
+/// success, so this isn't a new leniency, just applying an existing,
+/// already-precedented decode path to a second caller.
+pub(crate) fn decode_instruction_no_pcode(
+    compiled: &CompiledFrontend,
+    bytes: &[u8],
+    address: u64,
+    context_override: Option<PackedContextOverride>,
+) -> Result<DecodedInstruction> {
+    clear_bind_cache();
+    let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
+    ctx.context_register = compiled.default_context;
+    ctx.context_known_mask = compiled.default_context_known_mask;
+    if let Some(context_override) = context_override {
+        context_override.apply_to(&mut ctx.context_register, &mut ctx.context_known_mask);
+    }
+
+    let strategy = RuntimeDecodeStrategy::for_table();
+    let candidates = candidate_selections(compiled, &ctx, address)?;
+    let mut first_error: Option<anyhow::Error> = None;
+
+    for selection in candidates {
+        if !selection.constructor.runtime_ready {
+            let err = unsupported_constructor_error(compiled, selection.constructor);
+            if first_error.is_none() {
+                first_error = Some(err.into());
+            }
+            continue;
+        }
+        match bind_instruction(compiled, strategy, &ctx, selection) {
+            Ok(decoded) => {
+                return decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded);
+            }
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(typed_template_resolution_error(compiled, err));
+                }
+            }
+        }
+    }
+
+    Err(first_error.unwrap_or_else(|| {
+        RuntimeSleighError::DecodeNoMatch {
+            language: compiled.entry_id.clone(),
+            address,
+        }
+        .into()
+    }))
+}
+
 fn typed_template_resolution_error(
     compiled: &CompiledFrontend,
     err: anyhow::Error,

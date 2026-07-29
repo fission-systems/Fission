@@ -112,3 +112,31 @@ pub(crate) fn decode_instruction_with_context(
         .into()),
     }
 }
+
+/// Like [`decode_instruction_with_context`] but never emits p-code -- see
+/// `compiled_table::decode_instruction_no_pcode`'s doc comment for why a
+/// decode-only caller wants this instead.
+pub(crate) fn decode_instruction_no_pcode(
+    entry: &EntrySpec,
+    compiled: &CompiledFrontend,
+    bytes: &[u8],
+    address: u64,
+    context_override: Option<PackedContextOverride>,
+) -> Result<DecodedInstruction> {
+    match registry::executable_engine_key_for_entry(entry) {
+        Some(ExecutionEngineKey::CompiledTable) => compiled_table::decode_instruction_no_pcode(
+            compiled,
+            bytes,
+            address,
+            context_override,
+        ),
+        _ => Err(RuntimeSleighError::UnsupportedPcodeTemplate {
+            language: entry.entry_id.clone(),
+            reason: format!(
+                "{} runtime status is executable, but no shared execution engine is registered",
+                entry.entry_id
+            ),
+        }
+        .into()),
+    }
+}
