@@ -358,9 +358,24 @@ pub fn discover_functions_with_runtime(
             shared_returns.sort_unstable();
             shared_returns.dedup();
 
-            let mut validated_shared_returns = Vec::new();
-            for sr in shared_returns {
-                if !tracker.is_overlap(sr) && is_strict_boundary(binary, sr) {
+            // Parallelized the same way as the ghidra-patterns validation
+            // pass above (rayon, one fresh local cache per candidate) --
+            // this loop calls the same `validate_subroutine_candidate`,
+            // which can walk up to 4000 instructions per candidate
+            // (`must_terminate: true`), and `shared_returns` can be large
+            // on a binary with a lot of jump-table/tail-call traffic.
+            // Left sequential, this was the actual bottleneck behind
+            // Balanced-profile runs occasionally taking 19+ minutes on a
+            // real sqlite3.dll despite the earlier ghidra-patterns phase
+            // already being parallel -- confirmed via `ps` showing a
+            // single core pinned at ~100% for the whole stall, at a point
+            // in stderr output past the ghidra-patterns phase's own
+            // completion line.
+            let mut validated_shared_returns: Vec<u64> = shared_returns
+                .into_par_iter()
+                .filter(|&sr| !tracker.is_overlap(sr) && is_strict_boundary(binary, sr))
+                .filter_map(|sr| {
+                    let mut local_cache = std::collections::HashMap::new();
                     let (valid, _) = validate_subroutine_candidate(
                         binary,
                         &frontend,
@@ -369,14 +384,13 @@ pub fn discover_functions_with_runtime(
                         4000,
                         true,
                         &all_known,
-                        &mut validation_cache,
+                        &mut local_cache,
                         Some(&all_references),
                     );
-                    if valid {
-                        validated_shared_returns.push(sr);
-                    }
-                }
-            }
+                    valid.then_some(sr)
+                })
+                .collect();
+            validated_shared_returns.sort_unstable();
 
             eprintln!(
                 "SCANNER_STATS: tail_calls={}",
@@ -1404,9 +1418,14 @@ fn scan_dynamic_prologues(
     _executable_ranges: &[(u64, u64)],
     known_functions: &std::collections::HashSet<u64>,
     tracker: &InstructionBoundaryTracker,
-    cache: &mut std::collections::HashMap<u64, ValidationResult>,
+    // Unused now that candidate validation runs in parallel below (each
+    // rayon item gets its own local cache instead) -- kept in the
+    // signature so the call site doesn't need its own special case.
+    _cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
 ) -> Vec<u64> {
+    use rayon::prelude::*;
+
     // Mirrors Ghidra AIF's own `MINIMUM_FUNCTION_COUNT` gate: too few known
     // functions means too little statistical signal to trust a fingerprint.
     const AIF_MIN_KNOWN_FUNCTIONS: usize = 20;
@@ -1515,34 +1534,47 @@ fn scan_dynamic_prologues(
             collect_padding_boundaries(gap_start, gap_end, &mut gap_candidates);
         }
 
-        for candidate in gap_candidates {
-            if known_functions.contains(&candidate) || tracker.is_overlap(candidate) {
-                continue;
-            }
-            if !is_strict_boundary(binary, candidate) {
-                continue;
-            }
-            let Some(fp) = function_start_fingerprint(binary, frontend, candidate) else {
-                continue;
-            };
-            if !common_fingerprints.contains(&fp) {
-                continue;
-            }
-            let (valid, _) = validate_subroutine_candidate(
-                binary,
-                frontend,
-                candidate,
-                AIF_MIN_INSNS,
-                4000,
-                true,
-                known_functions,
-                cache,
-                global_references,
-            );
-            if valid {
-                results.push(candidate);
-            }
-        }
+        // Parallelized like the ghidra-patterns validation pass in the
+        // caller: `gap_candidates` on a heavily-optimized binary can run
+        // into the thousands (one per padding-bounded gap between already-
+        // known functions), and each one here can fall through to the same
+        // `validate_subroutine_candidate` (up to 4000 instructions decoded,
+        // `must_terminate: true`) as that pass. Left sequential with a
+        // single shared `cache`, this was the actual bottleneck behind
+        // Balanced-profile runs stalling for minutes on a real sqlite3.dll
+        // -- confirmed by `ps` showing one core pinned at 100% at exactly
+        // this point in stderr output (after `xml_hits`, before this
+        // function's own `dynamic_prologues` count is printed). Each
+        // rayon item gets its own fresh cache, same tradeoff already
+        // accepted for the ghidra-patterns pass, since `cache` can't be
+        // shared mutably across threads.
+        let validated: Vec<u64> = gap_candidates
+            .into_par_iter()
+            .filter(|&candidate| {
+                !known_functions.contains(&candidate) && !tracker.is_overlap(candidate)
+            })
+            .filter(|&candidate| is_strict_boundary(binary, candidate))
+            .filter_map(|candidate| {
+                let fp = function_start_fingerprint(binary, frontend, candidate)?;
+                if !common_fingerprints.contains(&fp) {
+                    return None;
+                }
+                let mut local_cache = std::collections::HashMap::new();
+                let (valid, _) = validate_subroutine_candidate(
+                    binary,
+                    frontend,
+                    candidate,
+                    AIF_MIN_INSNS,
+                    4000,
+                    true,
+                    known_functions,
+                    &mut local_cache,
+                    global_references,
+                );
+                valid.then_some(candidate)
+            })
+            .collect();
+        results.extend(validated);
     }
 
     results
