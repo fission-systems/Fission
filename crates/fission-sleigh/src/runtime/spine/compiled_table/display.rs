@@ -219,6 +219,41 @@ pub(super) fn render_instruction_display(
     Ok((mnemonic, body))
 }
 
+/// Same result as [`render_instruction_display`]'s first element, but never
+/// renders the operand body -- for callers that only need the mnemonic
+/// (e.g. function-discovery's control-flow-shape validation, which checks
+/// `mnemonic.is_empty()`/`"invalid"` and never reads operand text). Operand
+/// rendering recurses through subtable handles building a full display
+/// string (memory operands, scaled indices, etc.) and is the more
+/// expensive half of `render_instruction_display` -- skipping it here
+/// avoids that work and its string allocations entirely, not just the
+/// allocation for the field that would have held the result.
+pub(super) fn render_mnemonic_only(state: &RuntimeConstructState) -> Result<String> {
+    if state.display_template.pieces.is_empty() {
+        return Ok(disasm_mnemonic(state));
+    }
+    let mnemonic = render_display_template_mnemonic_only(state)?;
+    Ok(if mnemonic.is_empty() {
+        disasm_mnemonic(state)
+    } else {
+        mnemonic.replace('^', "").to_ascii_lowercase()
+    })
+}
+
+fn render_display_template_mnemonic_only(state: &RuntimeConstructState) -> Result<String> {
+    if let Some(flow_index) = state.display_template.flowthru_operand_index {
+        if let Some(child) = state
+            .handles
+            .get(flow_index)
+            .and_then(|handle| handle.subtable_state.as_deref())
+        {
+            return render_display_template_mnemonic_only(child);
+        }
+    }
+    let split = display_template_split_index(state)?;
+    render_display_pieces(state, &state.display_template.pieces[..split])
+}
+
 pub(super) fn render_display_template_parts(
     state: &RuntimeConstructState,
 ) -> Result<(String, String)> {

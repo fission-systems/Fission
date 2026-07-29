@@ -160,7 +160,7 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
                 details.pending_context_commits = pending_context_commits;
                 details.userops = compiled.userops.clone();
                 let instruction =
-                    decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded)?;
+                    decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded, true)?;
                 return Ok((instruction, ops, decoded_length, details));
             }
             Err(err) => {
@@ -410,7 +410,7 @@ pub(crate) fn decode_instruction_no_pcode(
         }
         match bind_instruction(compiled, strategy, &ctx, selection) {
             Ok(decoded) => {
-                return decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded);
+                return decoded_instruction_from_state(compiled, address, bytes, &ctx, decoded, false);
             }
             Err(err) => {
                 if first_error.is_none() {
@@ -677,9 +677,14 @@ fn decoded_instruction_from_state(
     bytes: &[u8],
     ctx: &CompiledInstructionContext<'_>,
     decoded: RuntimeConstructState,
+    render_operands: bool,
 ) -> Result<DecodedInstruction> {
     let length = decoded.length;
-    let (mnemonic, operands_text) = render_instruction_display(&decoded)?;
+    let (mnemonic, operands_text) = if render_operands {
+        render_instruction_display(&decoded)?
+    } else {
+        (render_mnemonic_only(&decoded)?, String::new())
+    };
     let flow_kind = flow_kind_for_state(&decoded);
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
     let direct_target = first_flow_target(&decoded, address, length).or_else(|| {
