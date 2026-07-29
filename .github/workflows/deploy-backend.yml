@@ -1,0 +1,34 @@
+name: Deploy fission-backend
+
+# Deploys `fission-backend` to Railway on every push to main -- same
+# push-triggered model as fission-web's own deploy workflow, not gated on
+# a version tag. `railway up` uploads and builds the current checkout
+# directly. Requires the RAILWAY_TOKEN repo secret (a project token
+# scoped to the `generous-art` project / `production` environment) -- see
+# docs/RAILWAY.md. Railway's own GitHub auto-deploy should stay disabled
+# in the dashboard so this is the only thing that ships production.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-railway-backend:
+    name: 🚂 Deploy fission-backend (Railway)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service fission-backend --ci --yes
