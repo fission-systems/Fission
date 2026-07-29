@@ -43,6 +43,19 @@ pub async fn handle_decompile(
     .await;
 
     match result {
+        // NOTE: `out.learned_facts` (whatever this decompile discovered --
+        // see DecompContext::record_inferred_type/record_discovered_hints)
+        // is deliberately *not* persisted back into the session here.
+        // Measured against a real sqlite3.dll: carrying a fact store
+        // forward across unrelated functions made a later decompile of a
+        // trivial one-line function take 60+ seconds (vs. instant),
+        // reproduced on a clean session and confirmed not present without
+        // this carry-forward -- something in the render pipeline scales
+        // with the *total* accumulated fact count across every function
+        // decompiled in the session, not just the current function's own.
+        // Root cause not yet isolated; carrying facts forward stays off
+        // until it is. `sess.facts()` below still serves the same
+        // loader-derived FactStore (Phase 1's win) on every call.
         Ok(Ok(out)) => Json(DecompileResponse {
             pseudocode: out.code,
             nir:        out.code_nir,

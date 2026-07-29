@@ -107,7 +107,7 @@ pub(crate) fn finish_rust_sleigh_render(
     options.userops = userops;
     apply_spec_overrides(binary, &mut options);
 
-    let selection = select_nir_output_from_prebuilt_pcode_with_facts(
+    let (selection, learned_facts) = select_nir_output_from_prebuilt_pcode_with_learned_facts(
         pcode,
         binary,
         fact_store,
@@ -137,6 +137,7 @@ pub(crate) fn finish_rust_sleigh_render(
             build_stats: selection.build_stats,
             hint_stats: selection.hint_stats,
             evidence: evidence.clone(),
+            learned_facts,
         });
     }
 
@@ -162,6 +163,7 @@ pub(crate) fn finish_rust_sleigh_render(
             build_stats: None,
             hint_stats: None,
             evidence: evidence.clone(),
+            learned_facts,
         });
     }
 
@@ -207,6 +209,31 @@ pub fn select_nir_output_from_prebuilt_pcode_with_facts(
         pcode,
         binary,
         &fact_store,
+        address,
+        name,
+        mode,
+        timeout_ms,
+        options,
+    )
+}
+
+/// Like [`select_nir_output_from_prebuilt_pcode_with_facts`], but also
+/// surfaces the [`FactStore`] the render pass learned along the way -- see
+/// [`crate::routing::select_nir_output_from_pcode_with_learned_facts`].
+fn select_nir_output_from_prebuilt_pcode_with_learned_facts(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+) -> Result<(NirSelection, Option<FactStore>), String> {
+    crate::routing::select_nir_output_from_pcode_with_learned_facts(
+        pcode,
+        binary,
+        fact_store,
         address,
         name,
         mode,

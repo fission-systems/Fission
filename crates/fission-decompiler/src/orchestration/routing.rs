@@ -123,7 +123,7 @@ fn render_selection_from_pcode(
     prefer_preview_surface: bool,
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
-) -> Result<NirSelection, String> {
+) -> Result<(NirSelection, Option<FactStore>), String> {
     let decomp_ctx = crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
     match crate::render::render_nir_from_pcode_with_decomp_context(
         pcode,
@@ -137,24 +137,24 @@ fn render_selection_from_pcode(
         false,
         false,
     ) {
-        Ok(Some((code, build_stats, hint_stats))) => Ok(NirRoutingResolver::nir_success(
-            code,
-            build_stats,
-            hint_stats,
-            false,
-            None,
+        Ok(Some((code, build_stats, hint_stats, learned_facts))) => Ok((
+            NirRoutingResolver::nir_success(code, build_stats, hint_stats, false, None),
+            Some(learned_facts),
         )),
-        Ok(None) => Ok(NirRoutingResolver::nir_fallback(
-            "nir skipped: function not supported by Fission NIR builder",
+        Ok(None) => Ok((
+            NirRoutingResolver::nir_fallback(
+                "nir skipped: function not supported by Fission NIR builder",
+            ),
+            None,
         )),
         Err(err) => {
             if err.contains("not a function (orphan block detected)") {
-                return Ok(NirRoutingResolver::nir_skipped(&err));
+                return Ok((NirRoutingResolver::nir_skipped(&err), None));
             }
             let recovery_decomp_ctx =
                 crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
             let recovery_options = crate::render::nir_options_with_recovery(binary, false, false);
-            if let Some(selection) = try_structuring_recovery_from_pcode(
+            if let Some((selection, learned_facts)) = try_structuring_recovery_from_pcode(
                 pcode,
                 binary,
                 address,
@@ -164,9 +164,9 @@ fn render_selection_from_pcode(
                 recovery_options,
                 &err,
             )? {
-                Ok(selection)
+                Ok((selection, learned_facts))
             } else {
-                Ok(NirRoutingResolver::nir_fallback(&err))
+                Ok((NirRoutingResolver::nir_fallback(&err), None))
             }
         }
     }
@@ -268,8 +268,33 @@ pub fn select_nir_output_from_pcode_with_facts(
     timeout_ms: Option<u64>,
     options: NirRenderOptions,
 ) -> Result<NirSelection, String> {
+    select_nir_output_from_pcode_with_learned_facts(
+        pcode, binary, fact_store, address, name, mode, timeout_ms, options,
+    )
+    .map(|(selection, _learned_facts)| selection)
+}
+
+/// Like [`select_nir_output_from_pcode_with_facts`], but also surfaces the
+/// [`FactStore`] the render pass ended up with -- which can differ from
+/// the one passed in, since `DecompContext`'s `record_inferred_type`/
+/// `record_discovered_hints` (see `context::DecompContext`'s `DecompFacts`
+/// impl) feed newly-discovered type/structuring info into it as the NIR
+/// builder's own (up to 3-round) internal feedback loop runs. Callers that
+/// want to persist that beyond this one render call (e.g. a server session
+/// reusing facts across separate decompile requests) need this variant;
+/// everyone else can keep using the plain one above.
+pub fn select_nir_output_from_pcode_with_learned_facts(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+) -> Result<(NirSelection, Option<FactStore>), String> {
     match mode {
-        NirEngineMode::Legacy => Ok(NirRoutingResolver::legacy_mode()),
+        NirEngineMode::Legacy => Ok((NirRoutingResolver::legacy_mode(), None)),
         NirEngineMode::Nir | NirEngineMode::Auto => render_selection_from_pcode(
             pcode,
             binary,

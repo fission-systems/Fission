@@ -8,6 +8,7 @@ use crate::{
     structuring_outcome_for_signature, take_last_nir_build_stats,
 };
 use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::decomp::facts::FactStore;
 
 const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
 
@@ -145,7 +146,7 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
     decomp_ctx: crate::context::DecompContext<'bin>,
     base_options: NirRenderOptions,
     error: &str,
-) -> Result<Option<NirSelection>, String> {
+) -> Result<Option<(NirSelection, Option<FactStore>)>, String> {
     if classify_nir_failure_refined(error) != "nir_structuring_failure" {
         return Ok(None);
     }
@@ -169,18 +170,21 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
         false,
     );
     let region_retry_build_stats = match region_retry {
-        Ok(Some((code, build_stats, hint_stats))) => {
-            return Ok(Some(NirRoutingResolver::nir_success_with_recovery(
-                code,
-                build_stats,
-                hint_stats,
-                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-                "recovered",
-                Some(signature.to_string()),
-                "region_linearized",
-                outcome.reason_family.as_str(),
-                outcome.retryable,
+        Ok(Some((code, build_stats, hint_stats, learned_facts))) => {
+            return Ok(Some((
+                NirRoutingResolver::nir_success_with_recovery(
+                    code,
+                    build_stats,
+                    hint_stats,
+                    RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                    RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                    "recovered",
+                    Some(signature.to_string()),
+                    "region_linearized",
+                    outcome.reason_family.as_str(),
+                    outcome.retryable,
+                ),
+                Some(learned_facts),
             )));
         }
         Ok(None) | Err(_) => take_last_nir_build_stats(),
@@ -198,7 +202,7 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
         false,
         true,
     ) {
-        Ok(Some((code, build_stats, hint_stats))) => {
+        Ok(Some((code, build_stats, hint_stats, learned_facts))) => {
             let merged_build_stats =
                 merge_optional_build_stats(build_stats, region_retry_build_stats);
             let mode = match outcome.mode {
@@ -206,38 +210,47 @@ pub(crate) fn try_structuring_recovery_from_pcode<'bin>(
                 RecoveryMode::RegionLinearized => "region_linearized",
                 RecoveryMode::ForcedLinear => "forced_linear",
             };
-            Ok(Some(NirRoutingResolver::nir_success_with_recovery(
-                code,
-                merged_build_stats,
-                hint_stats,
-                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-                "recovered",
-                Some(signature.to_string()),
-                mode,
-                outcome.reason_family.as_str(),
-                outcome.retryable,
+            Ok(Some((
+                NirRoutingResolver::nir_success_with_recovery(
+                    code,
+                    merged_build_stats,
+                    hint_stats,
+                    RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                    RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                    "recovered",
+                    Some(signature.to_string()),
+                    mode,
+                    outcome.reason_family.as_str(),
+                    outcome.retryable,
+                ),
+                Some(learned_facts),
             )))
         }
-        Ok(None) => Ok(Some(NirRoutingResolver::nir_fallback_with_recovery(
-            error,
-            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+        Ok(None) => Ok(Some((
+            NirRoutingResolver::nir_fallback_with_recovery(
+                error,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                None,
+                "retry_skipped",
+                Some(signature.to_string()),
+                Some("forced_linear"),
+                Some(outcome.reason_family.as_str()),
+                Some(outcome.retryable),
+            ),
             None,
-            "retry_skipped",
-            Some(signature.to_string()),
-            Some("forced_linear"),
-            Some(outcome.reason_family.as_str()),
-            Some(outcome.retryable),
         ))),
-        Err(retry_err) => Ok(Some(NirRoutingResolver::nir_fallback_with_recovery(
-            format!("{error}; recovery failed: {retry_err}"),
-            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+        Err(retry_err) => Ok(Some((
+            NirRoutingResolver::nir_fallback_with_recovery(
+                format!("{error}; recovery failed: {retry_err}"),
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                None,
+                "retry_failed",
+                Some(signature.to_string()),
+                Some("forced_linear"),
+                Some(outcome.reason_family.as_str()),
+                Some(outcome.retryable),
+            ),
             None,
-            "retry_failed",
-            Some(signature.to_string()),
-            Some("forced_linear"),
-            Some(outcome.reason_family.as_str()),
-            Some(outcome.retryable),
         ))),
     }
 }

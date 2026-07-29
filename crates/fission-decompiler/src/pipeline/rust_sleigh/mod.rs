@@ -9,6 +9,7 @@ pub use config::RustSleighDecompileConfig;
 pub use evidence::RustSleighPipelineEvidence;
 
 use crate::{NirBuildStats, NirHintStats};
+use fission_static::analysis::decomp::facts::FactStore;
 
 #[derive(Debug, Clone)]
 pub struct RustSleighDecompileResult {
@@ -22,6 +23,15 @@ pub struct RustSleighDecompileResult {
     pub build_stats: Option<NirBuildStats>,
     pub hint_stats: Option<NirHintStats>,
     pub evidence: RustSleighPipelineEvidence,
+    /// The `FactStore` this decompile ended up with, if the NIR render path
+    /// ran (`None` on pcode-dump/architecture-unsupported fallbacks, which
+    /// never build a `DecompContext`). Includes anything newly discovered
+    /// during this call (`record_inferred_type`/`record_discovered_hints`,
+    /// see `context::DecompContext`) on top of whatever `FactStore` was
+    /// passed in -- callers that want that to inform *later* decompiles
+    /// (e.g. a server session reusing facts across separate requests) need
+    /// to persist this themselves; it isn't merged back automatically.
+    pub learned_facts: Option<FactStore>,
 }
 
 mod pipeline;

@@ -102,5 +102,6 @@ pub(crate) fn probe_wrapper_contraction(
         build_stats: Some(build_stats),
         hint_stats: None,
         evidence: RustSleighPipelineEvidence::default(),
+        learned_facts: None,
     }))
 }

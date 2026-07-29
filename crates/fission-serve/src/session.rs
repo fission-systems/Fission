@@ -83,6 +83,16 @@ impl SessionData {
         built
     }
 
+    /// Persist a `FactStore` a decompile call learned new things into
+    /// (`RustSleighDecompileResult::learned_facts`) as the session's
+    /// current facts, so the *next* decompile call in this session
+    /// (of this function or, more usefully, a caller/callee of it) starts
+    /// from what was just discovered instead of the plain loader-derived
+    /// facts every session starts with.
+    pub async fn set_facts(&self, facts: FactStore) {
+        *self.facts.write().await = Some(Arc::new(facts));
+    }
+
     pub fn is_analyzing(&self) -> bool {
         self.analyzing.load(Ordering::Acquire)
     }
