@@ -43,26 +43,39 @@ pub async fn handle_decompile(
     .await;
 
     match result {
-        // NOTE: `out.learned_facts` (whatever this decompile discovered --
-        // see DecompContext::record_inferred_type/record_discovered_hints)
-        // is deliberately *not* persisted back into the session here.
-        // Measured against a real sqlite3.dll: carrying a fact store
-        // forward across unrelated functions made a later decompile of a
-        // trivial one-line function take 60+ seconds (vs. instant),
-        // reproduced on a clean session and confirmed not present without
-        // this carry-forward -- something in the render pipeline scales
-        // with the *total* accumulated fact count across every function
-        // decompiled in the session, not just the current function's own.
-        // Root cause not yet isolated; carrying facts forward stays off
-        // until it is. `sess.facts()` below still serves the same
-        // loader-derived FactStore (Phase 1's win) on every call.
-        Ok(Ok(out)) => Json(DecompileResponse {
-            pseudocode: out.code,
-            nir:        out.code_nir,
-            fell_back:  out.fell_back,
-            reason:     out.fallback_reason,
-        })
-        .into_response(),
+        // `out.learned_facts` -- whatever this decompile discovered via
+        // `DecompContext::record_inferred_type`/`record_discovered_hints`
+        // -- is persisted back as the session's current facts, so a later
+        // decompile in this session starts from it instead of the plain
+        // loader-derived facts every session starts with.
+        //
+        // A chained-decompile regression was previously suspected here
+        // (a trivial function taking 60+s to decompile right after an
+        // unrelated one in the same session) and traced -- via
+        // `FISSION_PREVIEW_DIAG` showing thousands of per-function
+        // `[CFG-DIAG]` lines before the render pipeline was ever reached --
+        // to `FactStore::from_binary`'s FID signature-matching loop
+        // (`ingest_signature_matches_with_databases`) doing a full,
+        // unparallelized CFG-building decode of every unnamed function in
+        // the binary. That cost is paid once per session on the first
+        // `sess.facts()` call (see below), not per decompile and not by
+        // carrying facts forward; parallelizing it (same fix shape as the
+        // shared-returns loop in `discover.rs`) brought a real sqlite3.dll
+        // from 6+ minutes down to ~49s, and a same-session decompile
+        // immediately after -- with facts now carried forward -- measured
+        // at 0.08s, confirming no regression from persisting them.
+        Ok(Ok(out)) => {
+            if let Some(learned_facts) = out.learned_facts.clone() {
+                sess.set_facts(learned_facts).await;
+            }
+            Json(DecompileResponse {
+                pseudocode: out.code,
+                nir:        out.code_nir,
+                fell_back:  out.fell_back,
+                reason:     out.fallback_reason,
+            })
+            .into_response()
+        }
         Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse::new(e.to_string())),

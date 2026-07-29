@@ -300,45 +300,59 @@ impl FactStore {
                 .map(|(offset, _size)| offset as i64)
         };
 
-        for func in &binary.functions {
-            // Skip imports/exports and already resolved PDB/Dwarf metadata
-            let has_strong_name =
-                func.is_import || func.is_export || self.pdb_functions.contains_key(&func.address);
-            if has_strong_name {
-                continue;
-            }
+        // Parallelized: each candidate needs its own full CFG-building decode
+        // (`lift_raw_pcode_function_with_context_and_memory_context`) to
+        // compute its FID hash, and on a binary with thousands of functions
+        // lacking a strong name (no import/export/PDB match) this loop was
+        // the actual bottleneck behind a session's first decompile call --
+        // which lazily builds this `FactStore` -- taking several minutes on
+        // a real sqlite3.dll (8000+ functions), confirmed via `FISSION_
+        // PREVIEW_DIAG`'s per-function `[CFG-DIAG] start entry=...` log
+        // firing thousands of times sequentially before the actual decompile
+        // pipeline was ever reached. Same fix shape as the shared-returns
+        // validation loop in `discover.rs`: one fresh local cache per
+        // candidate, decode+hash+lookup done in parallel, only the final
+        // `ingest_name_fact` mutation stays sequential.
+        use rayon::prelude::*;
+        let matches: Vec<(u64, String)> = binary
+            .functions
+            .par_iter()
+            .filter(|func| {
+                // Skip imports/exports and already resolved PDB/Dwarf metadata
+                !(func.is_import
+                    || func.is_export
+                    || self.pdb_functions.contains_key(&func.address))
+            })
+            .filter_map(|func| {
+                let max_bytes = function_max_bytes(binary, func.address, 4096);
+                let bytes = binary.view_bytes(func.address, max_bytes)?;
+                let memory_context = decode_memory_context_for(binary, func.address, max_bytes);
+                let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
+                let decoded = frontend
+                    .lift_raw_pcode_function_with_context_and_memory_context(
+                        bytes,
+                        func.address,
+                        contract,
+                        &memory_context,
+                        None,
+                    )
+                    .ok()?;
 
-            let max_bytes = function_max_bytes(binary, func.address, 4096);
-            let Some(bytes) = binary.view_bytes(func.address, max_bytes) else {
-                continue;
-            };
-            let memory_context = decode_memory_context_for(binary, func.address, max_bytes);
-            let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
-            let Ok(decoded) = frontend.lift_raw_pcode_function_with_context_and_memory_context(
-                bytes,
-                func.address,
-                contract,
-                &memory_context,
-                None,
-            ) else {
-                continue;
-            };
+                let (_full_count, full_hash, _specific_count, specific_hash) =
+                    frontend.fid_hashes(&decoded.instructions, &resolve_register_offset)?;
 
-            let Some((_full_count, full_hash, _specific_count, specific_hash)) =
-                frontend.fid_hashes(&decoded.instructions, &resolve_register_offset)
-            else {
-                continue;
-            };
+                let best_match = databases
+                    .iter()
+                    .flat_map(|db| db.identify_by_hashes(full_hash, specific_hash))
+                    .max_by(|a, b| a.score.total_cmp(&b.score))?;
 
-            let best_match = databases
-                .iter()
-                .flat_map(|db| db.identify_by_hashes(full_hash, specific_hash))
-                .max_by(|a, b| a.score.total_cmp(&b.score));
+                Some((func.address, best_match.name))
+            })
+            .collect();
 
-            if let Some(best_match) = best_match {
-                // Ingest matched name fact with tiered priority: FactProvenance::StrongFid
-                self.ingest_name_fact(func.address, best_match.name, FactProvenance::StrongFid);
-            }
+        for (address, name) in matches {
+            // Ingest matched name fact with tiered priority: FactProvenance::StrongFid
+            self.ingest_name_fact(address, name, FactProvenance::StrongFid);
         }
     }
 

@@ -432,6 +432,20 @@ pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
     type_context: &mut NirTypeContext,
 ) {
     let direct_callees = collect_direct_internal_callee_targets(pcode);
+    if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+        let resolved_in_refs = direct_callees
+            .iter()
+            .filter(|a| type_context.call_target_refs.contains_key(a))
+            .count();
+        eprintln!(
+            "[CALLEE-DIAG] fn_entry=0x{:x} blocks={} direct_callees={} resolved_in_refs={} call_target_refs_total={}",
+            pcode.blocks.first().map(|b| b.start_address).unwrap_or(0),
+            pcode.blocks.len(),
+            direct_callees.len(),
+            resolved_in_refs,
+            type_context.call_target_refs.len(),
+        );
+    }
     for target_addr in direct_callees {
         let Some(target_ref) = type_context.call_target_refs.get(&target_addr) else {
             continue;
