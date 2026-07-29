@@ -215,6 +215,44 @@ pub fn discover_functions_with_runtime(
         candidates.extend(data_refs.clone());
         all_known.extend(data_refs.clone());
 
+        // MSVC C++ exception-handling FuncInfo tables (x86 only -- see
+        // msvc_eh's module doc). Unlike every other scanner here, catch
+        // handlers and unwind actions are reachable *only* from these
+        // tables, never from code -- structurally invisible otherwise.
+        //
+        // Deliberately skips `validate_subroutine_candidate`'s CFG-shape
+        // heuristic (does this decode to something that looks like a
+        // normal function start/body?) and `is_strict_boundary` (is there
+        // padding or a terminator right before this address?): a real
+        // catch/unwind handler routinely starts mid-instruction-stream
+        // right after another call ends, or opens with a `call` of its
+        // own rather than a typical prologue -- confirmed on a real
+        // catch handler this scanner found (`sqlite3.dll`'s
+        // `Catch_All@0x101c36c5` per Ghidra's own naming) that both of
+        // those checks reject outright. The FuncInfo/UnwindMap/
+        // TryBlockMap chain's own bounds/same-section checks (already
+        // applied in `msvc_eh::scan_msvc_eh_funcinfo`) are the actual
+        // validation here, the same way Ghidra's own `PEExceptionAnalyzer`
+        // trusts a validated `EHFunctionInfoModel` without any additional
+        // disassembly-based check.
+        let raw_eh_candidates = super::msvc_eh::scan_msvc_eh_funcinfo(binary);
+        let mut eh_funcinfo_hits: Vec<u64> = raw_eh_candidates
+            .into_iter()
+            .filter(|&addr| {
+                !tracker.is_overlap(addr)
+                    && !all_known.contains(&addr)
+                    && crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                        addr,
+                        &executable_ranges,
+                    )
+            })
+            .collect();
+        eh_funcinfo_hits.sort_unstable();
+        eprintln!("SCANNER_STATS: msvc_eh_funcinfo={}", eh_funcinfo_hits.len());
+        tracker.add_functions_batch(binary, &frontend, &eh_funcinfo_hits);
+        candidates.extend(eh_funcinfo_hits.clone());
+        all_known.extend(eh_funcinfo_hits);
+
         // Ghidra XML static patterns (x86-64win / x86win)
         let mut xml_hits = scan_ghidra_patterns(
             binary,
