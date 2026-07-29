@@ -347,6 +347,14 @@ pub fn Sidebar() -> Element {
                         ul {
                             class: "function-list",
                             onwheel: move |e| {
+                                // `.function-list` also has CSS `overflow-y: auto`, so without
+                                // this the browser's own native scroll AND this manually
+                                // tracked `scroll_top` both advance on every wheel tick --
+                                // double-scrolling that drifts the virtual window out of sync
+                                // with the real content (a growing blank gap at the top).
+                                // This is the single source of truth; the container itself
+                                // never actually scrolls.
+                                e.prevent_default();
                                 let delta = e.delta().strip_units().y;
                                 let mut st = scroll_top.write();
                                 *st = (*st + delta).max(0.0).min(fn_total_h - VISIBLE_H);
@@ -465,6 +473,8 @@ pub fn Sidebar() -> Element {
                         ul {
                             class: "str-list",
                             onwheel: move |e| {
+                                // Same double-scroll fix as `.function-list` above.
+                                e.prevent_default();
                                 let delta = e.delta().strip_units().y;
                                 let mut st = str_scroll_top.write();
                                 *st = (*st + delta).max(0.0).min(str_total_h - str_visible_h);
