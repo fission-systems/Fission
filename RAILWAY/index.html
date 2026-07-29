@@ -1071,23 +1071,21 @@ memory, not in the build.</p>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>RUST_LOG=fission_serve=info,tower_http=info
 </span></code></pre></div>
 <h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
-<p>The two services deploy on different triggers, deliberately:</p>
+<p>Both services deploy on <strong>every push to <code>main</code></strong> in their own repo:</p>
 <ul>
-<li><strong><code>fission-backend</code></strong> deploys only on a <strong>version-tag push</strong> to
-  <code>fission-systems/Fission</code>, via a <code>cd.yml</code> job (<code>deploy-railway-backend</code>)
-  that runs after the same L0/L1/L2-gated tag build the CLI release assets
-  go through. It's the decompiler engine itself -- production should only
-  ever run a gated, tagged version.</li>
-<li><strong><code>fission-web</code></strong> deploys on <strong>every push to <code>main</code></strong> in
-  <code>fission-systems/fission-web</code>, via its own <code>cd.yml</code>. It's a pure
-  presentation layer (UI, copy, this app's own components) -- low-risk
-  enough not to wait on a Fission release tag. This is decoupled from the
-  <code>fission-ui</code> version it ships: <code>Cargo.toml</code> pins that git dependency to a
-  specific Fission release tag (<code>fission-ui = { git = "...", tag =
-  "vX.Y.Z" }</code>) regardless of when fission-web itself deploys, so new
-  Fission-side functionality only reaches production when that pin is
-  deliberately bumped and re-tagged to match -- not on every push here.</li>
+<li><strong><code>fission-backend</code></strong> deploys via <code>fission-systems/Fission</code>'s
+  <code>deploy-backend.yml</code> (separate from <code>cd.yml</code>, which stays tag-triggered
+  and only builds/publishes the versioned CLI release assets -- that's a
+  distinct concern from "what's running on Railway").</li>
+<li><strong><code>fission-web</code></strong> deploys via its own <code>cd.yml</code> in
+  <code>fission-systems/fission-web</code>.</li>
 </ul>
+<p>Both are decoupled from the CLI's own tagged-release cadence: fixes reach
+production as soon as they're pushed, without waiting on a version tag.
+<code>fission-web</code>'s <code>Cargo.toml</code> still pins its <code>fission-ui</code> git dependency to
+either an explicit Fission commit/tag (bump it whenever fission-web needs
+newer Fission-side functionality) -- that pin, not the deploy trigger, is
+what actually controls which Fission code fission-web ships.</p>
 <p>Railway's own GitHub auto-deploy is turned <strong>off</strong> for both services either
 way, so each one's GitHub Actions workflow is the only thing that ships
 production (avoids a double deploy from the two mechanisms racing).</p>
@@ -1109,10 +1107,7 @@ production (avoids a double deploy from the two mechanisms racing).</p>
    (Project Settings → Tokens) and add it as the <code>RAILWAY_TOKEN</code> secret in
    both the <code>fission-systems/Fission</code> and <code>fission-systems/fission-web</code>
    GitHub repos.</li>
-<li>Push a version tag (<code>vX.Y.Z</code>) to <code>fission-systems/Fission</code> to deploy
-   <code>fission-backend</code>. Push to <code>fission-systems/fission-web</code>'s <code>main</code> to
-   deploy <code>fission-web</code> (bump and re-tag its <code>fission-ui</code> pin first if it
-   needs to pick up a newer Fission release).</li>
+<li>Push to <code>main</code> in either repo to deploy that service.</li>
 <li>Open the web application -- it connects automatically; no token needed
     unless you configured one in step 3.</li>
 </ol>
