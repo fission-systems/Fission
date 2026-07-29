@@ -570,7 +570,7 @@ mod wasm_api {
 
 #[cfg(target_arch = "wasm32")]
 pub use wasm_api::{
-    fetch_server_status, get_server_url, set_server_api_token, set_server_url,
+    fetch_server_status, get_server_url, poll_functions, set_server_api_token, set_server_url,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
