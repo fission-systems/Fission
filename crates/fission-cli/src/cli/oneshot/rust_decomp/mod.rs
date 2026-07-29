@@ -166,6 +166,22 @@ pub(crate) fn render_one_function_inner(
     config: RenderConfig,
 ) -> FunctionRenderResult {
     let start = std::time::Instant::now();
+    // `FunctionInfo::name` may legitimately be empty (stripped binary, no
+    // symbol) -- unlike the empty name, an empty rendered signature
+    // (`uint (void) { ... }`) isn't valid C and can't be addressed by
+    // identifier downstream. Synthesize the same `sub_{addr:x}` fallback
+    // fission-serve's HTTP handler already applies, so every render path
+    // agrees on one name for an unnamed function.
+    let named_func;
+    let func: &FunctionInfo = if func.name.trim().is_empty() {
+        named_func = FunctionInfo {
+            name: format!("sub_{:x}", func.address),
+            ..func.clone()
+        };
+        &named_func
+    } else {
+        func
+    };
 
     match render_with_rust_sleigh(binary, facts, func, config.timeout_ms, config.prehir) {
         Ok(rendered) => {
