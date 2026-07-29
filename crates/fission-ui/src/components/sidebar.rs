@@ -94,8 +94,8 @@ pub fn Sidebar() -> Element {
 
 
     // Inline rename state: Some(addr) when editing
-    let mut rename_addr: Signal<Option<u64>> = use_signal(|| None);
-    let mut rename_draft: Signal<String>     = use_signal(|| String::new());
+    let rename_addr: Signal<Option<u64>> = use_signal(|| None);
+    let rename_draft: Signal<String>     = use_signal(|| String::new());
 
     // When sidebar_scroll_target changes (e.g. jumping here from an Xrefs
     // click-through), scroll the real DOM element into view -- every item is
@@ -110,102 +110,6 @@ pub fn Sidebar() -> Element {
     });
 
     let fn_total = filtered.read().len();
-
-    // ── Decompile on click ───────────────────────────────────────────────────
-    let mut on_select = move |entry: FnEntry| {
-        // Close any open rename
-        rename_addr.set(None);
-
-        // Import thunks (is_imp=true, is_thunk=true) are IAT stubs — JMP [IAT].
-        // They produce self-recursive pseudocode if decompiled, so treat them
-        // exactly like plain imports: show the stub comment, skip decompile.
-        let kind = if entry.is_imp {
-            // Covers both pure imports (is_thunk=false) and import thunks (is_thunk=true)
-            FunctionKind::Import { library: entry.lib.clone() }
-        } else if entry.is_thunk {
-            // Non-import thunks (e.g. vtable thunks, tail-call thunks) — still try to decompile
-            FunctionKind::Thunk { target: entry.thunk_t }
-        } else {
-            FunctionKind::Code
-        };
-
-        {
-            let mut s = state.write();
-            s.current_function_addr = Some(entry.addr);
-            s.current_function_kind = kind.clone();
-            s.decompiled_code = None;
-            s.decompiled_nir = None;
-            s.current_cfg = None;
-            s.current_xref_callers.clear();
-            s.current_xref_callees.clear();
-            s.is_loading_xrefs = false;
-            s.navigate_to(entry.addr);
-        }
-
-        match kind {
-            FunctionKind::Import { library } => {
-                let lib_str   = library.as_deref().unwrap_or("unknown");
-                let thunk_t   = entry.thunk_t;
-                let is_thunk  = entry.is_thunk;
-                let kind_tag  = if is_thunk { "Import thunk (IAT stub)" } else { "Import stub" };
-                let thunk_line = thunk_t
-                    .map(|t| format!("\n *  IAT target: 0x{t:x}"))
-                    .unwrap_or_default();
-                let stub = format!(
-                    "/* {kind_tag} — no decompilable body.\n\
-                     *\n\
-                     *  Symbol  : {}\n\
-                     *  Address : 0x{:016x}\n\
-                     *  Library : {lib_str}{thunk_line}\n\
-                     *\n\
-                     *  This is a JMP [IAT] thunk. The real implementation\n\
-                     *  lives in the imported DLL, not in this binary.\n\
-                     */",
-                    entry.name, entry.addr,
-                );
-                let mut s = state.write();
-                s.decompiled_code = Some(stub);
-                if is_thunk {
-                    let tgt_str = thunk_t.map(|t| format!(" → 0x{t:x}")).unwrap_or_default();
-                    s.push_log(LogEntry::info(format!(
-                        "Import thunk: {}{tgt_str}  (from {lib_str})", entry.name
-                    )));
-                } else {
-                    s.push_log(LogEntry::info(format!(
-                        "Import stub: {}  (from {lib_str})", entry.name
-                    )));
-                }
-            }
-            FunctionKind::Thunk { target } => {
-                let name = entry.name.clone();
-                let addr = entry.addr;
-                let tgt = target.map(|t| format!("0x{t:x}")).unwrap_or_default();
-                {
-                    let mut s = state.write();
-                    s.is_decompiling = true;
-                    s.push_log(LogEntry::warn(format!(
-                        "\"{name}\" is an import thunk — output will appear self-recursive \
-                         (IAT target: {tgt})"
-                    )));
-                }
-                let binary  = state.read().binary.clone();
-                let session = state.read().server_session_id.clone();
-                spawn(async move { run_decompile(state, binary, session, addr, name).await });
-            }
-            FunctionKind::Code => {
-                let name    = entry.name.clone();
-                let addr    = entry.addr;
-                let session = state.read().server_session_id.clone();
-                {
-                    let mut s = state.write();
-                    s.is_decompiling = true;
-                    s.push_log(LogEntry::info(format!("Decompiling {name}  @  0x{addr:x}")));
-                }
-                let binary = state.read().binary.clone();
-                spawn(async move { run_decompile(state, binary, session, addr, name).await });
-            }
-        }
-    };
 
     // ── Read once for rendering ───────────────────────────────────────────────
     let has_binary   = state.read().has_binary_loaded();
@@ -335,90 +239,44 @@ pub fn Sidebar() -> Element {
 
                             for entry in filtered.read().iter() {
                                 {
-                                    let is_sel   = selected == Some(entry.addr);
-                                    let addr     = entry.addr;
-                                    let is_rename= rename_now == Some(addr);
-
-                                    // Display name = rename_map override or original
+                                    let addr = entry.addr;
+                                    let is_sel = selected == Some(addr);
+                                    let is_rename = rename_now == Some(addr);
+                                    // Display name = rename_map override or original.
+                                    // Still an O(n) per-render lookup, but plain data
+                                    // (a HashMap probe + maybe a String clone) --
+                                    // cheap compared to the VNode tree construction
+                                    // FunctionListItem's own #[component] boundary
+                                    // now lets Dioxus skip entirely for the ~8000
+                                    // other items whose props didn't change.
                                     let display = {
                                         let s = state.read();
                                         s.rename_map.get(&addr).cloned()
                                             .unwrap_or_else(|| {
                                                 if entry.name.is_empty() {
-                                                    format!("sub_{:x}", addr)
+                                                    format!("sub_{addr:x}")
                                                 } else {
                                                     entry.name.clone()
                                                 }
                                             })
                                     };
                                     let orig_name = if entry.name.is_empty() {
-                                        format!("sub_{:x}", addr)
+                                        format!("sub_{addr:x}")
                                     } else {
                                         entry.name.clone()
                                     };
-                                    let dot_cls = if entry.is_exp     { "fn-type-dot is-export" }
-                                                  else if entry.is_thunk || entry.is_imp { "fn-type-dot is-import" }
-                                                  else { "fn-type-dot is-code" };
-                                    let item_cls = if is_sel { "function-item is-selected" } else { "function-item" };
-                                    let e2 = entry.clone();
 
                                     rsx! {
-                                        li {
+                                        FunctionListItem {
                                             key: "{addr}",
-                                            id: "fn-item-{addr:x}",
-                                            class: "{item_cls}",
-                                            onclick: move |_| {
-                                                if !is_rename {
-                                                    on_select(e2.clone());
-                                                }
-                                            },
-                                            ondoubleclick: move |e| {
-                                                e.stop_propagation();
-                                                rename_draft.set(display.clone());
-                                                rename_addr.set(Some(addr));
-                                            },
-                                            div { class: "{dot_cls}" }
-                                            div { class: "fn-info",
-                                                if is_rename {
-                                                    // Inline rename input
-                                                    input {
-                                                        class: "fn-rename-input",
-                                                        r#type: "text",
-                                                        value: "{rename_draft}",
-                                                        autofocus: true,
-                                                        oninput: move |ev| rename_draft.set(ev.value().clone()),
-                                                        onkeydown: move |ev| {
-                                                            match ev.key() {
-                                                                Key::Enter => {
-                                                                    let new_name = rename_draft.read().clone();
-                                                                    if !new_name.is_empty() && new_name != orig_name {
-                                                                        state.write().rename_map.insert(addr, new_name);
-                                                                    } else if new_name.is_empty() {
-                                                                        // empty = remove override
-                                                                        state.write().rename_map.remove(&addr);
-                                                                    }
-                                                                    rename_addr.set(None);
-                                                                }
-                                                                Key::Escape => { rename_addr.set(None); }
-                                                                _ => {}
-                                                            }
-                                                        },
-                                                        onblur: move |_| { rename_addr.set(None); },
-                                                    }
-                                                } else {
-                                                    div { class: "fn-name", "{display}" }
-                                                    div { class: "fn-addr", "0x{addr:016x}" }
-                                                }
-                                            }
-                                            if !is_rename {
-                                                if entry.is_thunk {
-                                                    span { class: "fn-kind-pill kind-thunk", "THUNK" }
-                                                } else if entry.is_exp {
-                                                    span { class: "fn-kind-pill kind-exp", "EXP" }
-                                                } else if entry.is_imp {
-                                                    span { class: "fn-kind-pill kind-imp", "IMP" }
-                                                }
-                                            }
+                                            entry: entry.clone(),
+                                            is_selected: is_sel,
+                                            is_renaming: is_rename,
+                                            display_name: display,
+                                            orig_name,
+                                            state,
+                                            rename_addr,
+                                            rename_draft,
                                         }
                                     }
                                 }
@@ -479,6 +337,194 @@ pub fn Sidebar() -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// One function-list row, its own `#[component]` boundary specifically so
+/// Dioxus can memoize it: with ~8000 functions in a real binary, building a
+/// fresh multi-child VNode tree (with event handlers) for every row on every
+/// `Sidebar` re-render -- even one triggered by an unrelated state change,
+/// like renaming a *different* function -- was the actual rendering cost;
+/// `content-visibility: auto` (see module doc) only ever addressed paint/
+/// layout cost for off-screen rows, not VNode construction/diffing cost for
+/// the whole list. As its own component, Dioxus compares this row's props
+/// (`entry`/`is_selected`/`is_renaming`/`display_name`, all plain data) to
+/// last render and skips rebuilding its subtree entirely when they're
+/// unchanged -- which is the case for effectively every row on most
+/// re-renders (only the previously- and newly-selected/renamed rows
+/// actually change).
+#[component]
+fn FunctionListItem(
+    entry: FnEntry,
+    is_selected: bool,
+    is_renaming: bool,
+    display_name: String,
+    orig_name: String,
+    state: Signal<AppState>,
+    mut rename_addr: Signal<Option<u64>>,
+    mut rename_draft: Signal<String>,
+) -> Element {
+    let addr = entry.addr;
+    let dot_cls = if entry.is_exp { "fn-type-dot is-export" }
+                  else if entry.is_thunk || entry.is_imp { "fn-type-dot is-import" }
+                  else { "fn-type-dot is-code" };
+    let item_cls = if is_selected { "function-item is-selected" } else { "function-item" };
+    let entry_for_click = entry.clone();
+
+    rsx! {
+        li {
+            id: "fn-item-{addr:x}",
+            class: "{item_cls}",
+            onclick: move |_| {
+                if !is_renaming {
+                    select_function(state, entry_for_click.clone());
+                }
+            },
+            ondoubleclick: move |e| {
+                e.stop_propagation();
+                rename_draft.set(display_name.clone());
+                rename_addr.set(Some(addr));
+            },
+            div { class: "{dot_cls}" }
+            div { class: "fn-info",
+                if is_renaming {
+                    // Inline rename input
+                    input {
+                        class: "fn-rename-input",
+                        r#type: "text",
+                        value: "{rename_draft}",
+                        autofocus: true,
+                        oninput: move |ev| rename_draft.set(ev.value().clone()),
+                        onkeydown: move |ev| {
+                            match ev.key() {
+                                Key::Enter => {
+                                    let new_name = rename_draft.read().clone();
+                                    if !new_name.is_empty() && new_name != orig_name {
+                                        state.write().rename_map.insert(addr, new_name);
+                                    } else if new_name.is_empty() {
+                                        // empty = remove override
+                                        state.write().rename_map.remove(&addr);
+                                    }
+                                    rename_addr.set(None);
+                                }
+                                Key::Escape => { rename_addr.set(None); }
+                                _ => {}
+                            }
+                        },
+                        onblur: move |_| { rename_addr.set(None); },
+                    }
+                } else {
+                    div { class: "fn-name", "{display_name}" }
+                    div { class: "fn-addr", "0x{addr:016x}" }
+                }
+            }
+            if !is_renaming {
+                if entry.is_thunk {
+                    span { class: "fn-kind-pill kind-thunk", "THUNK" }
+                } else if entry.is_exp {
+                    span { class: "fn-kind-pill kind-exp", "EXP" }
+                } else if entry.is_imp {
+                    span { class: "fn-kind-pill kind-imp", "IMP" }
+                }
+            }
+        }
+    }
+}
+
+/// Resolve a clicked function's kind and either show an import stub or
+/// kick off an async decompile. Free function (not a parent-scoped
+/// closure) so `FunctionListItem`'s `onclick` doesn't need a callback
+/// prop -- see that component's doc comment for why avoiding extra props
+/// here matters at ~8000 rows.
+fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
+    // Import thunks (is_imp=true, is_thunk=true) are IAT stubs — JMP [IAT].
+    // They produce self-recursive pseudocode if decompiled, so treat them
+    // exactly like plain imports: show the stub comment, skip decompile.
+    let kind = if entry.is_imp {
+        // Covers both pure imports (is_thunk=false) and import thunks (is_thunk=true)
+        FunctionKind::Import { library: entry.lib.clone() }
+    } else if entry.is_thunk {
+        // Non-import thunks (e.g. vtable thunks, tail-call thunks) — still try to decompile
+        FunctionKind::Thunk { target: entry.thunk_t }
+    } else {
+        FunctionKind::Code
+    };
+
+    {
+        let mut s = state.write();
+        s.current_function_addr = Some(entry.addr);
+        s.current_function_kind = kind.clone();
+        s.decompiled_code = None;
+        s.decompiled_nir = None;
+        s.current_cfg = None;
+        s.current_xref_callers.clear();
+        s.current_xref_callees.clear();
+        s.is_loading_xrefs = false;
+        s.navigate_to(entry.addr);
+    }
+
+    match kind {
+        FunctionKind::Import { library } => {
+            let lib_str   = library.as_deref().unwrap_or("unknown");
+            let thunk_t   = entry.thunk_t;
+            let is_thunk  = entry.is_thunk;
+            let kind_tag  = if is_thunk { "Import thunk (IAT stub)" } else { "Import stub" };
+            let thunk_line = thunk_t
+                .map(|t| format!("\n *  IAT target: 0x{t:x}"))
+                .unwrap_or_default();
+            let stub = format!(
+                "/* {kind_tag} — no decompilable body.\n\
+                 *\n\
+                 *  Symbol  : {}\n\
+                 *  Address : 0x{:016x}\n\
+                 *  Library : {lib_str}{thunk_line}\n\
+                 *\n\
+                 *  This is a JMP [IAT] thunk. The real implementation\n\
+                 *  lives in the imported DLL, not in this binary.\n\
+                 */",
+                entry.name, entry.addr,
+            );
+            let mut s = state.write();
+            s.decompiled_code = Some(stub);
+            if is_thunk {
+                let tgt_str = thunk_t.map(|t| format!(" → 0x{t:x}")).unwrap_or_default();
+                s.push_log(LogEntry::info(format!(
+                    "Import thunk: {}{tgt_str}  (from {lib_str})", entry.name
+                )));
+            } else {
+                s.push_log(LogEntry::info(format!(
+                    "Import stub: {}  (from {lib_str})", entry.name
+                )));
+            }
+        }
+        FunctionKind::Thunk { target } => {
+            let name = entry.name.clone();
+            let addr = entry.addr;
+            let tgt = target.map(|t| format!("0x{t:x}")).unwrap_or_default();
+            {
+                let mut s = state.write();
+                s.is_decompiling = true;
+                s.push_log(LogEntry::warn(format!(
+                    "\"{name}\" is an import thunk — output will appear self-recursive \
+                     (IAT target: {tgt})"
+                )));
+            }
+            let binary  = state.read().binary.clone();
+            let session = state.read().server_session_id.clone();
+            spawn(async move { run_decompile(state, binary, session, addr, name).await });
+        }
+        FunctionKind::Code => {
+            let name    = entry.name.clone();
+            let addr    = entry.addr;
+            let session = state.read().server_session_id.clone();
+            {
+                let mut s = state.write();
+                s.is_decompiling = true;
+                s.push_log(LogEntry::info(format!("Decompiling {name}  @  0x{addr:x}")));
+            }
+            let binary = state.read().binary.clone();
+            spawn(async move { run_decompile(state, binary, session, addr, name).await });
         }
     }
 }
