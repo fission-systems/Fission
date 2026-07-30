@@ -369,12 +369,19 @@ pub struct LoadedBinary {
     inner: Arc<LoadedBinaryInner>,
     /// DWARF debug information for functions (params, locals, return types).
     /// Keyed by function address for O(1) lookup during post-processing.
-    /// Not serialized — rebuilt on each load from debug sections.
-    pub dwarf_functions: std::collections::HashMap<u64, DwarfFunctionInfo>,
+    /// Not serialized — rebuilt on each load from debug sections. `Arc`-
+    /// wrapped (unlike most fields here, restored to the type's own "O(1)
+    /// clone" contract for this field) so `FactStore::from_program` can
+    /// share the same allocation instead of deep-cloning it -- a session
+    /// holds both a `LoadedBinary` and a `FactStore` built from it for its
+    /// entire lifetime, so an independent copy here is pure standing
+    /// duplication, not a one-off cost.
+    pub dwarf_functions: Arc<std::collections::HashMap<u64, DwarfFunctionInfo>>,
     /// Focused PDB function-level facts (name, return type, params/locals).
     /// Keyed by function address for O(1) lookup during post-processing.
-    /// Not serialized — rebuilt on each load from the PDB sidecar when available.
-    pub pdb_functions: std::collections::HashMap<u64, PdbFunctionInfo>,
+    /// Not serialized — rebuilt on each load from the PDB sidecar when
+    /// available. `Arc`-wrapped for the same reason as `dwarf_functions`.
+    pub pdb_functions: Arc<std::collections::HashMap<u64, PdbFunctionInfo>>,
     /// Structured compiler/packer/language hints with evidence (not an rkyv snapshot field).
     pub identity_report: Option<super::identity::BinaryIdentityReport>,
     /// Go compiler version string detected from the `.go.buildinfo` section (e.g. `"go1.22.3"`).
@@ -410,8 +417,8 @@ impl LoadedBinary {
     pub fn from_inner(inner: LoadedBinaryInner) -> Self {
         Self {
             inner: Arc::new(inner),
-            dwarf_functions: std::collections::HashMap::new(),
-            pdb_functions: std::collections::HashMap::new(),
+            dwarf_functions: Arc::new(std::collections::HashMap::new()),
+            pdb_functions: Arc::new(std::collections::HashMap::new()),
             identity_report: None,
             go_version: None,
             function_candidates: Vec::new(),

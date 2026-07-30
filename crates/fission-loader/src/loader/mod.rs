@@ -4,6 +4,7 @@
 
 use crate::prelude::*;
 use std::path::Path;
+use std::sync::Arc;
 
 pub mod analyzers;
 pub mod coff;
@@ -345,8 +346,11 @@ impl LoadedBinary {
             }
 
             // Store DWARF function info for post-processing (param/local name substitution)
-            for func_info in dwarf_funcs_res {
-                binary.dwarf_functions.insert(func_info.address, func_info);
+            {
+                let dwarf_functions = Arc::make_mut(&mut binary.dwarf_functions);
+                for func_info in dwarf_funcs_res {
+                    dwarf_functions.insert(func_info.address, func_info);
+                }
             }
         }
 

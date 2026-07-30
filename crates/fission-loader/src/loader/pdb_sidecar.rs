@@ -129,7 +129,7 @@ pub fn ingest_pdb_function_facts(binary: &mut LoadedBinary) -> Result<usize> {
     }
 
     let count = functions.len();
-    binary.pdb_functions.extend(functions);
+    std::sync::Arc::make_mut(&mut binary.pdb_functions).extend(functions);
 
     let struct_types = extract_pdb_struct_types(&type_information, &type_finder)
         .context("extract PDB struct/class layouts")?;

@@ -681,7 +681,7 @@ mod tests {
                 })
                 .build()
                 .expect("build test binary");
-        binary.dwarf_functions.insert(
+        std::sync::Arc::make_mut(&mut binary.dwarf_functions).insert(
             0x401000,
             DwarfFunctionInfo {
                 address: 0x401000,

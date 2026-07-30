@@ -123,8 +123,13 @@ impl FactStore {
             name_facts: HashMap::new(),
             native_type_facts: HashMap::new(),
             loader_type_facts: Arc::new(binary.inferred_types.clone()),
-            dwarf_functions: Arc::new(binary.dwarf_functions.clone()),
-            pdb_functions: Arc::new(binary.pdb_functions.clone()),
+            // `binary.dwarf_functions`/`pdb_functions` are already `Arc`-wrapped
+            // on `LoadedBinary` -- share the same allocation instead of deep-
+            // cloning it. A session holds both this `FactStore` and the
+            // `LoadedBinary` it was built from for its entire lifetime, so an
+            // independent copy here was pure standing duplication.
+            dwarf_functions: Arc::clone(&binary.dwarf_functions),
+            pdb_functions: Arc::clone(&binary.pdb_functions),
             structuring_hints: HashMap::new(),
             calling_conventions: HashMap::new(),
         };
@@ -155,7 +160,7 @@ impl FactStore {
             }
         }
 
-        for (addr, func) in &binary.pdb_functions {
+        for (addr, func) in binary.pdb_functions.iter() {
             if !func.name.trim().is_empty() {
                 store.ingest_name_fact(*addr, func.name.clone(), FactProvenance::PdbMetadata);
             }
@@ -840,6 +845,43 @@ mod tests {
             Some("KnownName")
         );
         assert!(snapshot.dwarf_info.is_some());
+    }
+
+    /// Memory regression guard: a session (`fission-serve`) holds a
+    /// `LoadedBinary` and a `FactStore` built from it side by side for the
+    /// session's entire lifetime, so `FactStore::from_binary` must *share*
+    /// `binary.dwarf_functions`/`pdb_functions` (both already `Arc`-wrapped
+    /// on `LoadedBinary`) rather than deep-clone them -- an independent copy
+    /// here is pure standing per-session duplication, not a one-off cost.
+    #[test]
+    fn from_binary_shares_dwarf_and_pdb_function_allocations_with_loaded_binary() {
+        let mut binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        Arc::make_mut(&mut binary.dwarf_functions).insert(
+            0x401000,
+            DwarfFunctionInfo {
+                address: 0x401000,
+                name: "KnownName".into(),
+                return_type: None,
+                params: Vec::new(),
+                local_vars: Vec::new(),
+                size: 0,
+            },
+        );
+
+        let store = FactStore::from_binary(&binary);
+
+        assert!(
+            Arc::ptr_eq(&binary.dwarf_functions, &store.dwarf_functions),
+            "FactStore::from_binary must share the same dwarf_functions allocation, not clone it"
+        );
+        assert!(
+            Arc::ptr_eq(&binary.pdb_functions, &store.pdb_functions),
+            "FactStore::from_binary must share the same pdb_functions allocation, not clone it"
+        );
     }
 
     #[test]
