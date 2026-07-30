@@ -230,6 +230,11 @@ pub struct AppState {
     /// User-defined function name overrides: addr → custom name.
     pub rename_map:        HashMap<u64, String>,
 
+    // ── Comments ─────────────────────────────────────────────────────────────
+    /// User-authored per-address annotations, editable inline in the
+    /// Disassembly view: instruction addr → comment text.
+    pub comments:           HashMap<u64, String>,
+
     // ── Find bar (editor Ctrl+F) ─────────────────────────────────────────────
     pub find_query:        String,
     pub find_bar_open:     bool,
@@ -299,6 +304,7 @@ impl AppState {
             strings_search: String::new(),
             hex_view_target: None,
             rename_map:     HashMap::new(),
+            comments:       HashMap::new(),
             find_query:     String::new(),
             find_bar_open:  false,
             find_current_index: 0,

@@ -934,13 +934,17 @@ mark.hex-highlight-row { display: block; background: rgba(255,210,80,0.16); colo
 
 /* ─── DISASSEMBLY ─── */
 .disasm-view { height: 100%; overflow-y: auto; padding: 4px 0; }
-.disasm-row { display: grid; grid-template-columns: 140px 200px 1fr; align-items: baseline; padding: 1px 16px; font-family: var(--font-code); font-size: 12px; cursor: default; }
+.disasm-row { display: flex; align-items: baseline; gap: 12px; padding: 1px 16px; font-family: var(--font-code); font-size: 12px; cursor: default; }
 .disasm-row:hover { background: rgba(255,255,255,0.02); }
 .disasm-row-clickable { cursor: pointer; }
 .disasm-row-clickable:hover .disasm-text { color: var(--accent); }
-.disasm-addr { color: var(--clr-cyan); opacity: 0.7; }
-.disasm-bytes { color: var(--ink-3); letter-spacing: 0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.disasm-text { color: var(--ink-1); white-space: pre; transition: color var(--t-fast); }
+.disasm-addr { flex: 0 0 130px; color: var(--clr-cyan); opacity: 0.7; }
+.disasm-bytes { flex: 0 0 190px; color: var(--ink-3); letter-spacing: 0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disasm-text { flex: 0 1 auto; min-width: 0; color: var(--ink-1); white-space: pre; transition: color var(--t-fast); }
+.disasm-comment { flex: 1 1 auto; min-width: 40px; color: var(--clr-green); font-style: italic; opacity: 0.8; cursor: text; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.disasm-comment:empty::before { content: '+ comment'; color: var(--ink-3); opacity: 0; }
+.disasm-row:hover .disasm-comment:empty::before { opacity: 0.5; }
+.disasm-comment-input { flex: 1 1 auto; min-width: 40px; background: var(--sf-2); border: 1px solid var(--accent); border-radius: 3px; color: var(--clr-green); font-style: italic; font-family: var(--font-code); font-size: 12px; padding: 0 4px; }
 
 /* ─── SCROLL-DRIVEN ENTRY ANIMATION ─── */
 @keyframes item-enter { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }

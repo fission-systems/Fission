@@ -451,6 +451,11 @@ pub fn Editor() -> Element {
         });
     });
 
+    // Inline comment-edit state for the Disasm view (mirrors sidebar.rs's
+    // rename_addr/rename_draft pattern: only one row editable at a time).
+    let mut comment_edit_addr: Signal<Option<u64>> = use_signal(|| None);
+    let mut comment_edit_draft: Signal<String> = use_signal(String::new);
+
     let active_tab    = state.read().active_tab.clone();
     let is_decompiling = state.read().is_decompiling;
     let fn_name       = state.read().current_function_name();
@@ -604,14 +609,18 @@ pub fn Editor() -> Element {
                             }
                         }
                     } else {
+                        let editing_addr = *comment_edit_addr.read();
                         rsx! {
                             div { class: "disasm-view",
                                 for (i, row) in rows.iter().enumerate() {
                                     {
-                                        let addr_str = format!("{:016x}", row.address);
+                                        let addr = row.address;
+                                        let addr_str = format!("{:016x}", addr);
                                         let bytes_str = row.bytes_hex.clone();
                                         let text = row.text.clone();
                                         let target = row.target_addr;
+                                        let is_editing = editing_addr == Some(addr);
+                                        let comment = state.read().comments.get(&addr).cloned().unwrap_or_default();
                                         rsx! {
                                             div {
                                                 class: if target.is_some() { "disasm-row disasm-row-clickable" } else { "disasm-row" },
@@ -626,6 +635,43 @@ pub fn Editor() -> Element {
                                                 span { class: "disasm-addr", "{addr_str}" }
                                                 span { class: "disasm-bytes", "{bytes_str}" }
                                                 span { class: "disasm-text", "{text}" }
+                                                if is_editing {
+                                                    input {
+                                                        class: "disasm-comment-input",
+                                                        r#type: "text",
+                                                        value: "{comment_edit_draft}",
+                                                        autofocus: true,
+                                                        onclick: move |e| e.stop_propagation(),
+                                                        oninput: move |ev| comment_edit_draft.set(ev.value().clone()),
+                                                        onkeydown: move |ev| {
+                                                            match ev.key() {
+                                                                Key::Enter => {
+                                                                    let text = comment_edit_draft.read().clone();
+                                                                    if text.is_empty() {
+                                                                        state.write().comments.remove(&addr);
+                                                                    } else {
+                                                                        state.write().comments.insert(addr, text);
+                                                                    }
+                                                                    comment_edit_addr.set(None);
+                                                                }
+                                                                Key::Escape => { comment_edit_addr.set(None); }
+                                                                _ => {}
+                                                            }
+                                                        },
+                                                        onblur: move |_| { comment_edit_addr.set(None); },
+                                                    }
+                                                } else {
+                                                    span {
+                                                        class: "disasm-comment",
+                                                        title: "Double-click to edit comment",
+                                                        ondoubleclick: move |e| {
+                                                            e.stop_propagation();
+                                                            comment_edit_draft.set(comment.clone());
+                                                            comment_edit_addr.set(Some(addr));
+                                                        },
+                                                        "{comment}"
+                                                    }
+                                                }
                                             }
                                         }
                                     }
