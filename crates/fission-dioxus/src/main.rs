@@ -7,6 +7,7 @@ use tracing::Level;
 
 mod components;
 mod engine;
+mod sidecar;
 mod state;
 
 use components::bottom_panel::BottomPanel;
@@ -149,6 +150,7 @@ fn App() -> Element {
                                     .await;
                                 if let Some(file) = file {
                                     let path = file.path().to_path_buf();
+                                    let path_str = path.display().to_string();
                                     {
                                         let mut s = state2.write();
                                         s.is_loading_binary = true;
@@ -163,6 +165,8 @@ fn App() -> Element {
                                             let fn_count = load.functions.len();
                                             let binary_arc = load.binary.clone();
                                             let name = file.file_name();
+                                            let (sidecar_renames, sidecar_comments) = sidecar::load_sidecar(&path_str);
+                                            let sidecar_count = sidecar_renames.len() + sidecar_comments.len();
                                             {
                                                 let mut s = state2.write();
                                                 s.binary_name           = Some(name.clone());
@@ -174,11 +178,15 @@ fn App() -> Element {
                                                 s.decompiled_nir        = None;
                                                 s.current_cfg           = None;
                                                 s.sidebar_search        = String::new();
-                                                s.rename_map.clear();
+                                                s.rename_map            = sidecar_renames;
+                                                s.comments              = sidecar_comments;
                                                 s.cached_facts          = None;
                                                 s.is_loading_binary     = false;
                                                 s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                                                 s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                                                if sidecar_count > 0 {
+                                                    s.push_log(LogEntry::info(format!("Restored {sidecar_count} saved annotation(s) from project file.")));
+                                                }
                                             }
                                             if let Some(bin) = binary_arc {
                                                 let mut state3 = state2;
@@ -207,6 +215,11 @@ fn App() -> Element {
                                 }
                             });
                         }
+                    }
+                    // Cmd+S — save project (renames + comments) to sidecar file
+                    Key::Character(s) if s == "s" && (mods.meta() || mods.ctrl()) => {
+                        e.prevent_default();
+                        components::title_bar::save_project(state);
                     }
                     // Cmd+[ — navigate back
                     Key::Character(s) if s == "[" && (mods.meta() || mods.ctrl()) => {

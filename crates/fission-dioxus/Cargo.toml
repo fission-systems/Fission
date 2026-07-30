@@ -13,6 +13,7 @@ tracing = "0.1"
 tokio = { version = "1.0", features = ["full"] }
 rfd = "0.14"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+serde_json = "1"
 
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }

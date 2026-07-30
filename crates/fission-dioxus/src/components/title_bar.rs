@@ -6,6 +6,34 @@ use crate::state::{use_app_state, LogEntry};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
+/// Save the current function renames + comments to `<binary>.fission.json`.
+/// Native only, no-op with a log message when no binary is loaded.
+/// Shared by the File-menu item and the global Cmd+S handler in `main.rs`.
+pub fn save_project(mut state: Signal<crate::state::AppState>) {
+    let (binary_path, renames, comments) = {
+        let s = state.read();
+        let Some(binary) = s.binary.as_ref() else {
+            return;
+        };
+        (binary.path.clone(), s.rename_map.clone(), s.comments.clone())
+    };
+    let ann_count = renames.len() + comments.len();
+    spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            crate::sidecar::save_sidecar(&binary_path, &renames, &comments)
+        })
+        .await;
+        let mut s = state.write();
+        match result {
+            Ok(Ok(())) => s.push_log(LogEntry::info(format!(
+                "Project saved ({ann_count} annotation(s))."
+            ))),
+            Ok(Err(e)) => s.push_log(LogEntry::error(format!("Save project failed: {e}"))),
+            Err(e) => s.push_log(LogEntry::error(format!("Save project failed: {e}"))),
+        }
+    });
+}
+
 // ── Inline SVG helpers ───────────────────────────────────────────────────────
 // These avoid emoji entirely and keep icons crisp at any DPI.
 
@@ -225,6 +253,9 @@ pub fn TitleBar() -> Element {
                     let fn_count = load.functions.len();
                     // Grab Arc<LoadedBinary> before taking the write lock
                     let binary_arc = load.binary.clone();
+                    let path_str = path.display().to_string();
+                    let (sidecar_renames, sidecar_comments) = crate::sidecar::load_sidecar(&path_str);
+                    let sidecar_count = sidecar_renames.len() + sidecar_comments.len();
                     {
                         let mut s = state.write();
                         s.binary_name = Some(
@@ -240,12 +271,16 @@ pub fn TitleBar() -> Element {
                         s.decompiled_code = None;
                         s.decompiled_nir = None;
                         s.sidebar_search = String::new();
-                        s.rename_map.clear();
+                        s.rename_map = sidecar_renames;
+                        s.comments   = sidecar_comments;
                         // Invalidate FactStore cache — new binary needs fresh analysis
                         s.cached_facts = None;
                         s.is_loading_binary = false;
                         s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                         s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                        if sidecar_count > 0 {
+                            s.push_log(LogEntry::info(format!("Restored {sidecar_count} saved annotation(s) from project file.")));
+                        }
                     }
                     // ── Eager FactStore preload ────────────────────────────────
                     // Build FactStore in background immediately after load so
@@ -284,6 +319,7 @@ pub fn TitleBar() -> Element {
         let s = state.read();
         s.binary_name.clone()
     };
+    let has_binary = binary_name.is_some();
 
     let title_text = match binary_name.as_deref() {
         Some(name) => format!("Fission — {}", name),
@@ -345,6 +381,12 @@ pub fn TitleBar() -> Element {
                                 span { "Open Binary…" }
                             }
                             span { class: "dropdown-item-kbd", "Cmd O" }
+                        }
+                        div {
+                            class: if has_binary { "dropdown-item" } else { "dropdown-item disabled" },
+                            onclick: move |_| save_project(state),
+                            div { class: "dropdown-item-label", "Save Project" }
+                            span { class: "dropdown-item-kbd", "Cmd S" }
                         }
                         div { class: "dropdown-separator" }
                         div { class: "dropdown-item disabled",
