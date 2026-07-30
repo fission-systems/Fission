@@ -123,8 +123,23 @@ fn cap_rayon_thread_pool() {
                 .unwrap_or(4)
                 .min(8)
         });
+    // A real production crash (`thread '<unknown>' has overflowed its
+    // stack, aborting`) hit a rayon worker thread mid-discovery on a
+    // completely ordinary binary that had already parsed successfully many
+    // times before and since -- consistent with some code path in the
+    // parse/discovery pipeline having a deep-but-legitimate (not runaway)
+    // recursion that only barely fits in rayon's default ~2MiB worker
+    // stack, tipping over depending on exact call-frame sizes/memory
+    // layout for a given run. A stack overflow aborts the whole process
+    // unconditionally in Rust -- it cannot be caught with
+    // `panic::catch_unwind`, so widening the stack is the only available
+    // mitigation short of finding and bounding the exact recursive call
+    // site. 16 MiB is a generous multiple of the default with negligible
+    // per-thread cost at this pool size (`threads`, capped at 8 above).
+    const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
     if let Err(e) = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
+        .stack_size(WORKER_STACK_SIZE)
         .build_global()
     {
         tracing::warn!("rayon global thread pool already initialized ({e}); FISSION_RAYON_THREADS cap not applied");
