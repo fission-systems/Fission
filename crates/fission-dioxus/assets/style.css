@@ -727,6 +727,8 @@ body::after {
 
 mark.find-match { background: rgba(255,210,80,0.25); color: inherit; border-radius: 2px; outline: 1px solid rgba(255,210,80,0.45); box-shadow: 0 0 6px rgba(255,210,80,0.12); }
 
+mark.hex-highlight-row { display: block; background: rgba(255,210,80,0.16); color: inherit; outline: 1px solid rgba(255,210,80,0.4); border-radius: 2px; }
+
 .hex-info-banner { flex-shrink: 0; padding: 6px 16px; font-size: 11px; font-family: var(--font-code); color: var(--ink-3); background: var(--sf-3); border-bottom: 1px solid var(--bdr-faint); letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 12px; }
 .hex-info-banner span { color: var(--ink-2); }
 

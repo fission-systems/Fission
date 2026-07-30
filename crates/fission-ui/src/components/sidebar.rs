@@ -315,8 +315,9 @@ pub fn Sidebar() -> Element {
                                             key: "{va}",
                                             class: "str-item",
                                             onclick: move |_| {
-                                                // Switch to Hex tab and (future) scroll to offset
+                                                // Switch to Hex tab and scroll to this string's offset.
                                                 let mut s = state.write();
+                                                s.hex_view_target = Some(va);
                                                 s.active_tab = crate::state::EditorTab::Hex;
                                             },
                                             div { class: "fn-type-dot is-code" }
@@ -525,6 +526,68 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
             }
             let binary = state.read().binary.clone();
             spawn(async move { run_decompile(state, binary, session, addr, name).await });
+        }
+    }
+}
+
+// ── Shared navigation helper ─────────────────────────────────────────────────
+
+/// Navigate to a function by address from anywhere in the UI (e.g. clicking a
+/// `sub_XXXX` reference inside decompiled pseudocode) -- resolves the target's
+/// kind from the current function list, records it in nav history, and either
+/// shows an import stub or kicks off a real decompile. Mirrors `select_function`
+/// and `xrefs_view::jump_to`, factored out here since this is a third call site
+/// for the same "jump to an address" logic.
+pub async fn navigate_to_address(mut state: Signal<AppState>, addr: u64) {
+    let binary = state.read().binary.clone();
+    let session = state.read().server_session_id.clone();
+
+    let (kind, resolved_name) = {
+        let s = state.read();
+        if let Some(fi) = s.functions.iter().find(|f| f.address == addr) {
+            let k = if fi.is_import && !fi.is_thunk_like {
+                FunctionKind::Import { library: fi.external_library.clone() }
+            } else if fi.is_thunk_like {
+                FunctionKind::Thunk { target: fi.thunk_target }
+            } else {
+                FunctionKind::Code
+            };
+            (k, fi.name.clone())
+        } else {
+            (FunctionKind::Code, format!("sub_{addr:x}"))
+        }
+    };
+
+    {
+        let mut s = state.write();
+        s.current_function_addr = Some(addr);
+        s.current_function_kind = kind.clone();
+        s.decompiled_code = None;
+        s.decompiled_nir = None;
+        s.current_cfg = None;
+        s.current_xref_callers.clear();
+        s.current_xref_callees.clear();
+        s.is_loading_xrefs = false;
+        s.navigate_to(addr);
+        s.push_log(LogEntry::info(format!("Jumped to {resolved_name}  @  0x{addr:x}")));
+    }
+
+    match kind {
+        FunctionKind::Import { library } => {
+            let lib_str = library.as_deref().unwrap_or("unknown");
+            let stub = format!(
+                "/* Import stub \u{2014} no decompilable body.\n\
+                 *\n\
+                 *  Symbol  : {resolved_name}\n\
+                 *  Address : 0x{addr:016x}\n\
+                 *  Library : {lib_str}\n\
+                 */"
+            );
+            state.write().decompiled_code = Some(stub);
+        }
+        FunctionKind::Thunk { .. } | FunctionKind::Code => {
+            state.write().is_decompiling = true;
+            run_decompile(state, binary, session, addr, resolved_name).await;
         }
     }
 }

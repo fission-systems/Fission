@@ -202,6 +202,11 @@ pub struct AppState {
     // ── Strings browser ──────────────────────────────────────────────────────
     pub strings:           Vec<BinaryString>,
     pub strings_search:    String,
+    /// Set when the user clicks a string in the sidebar: the Hex tab shows a
+    /// window centred on this VA instead of the current function's bytes.
+    /// Cleared by real navigation (`navigate_to`/`nav_back`/`nav_forward`) so
+    /// it never lingers after the user moves to a different function.
+    pub hex_view_target:   Option<u64>,
 
     // ── Rename map ───────────────────────────────────────────────────────────
     /// User-defined function name overrides: addr → custom name.
@@ -268,6 +273,7 @@ impl AppState {
             sidebar_kind_filter: SidebarKindFilter::All,
             strings:        Vec::new(),
             strings_search: String::new(),
+            hex_view_target: None,
             rename_map:     HashMap::new(),
             find_query:     String::new(),
             find_bar_open:  false,
@@ -402,6 +408,7 @@ impl AppState {
         }
         self.nav_cursor = self.nav_history.len().saturating_sub(1);
         self.sidebar_scroll_target = Some(addr);
+        self.hex_view_target = None;
     }
 
     /// Navigate backward; returns the target address if available.
@@ -412,6 +419,7 @@ impl AppState {
         self.nav_cursor -= 1;
         let addr = self.nav_history[self.nav_cursor];
         self.sidebar_scroll_target = Some(addr);
+        self.hex_view_target = None;
         Some(addr)
     }
 
@@ -423,6 +431,7 @@ impl AppState {
         self.nav_cursor += 1;
         let addr = self.nav_history[self.nav_cursor];
         self.sidebar_scroll_target = Some(addr);
+        self.hex_view_target = None;
         Some(addr)
     }
 

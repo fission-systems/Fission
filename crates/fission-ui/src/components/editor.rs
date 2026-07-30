@@ -265,12 +265,17 @@ fn render_with_lines(source: &str) -> (String, String) {
     (gutter, code)
 }
 
-/// Hex dump of `limit` bytes, formatted as `OFFSET  hex…  ascii`.
-fn hex_dump(data: &[u8], limit: usize) -> String {
+/// Hex dump of `limit` bytes, formatted as `ADDRESS  hex…  ascii`, addresses
+/// shown as `base_addr + row_offset` (real VA, not window-relative) so the
+/// view can be correlated with pseudocode/xref addresses. Returns escaped
+/// HTML (for `dangerous_inner_html`); when `highlight_addr` falls inside a
+/// row, that row is wrapped in `<mark id="hex-target-row">` so the caller
+/// can scroll it into view.
+fn hex_dump(data: &[u8], limit: usize, base_addr: u64, highlight_addr: Option<u64>) -> String {
     let data = &data[..data.len().min(limit)];
     let mut out = String::new();
     for (i, chunk) in data.chunks(16).enumerate() {
-        let offset = i * 16;
+        let row_addr = base_addr + (i * 16) as u64;
         let hex: String = chunk
             .iter()
             .enumerate()
@@ -292,7 +297,16 @@ fn hex_dump(data: &[u8], limit: usize) -> String {
                 }
             })
             .collect();
-        out.push_str(&format!("{offset:08x}  {hex:<49}  {ascii}\n"));
+        let row = html_escape(&format!("{row_addr:016x}  {hex:<49}  {ascii}"));
+        let is_target = highlight_addr.is_some_and(|h| h >= row_addr && h < row_addr + chunk.len() as u64);
+        if is_target {
+            out.push_str("<mark id=\"hex-target-row\" class=\"hex-highlight-row\">");
+            out.push_str(&row);
+            out.push_str("</mark>\n");
+        } else {
+            out.push_str(&row);
+            out.push('\n');
+        }
     }
     if data.len() == limit {
         out.push_str(&format!("\n[output truncated at {limit} bytes]\n"));
@@ -305,6 +319,41 @@ fn hex_dump(data: &[u8], limit: usize) -> String {
 #[component]
 pub fn Editor() -> Element {
     let mut state = use_app_state();
+
+    // ── Click-to-navigate for `sub_XXXX` references in pseudocode ────────────
+    // The highlighter (`highlight_line`, below) emits `data-addr` on each
+    // `tok-addr` span, but that content is injected via `dangerous_inner_html`
+    // (not part of the VDOM), so a plain Dioxus `onclick` on the wrapping
+    // element can't identify which span was clicked. Delegate at the document
+    // level via JS instead (`dioxus.send`/`Eval::recv` -- the standard,
+    // platform-agnostic bridge, same on desktop and web) and navigate in Rust
+    // when a `.tok-addr` element is clicked. `use_hook` guarantees this runs
+    // exactly once for the component's lifetime, so the listener is never
+    // registered twice even though `Editor` re-renders on every keystroke.
+    use_hook(|| {
+        spawn(async move {
+            let mut eval = document::eval(
+                r#"
+                document.addEventListener('click', (e) => {
+                    const el = e.target.closest && e.target.closest('.tok-addr');
+                    if (el) {
+                        const addr = el.getAttribute('data-addr');
+                        if (addr) { dioxus.send(addr); }
+                    }
+                });
+                "#,
+            );
+            loop {
+                let Ok(addr_hex) = eval.recv::<String>().await else {
+                    break;
+                };
+                let Ok(addr) = u64::from_str_radix(&addr_hex, 16) else {
+                    continue;
+                };
+                crate::components::sidebar::navigate_to_address(state, addr).await;
+            }
+        });
+    });
 
     let active_tab    = state.read().active_tab.clone();
     let is_decompiling = state.read().is_decompiling;
@@ -398,37 +447,74 @@ pub fn Editor() -> Element {
                 }
             }
             EditorTab::Hex => {
-                // Prefer the current function's byte range; fall back to file header.
-                let hex_info: Option<(u64, u64, String)> = {
+                let hex_view_target = state.read().hex_view_target;
+
+                // Scroll the highlighted row into view whenever a new string
+                // target is picked (mirrors sidebar's scrollIntoView pattern).
+                use_effect(move || {
+                    if hex_view_target.is_some() {
+                        document::eval(
+                            "document.getElementById('hex-target-row')?.scrollIntoView({block: 'center'});",
+                        );
+                    }
+                });
+
+                // Priority: string-click target > current function's bytes > file header.
+                let hex_info: Option<(u64, u64, String, bool)> = {
                     let s = state.read();
-                    if let (Some(binary), Some(fn_addr)) = (&s.binary, s.current_function_addr) {
-                        let fn_info = s.functions.iter().find(|f| f.address == fn_addr);
-                        if let Some(fi) = fn_info {
-                            let maybe_fo = binary.sections.iter().find_map(|sec| {
-                                if fn_addr >= sec.virtual_address
-                                    && fn_addr < sec.virtual_address + sec.virtual_size
-                                {
-                                    let offset_in_sec = fn_addr - sec.virtual_address;
-                                    Some(sec.file_offset + offset_in_sec)
-                                } else {
-                                    None
-                                }
-                            });
-                            if let Some(fo) = maybe_fo {
-                                let fo = fo as usize;
-                                let sz = if fi.size > 0 { fi.size as usize } else { 256 };
-                                let end = (fo + sz).min(binary.data.as_slice().len());
-                                if fo < binary.data.as_slice().len() {
-                                    Some((fn_addr, sz as u64, hex_dump(&binary.data.as_slice()[fo..end], sz)))
+                    hex_view_target.and_then(|target_va| {
+                        let binary = s.binary.as_ref()?;
+                        let file_off = binary.sections.iter().find_map(|sec| {
+                            if target_va >= sec.virtual_address
+                                && target_va < sec.virtual_address + sec.virtual_size
+                            {
+                                Some(sec.file_offset + (target_va - sec.virtual_address))
+                            } else {
+                                None
+                            }
+                        })?;
+                        const WINDOW: u64 = 512;
+                        const LEAD: u64 = 128;
+                        let window_start_va = target_va.saturating_sub(LEAD) & !0xF;
+                        let lead = target_va - window_start_va;
+                        let fo_start = (file_off.saturating_sub(lead) as usize).min(binary.data.as_slice().len());
+                        let end = (fo_start + WINDOW as usize).min(binary.data.as_slice().len());
+                        if fo_start >= binary.data.as_slice().len() {
+                            return None;
+                        }
+                        let hex = hex_dump(&binary.data.as_slice()[fo_start..end], WINDOW as usize, window_start_va, Some(target_va));
+                        Some((window_start_va, (end - fo_start) as u64, hex, true))
+                    })
+                    .or_else(|| {
+                        if let (Some(binary), Some(fn_addr)) = (&s.binary, s.current_function_addr) {
+                            let fn_info = s.functions.iter().find(|f| f.address == fn_addr);
+                            if let Some(fi) = fn_info {
+                                let maybe_fo = binary.sections.iter().find_map(|sec| {
+                                    if fn_addr >= sec.virtual_address
+                                        && fn_addr < sec.virtual_address + sec.virtual_size
+                                    {
+                                        let offset_in_sec = fn_addr - sec.virtual_address;
+                                        Some(sec.file_offset + offset_in_sec)
+                                    } else {
+                                        None
+                                    }
+                                });
+                                if let Some(fo) = maybe_fo {
+                                    let fo = fo as usize;
+                                    let sz = if fi.size > 0 { fi.size as usize } else { 256 };
+                                    let end = (fo + sz).min(binary.data.as_slice().len());
+                                    if fo < binary.data.as_slice().len() {
+                                        Some((fn_addr, sz as u64, hex_dump(&binary.data.as_slice()[fo..end], sz, fn_addr, None), false))
+                                    } else { None }
                                 } else { None }
                             } else { None }
                         } else { None }
-                    } else { None }
+                    })
                     .or_else(|| {
-                        s.binary.as_ref().map(|b| (0u64, 4096u64, hex_dump(b.data.as_slice(), 4096)))
+                        s.binary.as_ref().map(|b| (0u64, 4096u64, hex_dump(b.data.as_slice(), 4096, 0, None), false))
                     })
                 };
-                if let Some((base_va, sz_bytes, hex)) = hex_info {
+                if let Some((base_va, sz_bytes, hex, is_target_view)) = hex_info {
                     let line_count = hex.lines().count();
                     let gutter_str: String = (1..=line_count)
                         .map(|n| n.to_string())
@@ -436,13 +522,11 @@ pub fn Editor() -> Element {
                         .join("\n");
                     let fn_label = {
                         let s = state.read();
-                        if let Some(addr) = s.current_function_addr {
+                        if is_target_view {
+                            format!("String reference  |  VA 0x{:x}  |  showing {sz_bytes} bytes", hex_view_target.unwrap_or(base_va))
+                        } else if let Some(addr) = s.current_function_addr {
                             let name = s.display_name(addr);
-                            if base_va == 0 && s.current_function_addr.is_none() {
-                                format!("File header  |  {sz_bytes} bytes")
-                            } else {
-                                format!("{name}  |  VA 0x{base_va:x}  |  {sz_bytes} bytes")
-                            }
+                            format!("{name}  |  VA 0x{base_va:x}  |  {sz_bytes} bytes")
                         } else {
                             format!("File header  |  {sz_bytes} bytes")
                         }
@@ -456,7 +540,7 @@ pub fn Editor() -> Element {
                                 "{gutter_str}"
                             }
                             div { class: "code-region",
-                                code { "{hex}" }
+                                code { dangerous_inner_html: "{hex}" }
                             }
                         }
                     }
@@ -515,14 +599,31 @@ pub fn Editor() -> Element {
                                 title: "Copy pseudocode to clipboard",
                                 onclick: move |_| {
                                     let code = state.read().editor_code().map(str::to_string);
-                                    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
-                                    if let Some(code) = code {
-                                        #[cfg(not(target_arch = "wasm32"))]
-                                        {
-                                            if let Ok(mut ctx) = arboard::Clipboard::new() {
-                                                let _ = ctx.set_text(&code);
-                                            }
+                                    let Some(code) = code else { return; };
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    {
+                                        let mut s = state.write();
+                                        match arboard::Clipboard::new().and_then(|mut ctx| ctx.set_text(&code)) {
+                                            Ok(()) => s.push_log(crate::state::LogEntry::info("Pseudocode copied to clipboard.")),
+                                            Err(e) => s.push_log(crate::state::LogEntry::error(format!("Clipboard copy failed: {e}"))),
                                         }
+                                    }
+                                    #[cfg(target_arch = "wasm32")]
+                                    {
+                                        // No arboard on wasm32 -- use the browser's
+                                        // async Clipboard API via a fire-and-forget
+                                        // JS eval instead (navigator.clipboard.writeText
+                                        // returns a Promise; nothing here awaits it, so
+                                        // no success/failure log is emitted -- previously
+                                        // this path logged "copied" unconditionally
+                                        // without ever actually writing anything).
+                                        let escaped = code
+                                            .replace('\\', "\\\\")
+                                            .replace('`', "\\`")
+                                            .replace('$', "\\$");
+                                        document::eval(&format!(
+                                            "navigator.clipboard.writeText(`{escaped}`);"
+                                        ));
                                         state.write().push_log(crate::state::LogEntry::info("Pseudocode copied to clipboard."));
                                     }
                                 },

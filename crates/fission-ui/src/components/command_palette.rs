@@ -307,6 +307,10 @@ fn trigger_decompile(
         s.decompiled_code = None;
         s.decompiled_nir = None;
         s.current_cfg = None;
+        s.current_xref_callers.clear();
+        s.current_xref_callees.clear();
+        s.is_loading_xrefs = false;
+        s.navigate_to(addr);
     }
 
     match kind {
