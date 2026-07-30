@@ -462,9 +462,6 @@ pub fn TitleBar() -> Element {
                                 }
                             }
                         }
-                        div { class: "dropdown-item disabled",
-                            div { class: "dropdown-item-label", "Run FID Signatures" }
-                        }
                     }
                 }
             }

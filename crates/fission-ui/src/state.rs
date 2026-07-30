@@ -215,6 +215,9 @@ pub struct AppState {
     // ── Find bar (editor Ctrl+F) ─────────────────────────────────────────────
     pub find_query:        String,
     pub find_bar_open:     bool,
+    /// 0-based index of the "current" match, for Enter/next/prev navigation.
+    /// Clamped against the live match count on every render (see `Editor`).
+    pub find_current_index: usize,
 
     // ── Command palette ─────────────────────────────────────────────────────
     pub is_palette_open: bool,
@@ -277,6 +280,7 @@ impl AppState {
             rename_map:     HashMap::new(),
             find_query:     String::new(),
             find_bar_open:  false,
+            find_current_index: 0,
             is_palette_open: false,
             palette_query: String::new(),
             palette_focused: 0,

@@ -3,9 +3,11 @@ use dioxus::prelude::*;
 
 // ── Find-bar match highlight helper ─────────────────────────────────────────
 
-/// Wrap occurrences of `needle` in `<mark class="find-match">…</mark>`.
-/// Returns `(highlighted_html, match_count)`.
-fn apply_find_highlights(html: &str, needle: &str) -> (String, usize) {
+/// Wrap occurrences of `needle` in `<mark class="find-match">…</mark>`; the
+/// occurrence at `current_index` (0-based, wrapped to the match count) also
+/// gets `id="find-match-current"` and an extra class, so the caller can
+/// scroll it into view. Returns `(highlighted_html, match_count)`.
+fn apply_find_highlights(html: &str, needle: &str, current_index: usize) -> (String, usize) {
     if needle.is_empty() {
         return (html.to_string(), 0);
     }
@@ -18,7 +20,11 @@ fn apply_find_highlights(html: &str, needle: &str) -> (String, usize) {
     while let Some(idx) = lower_html[pos..].find(&lower_needle) {
         let abs = pos + idx;
         out.push_str(&html[pos..abs]);
-        out.push_str("<mark class=\"find-match\">");
+        if count == current_index {
+            out.push_str("<mark id=\"find-match-current\" class=\"find-match find-match-current\">");
+        } else {
+            out.push_str("<mark class=\"find-match\">");
+        }
         out.push_str(&html[abs..abs + nlen]);
         out.push_str("</mark>");
         pos = abs + nlen;
@@ -26,6 +32,25 @@ fn apply_find_highlights(html: &str, needle: &str) -> (String, usize) {
     }
     out.push_str(&html[pos..]);
     (out, count)
+}
+
+/// Count case-insensitive occurrences of `needle` without building any HTML
+/// -- used by the find bar's next/prev handlers to compute wraparound
+/// without paying for a full highlight pass.
+fn count_matches(html: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    let lower_html = html.to_lowercase();
+    let lower_needle = needle.to_lowercase();
+    let nlen = lower_needle.len();
+    let mut pos = 0;
+    let mut count = 0usize;
+    while let Some(idx) = lower_html[pos..].find(&lower_needle) {
+        pos += idx + nlen;
+        count += 1;
+    }
+    count
 }
 
 // ── SVG icons ────────────────────────────────────────────────────────────────
@@ -64,6 +89,77 @@ fn svg_hex() -> Element {
             line { x1: "9", y1: "21", x2: "9", y2: "9" }
         }
     }
+}
+
+// ── Save pseudocode to file ─────────────────────────────────────────────────
+// Native only: rfd's file dialog isn't wired for wasm32 here, so the wasm32
+// impl renders nothing rather than promise a save that can't happen (same
+// lesson as the clipboard bug this session already fixed: a button must not
+// claim to do something it can't actually do on the current target).
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_to_file_button(mut state: Signal<crate::state::AppState>) -> Element {
+    let has_code = state.read().editor_code().is_some();
+    let is_decompiling = state.read().is_decompiling;
+    if !has_code || is_decompiling {
+        return rsx! {};
+    }
+    rsx! {
+        button {
+            class: "tab-action-btn",
+            title: "Save pseudocode to file…",
+            onclick: move |_| {
+                let code = state.read().editor_code().map(str::to_string);
+                let Some(code) = code else { return; };
+                let default_name = state.read().current_function_name()
+                    .map(|n| format!("{n}.c"))
+                    .unwrap_or_else(|| "pseudocode.c".to_string());
+                spawn(async move {
+                    let picked = rfd::AsyncFileDialog::new()
+                        .set_title("Save Pseudocode")
+                        .set_file_name(&default_name)
+                        .add_filter("C source", &["c"])
+                        .save_file()
+                        .await;
+                    let Some(handle) = picked else { return; };
+                    let path = handle.path().to_path_buf();
+                    let write_result = tokio::task::spawn_blocking({
+                        let path = path.clone();
+                        move || std::fs::write(path, code)
+                    }).await;
+                    match write_result {
+                        Ok(Ok(())) => state.write().push_log(
+                            crate::state::LogEntry::info(format!("Saved to {}", path.display()))
+                        ),
+                        Ok(Err(e)) => state.write().push_log(
+                            crate::state::LogEntry::error(format!("Save failed: {e}"))
+                        ),
+                        Err(e) => state.write().push_log(
+                            crate::state::LogEntry::error(format!("Save failed: {e}"))
+                        ),
+                    }
+                });
+            },
+            svg {
+                xmlns: "http://www.w3.org/2000/svg",
+                width: "13", height: "13",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "1.8",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" }
+                path { d: "M17 21v-8H7v8" }
+                path { d: "M7 3v5h8" }
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_to_file_button(_state: Signal<crate::state::AppState>) -> Element {
+    rsx! {}
 }
 
 // ── Syntax highlighting ──────────────────────────────────────────────────────
@@ -397,7 +493,8 @@ pub fn Editor() -> Element {
                     } else {
                         let (gutter, raw_highlighted) = render_with_lines(&code);
                         // Apply find-bar highlights on top of syntax highlighting
-                        let (highlighted, _match_count) = apply_find_highlights(&raw_highlighted, &find_query);
+                        let find_idx = state.read().find_current_index;
+                        let (highlighted, _match_count) = apply_find_highlights(&raw_highlighted, &find_query, find_idx);
                         rsx! {
                             if is_thunk {
                                 div { class: "kind-notice kind-notice-thunk",
@@ -639,6 +736,7 @@ pub fn Editor() -> Element {
                                     path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
                                 }
                             }
+                            {save_to_file_button(state)}
                         }
                     }
                 }
@@ -651,43 +749,103 @@ pub fn Editor() -> Element {
 
             // ── Find bar (Cmd+F / Ctrl+F) ─────────────────────────────────
             if find_open {
-                div { class: "find-bar",
-                    input {
-                        class: "find-input",
-                        r#type: "text",
-                        placeholder: "Search in file…",
-                        value: "{find_query}",
-                        autofocus: true,
-                        oninput: move |e| state.write().find_query = e.value().clone(),
-                        onkeydown: move |e| {
-                            if e.key() == Key::Escape {
-                                let mut s = state.write();
-                                s.find_bar_open = false;
-                                s.find_query.clear();
-                            }
-                        },
-                    }
+                {
+                    let code_for_count = state.read().editor_code().map(str::to_string);
+                    let total = code_for_count.as_ref().map(|code| {
+                        let (_, raw) = render_with_lines(code);
+                        count_matches(&raw, &find_query)
+                    }).unwrap_or(0);
+                    let find_idx_now = state.read().find_current_index;
+
+                    // Scroll the current match into view whenever the query or
+                    // index changes (mirrors the hex-target-row pattern).
                     {
-                        let code_for_count = state.read().editor_code().map(str::to_string);
-                        let count = if let Some(code) = &code_for_count {
-                            let (_, raw) = render_with_lines(code);
-                            let (_, n) = apply_find_highlights(&raw, &find_query);
-                            n
-                        } else { 0 };
-                        rsx! {
+                        let find_query_for_effect = find_query.clone();
+                        use_effect(move || {
+                            let _ = (find_query_for_effect.clone(), find_idx_now);
+                            if total > 0 {
+                                document::eval(
+                                    "document.getElementById('find-match-current')?.scrollIntoView({block: 'center'});",
+                                );
+                            }
+                        });
+                    }
+
+                    let mut go_next = move || {
+                        let mut s = state.write();
+                        if total > 0 {
+                            s.find_current_index = (s.find_current_index + 1) % total;
+                        }
+                    };
+                    let mut go_prev = move || {
+                        let mut s = state.write();
+                        if total > 0 {
+                            s.find_current_index = (s.find_current_index + total - 1) % total;
+                        }
+                    };
+                    rsx! {
+                        div { class: "find-bar",
+                            input {
+                                class: "find-input",
+                                r#type: "text",
+                                placeholder: "Search in file…",
+                                value: "{find_query}",
+                                autofocus: true,
+                                oninput: move |e| {
+                                    let mut s = state.write();
+                                    s.find_query = e.value().clone();
+                                    s.find_current_index = 0;
+                                },
+                                onkeydown: move |e| {
+                                    match e.key() {
+                                        Key::Escape => {
+                                            let mut s = state.write();
+                                            s.find_bar_open = false;
+                                            s.find_query.clear();
+                                            s.find_current_index = 0;
+                                        }
+                                        Key::Enter if e.modifiers().shift() => {
+                                            e.prevent_default();
+                                            go_prev();
+                                        }
+                                        Key::Enter => {
+                                            e.prevent_default();
+                                            go_next();
+                                        }
+                                        _ => {}
+                                    }
+                                },
+                            }
                             span { class: "find-match-count",
-                                if find_query.is_empty() { "" } else if count == 0 { "No matches" } else { "{count} matches" }
+                                if find_query.is_empty() { "" }
+                                else if total == 0 { "No matches" }
+                                else { "{find_idx_now + 1} / {total}" }
+                            }
+                            button {
+                                class: "find-bar-nav",
+                                title: "Previous match  (Shift+Enter)",
+                                disabled: total == 0,
+                                onclick: move |_| go_prev(),
+                                "\u{2191}"
+                            }
+                            button {
+                                class: "find-bar-nav",
+                                title: "Next match  (Enter)",
+                                disabled: total == 0,
+                                onclick: move |_| go_next(),
+                                "\u{2193}"
+                            }
+                            button {
+                                class: "find-bar-close",
+                                onclick: move |_| {
+                                    let mut s = state.write();
+                                    s.find_bar_open = false;
+                                    s.find_query.clear();
+                                    s.find_current_index = 0;
+                                },
+                                "×"
                             }
                         }
-                    }
-                    button {
-                        class: "find-bar-close",
-                        onclick: move |_| {
-                            let mut s = state.write();
-                            s.find_bar_open = false;
-                            s.find_query.clear();
-                        },
-                        "×"
                     }
                 }
             }

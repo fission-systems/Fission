@@ -722,6 +722,12 @@ body::after {
 
 .find-match-count { font-family: var(--font-code); font-size: 11px; color: var(--ink-3); background: var(--sf-4); border: 1px solid var(--bdr-default); border-radius: var(--radius-xs); padding: 2px 7px; white-space: nowrap; flex-shrink: 0; }
 
+.find-bar-nav { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--ink-3); cursor: pointer; transition: color var(--t-fast), background var(--t-fast); flex-shrink: 0; font-size: 12px; }
+.find-bar-nav:hover:not(:disabled) { color: var(--ink-0); background: var(--sf-5); }
+.find-bar-nav:disabled { opacity: 0.35; cursor: default; }
+
+mark.find-match-current { background: rgba(124,142,255,0.35); outline: 1px solid var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+
 .find-bar-close { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--ink-3); cursor: pointer; transition: color var(--t-fast), background var(--t-fast); flex-shrink: 0; font-size: 14px; font-weight: 300; }
 .find-bar-close:hover { color: var(--ink-0); background: var(--sf-5); }
 

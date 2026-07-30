@@ -26,6 +26,7 @@ fission-decompiler = { path = "../fission-decompiler" }
 fission-signatures = { path = "../fission-signatures" }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 arboard = "3"
+rfd = "0.14"
 
 # WASM (web) — lightweight, analysis done server-side via HTTP
 [target.'cfg(target_arch = "wasm32")'.dependencies]
