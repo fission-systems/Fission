@@ -134,12 +134,30 @@ pub(super) fn infer_entry_stack_layout(
     // exact collision hung a real `i686-w64-mingw32-gcc`-compiled 8KB-
     // local-array fixture using `___chkstk_ms` until this was tightened
     // to exact-name matching).
-    const CHKSTK32_TARGETS: &[&str] = &[
+    //
+    // Sourced from `options.cspec_alloca_probe_targets` -- the real
+    // x86win.cspec `<callfixup name="alloca_probe">` target list, parsed by
+    // `fission-pcode`'s cspec loader -- rather than a hand-transcribed copy
+    // of it, so this automatically tracks whatever that file actually lists.
+    // `FALLBACK_CHKSTK32_TARGETS` only matters when cspec wasn't resolved
+    // (e.g. a synthetic `MlilPreviewOptions`/`NirRenderOptions` built
+    // directly in a unit test, never routed through `apply_spec_overrides`)
+    // -- keeps those tests behavior-identical without needing cspec loading.
+    const FALLBACK_CHKSTK32_TARGETS: &[&str] = &[
         "chkstk",
         "alloca_probe",
         "alloca_probe_8",
         "alloca_probe_16",
     ];
+    let chkstk32_targets: Vec<&str> = if options.cspec_alloca_probe_targets.is_empty() {
+        FALLBACK_CHKSTK32_TARGETS.to_vec()
+    } else {
+        options
+            .cspec_alloca_probe_targets
+            .iter()
+            .map(String::as_str)
+            .collect()
+    };
     // `lea rbp, [rsp+K]` for a nonzero compile-time-constant K: MSVC/mingw
     // sometimes position the frame pointer partway into a large frame
     // (rather than at its base, `mov rbp, rsp`'s implicit K=0) so both
@@ -205,7 +223,7 @@ pub(super) fn infer_entry_stack_layout(
         if !options.is_64bit
             && matches!(op.opcode, PcodeOpcode::Call)
             && let Some(name) = resolve_call_target_name(op)
-            && CHKSTK32_TARGETS.contains(&name.trim_start_matches('_'))
+            && chkstk32_targets.contains(&name.trim_start_matches('_'))
         {
             let eax = Varnode {
                 space_id: RUST_SLEIGH_REGISTER_SPACE_ID,

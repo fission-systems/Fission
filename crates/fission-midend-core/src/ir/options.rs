@@ -81,6 +81,15 @@ pub struct NirRenderOptions {
     #[serde(default, skip)]
     pub cspec_return_target: Option<(u64, u32)>,
 
+    /// Target symbol names for the `.cspec` `<callfixup name="alloca_probe">`
+    /// entry (`__chkstk`/`__alloca_probe`/... on x86win, leading underscores
+    /// already stripped), when resolved. Empty when not loaded -- callers
+    /// needing chkstk32-style detection fall back to a hardcoded default
+    /// list in that case (see `entry_analysis.rs`), so synthetic-options
+    /// unit tests that never populate this field keep working unmodified.
+    #[serde(default)]
+    pub cspec_alloca_probe_targets: Vec<String>,
+
     // ── .pspec-derived fields ─────────────────────────────────────────────────
     /// Authoritative program counter register name from `.pspec` `<programcounter register="..."/>`.
     ///
@@ -454,6 +463,7 @@ impl NirRenderOptions {
             cspec_return_offset: None,
             cspec_float_return_offset: None,
             cspec_return_target: None,
+            cspec_alloca_probe_targets: Vec::new(),
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: std::collections::HashSet::new(),

@@ -108,6 +108,7 @@ pub fn apply_cspec_for_pair(
     else {
         return false;
     };
+    options.cspec_alloca_probe_targets = resolved.callfixup_targets("alloca_probe");
     let Some(proto) = resolved.default_proto.as_ref() else {
         return false;
     };

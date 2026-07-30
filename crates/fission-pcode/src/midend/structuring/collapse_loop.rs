@@ -73,6 +73,7 @@ mod tests {
             cspec_return_offset: None,
             cspec_float_return_offset: None,
             cspec_return_target: None,
+            cspec_alloca_probe_targets: Vec::new(),
             pspec_programcounter: None,
             pspec_tracked_context: Vec::new(),
             pspec_hidden_registers: Default::default(),

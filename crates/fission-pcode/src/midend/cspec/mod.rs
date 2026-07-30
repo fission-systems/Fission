@@ -74,6 +74,25 @@ pub struct CspecPrototype {
     pub killedbycall: Vec<String>,
 }
 
+/// A `<callfixup name="...">` block: a named set of known trampoline/helper
+/// target symbols (e.g. `__chkstk`, `__alloca_probe`) the compiler spec
+/// declares special call-site handling for, plus (unparsed -- see module
+/// doc) the raw p-code effect body Ghidra would inject in their place.
+///
+/// Fission only reuses the *name coverage* (`targets`) to generalize what
+/// was previously a hand-transcribed, hardcoded target list
+/// (`entry_analysis.rs`'s old `CHKSTK32_TARGETS`); the actual stack-
+/// adjustment effect for the fixups Fission's builder cares about stays
+/// hand-coded Rust, keyed by `name`, not by interpreting `pcode_body`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CspecCallFixup {
+    /// Fixup name, e.g. `"alloca_probe"`.
+    pub name: String,
+    /// Target symbol names this fixup applies to, e.g. `["__alloca_probe",
+    /// "__alloca_probe_8", "__alloca_probe_16", "__chkstk"]`.
+    pub targets: Vec<String>,
+}
+
 /// Parsed contents of a `.cspec` file.
 #[derive(Debug, Clone)]
 pub struct CspecDocument {
@@ -83,6 +102,28 @@ pub struct CspecDocument {
     pub default_proto: Option<CspecPrototype>,
     /// All named prototypes (including the default).
     pub prototypes: Vec<CspecPrototype>,
+    /// All `<callfixup>` blocks in the document.
+    pub callfixups: Vec<CspecCallFixup>,
+}
+
+impl CspecDocument {
+    /// Target symbol names (leading underscores stripped, matching
+    /// `entry_analysis.rs`'s existing comparison convention) for the
+    /// callfixup literally named `name`, or an empty slice if this document
+    /// has no such fixup.
+    pub fn callfixup_targets(&self, name: &str) -> Vec<String> {
+        self.callfixups
+            .iter()
+            .find(|fixup| fixup.name == name)
+            .map(|fixup| {
+                fixup
+                    .targets
+                    .iter()
+                    .map(|t| t.trim_start_matches('_').to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 // ── Resolved structures ───────────────────────────────────────────────────────
@@ -119,6 +160,26 @@ pub struct ResolvedPrototype {
 pub struct ResolvedCspec {
     pub stack_pointer_offset: Option<u64>,
     pub default_proto: Option<ResolvedPrototype>,
+    /// Carried through unchanged from the raw `CspecDocument` -- target
+    /// symbol names need no register resolution.
+    pub callfixups: Vec<CspecCallFixup>,
+}
+
+impl ResolvedCspec {
+    /// See `CspecDocument::callfixup_targets`.
+    pub fn callfixup_targets(&self, name: &str) -> Vec<String> {
+        self.callfixups
+            .iter()
+            .find(|fixup| fixup.name == name)
+            .map(|fixup| {
+                fixup
+                    .targets
+                    .iter()
+                    .map(|t| t.trim_start_matches('_').to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 // ── Parser ────────────────────────────────────────────────────────────────────
@@ -156,6 +217,7 @@ impl CspecDocument {
         ResolvedCspec {
             stack_pointer_offset: sp_offset,
             default_proto,
+            callfixups: self.callfixups.clone(),
         }
     }
 }
@@ -277,6 +339,12 @@ enum ParseState {
     KilledByCall,
     /// Inside a `<pentry>` — accumulates `metatype` for next register/addr child.
     Pentry,
+    /// Inside a `<callfixup name="...">` — accumulates `<target name="..."/>`
+    /// children. The `<pcode><body>...</body></pcode>` child (its CDATA
+    /// body already skipped whole by the tokenizer) falls through the
+    /// open/close catch-alls harmlessly -- deliberately not modeled as a
+    /// state, see the module doc's "not attempting to interpret" note.
+    CallFixup,
 }
 
 struct CspecParser<'a> {
@@ -288,7 +356,9 @@ struct CspecParser<'a> {
     stackpointer: Option<String>,
     default_proto: Option<CspecPrototype>,
     prototypes: Vec<CspecPrototype>,
+    callfixups: Vec<CspecCallFixup>,
     cur_proto: Option<CspecPrototype>,
+    cur_callfixup: Option<CspecCallFixup>,
     cur_pentry_metatype: Option<String>,
     cur_pentry_storage: Option<String>,
     cur_io: Option<IoKind>,
@@ -309,7 +379,9 @@ impl<'a> CspecParser<'a> {
             stackpointer: None,
             default_proto: None,
             prototypes: Vec::new(),
+            callfixups: Vec::new(),
             cur_proto: None,
+            cur_callfixup: None,
             cur_pentry_metatype: None,
             cur_pentry_storage: None,
             cur_io: None,
@@ -332,6 +404,7 @@ impl<'a> CspecParser<'a> {
             stackpointer: self.stackpointer,
             default_proto: self.default_proto,
             prototypes: self.prototypes,
+            callfixups: self.callfixups,
         }
     }
 
@@ -425,6 +498,21 @@ impl<'a> CspecParser<'a> {
                     }
                 }
             }
+            "callfixup" if self.state == ParseState::Root => {
+                let fixup_name = attrs.get("name").cloned().unwrap_or_default();
+                self.cur_callfixup = Some(CspecCallFixup {
+                    name: fixup_name,
+                    targets: Vec::new(),
+                });
+                self.push(ParseState::CallFixup);
+            }
+            "target" if self.state == ParseState::CallFixup => {
+                if let Some(target_name) = attrs.get("name") {
+                    if let Some(fixup) = self.cur_callfixup.as_mut() {
+                        fixup.targets.push(target_name.clone());
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -433,6 +521,12 @@ impl<'a> CspecParser<'a> {
         match name {
             "default_proto" if self.state == ParseState::DefaultProto => {
                 self.pop();
+            }
+            "callfixup" if self.state == ParseState::CallFixup => {
+                self.pop();
+                if let Some(fixup) = self.cur_callfixup.take() {
+                    self.callfixups.push(fixup);
+                }
             }
             "prototype" if self.state == ParseState::Prototype => {
                 self.pop();
@@ -512,6 +606,21 @@ fn tokenize_xml(xml: &str) -> Vec<XmlToken> {
             continue;
         }
         i += 1; // skip '<'
+        // `<![CDATA[...]]>` (used by `<callfixup><pcode><body>` raw p-code
+        // text) needs its own terminator: real bodies contain bare `>`
+        // characters (confirmed in `x86win.cspec`'s callfixup entries,
+        // e.g. comparison-shaped p-code), so treating it as an ordinary
+        // `<!...>` comment/PI (stop at the first `>`) truncates mid-body and
+        // desyncs every token after it for the rest of the document.
+        if xml[i.saturating_sub(1)..].starts_with("<![CDATA[") {
+            i += "![CDATA[".len();
+            if let Some(end) = xml[i..].find("]]>") {
+                i += end + "]]>".len();
+            } else {
+                i = bytes.len();
+            }
+            continue;
+        }
         // Skip comments and processing instructions.
         if i < bytes.len() && (bytes[i] == b'?' || bytes[i] == b'!') {
             // Find matching '>'
@@ -613,6 +722,48 @@ mod tests {
         m.insert("R14".into(), (0xb0, 8));
         m.insert("R15".into(), (0xb8, 8));
         m
+    }
+
+    /// Confirms `callfixup`/`target` parsing against the real, checked-in
+    /// `x86win.cspec` -- not a synthetic fragment, since the whole point is
+    /// generalizing `entry_analysis.rs`'s old hardcoded `CHKSTK32_TARGETS`
+    /// to whatever this exact file actually lists. Also exercises the CDATA
+    /// tokenizer fix (this file's `alloca_probe` fixup is followed by
+    /// several more `<callfixup>` blocks with `>`-containing p-code bodies
+    /// -- `security_check_cookie`, the last in the file -- so a mis-skipped
+    /// CDATA body would either lose targets or silently truncate the
+    /// document before reaching it).
+    #[test]
+    fn parses_real_x86win_cspec_callfixups() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root")
+            .to_path_buf();
+        let path = root
+            .join("utils")
+            .join("sleigh-specs")
+            .join("languages")
+            .join("x86")
+            .join("x86win.cspec");
+        if !path.exists() {
+            return;
+        }
+        let doc = CspecDocument::parse_file(&path).expect("parse x86win.cspec");
+
+        let mut targets = doc.callfixup_targets("alloca_probe");
+        targets.sort();
+        assert_eq!(
+            targets,
+            vec!["alloca_probe", "alloca_probe_16", "alloca_probe_8", "chkstk"]
+        );
+
+        // The last callfixup in the file (past several CDATA bodies with
+        // bare `>` characters) must still be reachable.
+        assert!(
+            !doc.callfixup_targets("security_check_cookie").is_empty(),
+            "security_check_cookie callfixup should still parse after earlier CDATA bodies"
+        );
     }
 
     /// Smoke test with a fragment that matches the actual .cspec structure (pentry > register).
