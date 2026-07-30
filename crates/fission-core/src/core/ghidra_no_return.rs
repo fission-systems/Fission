@@ -60,7 +60,12 @@ pub fn binary_format_to_ghidra_format(loader_format: &str) -> Option<&'static st
     let upper = loader_format.to_ascii_uppercase();
     if upper.starts_with("PE") {
         Some(GHIDRA_FORMAT_PE)
-    } else if upper == "ELF" {
+    } else if upper.starts_with("ELF") {
+        // Loader reports "ELF32"/"ELF64" (bitness-qualified), not the bare
+        // "ELF" this exact-match check required -- confirmed via a real
+        // 64-bit static ELF that this silently never matched, so the
+        // by-name no-return lookup (and, transitively,
+        // `analysis::noreturn`'s seed set) never fired for it at all.
         Some(GHIDRA_FORMAT_ELF)
     } else if upper.starts_with("MACH-O") || upper.starts_with("MACHO") {
         Some(GHIDRA_FORMAT_MACHO)
@@ -481,6 +486,14 @@ mod tests {
         assert_eq!(binary_format_to_ghidra_format("pe"), Some(GHIDRA_FORMAT_PE));
         assert_eq!(
             binary_format_to_ghidra_format("ELF"),
+            Some(GHIDRA_FORMAT_ELF)
+        );
+        assert_eq!(
+            binary_format_to_ghidra_format("ELF64"),
+            Some(GHIDRA_FORMAT_ELF)
+        );
+        assert_eq!(
+            binary_format_to_ghidra_format("ELF32"),
             Some(GHIDRA_FORMAT_ELF)
         );
         assert_eq!(

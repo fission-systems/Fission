@@ -18,6 +18,7 @@ use fission_sleigh::runtime::{DecodeMemoryContext, RuntimeSleighFrontend};
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::noreturn::no_return_functions_for;
 use crate::analysis::xrefs::{XrefDatabase, XrefType};
 
 pub use decode_context::{decode_memory_context_for, function_max_bytes};
@@ -93,6 +94,14 @@ impl ControlFlowFacts {
             let ghidra_format = binary_format_to_ghidra_format(&binary.format);
             let compiler_key = ghidra_no_return_compiler_key(binary);
             let no_return_idx = ghidra_no_return_index();
+            // Transitively-computed no-return functions (a local wrapper
+            // around a known no-return like `abort`, propagated to fixpoint)
+            // -- see `analysis::noreturn`. Checked alongside the by-name
+            // lookup below, not instead of it: that lookup already covers
+            // every case this set also covers (it seeds from the same
+            // index), but keeping both is a smaller, more obviously
+            // behavior-preserving change than replacing the existing check.
+            let computed_no_return = no_return_functions_for(binary);
 
             for xref in xref_db.iter() {
                 match xref.xref_type {
@@ -100,13 +109,14 @@ impl ControlFlowFacts {
                         flow_edges.push((xref.from_addr, xref.to_addr));
                     }
                     XrefType::Call => {
-                        if ghidra_format.is_some_and(|fmt| {
+                        let by_name = ghidra_format.is_some_and(|fmt| {
                             resolve_call_target_name(binary, xref.to_addr).is_some_and(
                                 |(symbol, library)| {
                                     no_return_idx.is_no_return(fmt, compiler_key, library, &symbol)
                                 },
                             )
-                        }) {
+                        });
+                        if by_name || computed_no_return.contains(&xref.to_addr) {
                             noreturn_callsites.insert(xref.from_addr);
                         }
                     }
@@ -442,7 +452,7 @@ fn function_limit_addr(binary: &LoadedBinary, entry_address: u64, max_bytes: usi
     next_addr
 }
 
-fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'static str> {
+pub(crate) fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'static str> {
     let lang = binary
         .identity_report
         .as_ref()?

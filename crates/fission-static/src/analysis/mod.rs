@@ -10,6 +10,7 @@ pub mod decomp;
 pub mod external_symbol;
 pub mod function_discovery;
 pub mod function_provenance;
+pub mod noreturn;
 pub mod optimizer;
 pub mod patch;
 pub mod prototype_hint;
