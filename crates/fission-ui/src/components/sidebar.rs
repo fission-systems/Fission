@@ -1,16 +1,23 @@
 //! Sidebar — function list with:
 //!   • `use_memo` for O(1) re-render on unrelated state changes
-//!   • Full list render, off-screen rows skipped by native CSS
-//!     `content-visibility: auto` (see .function-item/.str-item) rather
-//!     than hand-rolled virtual scrolling -- a manual windowed-render
-//!     approach here went through two failed fix attempts (wheel-delta
-//!     tracking racing real scroll, then a real onscroll listener still
-//!     fighting the browser's own scroll-position adjustments as the
-//!     DOM changed under it) before landing on this simpler, native
-//!     alternative.
+//!   • Off-screen rows skipped by native CSS `content-visibility: auto`
+//!     (see .function-item/.str-item) for paint/layout cost -- but that
+//!     alone doesn't help VNode construction/diffing cost, which is the
+//!     real lag at tens of thousands of functions (a real ~15k-function
+//!     binary was the case that surfaced this). So the list is *also*
+//!     incrementally mounted: only `sidebar_render_limit` rows are ever
+//!     built, growing in batches as the user scrolls near the bottom.
+//!     This is append-only (rows are only ever added past the end, never
+//!     removed or repositioned), which is why it avoids the two failure
+//!     modes an earlier windowed/virtual-scroll attempt hit here
+//!     (wheel-delta tracking racing real scroll, and an onscroll listener
+//!     fighting the browser's own scroll-position adjustments as rows were
+//!     added/removed *above* the viewport) -- this design never touches
+//!     scroll position or removes already-rendered content, so there's
+//!     nothing for the browser's own scroll adjustment to fight.
 //!   • Import / Thunk classification before decompile
 
-use crate::state::{use_app_state, AppState, FunctionKind, LogEntry, SidebarKindFilter};
+use crate::state::{use_app_state, AppState, FunctionKind, LogEntry, SidebarKindFilter, SIDEBAR_RENDER_BATCH};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
@@ -112,12 +119,61 @@ pub fn Sidebar() -> Element {
     let rename_addr: Signal<Option<u64>> = use_signal(|| None);
     let rename_draft: Signal<String>     = use_signal(|| String::new());
 
+    // Grow the render window as the user scrolls near the bottom of the
+    // (real, natively-scrolling) function list. Delegated on `document`
+    // with `capture: true` rather than attached directly to the `<ul
+    // id="function-list-scroll">` -- scroll events don't bubble, but the
+    // capture phase still routes through `document` first regardless of
+    // whether that element exists yet at listener-registration time (it
+    // doesn't, the first time this runs: no binary is loaded when Sidebar
+    // first mounts), so this works the same way click delegation would.
+    use_hook(|| {
+        spawn(async move {
+            let mut eval = document::eval(
+                r#"
+                let last = 0;
+                document.addEventListener('scroll', (e) => {
+                    const el = e.target;
+                    if (!el || el.id !== 'function-list-scroll') return;
+                    if (el.scrollTop + el.clientHeight < el.scrollHeight - 400) return;
+                    const now = Date.now();
+                    if (now - last < 200) return;
+                    last = now;
+                    dioxus.send(1);
+                }, true);
+                "#,
+            );
+            loop {
+                if eval.recv::<i32>().await.is_err() {
+                    break;
+                }
+                let mut s = state.write();
+                if s.sidebar_render_limit < filtered.read().len() {
+                    s.sidebar_render_limit += SIDEBAR_RENDER_BATCH;
+                }
+            }
+        });
+    });
+
     // When sidebar_scroll_target changes (e.g. jumping here from an Xrefs
-    // click-through), scroll the real DOM element into view -- every item is
-    // rendered now (no virtual window to position), so it always exists.
+    // click-through), scroll the real DOM element into view. If the target
+    // isn't within the currently-mounted batch, extend sidebar_render_limit
+    // to cover it first and let this effect re-run (it's subscribed to the
+    // whole `state` signal, so the render_limit write below re-triggers it)
+    // once the DOM actually has the row.
     use_effect(move || {
         let target = state.read().sidebar_scroll_target;
         let Some(addr) = target else { return; };
+
+        let idx = filtered.read().iter().position(|f| f.addr == addr);
+        if let Some(idx) = idx {
+            let limit = state.read().sidebar_render_limit;
+            if idx >= limit {
+                state.write().sidebar_render_limit = idx + SIDEBAR_RENDER_BATCH;
+                return;
+            }
+        }
+
         document::eval(&format!(
             "document.getElementById('fn-item-{addr:x}')?.scrollIntoView({{block: 'center'}});"
         ));
@@ -125,6 +181,7 @@ pub fn Sidebar() -> Element {
     });
 
     let fn_total = filtered.read().len();
+    let render_limit = state.read().sidebar_render_limit.min(fn_total);
 
     // ── Read once for rendering ───────────────────────────────────────────────
     let has_binary   = state.read().has_binary_loaded();
@@ -183,7 +240,11 @@ pub fn Sidebar() -> Element {
                         rsx! {
                             button {
                                 class: "{cls}",
-                                onclick: move |_| state.write().sidebar_kind_filter = filter.clone(),
+                                onclick: move |_| {
+                                    let mut s = state.write();
+                                    s.sidebar_kind_filter = filter.clone();
+                                    s.sidebar_render_limit = SIDEBAR_RENDER_BATCH;
+                                },
                                 "{label}"
                             }
                         }
@@ -209,7 +270,11 @@ pub fn Sidebar() -> Element {
                                 class: "search-input",
                                 placeholder: "Filter  (Cmd K for palette)",
                                 value: "{search_val}",
-                                oninput: move |e| state.write().sidebar_search = e.value().clone(),
+                                oninput: move |e| {
+                                    let mut s = state.write();
+                                    s.sidebar_search = e.value().clone();
+                                    s.sidebar_render_limit = SIDEBAR_RENDER_BATCH;
+                                },
                             }
                         } else {
                             input {
@@ -250,9 +315,10 @@ pub fn Sidebar() -> Element {
                         }
                     } else {
                         ul {
+                            id: "function-list-scroll",
                             class: "function-list",
 
-                            for entry in filtered.read().iter() {
+                            for entry in filtered.read().iter().take(render_limit) {
                                 {
                                     let addr = entry.addr;
                                     let is_sel = selected == Some(addr);
@@ -294,6 +360,11 @@ pub fn Sidebar() -> Element {
                                             rename_draft,
                                         }
                                     }
+                                }
+                            }
+                            if render_limit < fn_total {
+                                li { class: "fn-list-more-hint",
+                                    "Showing {render_limit} of {fn_total} \u{2014} scroll for more"
                                 }
                             }
                         }

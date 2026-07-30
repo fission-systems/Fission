@@ -5,6 +5,10 @@ use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Rows mounted per batch in the sidebar function list -- see
+/// `AppState::sidebar_render_limit`'s doc for why this exists.
+pub const SIDEBAR_RENDER_BATCH: usize = 500;
+
 // ── Tab types ───────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -198,6 +202,15 @@ pub struct AppState {
     pub sidebar_search:    String,
     pub sidebar_tab:       SidebarTab,
     pub sidebar_kind_filter: SidebarKindFilter,
+    /// How many rows of the current filtered function list are actually
+    /// mounted in the DOM. `content-visibility: auto` only ever addressed
+    /// paint/layout cost for off-screen rows -- with real binaries running
+    /// into the tens of thousands of functions, constructing/diffing that
+    /// many `FunctionListItem` VNodes on every render is itself the lag.
+    /// Grows as the user scrolls near the bottom of the list (see
+    /// `sidebar.rs`); reset to the initial batch whenever the filtered set
+    /// changes (search/kind-filter edits).
+    pub sidebar_render_limit: usize,
 
     // ── Strings browser ──────────────────────────────────────────────────────
     pub strings:           Vec<BinaryString>,
@@ -274,6 +287,7 @@ impl AppState {
             sidebar_search: String::new(),
             sidebar_tab:    SidebarTab::Functions,
             sidebar_kind_filter: SidebarKindFilter::All,
+            sidebar_render_limit: SIDEBAR_RENDER_BATCH,
             strings:        Vec::new(),
             strings_search: String::new(),
             hex_view_target: None,

@@ -471,6 +471,14 @@ body::after {
 .sidebar-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .function-list { list-style: none; overflow-y: auto; flex: 1; padding: 4px 0; }
 
+.fn-list-more-hint {
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--ink-4);
+  text-align: center;
+  font-style: italic;
+}
+
 .function-item {
   display: flex;
   align-items: center;
