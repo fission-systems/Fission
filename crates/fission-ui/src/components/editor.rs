@@ -1,4 +1,4 @@
-use crate::state::{use_app_state, EditorTab, FunctionKind};
+use crate::state::{use_app_state, EditorTab, FunctionKind, LogEntry};
 use dioxus::prelude::*;
 
 // ── Find-bar match highlight helper ─────────────────────────────────────────
@@ -543,6 +543,98 @@ pub fn Editor() -> Element {
                     }
                 }
             }
+            EditorTab::Disasm => {
+                let fn_addr = state.read().current_function_addr;
+                let is_loading = state.read().is_loading_disasm;
+
+                // Load on mount / whenever the selected function changes
+                // (mirrors xrefs_view.rs's load-on-mount effect).
+                use_effect(move || {
+                    let Some(addr) = fn_addr else { return; };
+                    {
+                        let s = state.read();
+                        if s.is_loading_disasm { return; }
+                    }
+                    let binary = state.read().binary.clone();
+                    let session = state.read().server_session_id.clone();
+                    {
+                        let mut s = state.write();
+                        s.is_loading_disasm = true;
+                        s.current_disasm.clear();
+                    }
+                    spawn(async move {
+                        let result = crate::engine::run_disasm(binary, session, addr).await;
+                        let mut s = state.write();
+                        match result {
+                            Ok(rows) => s.current_disasm = rows,
+                            Err(e) => s.push_log(LogEntry::error(format!("Disassembly failed: {e}"))),
+                        }
+                        s.is_loading_disasm = false;
+                    });
+                });
+
+                if fn_addr.is_none() {
+                    rsx! {
+                        div { class: "editor-placeholder",
+                            div { class: "placeholder-icon-wrap", {svg_code()} }
+                            span { class: "placeholder-title", "Nothing to show" }
+                            span { class: "placeholder-sub",
+                                if state.read().has_binary_loaded() {
+                                    "Select a function from the sidebar to disassemble."
+                                } else {
+                                    "Open a binary to begin."
+                                }
+                            }
+                        }
+                    }
+                } else if is_loading {
+                    rsx! {
+                        div { class: "editor-decompiling",
+                            div { class: "spinner spinner-lg" }
+                            span { class: "decompiling-label", "Disassembling…" }
+                        }
+                    }
+                } else {
+                    let rows = state.read().current_disasm.clone();
+                    if rows.is_empty() {
+                        rsx! {
+                            div { class: "editor-placeholder",
+                                div { class: "placeholder-icon-wrap", {svg_code()} }
+                                span { class: "placeholder-title", "No disassembly" }
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            div { class: "disasm-view",
+                                for (i, row) in rows.iter().enumerate() {
+                                    {
+                                        let addr_str = format!("{:016x}", row.address);
+                                        let bytes_str = row.bytes_hex.clone();
+                                        let text = row.text.clone();
+                                        let target = row.target_addr;
+                                        rsx! {
+                                            div {
+                                                class: if target.is_some() { "disasm-row disasm-row-clickable" } else { "disasm-row" },
+                                                key: "{i}",
+                                                onclick: move |_| {
+                                                    if let Some(t) = target {
+                                                        spawn(async move {
+                                                            crate::components::sidebar::navigate_to_address(state, t).await;
+                                                        });
+                                                    }
+                                                },
+                                                span { class: "disasm-addr", "{addr_str}" }
+                                                span { class: "disasm-bytes", "{bytes_str}" }
+                                                span { class: "disasm-text", "{text}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             EditorTab::Hex => {
                 let hex_view_target = state.read().hex_view_target;
 
@@ -680,6 +772,11 @@ pub fn Editor() -> Element {
                         class: tab_cls(&EditorTab::Nir),
                         onclick: move |_| state.write().active_tab = EditorTab::Nir,
                         "NIR"
+                    }
+                    div {
+                        class: tab_cls(&EditorTab::Disasm),
+                        onclick: move |_| state.write().active_tab = EditorTab::Disasm,
+                        "Disasm"
                     }
                     div {
                         class: tab_cls(&EditorTab::Hex),

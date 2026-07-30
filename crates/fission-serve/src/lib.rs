@@ -25,6 +25,7 @@
 //! | GET    | /api/functions/:session           | Function list for session          |
 //! | POST   | /api/decompile/:session/:addr     | Decompile function at hex addr     |
 //! | GET    | /api/xrefs/:session/:addr         | Cross-references for function      |
+//! | GET    | /api/disasm/:session/:addr        | Raw disassembly for function       |
 //! | DELETE | /api/session/:session             | Release session explicitly         |
 
 pub mod config;
@@ -171,6 +172,7 @@ pub async fn run_serve(config: ServeConfig) -> Result<()> {
         .route("/api/functions/{session}",        get(handlers::functions::handle_list_functions))
         .route("/api/decompile/{session}/{addr}",  post(handlers::decompile::handle_decompile))
         .route("/api/xrefs/{session}/{addr}",      get(handlers::xrefs::handle_xrefs))
+        .route("/api/disasm/{session}/{addr}",     get(handlers::disasm::handle_disasm))
         .route("/api/session/{session}",          delete(handlers::binary::handle_delete_session));
 
     let protected = if let Some(token) = config.api_token.as_deref() {

@@ -1,8 +1,14 @@
-use fission_core::{DISASM_READ_WINDOW, PAGE_SIZE};
+use fission_core::DISASM_READ_WINDOW;
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{DecodedInstruction, RuntimeSleighFrontend};
 use std::io::{self, Write};
 
+/// Thin CLI-side wrapper over the shared `fission_decompiler::disasm`
+/// primitive (moved there so `fission-serve`'s `/api/disasm` handler can
+/// share the same implementation instead of the CLI having the only copy).
+/// Keeps this module's own `(name, func_start, needs_boundary_detection,
+/// Vec<(addr, bytes_hex, text)>)` shape so the text/JSON renderers below
+/// didn't need to change.
 fn collect_function_instructions(
     binary: &LoadedBinary,
     _data: &[u8],
@@ -15,36 +21,13 @@ fn collect_function_instructions(
         )
     })?;
     let func_start = func.address;
-    let mut func_size = func.size;
-    let needs_boundary_detection = func_size == 0;
+    let needs_boundary_detection = func.size == 0;
 
-    if needs_boundary_detection {
-        let all_functions: Vec<_> = binary
-            .functions
-            .iter()
-            .filter(|f| f.address > func_start)
-            .collect();
-
-        if let Some(next_func) = all_functions.iter().min_by_key(|f| f.address) {
-            func_size = next_func.address - func_start;
-        } else {
-            func_size = PAGE_SIZE as u64;
-        }
-    }
-
-    let max_bytes = usize::try_from(func_size).unwrap_or(PAGE_SIZE).max(1);
-    let (_, lifted) =
-        super::raw_pcode::lift_raw_pcode(binary, func_start, max_bytes, max_bytes, false)?;
-    let instructions = lifted
-        .instructions
-        .iter()
-        .map(|instruction| {
-            (
-                instruction.address,
-                format_instruction_bytes(instruction),
-                instruction.instruction_text(),
-            )
-        })
+    let rows = fission_decompiler::disasm::disassemble_function(binary, addr)
+        .map_err(to_io_error)?;
+    let instructions = rows
+        .into_iter()
+        .map(|row| (row.address, row.bytes_hex, row.text))
         .collect();
 
     Ok((

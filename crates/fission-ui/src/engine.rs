@@ -189,6 +189,15 @@ pub struct XrefRow {
     pub fn_name:   Option<String>,
 }
 
+/// One decoded instruction row, shared by both platforms.
+#[derive(Debug, Clone)]
+pub struct InstructionRow {
+    pub address:     u64,
+    pub bytes_hex:   String,
+    pub text:        String,
+    pub target_addr: Option<u64>,
+}
+
 /// Minimal batch result (native only, used by Analyse All worker).
 #[derive(Debug, Clone)]
 pub struct BatchResult {
@@ -322,6 +331,21 @@ mod native {
         (callers, callees)
     }
 
+    pub fn disasm_for_function_blocking(
+        binary: &Arc<LoadedBinary>, fn_addr: u64,
+    ) -> Result<Vec<InstructionRow>, String> {
+        fission_decompiler::disasm::disassemble_function(binary.as_ref(), fn_addr).map(|rows| {
+            rows.into_iter()
+                .map(|row| InstructionRow {
+                    address: row.address,
+                    bytes_hex: row.bytes_hex,
+                    text: row.text,
+                    target_addr: row.target_addr,
+                })
+                .collect()
+        })
+    }
+
     pub fn build_facts_blocking(binary: &LoadedBinary) -> FactStore {
         FactStore::from_binary(binary)
     }
@@ -361,8 +385,8 @@ mod native {
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{
     batch_decompile_one, batch_decompile_one_with_facts, build_facts_blocking,
-    decompile_blocking, decompile_blocking_with_facts, load_binary_from_bytes_blocking,
-    xrefs_for_function_blocking, FactStore,
+    decompile_blocking, decompile_blocking_with_facts, disasm_for_function_blocking,
+    load_binary_from_bytes_blocking, xrefs_for_function_blocking, FactStore,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -384,8 +408,8 @@ pub fn configured_server_url() -> String {
 mod wasm_api {
     use super::*;
     use fission_analysis_protocol::{
-        DecompileResponse as ApiDecompileResponse, FnEntry as ApiFnEntry,
-        FunctionsResponse as ApiFunctionsResponse, StatusResponse,
+        DecompileResponse as ApiDecompileResponse, DisasmResponse as ApiDisasmResponse,
+        FnEntry as ApiFnEntry, FunctionsResponse as ApiFunctionsResponse, StatusResponse,
         UploadResponse as ApiUploadResponse, XrefRow as ApiXrefRow,
         XrefsResponse as ApiXrefsResponse,
     };
@@ -566,6 +590,28 @@ mod wasm_api {
         }
         (vec![], vec![])
     }
+
+    pub async fn run_disasm(
+        _binary: Option<Arc<LoadedBinary>>,
+        session_id: Option<String>,
+        fn_addr: u64,
+    ) -> Result<Vec<InstructionRow>, String> {
+        let base = get_server_url();
+        let sid = session_id.ok_or("no active session — upload a binary first")?;
+        let resp = authorized(Request::get(&format!(
+            "{base}/api/disasm/{sid}/{fn_addr:x}"
+        )))
+            .send().await
+            .map_err(|e| format!("Disasm request failed: {e}"))?;
+        if !resp.ok() {
+            return Err(format!("Server error {}: disasm", resp.status()));
+        }
+        let out: ApiDisasmResponse = resp.json().await
+            .map_err(|e| format!("Parse disasm response: {e}"))?;
+        Ok(out.rows.into_iter().map(|r| InstructionRow {
+            address: r.address, bytes_hex: r.bytes_hex, text: r.text, target_addr: r.target_addr,
+        }).collect())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -631,4 +677,25 @@ pub async fn run_xrefs(
     fn_addr: u64,
 ) -> (Vec<XrefRow>, Vec<XrefRow>) {
     wasm_api::run_xrefs(binary, session_id, fn_addr).await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn run_disasm(
+    binary: Option<Arc<LoadedBinary>>,
+    _session_id: Option<String>,
+    fn_addr: u64,
+) -> Result<Vec<InstructionRow>, String> {
+    let binary = binary.ok_or_else(|| "No binary loaded".to_string())?;
+    tokio::task::spawn_blocking(move || disasm_for_function_blocking(&binary, fn_addr))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn run_disasm(
+    binary: Option<Arc<LoadedBinary>>,
+    session_id: Option<String>,
+    fn_addr: u64,
+) -> Result<Vec<InstructionRow>, String> {
+    wasm_api::run_disasm(binary, session_id, fn_addr).await
 }

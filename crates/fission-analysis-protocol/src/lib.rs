@@ -144,6 +144,19 @@ pub struct XrefsResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisasmRow {
+    pub address: u64,
+    pub bytes_hex: String,
+    pub text: String,
+    pub target_addr: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisasmResponse {
+    pub rows: Vec<DisasmRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorResponse {
     pub error: String,
 }

@@ -1,4 +1,4 @@
-use crate::engine::{CfgGraphData, XrefRow};
+use crate::engine::{CfgGraphData, InstructionRow, XrefRow};
 use dioxus::prelude::*;
 use fission_analysis_protocol::StatusResponse;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -16,6 +16,7 @@ pub enum EditorTab {
     #[default]
     Pseudocode,
     Nir,
+    Disasm,
     Hex,
 }
 
@@ -162,6 +163,10 @@ pub struct AppState {
     pub current_xref_callees: Vec<XrefRow>,
     pub is_loading_xrefs: bool,
 
+    // ── Disassembly ─────────────────────────────────────────────────────────
+    pub current_disasm: Vec<InstructionRow>,
+    pub is_loading_disasm: bool,
+
     // ── Editor / panel state ─────────────────────────────────────────────────
     pub active_tab: EditorTab,
     pub active_bottom_tab: BottomTab,
@@ -271,6 +276,8 @@ impl AppState {
             current_xref_callers: Vec::new(),
             current_xref_callees: Vec::new(),
             is_loading_xrefs: false,
+            current_disasm: Vec::new(),
+            is_loading_disasm: false,
             active_tab: EditorTab::Pseudocode,
             active_bottom_tab: BottomTab::Logs,
             log_entries: Vec::new(),
@@ -340,6 +347,7 @@ impl AppState {
                 .decompiled_nir
                 .as_deref()
                 .or(self.decompiled_code.as_deref()),
+            EditorTab::Disasm => None,
             EditorTab::Hex => None,
         }
     }
