@@ -97,10 +97,47 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         == 0
 }
 
+/// Cap rayon's global thread pool instead of trusting auto-detection.
+///
+/// `std::thread::available_parallelism()` (what rayon's default sizing uses)
+/// reads the *host* machine's core count on many container runtimes, not
+/// the container's actual cgroup CPU quota -- a well-known containerized-
+/// Rust gotcha. Observed live on Railway: a real ~27k-function binary that
+/// parses/decodes in under a second locally (14 real cores, no limits)
+/// instead produced a request that never returned even after several
+/// minutes -- consistent with rayon spinning up far more worker threads
+/// than the container's actual CPU quota can run at once, so the whole
+/// pool thrashes on scheduling/context-switch overhead instead of doing
+/// useful work. Overridable via `FISSION_RAYON_THREADS` once the actual
+/// allocated vCPU count for a given deployment is known; the default just
+/// needs to be small enough to avoid catastrophic oversubscription on a
+/// constrained container while still using a few real cores locally.
+fn cap_rayon_thread_pool() {
+    let threads = std::env::var("FISSION_RAYON_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .min(8)
+        });
+    if let Err(e) = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global()
+    {
+        tracing::warn!("rayon global thread pool already initialized ({e}); FISSION_RAYON_THREADS cap not applied");
+    } else {
+        tracing::info!("rayon global thread pool capped at {threads} threads");
+    }
+}
+
 /// Start the fission HTTP API server with the given configuration.
 /// Blocks until the server is shut down.
 pub async fn run_serve(config: ServeConfig) -> Result<()> {
     config.validate().map_err(anyhow::Error::msg)?;
+    cap_rayon_thread_pool();
     let store = Arc::new(SessionStore::new(config.max_sessions, config.session_ttl_secs));
 
     // Start background TTL sweeper
