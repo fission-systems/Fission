@@ -45,7 +45,10 @@ values compiled into a WASM bundle are public. The web client only sends a
 token if one has been entered in its own connection banner, and keeps it in
 memory, not in the build.
 
-Optional controls:
+Optional controls (values shown are also `fission-serve`'s own defaults as
+of this writing -- each session holds a full `LoadedBinary` + `FactStore` in
+process memory for its whole TTL, so `FISSION_MAX_SESSIONS` directly bounds
+worst-case memory; only set these if you need to override):
 
 ```text
 FISSION_MAX_SESSIONS=10

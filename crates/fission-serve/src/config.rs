@@ -15,8 +15,13 @@ pub struct ServeConfig {
     #[arg(long, default_value_t = 7331, env = "PORT")]
     pub port: u16,
 
-    /// Maximum number of concurrent sessions
-    #[arg(long, default_value_t = 50, env = "FISSION_MAX_SESSIONS")]
+    /// Maximum number of concurrent sessions. Each session holds a
+    /// `LoadedBinary` + `FactStore` in process memory for its whole TTL, so
+    /// this directly bounds worst-case memory. 10 matches the value
+    /// `docs/RAILWAY.md` has long recommended via `FISSION_MAX_SESSIONS` for
+    /// the single-replica cloud deployment -- moved here so a fresh deploy
+    /// is safe-by-default without needing that env var set explicitly.
+    #[arg(long, default_value_t = 10, env = "FISSION_MAX_SESSIONS")]
     pub max_sessions: usize,
 
     /// Session time-to-live in seconds (inactive sessions are evicted)
@@ -60,7 +65,7 @@ impl Default for ServeConfig {
         Self {
             host:             "127.0.0.1".into(),
             port:             7331,
-            max_sessions:     50,
+            max_sessions:     10,
             session_ttl_secs: 1800,
             max_upload_bytes: 52_428_800,
             cloud_mode:       false,
