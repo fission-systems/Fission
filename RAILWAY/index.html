@@ -1064,7 +1064,10 @@ mechanisms can run at once (nginx still rate-limits in front either way):</p>
 values compiled into a WASM bundle are public. The web client only sends a
 token if one has been entered in its own connection banner, and keeps it in
 memory, not in the build.</p>
-<p>Optional controls:</p>
+<p>Optional controls (values shown are also <code>fission-serve</code>'s own defaults as
+of this writing -- each session holds a full <code>LoadedBinary</code> + <code>FactStore</code> in
+process memory for its whole TTL, so <code>FISSION_MAX_SESSIONS</code> directly bounds
+worst-case memory; only set these if you need to override):</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>FISSION_MAX_SESSIONS=10
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>FISSION_SESSION_TTL=1800
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>FISSION_MAX_UPLOAD_BYTES=52428800
