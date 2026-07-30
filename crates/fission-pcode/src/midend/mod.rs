@@ -140,7 +140,7 @@ pub use fission_midend_normalize::{
 
 // Top-level preview/NIR entrypoints (builder → normalize → structure → print).
 pub use self::orchestrate::{
-    render_mlil_preview, render_mlil_preview_with_binary_and_context,
+    build_raw_hir, render_mlil_preview, render_mlil_preview_with_binary_and_context,
     render_mlil_preview_with_context, render_nir, render_nir_with_binary_and_context,
     render_nir_with_context, take_last_hir_function_snapshot, take_last_layered_pseudocode,
     take_last_prehir_snapshot, take_last_raw_hir_snapshot, test_refine_partitions,

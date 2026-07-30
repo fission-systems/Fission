@@ -29,6 +29,31 @@ pub fn test_refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
     super::builder::test_refine_partitions(accesses)
 }
 
+/// Decode `pcode` into a raw `PreHirFunction` only -- no normalize,
+/// structuring, or render. A deliberately independent, lighter-weight path
+/// from `render_mlil_preview_with_binary_and_context`'s own inline
+/// `build_hir` call (not extracted from it): that call site's error path
+/// also does telemetry/stats attribution and an unsupported-opcode
+/// inventory event that a whole-program pre-pass calling this for every
+/// function in a binary has no use for and shouldn't pay for, and keeping
+/// the two independent means this can't change that path's own tested
+/// behavior at all.
+///
+/// Used by `fission-decompiler`'s whole-program call-arity pre-pass: real
+/// argument recovery (`call_recovery.rs`) with no normalize-stage pruning,
+/// for every function in a binary, without the cost of a full render.
+pub fn build_raw_hir(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+    binary: Option<&LoadedBinary>,
+    type_context: Option<&PreviewTypeContext>,
+) -> Result<super::PreHirFunction, MlilPreviewError> {
+    let mut builder = PreviewBuilder::new_with_binary(pcode, options, binary, type_context);
+    builder.build_hir(name, address)
+}
+
 pub fn render_mlil_preview(
     pcode: &PcodeFunction,
     name: &str,

@@ -32,6 +32,7 @@ pub use pcode::*;
 // Re-export midend surface (public names historically exported via `nir`).
 pub use midend::{
     AdmissionClass, CallEdgeKind, CallEffectSummarySource, CallSummary, CallTargetProvenance,
+    build_raw_hir,
     CallTargetRef, CallingConvention, PreHirExpr, PreHirFunction, PreHirStmt, FormatFamily, HirExpr,
     HirFunction, HirStmt,
     IndirectControlClassification, LayeredPseudocode, MlilPreviewError, MlilPreviewOptions,

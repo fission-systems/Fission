@@ -582,6 +582,96 @@ pub(crate) fn record_interprocedural_arity_facts(
     }
 }
 
+/// Whole-program call-arity pre-analysis: decode every non-import function in
+/// the binary once, harvest each one's own real (pre-normalize) call-site
+/// argument counts via [`collect_raw_call_arities`], and record every
+/// resolved callee's observed arity as a structuring hint on `fact_store` --
+/// before any per-request decompile has happened.
+///
+/// This is what lets a *first-ever* decompile of a callee in a fresh session
+/// already show a widened signature, which
+/// [`record_interprocedural_arity_facts`] alone cannot: that helper only
+/// records what it observes *during* a real decompile, so it requires the
+/// caller to have already been rendered earlier in the same session. Meant
+/// to run once during background discovery (mirrors the whole-binary,
+/// bounded-per-function decode shape already used by
+/// `ingest_signature_matches_with_databases` for FID matching, and by Phase
+/// A's no-return fixpoint), not per decompile request.
+pub fn seed_whole_program_call_arity_facts(binary: &LoadedBinary, fact_store: &mut FactStore) {
+    use rayon::prelude::*;
+
+    let type_context = build_nir_type_context(binary, fact_store, 0);
+    let mut options = crate::seed_nir_render_options(binary);
+    apply_spec_overrides(binary, &mut options);
+
+    let name_to_addr: HashMap<&str, u64> = type_context
+        .call_targets
+        .iter()
+        .map(|(addr, name)| (name.as_str(), *addr))
+        .collect();
+
+    let observations: Vec<(u64, HashMap<String, usize>)> = binary
+        .functions
+        .par_iter()
+        .filter(|f| !f.is_import && f.address != 0)
+        .filter_map(|f| {
+            let max_bytes = direct_callee_max_bytes(binary, f.address)?;
+            let instruction_limit = direct_callee_instruction_limit(max_bytes);
+            let pcode = decode_rust_sleigh_pcode(
+                binary,
+                &f.name,
+                f.address,
+                max_bytes,
+                instruction_limit,
+                true,
+                true,
+            )
+            .ok()?;
+            let raw_hir = fission_pcode::build_raw_hir(
+                &pcode,
+                &f.name,
+                f.address,
+                &options,
+                Some(binary),
+                Some(&type_context),
+            )
+            .ok()?;
+            let mut arities = HashMap::new();
+            collect_raw_call_arities(&raw_hir.body, &mut arities);
+            (!arities.is_empty()).then_some((f.address, arities))
+        })
+        .collect();
+
+    let mut merged: HashMap<u64, usize> = HashMap::new();
+    for (caller_addr, arities) in &observations {
+        for (callee_name, &arity) in arities {
+            if arity == 0 {
+                continue; // uninformative / can't distinguish from "not a real call"
+            }
+            let Some(&callee_addr) = name_to_addr.get(callee_name.as_str()) else {
+                continue; // unresolved symbol (external import, indirect, etc.)
+            };
+            if callee_addr == *caller_addr {
+                continue; // recursive call carries no new arity info
+            }
+            merged
+                .entry(callee_addr)
+                .and_modify(|max| *max = (*max).max(arity))
+                .or_insert(arity);
+        }
+    }
+
+    for (callee_addr, arity) in merged {
+        // See `record_interprocedural_arity_facts` above for why `param_{i}`
+        // placeholders (not empty names) are required here.
+        let hints = NirFunctionHints {
+            param_names: (1..=arity).map(|i| format!("param_{i}")).collect(),
+            ..Default::default()
+        };
+        fact_store.record_structuring_hints(callee_addr, hints);
+    }
+}
+
 pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
     binary: &LoadedBinary,
     pcode: &PcodeFunction,

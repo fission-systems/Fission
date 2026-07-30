@@ -717,6 +717,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "verify",
     "debug",
     "ai",
+    "serve",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1045,6 +1046,22 @@ mod tests {
             ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
             ParsedInvocation::Serve { .. } => panic!("legacy parser cannot emit serve"),
+        }
+    }
+
+    #[test]
+    fn canonical_serve_invocation_parses_port_and_host() {
+        // Regression: `serve` was missing from `CANONICAL_SUBCOMMANDS`, so
+        // `fission_cli serve --port ... --host ...` fell through to the
+        // legacy flat parser, which treated "serve" itself as the BINARY
+        // positional argument and rejected `--port` as unknown.
+        let inv = parse_oneshot_args_from(["fission_cli", "serve", "--port", "9999", "--host", "0.0.0.0"]);
+        match inv {
+            ParsedInvocation::Serve { port, host } => {
+                assert_eq!(port, 9999);
+                assert_eq!(host, "0.0.0.0");
+            }
+            other => panic!("expected serve invocation, got {other:?}"),
         }
     }
 

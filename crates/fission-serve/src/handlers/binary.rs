@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Json},
 };
 use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::decomp::facts::FactStore;
 use fission_static::analysis::{FunctionDiscoveryProfile, discover_functions_with_runtime};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -124,7 +125,31 @@ async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid)
     })
     .await;
     match discovered {
-        Ok(binary) => session.set_binary(binary).await,
+        Ok(binary) => {
+            session.set_binary(binary.clone()).await;
+            // Whole-program call-arity pre-analysis: decode every function
+            // once now (background, off the request path) so a session's
+            // *first-ever* decompile of a callee can already show a widened
+            // signature learned from its callers -- rather than requiring
+            // the caller to have been decompiled first in this same session
+            // (that per-request-only path is `record_interprocedural_arity_facts`,
+            // wired separately in `render.rs`). Built here, once, instead of
+            // lazily in `SessionData::facts()`, since that path is also on
+            // the hot per-request critical path for the *first* decompile
+            // call otherwise.
+            let facts = tokio::task::spawn_blocking(move || {
+                let mut facts = FactStore::from_binary(&binary);
+                fission_decompiler::facts::seed_whole_program_call_arity_facts(
+                    &binary, &mut facts,
+                );
+                facts
+            })
+            .await;
+            match facts {
+                Ok(facts) => session.set_facts(facts).await,
+                Err(e) => tracing::warn!("background arity pre-analysis panicked: {e}"),
+            }
+        }
         Err(e) => tracing::warn!("background function discovery panicked: {e}"),
     }
     session.set_analyzing(false);

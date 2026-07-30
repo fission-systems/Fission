@@ -2649,6 +2649,7 @@ dependencies = [
  "fission-sleigh",
  "fission-static",
  "once_cell",
+ "rayon",
  "regex",
  "serde",
  "serde_json",
