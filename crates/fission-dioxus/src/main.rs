@@ -213,28 +213,7 @@ fn App() -> Element {
                         e.prevent_default();
                         let addr = state.write().nav_back();
                         if let Some(addr) = addr {
-                            let binary = state.read().binary.clone();
-                            let name = state.read().functions.iter()
-                                .find(|f| f.address == addr)
-                                .map(|f| f.name.clone())
-                                .unwrap_or_else(|| format!("sub_{addr:x}"));
-                            if let Some(binary) = binary {
-                                {
-                                    let mut s = state.write();
-                                    s.current_function_addr = Some(addr);
-                                    s.decompiled_code = None;
-                                    s.decompiled_nir  = None;
-                                    s.current_cfg     = None;
-                                    s.current_xref_callers.clear();
-                                    s.current_xref_callees.clear();
-                                    s.is_loading_xrefs = false;
-                                    s.is_decompiling  = true;
-                                    s.push_log(LogEntry::info(format!("Back -> {name}  @  0x{addr:x}")));
-                                }
-                                spawn(async move {
-                                    engine::run_nav_decompile(state, Some(binary), None, addr, name).await;
-                                });
-                            }
+                            spawn(components::sidebar::navigate_to_address_no_history(state, addr));
                         }
                     }
                     // Cmd+] — navigate forward
@@ -242,28 +221,7 @@ fn App() -> Element {
                         e.prevent_default();
                         let addr = state.write().nav_forward();
                         if let Some(addr) = addr {
-                            let binary = state.read().binary.clone();
-                            let name = state.read().functions.iter()
-                                .find(|f| f.address == addr)
-                                .map(|f| f.name.clone())
-                                .unwrap_or_else(|| format!("sub_{addr:x}"));
-                            if let Some(binary) = binary {
-                                {
-                                    let mut s = state.write();
-                                    s.current_function_addr = Some(addr);
-                                    s.decompiled_code = None;
-                                    s.decompiled_nir  = None;
-                                    s.current_cfg     = None;
-                                    s.current_xref_callers.clear();
-                                    s.current_xref_callees.clear();
-                                    s.is_loading_xrefs = false;
-                                    s.is_decompiling  = true;
-                                    s.push_log(LogEntry::info(format!("Forward -> {name}  @  0x{addr:x}")));
-                                }
-                                spawn(async move {
-                                    engine::run_nav_decompile(state, Some(binary), None, addr, name).await;
-                                });
-                            }
+                            spawn(components::sidebar::navigate_to_address_no_history(state, addr));
                         }
                     }
                     // Escape — close palette

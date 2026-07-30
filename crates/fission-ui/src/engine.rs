@@ -632,26 +632,3 @@ pub async fn run_xrefs(
 ) -> (Vec<XrefRow>, Vec<XrefRow>) {
     wasm_api::run_xrefs(binary, session_id, fn_addr).await
 }
-
-/// Thin helper for keyboard nav — delegates to sidebar's decompile path.
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn run_nav_decompile(
-    state: dioxus::prelude::Signal<crate::state::AppState>,
-    binary: Option<Arc<LoadedBinary>>,
-    session_id: Option<String>,
-    addr: u64,
-    name: String,
-) {
-    crate::components::sidebar::run_decompile(state, binary, session_id, addr, name).await;
-}
-
-#[cfg(target_arch = "wasm32")]
-pub async fn run_nav_decompile(
-    state: dioxus::prelude::Signal<crate::state::AppState>,
-    _binary: Option<Arc<LoadedBinary>>,
-    session_id: Option<String>,
-    addr: u64,
-    name: String,
-) {
-    crate::components::sidebar::run_decompile(state, None, session_id, addr, name).await;
-}

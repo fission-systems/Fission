@@ -3,8 +3,8 @@
 //! Clicking a row navigates to the target function: updates selection,
 //! triggers auto-decompile, and switches the bottom panel to Output.
 
-use crate::components::sidebar::run_decompile;
-use crate::state::{use_app_state, BottomTab, FunctionKind, LogEntry};
+use crate::components::sidebar::navigate_to_address_with_hint;
+use crate::state::{use_app_state, BottomTab, LogEntry};
 use dioxus::prelude::*;
 
 #[component]
@@ -67,52 +67,14 @@ pub fn XrefsView() -> Element {
     }
 
     // ── Jump helper ──────────────────────────────────────────────────────────
+    // Switching back to the Logs tab is xrefs-specific (the user is leaving
+    // the Xrefs panel to look at the jump target), so it stays here rather
+    // than inside the shared navigate_to_address_with_hint helper, which
+    // other call sites (sidebar clicks, palette selections) don't want.
     let mut jump_to = move |addr: u64, hint_name: Option<String>| {
-        let binary = state.read().binary.clone();
-
-        let (kind, resolved_name) = {
-            let s = state.read();
-            if let Some(fi) = s.functions.iter().find(|f| f.address == addr) {
-                let k = if fi.is_import && !fi.is_thunk_like {
-                    FunctionKind::Import {
-                        library: fi.external_library.clone(),
-                    }
-                } else if fi.is_thunk_like {
-                    FunctionKind::Thunk {
-                        target: fi.thunk_target,
-                    }
-                } else {
-                    FunctionKind::Code
-                };
-                (k, fi.name.clone())
-            } else {
-                let fallback = hint_name.unwrap_or_else(|| format!("sub_{addr:x}"));
-                (FunctionKind::Code, fallback)
-            }
-        };
-
-        {
-            let mut s = state.write();
-            s.current_function_addr = Some(addr);
-            s.current_function_kind = kind;
-            s.decompiled_code = None;
-            s.decompiled_nir = None;
-            s.current_cfg = None;
-            s.current_xref_callers.clear();
-            s.current_xref_callees.clear();
-            s.is_loading_xrefs = false;
-            s.is_decompiling = true;
-            s.navigate_to(addr);
-            s.active_bottom_tab = BottomTab::Logs;
-            s.push_log(LogEntry::info(format!(
-                "Jumped to {resolved_name}  @  0x{addr:x}"
-            )));
-        }
-
-        let name_for_task = resolved_name;
-        let session = state.read().server_session_id.clone();
+        state.write().active_bottom_tab = BottomTab::Logs;
         spawn(async move {
-            run_decompile(state, binary, session, addr, name_for_task).await;
+            navigate_to_address_with_hint(state, addr, hint_name).await;
         });
     };
 

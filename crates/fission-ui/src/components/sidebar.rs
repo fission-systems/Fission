@@ -42,6 +42,21 @@ fn svg_binary() -> Element {
     }
 }
 
+// ── Strings tab empty-state message ──────────────────────────────────────────
+// On wasm32 (fission-web), string extraction runs server-side and isn't
+// serialised over the API yet (`run_load`'s wasm arm hardcodes
+// `strings: Vec::new()`), so an empty list there doesn't mean the binary
+// truly has no strings -- it's a platform gap, and the message should say so
+// rather than assert a fact about the binary that isn't actually known.
+#[cfg(target_arch = "wasm32")]
+fn no_strings_reason() -> &'static str {
+    "Not available yet in the browser build -- string extraction runs server-side and isn't exposed over the API"
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn no_strings_reason() -> &'static str {
+    "Binary has no extracted strings"
+}
+
 // ── Entry snapshot ───────────────────────────────────────────────────────────
 #[derive(Clone, PartialEq)]
 struct FnEntry {
@@ -290,7 +305,7 @@ pub fn Sidebar() -> Element {
                             span { class: "state-title", "No strings" }
                             span { class: "state-sub",
                                 if str_search.is_empty() {
-                                    "Binary has no extracted strings"
+                                    "{no_strings_reason()}"
                                 } else {
                                     "No match for your query"
                                 }
@@ -533,12 +548,19 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
 // ── Shared navigation helper ─────────────────────────────────────────────────
 
 /// Navigate to a function by address from anywhere in the UI (e.g. clicking a
-/// `sub_XXXX` reference inside decompiled pseudocode) -- resolves the target's
-/// kind from the current function list, records it in nav history, and either
-/// shows an import stub or kicks off a real decompile. Mirrors `select_function`
-/// and `xrefs_view::jump_to`, factored out here since this is a third call site
-/// for the same "jump to an address" logic.
-pub async fn navigate_to_address(mut state: Signal<AppState>, addr: u64) {
+/// `sub_XXXX` reference inside decompiled pseudocode, a command-palette
+/// selection, or a Back/Forward step) -- resolves the target's kind from the
+/// current function list and either shows an import stub or kicks off a real
+/// decompile. `record_history` controls whether this call appends a new
+/// `nav_history` entry (a real navigation, e.g. clicking a reference) or not
+/// (Back/Forward stepping through history that's already been updated by
+/// `nav_back`/`nav_forward`, which also already set `sidebar_scroll_target`).
+async fn navigate_to_address_impl(
+    mut state: Signal<AppState>,
+    addr: u64,
+    hint_name: Option<String>,
+    record_history: bool,
+) {
     let binary = state.read().binary.clone();
     let session = state.read().server_session_id.clone();
 
@@ -554,7 +576,9 @@ pub async fn navigate_to_address(mut state: Signal<AppState>, addr: u64) {
             };
             (k, fi.name.clone())
         } else {
-            (FunctionKind::Code, format!("sub_{addr:x}"))
+            // Not a known function (e.g. an xref target only known by
+            // symbol name) -- prefer the caller's hint over a generic label.
+            (FunctionKind::Code, hint_name.unwrap_or_else(|| format!("sub_{addr:x}")))
         }
     };
 
@@ -568,7 +592,9 @@ pub async fn navigate_to_address(mut state: Signal<AppState>, addr: u64) {
         s.current_xref_callers.clear();
         s.current_xref_callees.clear();
         s.is_loading_xrefs = false;
-        s.navigate_to(addr);
+        if record_history {
+            s.navigate_to(addr);
+        }
         s.push_log(LogEntry::info(format!("Jumped to {resolved_name}  @  0x{addr:x}")));
     }
 
@@ -590,6 +616,30 @@ pub async fn navigate_to_address(mut state: Signal<AppState>, addr: u64) {
             run_decompile(state, binary, session, addr, resolved_name).await;
         }
     }
+}
+
+/// Navigate to `addr`, recording a new nav-history entry. Use for real
+/// navigations: clicking a `sub_XXXX` reference or a command palette result.
+pub async fn navigate_to_address(state: Signal<AppState>, addr: u64) {
+    navigate_to_address_impl(state, addr, None, true).await;
+}
+
+/// Like [`navigate_to_address`], but with a fallback display name to use if
+/// `addr` isn't in the current function list (e.g. an xrefs row that only
+/// resolved to a symbol name, not a local function).
+pub async fn navigate_to_address_with_hint(
+    state: Signal<AppState>,
+    addr: u64,
+    hint_name: Option<String>,
+) {
+    navigate_to_address_impl(state, addr, hint_name, true).await;
+}
+
+/// Navigate to `addr` *without* touching nav history. Use for Back/Forward
+/// stepping, where `AppState::nav_back`/`nav_forward` already updated
+/// `nav_history`/`nav_cursor` themselves.
+pub async fn navigate_to_address_no_history(state: Signal<AppState>, addr: u64) {
+    navigate_to_address_impl(state, addr, None, false).await;
 }
 
 // ── Shared async decompile helper ────────────────────────────────────────────

@@ -7,7 +7,7 @@
 //!  - Arrow keys move focus; Enter selects; Escape closes.
 //!  - Clicking a result or the backdrop also dismisses.
 
-use crate::state::{use_app_state, AppState, FunctionKind, LogEntry};
+use crate::state::{use_app_state, AppState};
 use dioxus::prelude::*;
 
 // ── SVG icons (palette-local) ────────────────────────────────────────────────
@@ -74,21 +74,13 @@ pub fn CommandPalette() -> Element {
 
     // Build fuzzy-ranked results — wrap in Arc so both the key-handler
     // closure and the render loop can own a reference without a move conflict.
-    let results: std::sync::Arc<Vec<(i32, String, u64, bool, bool, Option<String>, Option<u64>)>> = {
+    let results: std::sync::Arc<Vec<(i32, String, u64, bool, bool)>> = {
         let s = state.read();
         let v = s
             .palette_results(18)
             .into_iter()
             .map(|(score, f)| {
-                (
-                    score,
-                    f.name.clone(),
-                    f.address,
-                    f.is_import,
-                    f.is_thunk_like,
-                    f.external_library.clone(),
-                    f.thunk_target,
-                )
+                (score, f.name.clone(), f.address, f.is_import, f.is_thunk_like)
             })
             .collect();
         std::sync::Arc::new(v)
@@ -115,16 +107,14 @@ pub fn CommandPalette() -> Element {
             s.palette_focused = s.palette_focused.saturating_sub(1);
         }
         Key::Enter => {
-            if let Some((_, name, addr, is_import, is_thunk, lib, target)) =
-                results_key.get(focused).cloned()
-            {
+            if let Some((_, _, addr, ..)) = results_key.get(focused).cloned() {
                 {
                     let mut s = state.write();
                     s.is_palette_open = false;
                     s.palette_query.clear();
                     s.palette_focused = 0;
                 }
-                trigger_decompile(state, addr, name, is_import, is_thunk, lib, target);
+                trigger_decompile(state, addr);
             }
         }
         _ => {}
@@ -192,7 +182,7 @@ pub fn CommandPalette() -> Element {
                     }
                 } else {
                     div { class: "palette-results",
-                        for (idx, (_score, name, addr, is_import, is_thunk, lib, thunk_target)) in results.iter().enumerate() {
+                        for (idx, (_score, name, addr, is_import, is_thunk)) in results.iter().enumerate() {
                             {
                                 let is_focused = idx == focused;
                                 let display = if name.is_empty() {
@@ -200,11 +190,6 @@ pub fn CommandPalette() -> Element {
                                 } else {
                                     name.clone()
                                 };
-                                let lib_clone  = lib.clone();
-                                let tt_clone   = *thunk_target;
-                                let ii = *is_import;
-                                let it = *is_thunk;
-                                let name_click = name.clone();
                                 let addr_val   = *addr;
 
                                 rsx! {
@@ -218,14 +203,7 @@ pub fn CommandPalette() -> Element {
                                                 s.palette_query.clear();
                                                 s.palette_focused = 0;
                                             }
-                                            trigger_decompile(
-                                                state,
-                                                addr_val,
-                                                name_click.clone(),
-                                                ii, it,
-                                                lib_clone.clone(),
-                                                tt_clone,
-                                            );
+                                            trigger_decompile(state, addr_val);
                                         },
 
                                         // Function icon
@@ -279,76 +257,11 @@ pub fn CommandPalette() -> Element {
 
 // ── Decompile trigger (shared by click and Enter) ────────────────────────────
 
-fn trigger_decompile(
-    mut state: Signal<AppState>,
-    addr: u64,
-    name: String,
-    is_import: bool,
-    is_thunk: bool,
-    library: Option<String>,
-    thunk_target: Option<u64>,
-) {
-    let kind = if is_import && !is_thunk {
-        FunctionKind::Import {
-            library: library.clone(),
-        }
-    } else if is_thunk {
-        FunctionKind::Thunk {
-            target: thunk_target,
-        }
-    } else {
-        FunctionKind::Code
-    };
-
-    {
-        let mut s = state.write();
-        s.current_function_addr = Some(addr);
-        s.current_function_kind = kind.clone();
-        s.decompiled_code = None;
-        s.decompiled_nir = None;
-        s.current_cfg = None;
-        s.current_xref_callers.clear();
-        s.current_xref_callees.clear();
-        s.is_loading_xrefs = false;
-        s.navigate_to(addr);
-    }
-
-    match kind {
-        FunctionKind::Import { library } => {
-            let lib_str = library.as_deref().unwrap_or("unknown");
-            let text = format!(
-                "/* Import stub \u{2014} no decompilable body.\n\
-                 *\n\
-                 *  Symbol  : {name}\n\
-                 *  Address : 0x{addr:016x}\n\
-                 *  Library : {lib_str}\n\
-                 */"
-            );
-            let mut s = state.write();
-            s.decompiled_code = Some(text);
-            s.push_log(LogEntry::info(format!("Import stub: {name}")));
-        }
-        FunctionKind::Thunk { .. } | FunctionKind::Code => {
-            let binary = state.read().binary.clone();
-            let is_thunk_kind = matches!(kind, FunctionKind::Thunk { .. });
-
-            {
-                let mut s = state.write();
-                s.is_decompiling = true;
-                if is_thunk_kind {
-                    s.push_log(LogEntry::warn(format!(
-                        "Decompiling import thunk: {name} @ 0x{addr:x}"
-                    )));
-                } else {
-                    s.push_log(LogEntry::info(format!("Decompiling {name} @ 0x{addr:x}")));
-                }
-            }
-
-            // Use the shared helper from sidebar so CFG is also stored
-            let session = state.read().server_session_id.clone();
-            spawn(crate::components::sidebar::run_decompile(
-                state, binary, session, addr, name,
-            ));
-        }
-    }
+/// Kind (Import/Thunk/Code) is re-resolved live from `state.functions` inside
+/// `navigate_to_address`, not from the palette's own snapshot -- the two are
+/// the same source of truth moments apart, so nothing is lost by not passing
+/// the palette result's own is_import/is_thunk/library/thunk_target fields
+/// through (those are still used locally for this row's icon/badge).
+fn trigger_decompile(state: Signal<AppState>, addr: u64) {
+    spawn(crate::components::sidebar::navigate_to_address(state, addr));
 }
