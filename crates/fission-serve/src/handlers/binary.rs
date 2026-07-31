@@ -197,6 +197,23 @@ async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid,
                     }
                     Err(e) => tracing::warn!("background arity pre-analysis panicked: {e}"),
                 }
+            } else {
+                // Cloud mode skips the arity phase above, but a session's
+                // *first* decompile still has to build `session.facts()`
+                // (FID matching) somewhere -- doing that lazily on the
+                // first decompile request works, but means that request
+                // pays the full cost synchronously. Warming it here
+                // instead means a session sitting idle for even a few
+                // seconds after upload (reading the function list, picking
+                // what to click) already has it ready by the time a
+                // decompile request lands. Safe to just call `facts()` and
+                // let it race with a real decompile request: `SessionData::
+                // facts()`'s lock is now held across the whole build, not
+                // just the check, so a concurrent caller awaits this same
+                // in-flight build instead of redundantly starting its own.
+                let t1 = std::time::Instant::now();
+                session.facts().await;
+                tracing::info!("[PERF] fid-warmup phase: {:?}", t1.elapsed());
             }
         }
         Err(e) => {

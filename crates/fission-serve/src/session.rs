@@ -37,7 +37,16 @@ pub struct SessionData {
     /// matching -- and was previously rebuilt from scratch on every single
     /// decompile request in a session, even back-to-back requests against
     /// the exact same unchanged binary state.
-    facts:           RwLock<Option<Arc<FactStore>>>,
+    ///
+    /// A `tokio::sync::Mutex`, not `RwLock`: held across the *entire*
+    /// check-then-build-then-store sequence in `facts()` (tokio's `Mutex`
+    /// is specifically designed to be held across an `.await`, unlike
+    /// `std::sync::Mutex`). Two concurrent decompile requests racing on a
+    /// cold cache used to both independently pay the full FID-matching
+    /// cost -- same check-then-release-then-compute race as the global
+    /// `control_flow_facts_for` cache had -- now the second just awaits
+    /// the first's in-flight build instead of redoing it.
+    facts:           tokio::sync::Mutex<Option<Arc<FactStore>>>,
     last_used:       RwLock<Instant>,
 }
 
@@ -47,7 +56,7 @@ impl SessionData {
             binary:      RwLock::new(Arc::new(binary)),
             binary_name,
             analyzing:   AtomicBool::new(analyzing),
-            facts:       RwLock::new(None),
+            facts:       tokio::sync::Mutex::new(None),
             last_used:   RwLock::new(Instant::now()),
         }
     }
@@ -62,23 +71,35 @@ impl SessionData {
     /// binary's current function/symbol set.
     pub async fn set_binary(&self, binary: LoadedBinary) {
         *self.binary.write().await = Arc::new(binary);
-        *self.facts.write().await = None;
+        *self.facts.lock().await = None;
     }
 
     /// The session's cached facts, building them from the current binary
     /// on first use (or after `set_binary` invalidated a stale copy).
+    ///
+    /// The lock is held across the `spawn_blocking` build (not just the
+    /// check), so a second caller that arrives while a build is already in
+    /// flight awaits the same result instead of kicking off a redundant
+    /// one -- and because it's a `tokio::sync::Mutex`, "awaits" here means
+    /// yielding the executor, not blocking a worker thread.
     pub async fn facts(&self) -> Arc<FactStore> {
-        if let Some(facts) = self.facts.read().await.as_ref() {
-            return Arc::clone(facts);
-        }
-        let mut slot = self.facts.write().await;
-        // Another task may have built it while we were waiting for the
-        // write lock -- check again before doing the work twice.
+        let mut slot = self.facts.lock().await;
         if let Some(facts) = slot.as_ref() {
             return Arc::clone(facts);
         }
         let binary = self.binary().await;
-        let built = Arc::new(FactStore::from_binary(&binary));
+        // `FactStore::from_binary` runs FID/signature-database matching
+        // over every unnamed function in the binary -- genuinely CPU-heavy
+        // (seconds to tens of seconds on a large binary). Calling it
+        // directly here (as this used to) runs it synchronously on
+        // whichever tokio worker thread is executing this task, blocking
+        // that thread from servicing *any* other async work -- other
+        // sessions' requests included -- for the whole duration, not just
+        // slowing this one down. `spawn_blocking` moves it to tokio's
+        // separate blocking-task thread pool instead.
+        let built = tokio::task::spawn_blocking(move || Arc::new(FactStore::from_binary(&binary)))
+            .await
+            .expect("FactStore::from_binary panicked");
         *slot = Some(Arc::clone(&built));
         built
     }
@@ -90,7 +111,7 @@ impl SessionData {
     /// from what was just discovered instead of the plain loader-derived
     /// facts every session starts with.
     pub async fn set_facts(&self, facts: FactStore) {
-        *self.facts.write().await = Some(Arc::new(facts));
+        *self.facts.lock().await = Some(Arc::new(facts));
     }
 
     pub fn is_analyzing(&self) -> bool {
