@@ -1,8 +1,9 @@
 use crate::{
-    SessionStore,
+    ServeRuntimeInfo, SessionStore,
     types::{ErrorResponse, UploadResponse},
 };
 use axum::{
+    Extension,
     extract::{Multipart, Path, State},
     http::StatusCode,
     response::{IntoResponse, Json},
@@ -16,6 +17,7 @@ use uuid::Uuid;
 /// POST /api/binary — upload a binary, returns a session_id.
 pub async fn handle_upload_binary(
     State(store): State<Arc<SessionStore>>,
+    Extension(runtime): Extension<ServeRuntimeInfo>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     // Extract the file field from the multipart body
@@ -72,7 +74,7 @@ pub async fn handle_upload_binary(
                     // instead of blocking the upload on it; the session
                     // starts usable with loader-only symbols and
                     // `analyzing` flips false once discovery lands.
-                    tokio::spawn(run_discovery_in_background(store.clone(), session_id));
+                    tokio::spawn(run_discovery_in_background(store.clone(), session_id, runtime.cloud_mode));
 
                     (
                         StatusCode::OK,
@@ -105,7 +107,7 @@ pub async fn handle_upload_binary(
     }
 }
 
-async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid) {
+async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid, cloud_mode: bool) {
     let Some(session) = store.get(&session_id).await else {
         return;
     };
@@ -153,33 +155,48 @@ async fn run_discovery_in_background(store: Arc<SessionStore>, session_id: Uuid)
             // wired separately in `render.rs`). Built here, once, instead of
             // lazily in `SessionData::facts()`, since that path is also on
             // the hot per-request critical path for the *first* decompile
-            // call otherwise. Genuinely slow on a large binary (see above),
-            // so this now runs fully detached from `analyzing` -- whatever
-            // decompile happens before it lands just gets a plain
-            // FID-matched `FactStore` (`SessionData::facts()`'s own lazy
-            // build), exactly like a session would have gotten before this
-            // pre-analysis existed.
-            let t1 = std::time::Instant::now();
-            let fn_count = binary.functions.len();
-            let facts = tokio::task::spawn_blocking(move || {
-                let mut facts = FactStore::from_binary(&binary);
-                let t_fid = t1.elapsed();
-                fission_decompiler::facts::seed_whole_program_call_arity_facts(
-                    &binary, &mut facts,
-                );
-                (facts, t_fid)
-            })
-            .await;
-            match facts {
-                Ok((facts, t_fid)) => {
-                    tracing::info!(
-                        "[PERF] arity phase: {:?} total (fid/facts-build sub-portion: {:?}), fn_count={fn_count}",
-                        t1.elapsed(),
-                        t_fid
+            // call otherwise.
+            //
+            // Skipped entirely in cloud mode: this decodes every non-import
+            // function and builds full HIR for each one, which is dramatically
+            // more expensive than the FID-matching pass alone. Observed live
+            // on Railway not finishing within a session's whole 30-minute TTL
+            // for an ordinary ~6500-function binary (not the earlier-diagnosed
+            // 27k-function outlier -- this is now the *typical* case), and
+            // while running it saturates the container's rayon pool badly
+            // enough to starve that same session's own foreground decompile
+            // requests for CPU. `fission_cli`'s oneshot `decomp` never calls
+            // this at all, so cloud mode without it now matches that same,
+            // already-proven-adequate shape: FID-matched names from the plain
+            // `FactStore` (`SessionData::facts()`'s own lazy, now-de-stampeded
+            // build) plus whatever `record_interprocedural_arity_facts` learns
+            // per-request as callers get decompiled -- just without the
+            // upfront whole-program head start. Self-hosted/local `fission_
+            // serve` keeps it, since an operator running their own instance
+            // controls (and presumably has more of) its CPU budget.
+            if !cloud_mode {
+                let t1 = std::time::Instant::now();
+                let fn_count = binary.functions.len();
+                let facts = tokio::task::spawn_blocking(move || {
+                    let mut facts = FactStore::from_binary(&binary);
+                    let t_fid = t1.elapsed();
+                    fission_decompiler::facts::seed_whole_program_call_arity_facts(
+                        &binary, &mut facts,
                     );
-                    session.set_facts(facts).await;
+                    (facts, t_fid)
+                })
+                .await;
+                match facts {
+                    Ok((facts, t_fid)) => {
+                        tracing::info!(
+                            "[PERF] arity phase: {:?} total (fid/facts-build sub-portion: {:?}), fn_count={fn_count}",
+                            t1.elapsed(),
+                            t_fid
+                        );
+                        session.set_facts(facts).await;
+                    }
+                    Err(e) => tracing::warn!("background arity pre-analysis panicked: {e}"),
                 }
-                Err(e) => tracing::warn!("background arity pre-analysis panicked: {e}"),
             }
         }
         Err(e) => {
