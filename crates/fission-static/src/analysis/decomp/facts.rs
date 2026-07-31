@@ -329,6 +329,7 @@ impl FactStore {
                     || self.pdb_functions.contains_key(&func.address))
             })
             .filter_map(|func| {
+                let diag_start = std::time::Instant::now();
                 let max_bytes = function_max_bytes(binary, func.address, 4096);
                 let bytes = binary.view_bytes(func.address, max_bytes)?;
                 let memory_context = decode_memory_context_for(binary, func.address, max_bytes);
@@ -342,6 +343,12 @@ impl FactStore {
                         None,
                     )
                     .ok()?;
+                if std::env::var_os("FISSION_FID_DIAG").is_some() {
+                    let elapsed = diag_start.elapsed();
+                    if elapsed.as_millis() > 200 {
+                        eprintln!("[FID-DIAG] decode addr=0x{:x} elapsed={:?} max_bytes={} instructions={}", func.address, elapsed, max_bytes, decoded.instructions.len());
+                    }
+                }
 
                 let (_full_count, full_hash, _specific_count, specific_hash) =
                     frontend.fid_hashes(&decoded.instructions, &resolve_register_offset)?;

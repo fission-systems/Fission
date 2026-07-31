@@ -48,9 +48,10 @@ pub struct FunctionControlFlowFacts {
     pub noreturn_callsites: Vec<u64>,
 }
 
-static FACTS_CACHE: OnceLock<Mutex<LruCache<String, ControlFlowFacts>>> = OnceLock::new();
+static FACTS_CACHE: OnceLock<Mutex<LruCache<String, std::sync::Arc<OnceLock<ControlFlowFacts>>>>> =
+    OnceLock::new();
 
-fn facts_cache() -> &'static Mutex<LruCache<String, ControlFlowFacts>> {
+fn facts_cache() -> &'static Mutex<LruCache<String, std::sync::Arc<OnceLock<ControlFlowFacts>>>> {
     FACTS_CACHE.get_or_init(|| {
         Mutex::new(LruCache::new(
             NonZeroUsize::new(FACTS_CACHE_CAPACITY).expect("non-zero cache capacity"),
@@ -59,23 +60,42 @@ fn facts_cache() -> &'static Mutex<LruCache<String, ControlFlowFacts>> {
 }
 
 /// Return cached control-flow facts for `binary`, assembling on first use.
+///
+/// FID signature matching (`ingest_signature_matches_with_databases`) calls
+/// this once per candidate function, in parallel across every rayon worker,
+/// for the SAME binary -- so the very first call after a cache miss used to
+/// be a thundering herd: the lock was released between the miss check and
+/// the `assemble` call, so every one of those parallel callers independently
+/// saw "not cached yet" and each ran the full whole-binary xref/no-return
+/// analysis at once, all fighting over the same CPU cores simultaneously.
+/// Confirmed via a real 6500-function binary's first decompile taking
+/// anywhere from ~50s to 30+ minutes across otherwise-identical runs --
+/// exactly the variance a scheduling-dependent stampede produces, not a
+/// per-function cost. Each binary hash now maps to a shared
+/// `Arc<OnceLock<..>>`; concurrent callers for the same binary block on that
+/// one slot's `get_or_init` instead of redoing the work, so only one thread
+/// ever actually computes it.
 pub fn control_flow_facts_for(binary: &LoadedBinary) -> ControlFlowFacts {
     let hash = binary.hash.clone();
-    if let Ok(mut cache) = facts_cache().lock() {
-        if let Some(facts) = cache.get(&hash) {
-            return facts.clone();
+
+    let slot = {
+        let mut cache = facts_cache().lock().expect("control-flow facts cache poisoned");
+        if let Some(slot) = cache.get(&hash) {
+            slot.clone()
+        } else {
+            let slot = std::sync::Arc::new(OnceLock::new());
+            cache.put(hash, slot.clone());
+            slot
         }
-    }
+    };
 
-    let frontend = binary
-        .load_spec()
-        .and_then(|load_spec| RuntimeSleighFrontend::new_for_load_spec(load_spec).ok());
-    let facts = ControlFlowFacts::assemble(binary, frontend.as_ref());
-
-    if let Ok(mut cache) = facts_cache().lock() {
-        cache.put(hash, facts.clone());
-    }
-    facts
+    slot.get_or_init(|| {
+        let frontend = binary
+            .load_spec()
+            .and_then(|load_spec| RuntimeSleighFrontend::new_for_load_spec(load_spec).ok());
+        ControlFlowFacts::assemble(binary, frontend.as_ref())
+    })
+    .clone()
 }
 
 impl ControlFlowFacts {
