@@ -17,7 +17,7 @@
 //!     nothing for the browser's own scroll adjustment to fight.
 //!   • Import / Thunk classification before decompile
 
-use crate::state::{use_app_state, AppState, FunctionKind, LogEntry, SidebarKindFilter, SIDEBAR_RENDER_BATCH};
+use crate::state::{use_app_state, AppState, CachedDecompile, FunctionKind, LogEntry, SidebarKindFilter, SIDEBAR_RENDER_BATCH};
 use dioxus::prelude::*;
 use std::sync::Arc;
 
@@ -588,6 +588,14 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
         FunctionKind::Thunk { target } => {
             let name = entry.name.clone();
             let addr = entry.addr;
+            if apply_cached_decompile(state, addr) {
+                let tgt = target.map(|t| format!("0x{t:x}")).unwrap_or_default();
+                state.write().push_log(LogEntry::warn(format!(
+                    "\"{name}\" is an import thunk — output will appear self-recursive \
+                     (IAT target: {tgt})"
+                )));
+                return;
+            }
             let tgt = target.map(|t| format!("0x{t:x}")).unwrap_or_default();
             {
                 let mut s = state.write();
@@ -604,6 +612,10 @@ fn select_function(mut state: Signal<AppState>, entry: FnEntry) {
         FunctionKind::Code => {
             let name    = entry.name.clone();
             let addr    = entry.addr;
+            if apply_cached_decompile(state, addr) {
+                state.write().push_log(LogEntry::info(format!("{name}  @  0x{addr:x}  (cached)")));
+                return;
+            }
             let session = state.read().server_session_id.clone();
             {
                 let mut s = state.write();
@@ -683,6 +695,9 @@ async fn navigate_to_address_impl(
             state.write().decompiled_code = Some(stub);
         }
         FunctionKind::Thunk { .. } | FunctionKind::Code => {
+            if apply_cached_decompile(state, addr) {
+                return;
+            }
             state.write().is_decompiling = true;
             run_decompile(state, binary, session, addr, resolved_name).await;
         }
@@ -711,6 +726,23 @@ pub async fn navigate_to_address_with_hint(
 /// `nav_history`/`nav_cursor` themselves.
 pub async fn navigate_to_address_no_history(state: Signal<AppState>, addr: u64) {
     navigate_to_address_impl(state, addr, None, false).await;
+}
+
+/// If `addr` has a cached decompile result, restore it into `AppState`
+/// directly and return `true` (skips `is_decompiling`/network entirely --
+/// re-selecting a function already visited this session is instant instead
+/// of re-running the whole decompile). Returns `false` on a cache miss, in
+/// which case the caller proceeds with a normal `run_decompile` call.
+fn apply_cached_decompile(mut state: Signal<AppState>, addr: u64) -> bool {
+    let mut s = state.write();
+    let Some(cached) = s.decompile_cache.get(&addr).cloned() else {
+        return false;
+    };
+    s.decompiled_code = Some(cached.code);
+    s.decompiled_nir = cached.code_nir;
+    s.current_cfg = cached.cfg;
+    s.is_decompiling = false;
+    true
 }
 
 // ── Shared async decompile helper ────────────────────────────────────────────
@@ -760,6 +792,11 @@ pub async fn run_decompile(
             let reason  = out.fallback_reason.clone();
             let has_cfg = out.cfg.is_some();
             let mut s   = state.write();
+            s.decompile_cache.insert(addr, CachedDecompile {
+                code: out.code.clone(),
+                code_nir: out.code_nir.clone(),
+                cfg: out.cfg.clone(),
+            });
             s.decompiled_code = Some(out.code);
             s.decompiled_nir  = out.code_nir;
             s.current_cfg     = out.cfg;
@@ -808,6 +845,11 @@ pub async fn run_decompile(
             let reason  = out.fallback_reason.clone();
             let has_cfg = out.cfg.is_some();
             let mut s   = state.write();
+            s.decompile_cache.insert(addr, CachedDecompile {
+                code: out.code.clone(),
+                code_nir: out.code_nir.clone(),
+                cfg: out.cfg.clone(),
+            });
             s.decompiled_code = Some(out.code);
             s.decompiled_nir  = out.code_nir;
             s.current_cfg     = out.cfg;

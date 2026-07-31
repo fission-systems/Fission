@@ -28,6 +28,16 @@ pub enum BottomTab {
     Xrefs,
 }
 
+/// A previously-computed decompile result, keyed by function address in
+/// `AppState.decompile_cache`. Mirrors the fields `run_decompile` writes
+/// into `AppState` on a fresh decompile.
+#[derive(Clone, Debug, Default)]
+pub struct CachedDecompile {
+    pub code: String,
+    pub code_nir: Option<String>,
+    pub cfg: Option<CfgGraphData>,
+}
+
 // ── Function classification ──────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -157,6 +167,12 @@ pub struct AppState {
     pub decompiled_code: Option<String>,
     pub decompiled_nir: Option<String>,
     pub current_cfg: Option<CfgGraphData>,
+    /// Per-address decompile result cache: re-selecting a function already
+    /// decompiled this session (e.g. clicking back to it after visiting
+    /// others) restores instantly from here instead of re-running the whole
+    /// decompile (network round-trip on web, full pipeline either way).
+    /// Cleared whenever a new binary is loaded (see `open_binary`/Cmd+O).
+    pub decompile_cache: HashMap<u64, CachedDecompile>,
 
     // ── Xrefs ────────────────────────────────────────────────────────────────
     pub current_xref_callers: Vec<XrefRow>,
@@ -278,6 +294,7 @@ impl AppState {
             decompiled_code: None,
             decompiled_nir: None,
             current_cfg: None,
+            decompile_cache: HashMap::new(),
             current_xref_callers: Vec::new(),
             current_xref_callees: Vec::new(),
             is_loading_xrefs: false,

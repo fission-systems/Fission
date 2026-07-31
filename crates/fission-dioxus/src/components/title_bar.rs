@@ -273,6 +273,7 @@ pub fn TitleBar() -> Element {
                         s.sidebar_search = String::new();
                         s.rename_map = sidecar_renames;
                         s.comments   = sidecar_comments;
+                        s.decompile_cache.clear();
                         // Invalidate FactStore cache — new binary needs fresh analysis
                         s.cached_facts = None;
                         s.is_loading_binary = false;

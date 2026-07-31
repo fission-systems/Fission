@@ -180,6 +180,7 @@ fn App() -> Element {
                                                 s.sidebar_search        = String::new();
                                                 s.rename_map            = sidecar_renames;
                                                 s.comments              = sidecar_comments;
+                                                s.decompile_cache.clear();
                                                 s.cached_facts          = None;
                                                 s.is_loading_binary     = false;
                                                 s.push_log(LogEntry::info(format!("Loaded — {summary}")));
@@ -309,6 +310,7 @@ fn App() -> Element {
                                     s.current_cfg           = None;
                                     s.sidebar_search        = String::new();
                                     s.rename_map.clear();
+                                    s.decompile_cache.clear();
                                     // Invalidate FactStore cache — new binary needs fresh analysis
                                     s.cached_facts          = None;
                                     s.is_loading_binary     = false;
