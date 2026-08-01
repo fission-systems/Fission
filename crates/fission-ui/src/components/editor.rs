@@ -463,6 +463,73 @@ pub fn Editor() -> Element {
     let find_open     = state.read().find_bar_open;
     let find_query    = state.read().find_query.clone();
 
+    // ── Tab-scoped effects, hoisted unconditional ────────────────────────────
+    // These used to live inside their respective `match active_tab { .. }` /
+    // `if find_open { .. }` arms below, which meant `use_effect` was only
+    // *called* on renders where that branch executed. Dioxus (like React)
+    // requires the same hooks in the same order on every render of a given
+    // component instance -- calling one only sometimes desyncs its hook slot
+    // from the rest, which manifested as the Disasm tab fetching once and
+    // then never updating again on later function switches (and very likely
+    // contributed to the reported Hex/NIR flakiness too, since a corrupted
+    // hook slot can affect unrelated state in the same component). Each
+    // effect below is now called on literally every render and does its own
+    // internal `if` check for whether it's actually the active tab, instead
+    // of the *call itself* being conditional.
+    {
+        let fn_addr = state.read().current_function_addr;
+        let active_tab = active_tab.clone();
+        use_effect(move || {
+            if active_tab != EditorTab::Disasm || is_decompiling {
+                return;
+            }
+            let Some(addr) = fn_addr else { return; };
+            {
+                let s = state.read();
+                if s.is_loading_disasm { return; }
+            }
+            let binary = state.read().binary.clone();
+            let session = state.read().server_session_id.clone();
+            {
+                let mut s = state.write();
+                s.is_loading_disasm = true;
+                s.current_disasm.clear();
+            }
+            spawn(async move {
+                let result = crate::engine::run_disasm(binary, session, addr).await;
+                let mut s = state.write();
+                match result {
+                    Ok(rows) => s.current_disasm = rows,
+                    Err(e) => s.push_log(LogEntry::error(format!("Disassembly failed: {e}"))),
+                }
+                s.is_loading_disasm = false;
+            });
+        });
+    }
+    {
+        let hex_view_target = state.read().hex_view_target;
+        let active_tab = active_tab.clone();
+        use_effect(move || {
+            if active_tab == EditorTab::Hex && hex_view_target.is_some() {
+                document::eval(
+                    "document.getElementById('hex-target-row')?.scrollIntoView({block: 'center'});",
+                );
+            }
+        });
+    }
+    {
+        let find_query_for_effect = find_query.clone();
+        let find_idx_now = state.read().find_current_index;
+        use_effect(move || {
+            let _ = (find_query_for_effect.clone(), find_idx_now);
+            if find_open {
+                document::eval(
+                    "document.getElementById('find-match-current')?.scrollIntoView({block: 'center'});",
+                );
+            }
+        });
+    }
+
     let kind_badge: Option<(&'static str, &'static str)> = match &fn_kind {
         FunctionKind::Import { .. } => Some(("kind-badge-imp",   "IMPORT STUB")),
         FunctionKind::Thunk { .. }  => Some(("kind-badge-thunk", "THUNK")),
@@ -551,32 +618,6 @@ pub fn Editor() -> Element {
             EditorTab::Disasm => {
                 let fn_addr = state.read().current_function_addr;
                 let is_loading = state.read().is_loading_disasm;
-
-                // Load on mount / whenever the selected function changes
-                // (mirrors xrefs_view.rs's load-on-mount effect).
-                use_effect(move || {
-                    let Some(addr) = fn_addr else { return; };
-                    {
-                        let s = state.read();
-                        if s.is_loading_disasm { return; }
-                    }
-                    let binary = state.read().binary.clone();
-                    let session = state.read().server_session_id.clone();
-                    {
-                        let mut s = state.write();
-                        s.is_loading_disasm = true;
-                        s.current_disasm.clear();
-                    }
-                    spawn(async move {
-                        let result = crate::engine::run_disasm(binary, session, addr).await;
-                        let mut s = state.write();
-                        match result {
-                            Ok(rows) => s.current_disasm = rows,
-                            Err(e) => s.push_log(LogEntry::error(format!("Disassembly failed: {e}"))),
-                        }
-                        s.is_loading_disasm = false;
-                    });
-                });
 
                 if fn_addr.is_none() {
                     rsx! {
@@ -683,16 +724,6 @@ pub fn Editor() -> Element {
             }
             EditorTab::Hex => {
                 let hex_view_target = state.read().hex_view_target;
-
-                // Scroll the highlighted row into view whenever a new string
-                // target is picked (mirrors sidebar's scrollIntoView pattern).
-                use_effect(move || {
-                    if hex_view_target.is_some() {
-                        document::eval(
-                            "document.getElementById('hex-target-row')?.scrollIntoView({block: 'center'});",
-                        );
-                    }
-                });
 
                 // Priority: string-click target > current function's bytes > file header.
                 let hex_info: Option<(u64, u64, String, bool)> = {
@@ -899,20 +930,6 @@ pub fn Editor() -> Element {
                         count_matches(&raw, &find_query)
                     }).unwrap_or(0);
                     let find_idx_now = state.read().find_current_index;
-
-                    // Scroll the current match into view whenever the query or
-                    // index changes (mirrors the hex-target-row pattern).
-                    {
-                        let find_query_for_effect = find_query.clone();
-                        use_effect(move || {
-                            let _ = (find_query_for_effect.clone(), find_idx_now);
-                            if total > 0 {
-                                document::eval(
-                                    "document.getElementById('find-match-current')?.scrollIntoView({block: 'center'});",
-                                );
-                            }
-                        });
-                    }
 
                     let mut go_next = move || {
                         let mut s = state.write();
