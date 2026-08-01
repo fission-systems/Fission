@@ -439,11 +439,12 @@ mod wasm_api {
     use super::*;
     use fission_analysis_protocol::{
         DecompileResponse as ApiDecompileResponse, DisasmResponse as ApiDisasmResponse,
-        FnEntry as ApiFnEntry, FunctionsResponse as ApiFunctionsResponse, StatusResponse,
+        ErrorResponse as ApiErrorResponse, FnEntry as ApiFnEntry,
+        FunctionsResponse as ApiFunctionsResponse, StatusResponse,
         UploadResponse as ApiUploadResponse, XrefRow as ApiXrefRow,
         XrefsResponse as ApiXrefsResponse,
     };
-    use gloo_net::http::{Request, RequestBuilder};
+    use gloo_net::http::{Request, RequestBuilder, Response};
 
     // Thread-local server URL (configurable from UI)
     thread_local! {
@@ -465,6 +466,23 @@ mod wasm_api {
         SERVER_API_TOKEN.with(|current| *current.borrow_mut() = token.trim().to_string());
     }
 
+    /// Build a user-facing error message for a non-ok HTTP response,
+    /// preferring the server's own `{"error": "..."}` body (e.g. why a
+    /// 422 upload failed to parse a binary) over a bare status code.
+    /// Every call site here used to do `format!("Server error {}: ...",
+    /// resp.status())` and throw the response body away entirely -- so a
+    /// perfectly good explanation the server already sent back (unsupported
+    /// format, extraction required, etc.) never reached the user, who'd
+    /// only ever see e.g. "Server error 422: upload" with no indication of
+    /// what was actually wrong with their file.
+    async fn server_error_detail(resp: Response, context: &str) -> String {
+        let status = resp.status();
+        match resp.json::<ApiErrorResponse>().await {
+            Ok(body) => format!("Server error {status} ({context}): {}", body.error),
+            Err(_) => format!("Server error {status}: {context}"),
+        }
+    }
+
     fn authorized(request: RequestBuilder) -> RequestBuilder {
         SERVER_API_TOKEN.with(|token| {
             let token = token.borrow();
@@ -483,7 +501,7 @@ mod wasm_api {
             .await
             .map_err(|error| format!("Backend status failed: {error}"))?;
         if !response.ok() {
-            return Err(format!("Backend status returned {}", response.status()));
+            return Err(server_error_detail(response, "status").await);
         }
         response
             .json::<StatusResponse>()
@@ -521,7 +539,7 @@ mod wasm_api {
             .map_err(|e| format!("Upload failed: {e:?}"))?;
 
         if !resp.ok() {
-            return Err(format!("Server error {}: upload", resp.status()));
+            return Err(server_error_detail(resp, "upload").await);
         }
         let upload: ApiUploadResponse = resp.json().await
             .map_err(|e| format!("Parse upload response: {e:?}"))?;
@@ -585,7 +603,7 @@ mod wasm_api {
             .send().await
             .map_err(|e| format!("Decompile request failed: {e}"))?;
         if !resp.ok() {
-            return Err(format!("Server error {}: decompile", resp.status()));
+            return Err(server_error_detail(resp, "decompile").await);
         }
         let out: ApiDecompileResponse = resp.json().await
             .map_err(|e| format!("Parse decompile response: {e}"))?;
@@ -634,7 +652,7 @@ mod wasm_api {
             .send().await
             .map_err(|e| format!("Disasm request failed: {e}"))?;
         if !resp.ok() {
-            return Err(format!("Server error {}: disasm", resp.status()));
+            return Err(server_error_detail(resp, "disasm").await);
         }
         let out: ApiDisasmResponse = resp.json().await
             .map_err(|e| format!("Parse disasm response: {e}"))?;
