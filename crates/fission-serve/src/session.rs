@@ -7,6 +7,7 @@
 
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
+use fission_static::analysis::xref_index::{build_xref_index, XrefIndex};
 use std::{
     collections::HashMap,
     sync::{
@@ -47,6 +48,19 @@ pub struct SessionData {
     /// `control_flow_facts_for` cache had -- now the second just awaits
     /// the first's in-flight build instead of redoing it.
     facts:           tokio::sync::Mutex<Option<Arc<FactStore>>>,
+    /// Lazily built, cached on first use, same shape and rationale as
+    /// `facts` above. `build_xref_index(.., true)` disassembles every
+    /// executable section to find call/jump/data cross-references -- the
+    /// handler used to pass `false` here (loader-derived xrefs only:
+    /// imports/exports/relocations), which meant the Xrefs panel showed
+    /// "no known callers/callees" for nearly every ordinary internal
+    /// function, since the actual call-graph edges were never computed.
+    /// `fission_cli`'s `xrefs` subcommand already defaults to `true`
+    /// (`include_disasm = !cli.xref_no_disassembly`) -- this brings the
+    /// GUI in line with that. Caching matters here for the same reason it
+    /// did for `facts`: uncached, every single Xrefs-tab view of any
+    /// function would redo the whole-binary disassembly sweep.
+    xref_index:      tokio::sync::Mutex<Option<Arc<XrefIndex>>>,
     last_used:       RwLock<Instant>,
 }
 
@@ -57,6 +71,7 @@ impl SessionData {
             binary_name,
             analyzing:   AtomicBool::new(analyzing),
             facts:       tokio::sync::Mutex::new(None),
+            xref_index:  tokio::sync::Mutex::new(None),
             last_used:   RwLock::new(Instant::now()),
         }
     }
@@ -72,6 +87,7 @@ impl SessionData {
     pub async fn set_binary(&self, binary: LoadedBinary) {
         *self.binary.write().await = Arc::new(binary);
         *self.facts.lock().await = None;
+        *self.xref_index.lock().await = None;
     }
 
     /// The session's cached facts, building them from the current binary
@@ -100,6 +116,26 @@ impl SessionData {
         let built = tokio::task::spawn_blocking(move || Arc::new(FactStore::from_binary(&binary)))
             .await
             .expect("FactStore::from_binary panicked");
+        *slot = Some(Arc::clone(&built));
+        built
+    }
+
+    /// The session's cached disassembly-based xref index, building it from
+    /// the current binary on first use. Same locking shape as `facts()`
+    /// (lock held across the `spawn_blocking` build) for the same reason:
+    /// avoid both blocking a tokio worker thread and a redundant-build race
+    /// between concurrent xrefs requests.
+    pub async fn xref_index(&self) -> Arc<XrefIndex> {
+        let mut slot = self.xref_index.lock().await;
+        if let Some(index) = slot.as_ref() {
+            return Arc::clone(index);
+        }
+        let t0 = std::time::Instant::now();
+        let binary = self.binary().await;
+        let built = tokio::task::spawn_blocking(move || Arc::new(build_xref_index(&binary, true)))
+            .await
+            .expect("build_xref_index panicked");
+        tracing::info!("[PERF] xref_index build: {:?}", t0.elapsed());
         *slot = Some(Arc::clone(&built));
         built
     }

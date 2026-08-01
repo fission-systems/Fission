@@ -4,9 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use fission_static::analysis::xref_index::{
-    XrefKind, build_xref_index, resolve_enclosing_function,
-};
+use fission_static::analysis::xref_index::{XrefKind, resolve_enclosing_function};
 use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
@@ -29,8 +27,8 @@ pub async fn handle_xrefs(
     };
 
     let binary = sess.binary().await;
+    let index = sess.xref_index().await;
     let result = tokio::task::spawn_blocking(move || {
-        let index = build_xref_index(&binary, false);
         let name_map: HashMap<u64, String> = binary.functions.iter()
             .map(|f| (f.address, f.name.clone()))
             .collect();

@@ -305,10 +305,40 @@ mod native {
         })
     }
 
+    // Single-slot, binary-hash-keyed cache for the disassembly-based xref
+    // index: the desktop app only ever has one binary loaded at a time, so
+    // unlike `control_flow_facts_for`'s multi-entry LRU there's no need for
+    // more than one slot -- just enough to avoid re-disassembling the whole
+    // binary on every Xrefs-tab view of a different function.
+    static XREF_INDEX_CACHE: std::sync::OnceLock<
+        std::sync::Mutex<Option<(String, std::sync::Arc<fission_static::analysis::xref_index::XrefIndex>)>>,
+    > = std::sync::OnceLock::new();
+
+    fn xref_index_for(binary: &LoadedBinary) -> std::sync::Arc<fission_static::analysis::xref_index::XrefIndex> {
+        let cache = XREF_INDEX_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        {
+            let guard = cache.lock().expect("xref index cache poisoned");
+            if let Some((hash, index)) = guard.as_ref() {
+                if *hash == binary.hash {
+                    return std::sync::Arc::clone(index);
+                }
+            }
+        }
+        // `true`: disassemble every executable section for call/jump/data
+        // xrefs, not just loader-derived (import/export/relocation) ones --
+        // matches `fission_cli xrefs`'s own default. Previously `false`
+        // here meant the Xrefs panel showed "no known callers/callees" for
+        // nearly every ordinary internal function.
+        let built = std::sync::Arc::new(build_xref_index(binary, true));
+        *cache.lock().expect("xref index cache poisoned") =
+            Some((binary.hash.clone(), std::sync::Arc::clone(&built)));
+        built
+    }
+
     pub fn xrefs_for_function_blocking(
         binary: &Arc<LoadedBinary>, fn_addr: u64,
     ) -> (Vec<XrefRow>, Vec<XrefRow>) {
-        let index    = build_xref_index(binary.as_ref(), false);
+        let index    = xref_index_for(binary.as_ref());
         let name_map: std::collections::HashMap<u64, String> =
             binary.functions.iter().map(|f| (f.address, f.name.clone())).collect();
 
