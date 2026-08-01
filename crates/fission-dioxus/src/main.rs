@@ -169,19 +169,13 @@ fn App() -> Element {
                                             let sidecar_count = sidecar_renames.len() + sidecar_comments.len();
                                             {
                                                 let mut s = state2.write();
+                                                s.reset_for_new_binary();
                                                 s.binary_name           = Some(name.clone());
                                                 s.binary                = load.binary.clone();
                                                 s.functions             = load.functions;
                                                 s.strings               = load.strings;
-                                                s.current_function_addr = None;
-                                                s.decompiled_code       = None;
-                                                s.decompiled_nir        = None;
-                                                s.current_cfg           = None;
-                                                s.sidebar_search        = String::new();
                                                 s.rename_map            = sidecar_renames;
                                                 s.comments              = sidecar_comments;
-                                                s.decompile_cache.clear();
-                                                s.cached_facts          = None;
                                                 s.is_loading_binary     = false;
                                                 s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                                                 s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
@@ -298,24 +292,24 @@ fn App() -> Element {
                                 let summary  = load.summary.clone();
                                 let fn_count = load.functions.len();
                                 let binary_arc = load.binary.clone();
+                                let path_str = path.display().to_string();
+                                let (sidecar_renames, sidecar_comments) = sidecar::load_sidecar(&path_str);
+                                let sidecar_count = sidecar_renames.len() + sidecar_comments.len();
                                 {
                                     let mut s = state.write();
+                                    s.reset_for_new_binary();
                                     s.binary_name           = Some(path.file_name().unwrap_or_default().to_string_lossy().into_owned());
                                     s.binary                = load.binary.clone();
                                     s.functions             = load.functions;
                                     s.strings               = load.strings;
-                                    s.current_function_addr = None;
-                                    s.decompiled_code       = None;
-                                    s.decompiled_nir        = None;
-                                    s.current_cfg           = None;
-                                    s.sidebar_search        = String::new();
-                                    s.rename_map.clear();
-                                    s.decompile_cache.clear();
-                                    // Invalidate FactStore cache — new binary needs fresh analysis
-                                    s.cached_facts          = None;
+                                    s.rename_map             = sidecar_renames;
+                                    s.comments               = sidecar_comments;
                                     s.is_loading_binary     = false;
                                     s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                                     s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));
+                                    if sidecar_count > 0 {
+                                        s.push_log(LogEntry::info(format!("Restored {sidecar_count} saved annotation(s) from project file.")));
+                                    }
                                 }
                                 // ── Eager FactStore preload ────────────────────
                                 // Build FactStore in background immediately after

@@ -391,8 +391,16 @@ pub fn Sidebar() -> Element {
                                     let va      = bs.offset;
                                     let val     = bs.value.clone();
                                     let section = bs.section.clone();
-                                    let val_disp = if val.len() > 64 {
-                                        format!("{}…", &val[..64])
+                                    // Truncate by *character* count, not byte
+                                    // index: `binary.string_map`-sourced values
+                                    // can hold decoded non-ASCII text (e.g. a
+                                    // PE's UTF-16 strings converted to UTF-8),
+                                    // and `&val[..64]` would panic outright if
+                                    // byte 64 fell inside a multi-byte
+                                    // character instead of on a boundary.
+                                    let val_disp = if val.chars().count() > 64 {
+                                        let truncated: String = val.chars().take(64).collect();
+                                        format!("{truncated}…")
                                     } else {
                                         val.clone()
                                     };

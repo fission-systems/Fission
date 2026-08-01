@@ -258,6 +258,7 @@ pub fn TitleBar() -> Element {
                     let sidecar_count = sidecar_renames.len() + sidecar_comments.len();
                     {
                         let mut s = state.write();
+                        s.reset_for_new_binary();
                         s.binary_name = Some(
                             path.file_name()
                                 .unwrap_or_default()
@@ -267,15 +268,8 @@ pub fn TitleBar() -> Element {
                         s.binary = load.binary.clone();
                         s.functions = load.functions;
                         s.strings   = load.strings;
-                        s.current_function_addr = None;
-                        s.decompiled_code = None;
-                        s.decompiled_nir = None;
-                        s.sidebar_search = String::new();
                         s.rename_map = sidecar_renames;
                         s.comments   = sidecar_comments;
-                        s.decompile_cache.clear();
-                        // Invalidate FactStore cache — new binary needs fresh analysis
-                        s.cached_facts = None;
                         s.is_loading_binary = false;
                         s.push_log(LogEntry::info(format!("Loaded — {summary}")));
                         s.push_log(LogEntry::info(format!("{fn_count} functions discovered.")));

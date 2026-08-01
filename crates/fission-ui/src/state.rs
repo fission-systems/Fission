@@ -344,6 +344,53 @@ impl AppState {
         self.binary.is_some() || self.binary_name.is_some()
     }
 
+    /// Reset every field scoped to the previously-loaded binary, before a
+    /// caller applies a freshly loaded binary's own data (`functions`,
+    /// `strings`, a sidecar's `rename_map`/`comments`, etc.).
+    ///
+    /// Each of these held an address, index, or cached view that's only
+    /// meaningful for whichever binary was loaded when it was set. Left
+    /// stale after switching binaries, several of them don't just look
+    /// wrong -- they're actively misleading: `nav_history` full of the old
+    /// binary's addresses means Back/Forward can jump to a location that
+    /// means something completely different (or nothing) in the new one;
+    /// a leftover `current_cfg`/`current_disasm`/xrefs view could still be
+    /// showing before the user has picked any function in the new binary.
+    /// Previously each of the four binary-load call sites (this crate's
+    /// native paths, plus fission-web's own drop-to-load handler) built
+    /// this reset list by hand and each one ended up incomplete in a
+    /// different way -- e.g. `decompile_cache` was missing from all of
+    /// them until it was the one that visibly broke; centralizing it here
+    /// means there's exactly one list to keep complete.
+    pub fn reset_for_new_binary(&mut self) {
+        self.current_function_addr = None;
+        self.current_function_kind = FunctionKind::Code;
+        self.decompiled_code = None;
+        self.decompiled_nir = None;
+        self.current_cfg = None;
+        self.decompile_cache.clear();
+        self.current_xref_callers.clear();
+        self.current_xref_callees.clear();
+        self.is_loading_xrefs = false;
+        self.current_disasm.clear();
+        self.is_loading_disasm = false;
+        self.nav_history.clear();
+        self.nav_cursor = 0;
+        self.sidebar_scroll_target = None;
+        self.sidebar_search.clear();
+        self.strings_search.clear();
+        self.hex_view_target = None;
+        self.rename_map.clear();
+        self.comments.clear();
+        self.find_query.clear();
+        self.find_bar_open = false;
+        self.find_current_index = 0;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.cached_facts = None;
+        }
+    }
+
     pub fn push_log(&mut self, entry: LogEntry) {
         if self.log_entries.len() >= 500 {
             self.log_entries.remove(0);
