@@ -330,6 +330,19 @@ pub fn CfgView() -> Element {
     let state = use_app_state();
     let cfg_opt = state.read().current_cfg.clone();
 
+    // Hooks must be called unconditionally on every render (Dioxus, like
+    // React, requires the same hooks in the same order every time) -- these
+    // used to live after the early `return` below, so they were only
+    // *called* on renders where a CFG was already loaded, desyncing their
+    // hook slots from the rest whenever a render happened with no CFG
+    // (e.g. before anything's been decompiled yet). Same bug shape already
+    // fixed in editor.rs's tab-scoped `use_effect` calls.
+    let mut scale = use_signal(|| 1.0_f64);
+    let mut offset_x = use_signal(|| 0.0_f64);
+    let mut offset_y = use_signal(|| 0.0_f64);
+    let mut panning = use_signal(|| false);
+    let mut pan_xy = use_signal(|| (0.0_f64, 0.0_f64));
+
     let Some(cfg) = cfg_opt else {
         return rsx! {
             div { class: "cfg-empty",
@@ -338,12 +351,6 @@ pub fn CfgView() -> Element {
             }
         };
     };
-
-    let mut scale = use_signal(|| 1.0_f64);
-    let mut offset_x = use_signal(|| 0.0_f64);
-    let mut offset_y = use_signal(|| 0.0_f64);
-    let mut panning = use_signal(|| false);
-    let mut pan_xy = use_signal(|| (0.0_f64, 0.0_f64));
 
     let stats = format!(
         "{} blocks  \u{00B7}  {} edges  \u{00B7}  cyclomatic {}",
