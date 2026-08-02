@@ -1,4 +1,4 @@
-use crate::engine::{CfgGraphData, InstructionRow, XrefRow};
+use crate::engine::{CallGraphNode, CfgGraphData, InstructionRow, XrefRow};
 use dioxus::prelude::*;
 use fission_analysis_protocol::StatusResponse;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -70,6 +70,16 @@ pub enum SidebarTab {
     #[default]
     Functions,
     Strings,
+    CallGraph,
+}
+
+/// Sort key for the Call Graph tab's function table.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CallGraphSort {
+    #[default]
+    CallersDesc,
+    CalleesDesc,
+    NameAsc,
 }
 
 // ── Binary string ────────────────────────────────────────────────────────────
@@ -182,6 +192,16 @@ pub struct AppState {
     // ── Disassembly ─────────────────────────────────────────────────────────
     pub current_disasm: Vec<InstructionRow>,
     pub is_loading_disasm: bool,
+
+    // ── Call graph (sidebar tab) ─────────────────────────────────────────────
+    /// Whole-binary caller/callee counts, fetched once per binary (not
+    /// per-function like xrefs) and cached here for the session -- see
+    /// `reset_for_new_binary` for why this needs clearing on a new load.
+    pub call_graph_nodes: Vec<CallGraphNode>,
+    pub is_loading_callgraph: bool,
+    pub call_graph_loaded: bool,
+    pub call_graph_search: String,
+    pub call_graph_sort: CallGraphSort,
 
     // ── Editor / panel state ─────────────────────────────────────────────────
     pub active_tab: EditorTab,
@@ -300,6 +320,11 @@ impl AppState {
             is_loading_xrefs: false,
             current_disasm: Vec::new(),
             is_loading_disasm: false,
+            call_graph_nodes: Vec::new(),
+            is_loading_callgraph: false,
+            call_graph_loaded: false,
+            call_graph_search: String::new(),
+            call_graph_sort: CallGraphSort::default(),
             active_tab: EditorTab::Pseudocode,
             active_bottom_tab: BottomTab::Logs,
             log_entries: Vec::new(),
@@ -374,6 +399,10 @@ impl AppState {
         self.is_loading_xrefs = false;
         self.current_disasm.clear();
         self.is_loading_disasm = false;
+        self.call_graph_nodes.clear();
+        self.is_loading_callgraph = false;
+        self.call_graph_loaded = false;
+        self.call_graph_search.clear();
         self.nav_history.clear();
         self.nav_cursor = 0;
         self.sidebar_scroll_target = None;

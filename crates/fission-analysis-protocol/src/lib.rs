@@ -144,6 +144,20 @@ pub struct XrefsResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallGraphNode {
+    pub address: u64,
+    pub name: String,
+    pub caller_count: usize,
+    pub callee_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallGraphResponse {
+    pub nodes: Vec<CallGraphNode>,
+    pub total_call_sites: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisasmRow {
     pub address: u64,
     pub bytes_hex: String,

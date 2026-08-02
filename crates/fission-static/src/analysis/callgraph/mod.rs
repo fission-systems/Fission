@@ -8,6 +8,7 @@ use rustc_hash::FxHashMap;
 
 use fission_loader::loader::FunctionInfo;
 
+use super::xref_index::{XrefIndex, XrefKind, resolve_enclosing_function};
 use super::xrefs::{XrefDatabase, XrefType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,67 @@ impl CallGraph {
 
             let callee = find_function_addr(&functions, xref.to_addr, fallback_range)
                 .unwrap_or(xref.to_addr);
+
+            callers_map
+                .entry(callee)
+                .or_default()
+                .entry(caller)
+                .and_modify(|count| *count += 1)
+                .or_insert(1);
+
+            callees_map
+                .entry(caller)
+                .or_default()
+                .entry(callee)
+                .and_modify(|count| *count += 1)
+                .or_insert(1);
+
+            total_call_sites += 1;
+        }
+
+        let callers = finalize_edges(callers_map);
+        let callees = finalize_edges(callees_map);
+
+        Self {
+            callers,
+            callees,
+            total_call_sites,
+        }
+    }
+
+    /// Same aggregation as [`Self::build_from_xrefs`], but from an
+    /// already-computed [`XrefIndex`] (the canonical merged loader +
+    /// disassembly index the Xrefs panel/API builds and caches) instead of
+    /// a raw [`XrefDatabase`]. Building a fresh `XrefDatabase` here would
+    /// mean a second whole-binary disassembly pass identical to the one
+    /// `XrefIndex` already paid for -- this reuses that result instead.
+    pub fn build_from_xref_index(
+        functions: &[FunctionInfo],
+        index: &XrefIndex,
+        fallback_range: u64,
+    ) -> Self {
+        let mut functions = functions.to_vec();
+        functions.sort_by_key(|func| func.address);
+
+        let fallback_range = fallback_range.max(1);
+        let mut callers_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
+        let mut callees_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
+        let mut total_call_sites = 0usize;
+
+        for record in &index.refs {
+            if record.kind != XrefKind::Call {
+                continue;
+            }
+            let Some(to_addr) = record.target.address else {
+                continue;
+            };
+
+            let caller = match resolve_enclosing_function(&functions, record.source.address, fallback_range) {
+                Some(addr) => addr,
+                None => continue,
+            };
+            let callee =
+                resolve_enclosing_function(&functions, to_addr, fallback_range).unwrap_or(to_addr);
 
             callers_map
                 .entry(callee)

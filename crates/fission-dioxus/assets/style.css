@@ -552,7 +552,9 @@ body::after {
   caret-color: var(--accent);
 }
 
-@container sidebar (width < 220px) { .fn-addr { display: none; } .fn-kind-pill { display: none; } }
+.cg-counts { font-family: var(--font-code); font-size: 10px; color: var(--ink-3); flex-shrink: 0; margin-left: 6px; letter-spacing: 0.02em; white-space: nowrap; }
+
+@container sidebar (width < 220px) { .fn-addr { display: none; } .fn-kind-pill { display: none; } .cg-counts { display: none; } }
 @container sidebar (width < 180px) { .fn-type-dot { display: none; } }
 
 .sidebar-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; flex: 1; padding: 32px 20px; text-align: center; }

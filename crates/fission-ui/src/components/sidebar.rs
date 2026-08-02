@@ -180,6 +180,38 @@ pub fn Sidebar() -> Element {
         state.write().sidebar_scroll_target = None;
     });
 
+    // Fetch the whole-binary call graph once, the first time the tab is
+    // opened (not per-function like xrefs -- this is one fetch for the
+    // whole table, cached in `call_graph_nodes` until the next binary
+    // load). Unconditional at the top level like the effect above --
+    // Dioxus requires every hook called on every render, so gating the
+    // *call* to `use_effect` on `sidebar_tab == CallGraph` (rather than
+    // gating what the effect body does) would reintroduce the exact hook-
+    // ordering bug already fixed in editor.rs/cfg_view.rs this session.
+    use_effect(move || {
+        if state.read().sidebar_tab != crate::state::SidebarTab::CallGraph {
+            return;
+        }
+        if state.read().call_graph_loaded || state.read().is_loading_callgraph {
+            return;
+        }
+        let binary = state.read().binary.clone();
+        let session = state.read().server_session_id.clone();
+        state.write().is_loading_callgraph = true;
+        spawn(async move {
+            let result = crate::engine::run_callgraph(binary, session).await;
+            let mut s = state.write();
+            match result {
+                Ok(nodes) => {
+                    s.call_graph_nodes = nodes;
+                    s.call_graph_loaded = true;
+                }
+                Err(e) => s.push_log(LogEntry::error(format!("Call graph failed: {e}"))),
+            }
+            s.is_loading_callgraph = false;
+        });
+    });
+
     let fn_total = filtered.read().len();
     let render_limit = state.read().sidebar_render_limit.min(fn_total);
 
@@ -205,6 +237,37 @@ pub fn Sidebar() -> Element {
     };
     let str_total    = strings_list.len();
 
+    // Call graph list (filtered + sorted). Capped to CALLGRAPH_RENDER_LIMIT
+    // rows for the same reason the function list is incrementally mounted
+    // (see this file's module doc) -- a real binary can have tens of
+    // thousands of functions, and since the list is already sorted by
+    // caller/callee count, the top slice is the interesting part anyway;
+    // a search narrows past the cap same as the Functions tab's filter.
+    const CALLGRAPH_RENDER_LIMIT: usize = 500;
+    let cg_search = state.read().call_graph_search.clone();
+    let cg_sort   = state.read().call_graph_sort.clone();
+    let is_loading_callgraph = state.read().is_loading_callgraph;
+    let (call_graph_list, cg_matched_total): (Vec<crate::engine::CallGraphNode>, usize) = {
+        let s = state.read();
+        let q = cg_search.to_lowercase();
+        let mut list: Vec<crate::engine::CallGraphNode> = s.call_graph_nodes.iter()
+            .filter(|n| q.is_empty()
+                || n.name.to_lowercase().contains(&q)
+                || format!("{:x}", n.address).contains(&q))
+            .cloned()
+            .collect();
+        match cg_sort {
+            crate::state::CallGraphSort::CallersDesc => list.sort_by(|a, b|
+                b.caller_count.cmp(&a.caller_count).then_with(|| a.name.cmp(&b.name))),
+            crate::state::CallGraphSort::CalleesDesc => list.sort_by(|a, b|
+                b.callee_count.cmp(&a.callee_count).then_with(|| a.name.cmp(&b.name))),
+            crate::state::CallGraphSort::NameAsc => list.sort_by(|a, b| a.name.cmp(&b.name)),
+        }
+        let matched_total = list.len();
+        list.truncate(CALLGRAPH_RENDER_LIMIT);
+        (list, matched_total)
+    };
+
     rsx! {
         div { class: "sidebar",
             // ── Tab switcher ────────────────────────────────────────────────
@@ -226,6 +289,14 @@ pub fn Sidebar() -> Element {
                     "Strings"
                     if has_binary {
                         span { class: "sidebar-tab-count", "{str_total}" }
+                    }
+                }
+                div {
+                    class: if active_tab == crate::state::SidebarTab::CallGraph { "sidebar-tab is-active" } else { "sidebar-tab" },
+                    onclick: move |_| state.write().sidebar_tab = crate::state::SidebarTab::CallGraph,
+                    "Call Graph"
+                    if has_binary && state.read().call_graph_loaded {
+                        span { class: "sidebar-tab-count", "{state.read().call_graph_nodes.len()}" }
                     }
                 }
             }
@@ -260,6 +331,29 @@ pub fn Sidebar() -> Element {
                 }
             }
 
+            if has_binary && active_tab == crate::state::SidebarTab::CallGraph {
+                {
+                    let sort_chip = |label: &'static str, sort: crate::state::CallGraphSort| -> Element {
+                        let active = cg_sort == sort;
+                        let cls = if active { "kind-chip is-active" } else { "kind-chip" };
+                        rsx! {
+                            button {
+                                class: "{cls}",
+                                onclick: move |_| state.write().call_graph_sort = sort.clone(),
+                                "{label}"
+                            }
+                        }
+                    };
+                    rsx! {
+                        div { class: "kind-filter-bar",
+                            {sort_chip("Most called", crate::state::CallGraphSort::CallersDesc)}
+                            {sort_chip("Most calling", crate::state::CallGraphSort::CalleesDesc)}
+                            {sort_chip("Name", crate::state::CallGraphSort::NameAsc)}
+                        }
+                    }
+                }
+            }
+
             if has_binary {
                 div { class: "sidebar-search",
                     div { class: "search-wrap",
@@ -275,6 +369,14 @@ pub fn Sidebar() -> Element {
                                     s.sidebar_search = e.value().clone();
                                     s.sidebar_render_limit = SIDEBAR_RENDER_BATCH;
                                 },
+                            }
+                        } else if active_tab == crate::state::SidebarTab::CallGraph {
+                            input {
+                                r#type: "text",
+                                class: "search-input",
+                                placeholder: "Search call graph…",
+                                value: "{cg_search}",
+                                oninput: move |e| state.write().call_graph_search = e.value().clone(),
                             }
                         } else {
                             input {
@@ -365,6 +467,66 @@ pub fn Sidebar() -> Element {
                             if render_limit < fn_total {
                                 li { class: "fn-list-more-hint",
                                     "Showing {render_limit} of {fn_total} \u{2014} scroll for more"
+                                }
+                            }
+                        }
+                    }
+                } else if active_tab == crate::state::SidebarTab::CallGraph {
+                    // ── Call Graph tab ──────────────────────────────────────────
+                    if is_loading_callgraph {
+                        div { class: "skeleton-list",
+                            div { class: "skeleton-item" }
+                            div { class: "skeleton-item" }
+                            div { class: "skeleton-item" }
+                        }
+                    } else if call_graph_list.is_empty() {
+                        div { class: "sidebar-state",
+                            span { class: "state-title", "No results" }
+                            span { class: "state-sub",
+                                if cg_search.is_empty() {
+                                    "No call-graph data for this binary."
+                                } else {
+                                    "No match for your query"
+                                }
+                            }
+                        }
+                    } else {
+                        ul {
+                            class: "function-list",
+                            for node in call_graph_list.iter() {
+                                {
+                                    let addr = node.address;
+                                    let is_sel = selected == Some(addr);
+                                    let display = if node.name.is_empty() {
+                                        format!("sub_{addr:x}")
+                                    } else {
+                                        node.name.clone()
+                                    };
+                                    let item_cls = if is_sel { "function-item is-selected" } else { "function-item" };
+                                    rsx! {
+                                        li {
+                                            key: "{addr}",
+                                            class: "{item_cls}",
+                                            onclick: move |_| {
+                                                spawn(async move {
+                                                    navigate_to_address(state, addr).await;
+                                                });
+                                            },
+                                            div { class: "fn-type-dot is-code" }
+                                            div { class: "fn-info",
+                                                div { class: "fn-name", "{display}" }
+                                                div { class: "fn-addr", "0x{addr:016x}" }
+                                            }
+                                            span { class: "cg-counts", title: "callers \u{2190} / callees \u{2192}",
+                                                "{node.caller_count}\u{2190} {node.callee_count}\u{2192}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if cg_matched_total > CALLGRAPH_RENDER_LIMIT {
+                                li { class: "fn-list-more-hint",
+                                    "Showing top {CALLGRAPH_RENDER_LIMIT} of {cg_matched_total} \u{2014} refine search to narrow"
                                 }
                             }
                         }

@@ -189,6 +189,15 @@ pub struct XrefRow {
     pub fn_name:   Option<String>,
 }
 
+/// One row in the whole-program call graph browser, shared by both platforms.
+#[derive(Debug, Clone)]
+pub struct CallGraphNode {
+    pub address:      u64,
+    pub name:         String,
+    pub caller_count: usize,
+    pub callee_count: usize,
+}
+
 /// One decoded instruction row, shared by both platforms.
 #[derive(Debug, Clone)]
 pub struct InstructionRow {
@@ -361,6 +370,27 @@ mod native {
         (callers, callees)
     }
 
+    /// Whole-binary caller/callee counts, one row per non-import function.
+    /// Reuses the same cached `XrefIndex` as `xrefs_for_function_blocking`
+    /// (via `xref_index_for`) -- the caller/callee aggregation itself is a
+    /// cheap in-memory pass over already-computed refs, not another
+    /// disassembly sweep, so no separate cache is needed for it.
+    pub fn callgraph_blocking(binary: &Arc<LoadedBinary>) -> Vec<CallGraphNode> {
+        let index = xref_index_for(binary.as_ref());
+        let graph = fission_static::analysis::CallGraph::build_from_xref_index(
+            &binary.functions, &index, 0x40,
+        );
+        binary.functions.iter()
+            .filter(|f| !f.is_import)
+            .map(|f| CallGraphNode {
+                address:      f.address,
+                name:         f.name.clone(),
+                caller_count: graph.callers_of(f.address).len(),
+                callee_count: graph.callees_of(f.address).len(),
+            })
+            .collect()
+    }
+
     pub fn disasm_for_function_blocking(
         binary: &Arc<LoadedBinary>, fn_addr: u64,
     ) -> Result<Vec<InstructionRow>, String> {
@@ -415,8 +445,9 @@ mod native {
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{
     batch_decompile_one, batch_decompile_one_with_facts, build_facts_blocking,
-    decompile_blocking, decompile_blocking_with_facts, disasm_for_function_blocking,
-    load_binary_from_bytes_blocking, xrefs_for_function_blocking, FactStore,
+    callgraph_blocking, decompile_blocking, decompile_blocking_with_facts,
+    disasm_for_function_blocking, load_binary_from_bytes_blocking,
+    xrefs_for_function_blocking, FactStore,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -438,9 +469,9 @@ pub fn configured_server_url() -> String {
 mod wasm_api {
     use super::*;
     use fission_analysis_protocol::{
-        DecompileResponse as ApiDecompileResponse, DisasmResponse as ApiDisasmResponse,
-        ErrorResponse as ApiErrorResponse, FnEntry as ApiFnEntry,
-        FunctionsResponse as ApiFunctionsResponse, StatusResponse,
+        CallGraphResponse as ApiCallGraphResponse, DecompileResponse as ApiDecompileResponse,
+        DisasmResponse as ApiDisasmResponse, ErrorResponse as ApiErrorResponse,
+        FnEntry as ApiFnEntry, FunctionsResponse as ApiFunctionsResponse, StatusResponse,
         UploadResponse as ApiUploadResponse, XrefRow as ApiXrefRow,
         XrefsResponse as ApiXrefsResponse,
     };
@@ -660,6 +691,26 @@ mod wasm_api {
             address: r.address, bytes_hex: r.bytes_hex, text: r.text, target_addr: r.target_addr,
         }).collect())
     }
+
+    pub async fn run_callgraph(
+        _binary: Option<Arc<LoadedBinary>>,
+        session_id: Option<String>,
+    ) -> Result<Vec<CallGraphNode>, String> {
+        let base = get_server_url();
+        let sid = session_id.ok_or("no active session — upload a binary first")?;
+        let resp = authorized(Request::get(&format!("{base}/api/callgraph/{sid}")))
+            .send().await
+            .map_err(|e| format!("Call graph request failed: {e}"))?;
+        if !resp.ok() {
+            return Err(server_error_detail(resp, "callgraph").await);
+        }
+        let out: ApiCallGraphResponse = resp.json().await
+            .map_err(|e| format!("Parse callgraph response: {e}"))?;
+        Ok(out.nodes.into_iter().map(|n| CallGraphNode {
+            address: n.address, name: n.name,
+            caller_count: n.caller_count, callee_count: n.callee_count,
+        }).collect())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -746,4 +797,23 @@ pub async fn run_disasm(
     fn_addr: u64,
 ) -> Result<Vec<InstructionRow>, String> {
     wasm_api::run_disasm(binary, session_id, fn_addr).await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn run_callgraph(
+    binary: Option<Arc<LoadedBinary>>,
+    _session_id: Option<String>,
+) -> Result<Vec<CallGraphNode>, String> {
+    let binary = binary.ok_or_else(|| "No binary loaded".to_string())?;
+    tokio::task::spawn_blocking(move || callgraph_blocking(&binary))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn run_callgraph(
+    binary: Option<Arc<LoadedBinary>>,
+    session_id: Option<String>,
+) -> Result<Vec<CallGraphNode>, String> {
+    wasm_api::run_callgraph(binary, session_id).await
 }

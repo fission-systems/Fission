@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod callgraph;
 pub mod decompile;
 pub mod disasm;
 pub mod functions;
