@@ -238,7 +238,16 @@ impl TypeFlowSolver {
                         },
                     );
                 }
-                if value_fact.ty != NirType::Unknown
+                // `pointer == value` is the in-place pointer-chase idiom
+                // (`x = *x`, reusing one temp for both the address being
+                // dereferenced and the loaded result). `value_fact` above is
+                // then a snapshot of `pointer`'s own pre-load fact, not an
+                // independent signal -- wrapping it back onto `pointer` as
+                // `Ptr(value_fact.ty)` re-derives "x is a pointer to its own
+                // prior type", which never converges: each solver pass adds
+                // one more `Ptr(...)` layer around the same node forever.
+                if pointer != value
+                    && value_fact.ty != NirType::Unknown
                     && type_bits(&value_fact.ty, self.pointer_bits)
                         == type_bits(access_ty, self.pointer_bits)
                 {
@@ -319,8 +328,26 @@ fn compatible_width(current: &NirType, candidate: &NirType, pointer_bits: u32) -
     }
 }
 
+/// Real C pointer types are never nested this deep; anything beyond this is
+/// the solver chasing a cycle in the type-flow graph (a Load/Store edge
+/// pair, or a longer multi-variable chain, feeding a node's own fact back
+/// into itself and re-wrapping it each solver pass). Rejecting the update
+/// once the cap is hit stops the cycle from growing further without having
+/// to special-case every graph shape that can produce one.
+const MAX_PTR_NESTING_DEPTH: u32 = 8;
+
+fn ptr_nesting_depth(ty: &NirType) -> u32 {
+    match ty {
+        NirType::Ptr(inner) => 1 + ptr_nesting_depth(inner),
+        _ => 0,
+    }
+}
+
 fn refine_fact(current: &TypeFact, candidate: &TypeFact, pointer_bits: u32) -> Option<TypeFact> {
     if current.locked || candidate.ty == NirType::Unknown {
+        return None;
+    }
+    if ptr_nesting_depth(&candidate.ty) > MAX_PTR_NESTING_DEPTH {
         return None;
     }
     if current.ty == candidate.ty {
@@ -618,6 +645,56 @@ mod tests {
                 .iter()
                 .filter(|binding| binding.name.starts_with("alias_"))
                 .all(|binding| binding.ty == expected)
+        );
+    }
+
+    #[test]
+    fn refine_fact_rejects_pointer_nesting_beyond_cap() {
+        let mut deep = NirType::Unknown;
+        for _ in 0..(MAX_PTR_NESTING_DEPTH + 2) {
+            deep = NirType::Ptr(Box::new(deep));
+        }
+        let current = TypeFact::unknown();
+        let candidate = TypeFact {
+            ty: deep,
+            strength: EvidenceStrength::Semantic,
+            locked: false,
+        };
+        assert!(refine_fact(&current, &candidate, 64).is_none());
+    }
+
+    #[test]
+    fn apply_type_flow_pass_does_not_grow_pointer_depth_on_self_referential_load() {
+        // `x = *x`: reuses one temp for both the address being dereferenced
+        // and the loaded result (the in-place pointer-chase idiom). Before
+        // the fix, each solver pass re-derived "x is a pointer to its own
+        // prior type" and wrapped another `Ptr(...)` layer around it,
+        // growing without bound across repeated fixed-point rounds.
+        let int32 = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_int32 = NirType::Ptr(Box::new(int32));
+        let mut func = function(
+            vec![],
+            vec![binding("x", ptr_int32.clone(), NirBindingOrigin::Temp)],
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("x".to_owned())),
+                    ty: ptr_int32,
+                },
+            }],
+        );
+
+        for _ in 0..20 {
+            apply_type_flow_pass(&mut func);
+        }
+
+        assert!(
+            ptr_nesting_depth(&func.locals[0].ty) <= MAX_PTR_NESTING_DEPTH,
+            "x grew to {:?}",
+            func.locals[0].ty
         );
     }
 
