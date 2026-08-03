@@ -362,6 +362,270 @@ fn structuring_total_work_budget_exceeded(host: &impl StructuringHost) -> bool {
     total > STRUCTURING_TOTAL_WORK_BUDGET
 }
 
+// ---------------------------------------------------------------------------
+// Condition-prefix folding: fold a trivial pure temp-assignment chain that
+// only feeds the branch condition directly into the condition expression,
+// so a head that materializes its comparison through an intermediate
+// variable (the common -O0 "flag temp" pattern) still gets the clean
+// `while(cond)` shape instead of the conservative `while(1){prefix; if
+// (!cond) break; ...}` guard. Ghidra avoids needing this because its
+// pcode-level copy-propagation already eliminates such temps before
+// structuring ever runs; Fission's structuring stage sees the raw prefix.
+// ---------------------------------------------------------------------------
+
+fn count_var_refs(expr: &PreHirExpr, name: &str) -> usize {
+    match expr {
+        PreHirExpr::Var(n) => usize::from(n == name),
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => 0,
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
+            count_var_refs(expr, name)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            count_var_refs(lhs, name) + count_var_refs(rhs, name)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_refs(cond, name)
+                + count_var_refs(then_expr, name)
+                + count_var_refs(else_expr, name)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().map(|a| count_var_refs(a, name)).sum(),
+        PreHirExpr::Load { ptr, .. } => count_var_refs(ptr, name),
+        PreHirExpr::PtrOffset { base, .. } => count_var_refs(base, name),
+        PreHirExpr::Index { base, index, .. } => {
+            count_var_refs(base, name) + count_var_refs(index, name)
+        }
+        PreHirExpr::FieldAccess { base, .. } => count_var_refs(base, name),
+        PreHirExpr::AggregateCopy { src, .. } => count_var_refs(src, name),
+    }
+}
+
+fn substitute_var(expr: &PreHirExpr, name: &str, replacement: &PreHirExpr) -> PreHirExpr {
+    match expr {
+        PreHirExpr::Var(n) if n == name => replacement.clone(),
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => {
+            expr.clone()
+        }
+        PreHirExpr::Cast { ty, expr: inner } => PreHirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(substitute_var(inner, name, replacement)),
+        },
+        PreHirExpr::Unary { op, expr: inner, ty } => PreHirExpr::Unary {
+            op: *op,
+            expr: Box::new(substitute_var(inner, name, replacement)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Binary { op, lhs, rhs, ty } => PreHirExpr::Binary {
+            op: *op,
+            lhs: Box::new(substitute_var(lhs, name, replacement)),
+            rhs: Box::new(substitute_var(rhs, name, replacement)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ty,
+        } => PreHirExpr::Select {
+            cond: Box::new(substitute_var(cond, name, replacement)),
+            then_expr: Box::new(substitute_var(then_expr, name, replacement)),
+            else_expr: Box::new(substitute_var(else_expr, name, replacement)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Call { target, args, ty } => PreHirExpr::Call {
+            target: target.clone(),
+            args: args
+                .iter()
+                .map(|a| substitute_var(a, name, replacement))
+                .collect(),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Load { ptr, ty } => PreHirExpr::Load {
+            ptr: Box::new(substitute_var(ptr, name, replacement)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::PtrOffset { base, offset } => PreHirExpr::PtrOffset {
+            base: Box::new(substitute_var(base, name, replacement)),
+            offset: *offset,
+        },
+        PreHirExpr::Index {
+            base,
+            index,
+            elem_ty,
+        } => PreHirExpr::Index {
+            base: Box::new(substitute_var(base, name, replacement)),
+            index: Box::new(substitute_var(index, name, replacement)),
+            elem_ty: elem_ty.clone(),
+        },
+        PreHirExpr::FieldAccess {
+            base,
+            field_name,
+            offset,
+            ty,
+        } => PreHirExpr::FieldAccess {
+            base: Box::new(substitute_var(base, name, replacement)),
+            field_name: field_name.clone(),
+            offset: *offset,
+            ty: ty.clone(),
+        },
+        PreHirExpr::AggregateCopy { src, size } => PreHirExpr::AggregateCopy {
+            src: Box::new(substitute_var(src, name, replacement)),
+            size: *size,
+        },
+    }
+}
+
+fn lvalue_references_var(lv: &PreHirLValue, name: &str) -> bool {
+    match lv {
+        PreHirLValue::Var(n) => n == name,
+        PreHirLValue::Deref { ptr, .. } => count_var_refs(ptr, name) > 0,
+        PreHirLValue::Index { base, index, .. } => {
+            count_var_refs(base, name) > 0 || count_var_refs(index, name) > 0
+        }
+        PreHirLValue::FieldAccess { base, .. } => count_var_refs(base, name) > 0,
+    }
+}
+
+fn stmt_references_var(stmt: &PreHirStmt, name: &str) -> bool {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            lvalue_references_var(lhs, name) || count_var_refs(rhs, name) > 0
+        }
+        PreHirStmt::Expr(expr) => count_var_refs(expr, name) > 0,
+        PreHirStmt::VaStart { va_list, .. } => count_var_refs(va_list, name) > 0,
+        PreHirStmt::Block(body) => stmts_reference_var(body, name),
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            count_var_refs(expr, name) > 0
+                || cases.iter().any(|c| stmts_reference_var(&c.body, name))
+                || stmts_reference_var(default, name)
+        }
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            count_var_refs(cond, name) > 0
+                || stmts_reference_var(then_body, name)
+                || stmts_reference_var(else_body, name)
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+            count_var_refs(cond, name) > 0 || stmts_reference_var(body, name)
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref().is_some_and(|s| stmt_references_var(s, name))
+                || cond.as_ref().is_some_and(|c| count_var_refs(c, name) > 0)
+                || update
+                    .as_deref()
+                    .is_some_and(|s| stmt_references_var(s, name))
+                || stmts_reference_var(body, name)
+        }
+        PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+            false
+        }
+        PreHirStmt::Return(expr) => expr.as_ref().is_some_and(|e| count_var_refs(e, name) > 0),
+    }
+}
+
+fn stmts_reference_var(stmts: &[PreHirStmt], name: &str) -> bool {
+    stmts.iter().any(|s| stmt_references_var(s, name))
+}
+
+/// True only when the *first* body statement (in program order) that
+/// touches `name` at all is a plain top-level `name = rhs` overwrite whose
+/// own rhs doesn't itself read `name` -- i.e. every possible execution path
+/// through `body` clobbers the variable before any read can observe the
+/// value a dropped cond-prefix statement would have left behind. Any other
+/// shape (first touch inside an `If`/`Switch`/nested loop, a self-referential
+/// assign, or a plain read) is conservatively unsafe.
+fn body_overwrites_before_any_read(body: &[PreHirStmt], name: &str) -> bool {
+    for stmt in body {
+        if !stmt_references_var(stmt, name) {
+            continue;
+        }
+        return match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(n),
+                rhs,
+            } if n == name => count_var_refs(rhs, name) == 0,
+            _ => false,
+        };
+    }
+    false
+}
+
+/// Fold `cond_prefix` (already proven all-trivial/side-effect-free by the
+/// caller) directly into `cond`, processing statements innermost-use-first
+/// (reverse program order) so chained temps (`a = f(x); b = g(a); if (b)`)
+/// resolve correctly. Bails (returns `None`, leaving the existing
+/// conservative shape untouched) unless every prefix variable is either (a)
+/// used exactly once in the condition built so far, and gets substituted
+/// in, or (b) unused (0 references) in both the condition-so-far and
+/// `body`, and gets dropped as dead code -- the common case for a raw
+/// x86 CMP's unused flag byproducts (PF/OF/etc. computed alongside the ZF
+/// the branch actually reads). `body` must never reference a prefix
+/// variable that survives folding/dropping: folding moves the computation
+/// into a per-iteration re-evaluated `while` condition, so any other read
+/// of the same variable inside the loop body would otherwise go stale.
+fn try_fold_cond_prefix(
+    cond_prefix: &[PreHirStmt],
+    cond: &PreHirExpr,
+    body: &[PreHirStmt],
+) -> Option<PreHirExpr> {
+    if cond_prefix.is_empty() {
+        return None;
+    }
+    let diag = structuring_diag_enabled();
+    let mut folded = cond.clone();
+    for stmt in cond_prefix.iter().rev() {
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } = stmt
+        else {
+            if diag {
+                eprintln!("[DIAG] try_fold_cond_prefix bail: reason=not_var_assign stmt={:?}", stmt);
+            }
+            return None;
+        };
+        if stmts_reference_var(body, name) && !body_overwrites_before_any_read(body, name) {
+            if diag {
+                eprintln!("[DIAG] try_fold_cond_prefix bail: reason=used_in_body var={}", name);
+            }
+            return None;
+        }
+        match count_var_refs(&folded, name) {
+            0 => {
+                // Dead byproduct (e.g. an unused CMP flag) -- drop it, but
+                // only if its own rhs doesn't reach outside this prefix
+                // chain (it can't: `rhs` was already required trivial by
+                // the caller, and any prefix var it reads gets the same
+                // 0/1-use check on its own turn below).
+            }
+            1 => folded = substitute_var(&folded, name, rhs),
+            n => {
+                if diag {
+                    eprintln!("[DIAG] try_fold_cond_prefix bail: reason=multi_use var={} count={}", name, n);
+                }
+                return None;
+            }
+        }
+    }
+    Some(folded)
+}
+
 pub fn try_lower_while(host: &mut impl StructuringHost,
         idx: usize,
     ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
@@ -506,6 +770,23 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
             host.track_loop_control_rewrite_stats(stats.break_rewrites, stats.continue_rewrites, stats.skipped_nested_scope_count);
             if cond_prefix.is_empty() {
                 return Ok(Some((PreHirStmt::While { cond, body }, exit_idx)));
+            }
+            if let Some(folded_cond) = try_fold_cond_prefix(&cond_prefix, &cond, &body) {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_while cond_prefix_folded: idx={} block=0x{:x} prefix_stmts={}",
+                        idx,
+                        block_addr,
+                        cond_prefix.len()
+                    );
+                }
+                return Ok(Some((
+                    PreHirStmt::While {
+                        cond: folded_cond,
+                        body,
+                    },
+                    exit_idx,
+                )));
             }
 
             let mut guarded_body = cond_prefix;
@@ -878,6 +1159,8 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
             return Ok(None);
         }
 
+        let diag = structuring_diag_enabled();
+
         // ── Invariant 3: exactly one outside-loop predecessor of head (init block) ──
         let outside_preds: Vec<usize> = host.predecessors()[idx]
             .iter()
@@ -885,6 +1168,13 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
             .filter(|&p| !body_set.contains(&p))
             .collect();
         if outside_preds.len() != 1 {
+            if diag {
+                eprintln!(
+                    "[DIAG] try_lower_for reject: idx={} reason=outside_preds_count count={}",
+                    idx,
+                    outside_preds.len()
+                );
+            }
             return Ok(None);
         }
         let init_idx = outside_preds[0];
@@ -892,23 +1182,53 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
         // Init block must lower to exactly one Assign statement
         let init_stmts = host.lower_block_stmts(init_idx)?;
         if init_stmts.len() != 1 {
+            if diag {
+                eprintln!(
+                    "[DIAG] try_lower_for reject: idx={} reason=init_block_stmt_count init_idx={} count={}",
+                    idx,
+                    init_idx,
+                    init_stmts.len()
+                );
+            }
             return Ok(None);
         }
         let PreHirStmt::Assign {
             lhs: ref init_lhs, ..
         } = init_stmts[0]
         else {
+            if diag {
+                eprintln!(
+                    "[DIAG] try_lower_for reject: idx={} reason=init_stmt_not_assign",
+                    idx
+                );
+            }
             return Ok(None);
         };
         let init_var_name = match init_lhs {
             PreHirLValue::Var(name) => name.clone(),
-            _ => return Ok(None),
+            _ => {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_for reject: idx={} reason=init_lhs_not_var",
+                        idx
+                    );
+                }
+                return Ok(None);
+            }
         };
 
         // ── Invariant 4: latch lowers to exactly one Assign (the update) ──
         // We lower latch stmts only (not the back-edge terminator).
         let latch_stmts = host.lower_block_stmts(latch_idx)?;
         if latch_stmts.len() != 1 {
+            if diag {
+                eprintln!(
+                    "[DIAG] try_lower_for reject: idx={} reason=latch_block_stmt_count latch_idx={} count={}",
+                    idx,
+                    latch_idx,
+                    latch_stmts.len()
+                );
+            }
             return Ok(None);
         }
         let PreHirStmt::Assign {
@@ -916,15 +1236,35 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
             ..
         } = latch_stmts[0]
         else {
+            if diag {
+                eprintln!(
+                    "[DIAG] try_lower_for reject: idx={} reason=latch_stmt_not_assign",
+                    idx
+                );
+            }
             return Ok(None);
         };
 
         // ── Invariant 5: init and update assign to the same variable ──
         let update_var_name = match update_lhs {
             PreHirLValue::Var(name) => name.clone(),
-            _ => return Ok(None),
+            _ => {
+                if diag {
+                    eprintln!(
+                        "[DIAG] try_lower_for reject: idx={} reason=update_lhs_not_var",
+                        idx
+                    );
+                }
+                return Ok(None);
+            }
         };
         if init_var_name != update_var_name {
+            if diag {
+                eprintln!(
+                    "[DIAG] try_lower_for reject: idx={} reason=init_update_var_mismatch init_var={} update_var={}",
+                    idx, init_var_name, update_var_name
+                );
+            }
             return Ok(None);
         }
 
@@ -1393,7 +1733,7 @@ pub fn try_lower_multiblock_infloop(host: &mut impl StructuringHost,
 mod tests {
     use super::*;
     use fission_midend_core::ir::{NirType};
-use fission_midend_prehir::{PreHirExpr, PreHirStmt};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt};
 
     #[test]
     fn rewrite_loop_control_gotos_converts_break_and_continue_targets() {
@@ -1571,5 +1911,92 @@ use fission_midend_prehir::{PreHirExpr, PreHirStmt};
         ];
 
         assert!(!has_goto_to_undefined_label(&body));
+    }
+
+    // ── try_fold_cond_prefix ────────────────────────────────────────────────
+
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
+    }
+
+    fn u32_const(v: i64) -> PreHirExpr {
+        PreHirExpr::Const(v, NirType::Int { bits: 32, signed: false })
+    }
+
+    fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs,
+        }
+    }
+
+    fn eq_expr(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: NirType::Bool,
+        }
+    }
+
+    #[test]
+    fn try_fold_cond_prefix_substitutes_used_var_and_drops_dead_byproduct() {
+        // Mirrors a raw x86 CMP: one dead flag byproduct ("of") plus the one
+        // flag ("zf") the branch actually reads.
+        let cond_prefix = vec![
+            assign("of", u32_const(0)),
+            assign("zf", eq_expr(var("x"), u32_const(0))),
+        ];
+        let cond = var("zf");
+        let body: Vec<PreHirStmt> = Vec::new();
+
+        let folded = try_fold_cond_prefix(&cond_prefix, &cond, &body)
+            .expect("fold should succeed: single-use zf + unused of");
+        assert_eq!(folded, eq_expr(var("x"), u32_const(0)));
+    }
+
+    #[test]
+    fn try_fold_cond_prefix_bails_on_multi_use() {
+        let cond_prefix = vec![assign("t", u32_const(5))];
+        let cond = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(var("t")),
+            rhs: Box::new(var("t")),
+            ty: NirType::Int { bits: 32, signed: false },
+        };
+        let body: Vec<PreHirStmt> = Vec::new();
+
+        assert!(try_fold_cond_prefix(&cond_prefix, &cond, &body).is_none());
+    }
+
+    #[test]
+    fn try_fold_cond_prefix_bails_when_body_reads_dropped_var_before_any_write() {
+        // "t" is unused by cond (drop candidate), but body reads it first --
+        // dropping the prefix def would leave that read stale.
+        let cond_prefix = vec![assign("t", u32_const(5))];
+        let cond = PreHirExpr::Const(1, NirType::Bool);
+        let body = vec![PreHirStmt::Expr(var("t"))];
+
+        assert!(try_fold_cond_prefix(&cond_prefix, &cond, &body).is_none());
+    }
+
+    #[test]
+    fn try_fold_cond_prefix_drops_var_when_body_overwrites_before_any_read() {
+        // "t" is unused by cond, and body's first touch of "t" is a clean
+        // overwrite before any read -- safe to drop the prefix def.
+        let cond_prefix = vec![assign("t", u32_const(5))];
+        let cond = PreHirExpr::Const(1, NirType::Bool);
+        let body = vec![assign("t", u32_const(9)), PreHirStmt::Expr(var("t"))];
+
+        let folded = try_fold_cond_prefix(&cond_prefix, &cond, &body)
+            .expect("fold should succeed: body clobbers t before any read");
+        assert_eq!(folded, PreHirExpr::Const(1, NirType::Bool));
+    }
+
+    #[test]
+    fn try_fold_cond_prefix_empty_prefix_returns_none() {
+        let cond = var("zf");
+        let body: Vec<PreHirStmt> = Vec::new();
+        assert!(try_fold_cond_prefix(&[], &cond, &body).is_none());
     }
 }
