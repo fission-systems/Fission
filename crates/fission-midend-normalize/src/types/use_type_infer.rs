@@ -1113,72 +1113,110 @@ fn is_byte_accumulator_update(
         || (expr_is_var(rhs, name) && is_byte_expr(lhs, known_binding_types)))
 }
 
+fn direct_var_name(expr: &PreHirExpr) -> Option<&str> {
+    match expr {
+        PreHirExpr::Var(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+/// Collects byte-index-accumulator evidence for every name in `candidates`
+/// simultaneously in one walk over `stmts`, instead of one full-body walk
+/// per candidate -- `narrow_byte_index_accumulators` used to call this once
+/// per qualifying local, making it O(locals * stmts) on functions with many
+/// wide temp locals. `exclude`, when set, is the one local variable whose
+/// own leaf references should NOT be recorded in the current expression
+/// subtree (used for the single case where a candidate's own recognized
+/// self-referential accumulator update, `x = x + 1`, must not also count as
+/// a disallowed use of `x` in that same right-hand side -- other candidates
+/// appearing in that same subtree are still recorded normally).
 fn collect_byte_index_accumulator_evidence(
     stmts: &[PreHirStmt],
-    name: &str,
+    candidates: &HashSet<String>,
     known_binding_types: &HashMap<String, NirType>,
-    evidence: &mut ByteIndexAccumulatorEvidence,
+    evidence: &mut HashMap<String, ByteIndexAccumulatorEvidence>,
 ) {
     for stmt in stmts {
-        collect_byte_index_accumulator_evidence_stmt(stmt, name, known_binding_types, evidence);
+        collect_byte_index_accumulator_evidence_stmt(stmt, candidates, known_binding_types, evidence);
     }
 }
 
 fn collect_byte_index_accumulator_evidence_stmt(
     stmt: &PreHirStmt,
-    name: &str,
+    candidates: &HashSet<String>,
     known_binding_types: &HashMap<String, NirType>,
-    evidence: &mut ByteIndexAccumulatorEvidence,
+    evidence: &mut HashMap<String, ByteIndexAccumulatorEvidence>,
 ) {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
-            let self_def = matches!(lhs, PreHirLValue::Var(lhs_name) if lhs_name == name);
-            if self_def {
-                evidence.def_count += 1;
+            let self_def_name = match lhs {
+                PreHirLValue::Var(lhs_name) if candidates.contains(lhs_name) => {
+                    Some(lhs_name.as_str())
+                }
+                _ => None,
+            };
+            if let Some(name) = self_def_name {
+                let is_accum_update = is_byte_accumulator_update(rhs, name, known_binding_types);
+                let ev = evidence.entry(name.to_owned()).or_default();
+                ev.def_count += 1;
                 if is_byte_expr(rhs, known_binding_types) {
-                    evidence.byte_seed_defs += 1;
-                } else if is_byte_accumulator_update(rhs, name, known_binding_types) {
-                    evidence.byte_update_defs += 1;
+                    ev.byte_seed_defs += 1;
+                } else if is_accum_update {
+                    ev.byte_update_defs += 1;
                 } else {
-                    evidence.disallowed_uses += 1;
+                    ev.disallowed_uses += 1;
                 }
-                if !is_byte_accumulator_update(rhs, name, known_binding_types) {
-                    collect_byte_index_accumulator_evidence_expr(
-                        rhs,
-                        name,
-                        known_binding_types,
-                        evidence,
-                    );
-                }
+                let exclude = if is_accum_update { Some(name) } else { None };
+                collect_byte_index_accumulator_evidence_expr(
+                    rhs,
+                    candidates,
+                    exclude,
+                    known_binding_types,
+                    evidence,
+                );
             } else {
                 collect_byte_index_accumulator_evidence_lvalue(
                     lhs,
-                    name,
+                    candidates,
+                    None,
                     known_binding_types,
                     evidence,
                 );
                 collect_byte_index_accumulator_evidence_expr(
                     rhs,
-                    name,
+                    candidates,
+                    None,
                     known_binding_types,
                     evidence,
                 );
             }
         }
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-            collect_byte_index_accumulator_evidence_expr(expr, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                expr,
+                candidates,
+                None,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            collect_byte_index_accumulator_evidence(body, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(body, candidates, known_binding_types, evidence);
         }
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            collect_byte_index_accumulator_evidence_expr(cond, name, known_binding_types, evidence);
-            collect_byte_index_accumulator_evidence(then_body, name, known_binding_types, evidence);
-            collect_byte_index_accumulator_evidence(else_body, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                cond,
+                candidates,
+                None,
+                known_binding_types,
+                evidence,
+            );
+            collect_byte_index_accumulator_evidence(then_body, candidates, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(else_body, candidates, known_binding_types, evidence);
         }
         PreHirStmt::For {
             init,
@@ -1187,51 +1225,44 @@ fn collect_byte_index_accumulator_evidence_stmt(
             body,
         } => {
             if let Some(init) = init {
-                collect_byte_index_accumulator_evidence_stmt(
-                    init,
-                    name,
-                    known_binding_types,
-                    evidence,
-                );
+                collect_byte_index_accumulator_evidence_stmt(init, candidates, known_binding_types, evidence);
             }
             if let Some(cond) = cond {
                 collect_byte_index_accumulator_evidence_expr(
                     cond,
-                    name,
+                    candidates,
+                    None,
                     known_binding_types,
                     evidence,
                 );
             }
             if let Some(update) = update {
-                collect_byte_index_accumulator_evidence_stmt(
-                    update,
-                    name,
-                    known_binding_types,
-                    evidence,
-                );
+                collect_byte_index_accumulator_evidence_stmt(update, candidates, known_binding_types, evidence);
             }
-            collect_byte_index_accumulator_evidence(body, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(body, candidates, known_binding_types, evidence);
         }
         PreHirStmt::Switch {
             expr,
             cases,
             default,
         } => {
-            collect_byte_index_accumulator_evidence_expr(expr, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                expr,
+                candidates,
+                None,
+                known_binding_types,
+                evidence,
+            );
             for case in cases {
-                collect_byte_index_accumulator_evidence(
-                    &case.body,
-                    name,
-                    known_binding_types,
-                    evidence,
-                );
+                collect_byte_index_accumulator_evidence(&case.body, candidates, known_binding_types, evidence);
             }
-            collect_byte_index_accumulator_evidence(default, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence(default, candidates, known_binding_types, evidence);
         }
         PreHirStmt::VaStart { va_list, .. } => {
             collect_byte_index_accumulator_evidence_expr(
                 va_list,
-                name,
+                candidates,
+                None,
                 known_binding_types,
                 evidence,
             );
@@ -1246,20 +1277,34 @@ fn collect_byte_index_accumulator_evidence_stmt(
 
 fn collect_byte_index_accumulator_evidence_lvalue(
     lhs: &PreHirLValue,
-    name: &str,
+    candidates: &HashSet<String>,
+    exclude: Option<&str>,
     known_binding_types: &HashMap<String, NirType>,
-    evidence: &mut ByteIndexAccumulatorEvidence,
+    evidence: &mut HashMap<String, ByteIndexAccumulatorEvidence>,
 ) {
     match lhs {
         PreHirLValue::Var(_) => {}
         PreHirLValue::Deref { ptr, .. } | PreHirLValue::FieldAccess { base: ptr, .. } => {
-            collect_byte_index_accumulator_evidence_expr(ptr, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                ptr,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirLValue::Index { base, index, .. } => {
-            collect_byte_index_accumulator_evidence_expr(base, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                base,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
             collect_byte_index_accumulator_evidence_expr(
                 index,
-                name,
+                candidates,
+                exclude,
                 known_binding_types,
                 evidence,
             );
@@ -1269,13 +1314,16 @@ fn collect_byte_index_accumulator_evidence_lvalue(
 
 fn collect_byte_index_accumulator_evidence_expr(
     expr: &PreHirExpr,
-    name: &str,
+    candidates: &HashSet<String>,
+    exclude: Option<&str>,
     known_binding_types: &HashMap<String, NirType>,
-    evidence: &mut ByteIndexAccumulatorEvidence,
+    evidence: &mut HashMap<String, ByteIndexAccumulatorEvidence>,
 ) {
     match expr {
-        PreHirExpr::Var(var_name) | PreHirExpr::AddressOfGlobal(var_name) if var_name == name => {
-            evidence.disallowed_uses += 1;
+        PreHirExpr::Var(var_name) | PreHirExpr::AddressOfGlobal(var_name)
+            if candidates.contains(var_name) && Some(var_name.as_str()) != exclude =>
+        {
+            evidence.entry(var_name.clone()).or_default().disallowed_uses += 1;
         }
         PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::Unary { expr: inner, .. }
@@ -1285,7 +1333,8 @@ fn collect_byte_index_accumulator_evidence_expr(
         | PreHirExpr::FieldAccess { base: inner, .. } => {
             collect_byte_index_accumulator_evidence_expr(
                 inner,
-                name,
+                candidates,
+                exclude,
                 known_binding_types,
                 evidence,
             );
@@ -1295,36 +1344,81 @@ fn collect_byte_index_accumulator_evidence_expr(
             lhs,
             rhs,
             ..
-        } if expr_is_var(lhs, name) && is_byte_pointer_expr(rhs, known_binding_types) => {
-            evidence.byte_pointer_offset_uses += 1;
+        } if direct_var_name(lhs)
+            .is_some_and(|v| candidates.contains(v) && Some(v) != exclude)
+            && is_byte_pointer_expr(rhs, known_binding_types) =>
+        {
+            let v = direct_var_name(lhs).expect("guard matched Some");
+            evidence.entry(v.to_owned()).or_default().byte_pointer_offset_uses += 1;
+            // `lhs` (the identified candidate) is fully accounted for above;
+            // `rhs` (the pointer operand) may still reference *other*
+            // candidates and still needs its own scan.
+            collect_byte_index_accumulator_evidence_expr(
+                rhs,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Add,
             lhs,
             rhs,
             ..
-        } if expr_is_var(rhs, name) && is_byte_pointer_expr(lhs, known_binding_types) => {
-            evidence.byte_pointer_offset_uses += 1;
+        } if direct_var_name(rhs)
+            .is_some_and(|v| candidates.contains(v) && Some(v) != exclude)
+            && is_byte_pointer_expr(lhs, known_binding_types) =>
+        {
+            let v = direct_var_name(rhs).expect("guard matched Some");
+            evidence.entry(v.to_owned()).or_default().byte_pointer_offset_uses += 1;
+            collect_byte_index_accumulator_evidence_expr(
+                lhs,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            collect_byte_index_accumulator_evidence_expr(lhs, name, known_binding_types, evidence);
-            collect_byte_index_accumulator_evidence_expr(rhs, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                lhs,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
+            collect_byte_index_accumulator_evidence_expr(
+                rhs,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_byte_index_accumulator_evidence_expr(
                     arg,
-                    name,
+                    candidates,
+                    exclude,
                     known_binding_types,
                     evidence,
                 );
             }
         }
         PreHirExpr::Index { base, index, .. } => {
-            collect_byte_index_accumulator_evidence_expr(base, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                base,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
             collect_byte_index_accumulator_evidence_expr(
                 index,
-                name,
+                candidates,
+                exclude,
                 known_binding_types,
                 evidence,
             );
@@ -1335,16 +1429,24 @@ fn collect_byte_index_accumulator_evidence_expr(
             else_expr,
             ..
         } => {
-            collect_byte_index_accumulator_evidence_expr(cond, name, known_binding_types, evidence);
+            collect_byte_index_accumulator_evidence_expr(
+                cond,
+                candidates,
+                exclude,
+                known_binding_types,
+                evidence,
+            );
             collect_byte_index_accumulator_evidence_expr(
                 then_expr,
-                name,
+                candidates,
+                exclude,
                 known_binding_types,
                 evidence,
             );
             collect_byte_index_accumulator_evidence_expr(
                 else_expr,
-                name,
+                candidates,
+                exclude,
                 known_binding_types,
                 evidence,
             );
@@ -1355,31 +1457,39 @@ fn collect_byte_index_accumulator_evidence_expr(
 
 fn narrow_byte_index_accumulators(func: &mut PreHirFunction) -> bool {
     let known_binding_types = collect_known_binding_types(func);
+    let candidates: HashSet<String> = func
+        .locals
+        .iter()
+        .filter(|binding| {
+            binding.surface_type_name.is_none()
+                && matches!(
+                    binding.origin,
+                    Some(NirBindingOrigin::Temp | NirBindingOrigin::TempPreserved)
+                )
+                && matches!(binding.ty, NirType::Int { bits, .. } if bits > 8)
+        })
+        .map(|binding| binding.name.clone())
+        .collect();
+    if candidates.is_empty() {
+        return false;
+    }
+
+    let mut evidence_by_name: HashMap<String, ByteIndexAccumulatorEvidence> = HashMap::default();
+    collect_byte_index_accumulator_evidence(
+        &func.body,
+        &candidates,
+        &known_binding_types,
+        &mut evidence_by_name,
+    );
+
     let mut changed = false;
     for binding in &mut func.locals {
-        if binding.surface_type_name.is_some() {
+        if !candidates.contains(&binding.name) {
             continue;
         }
-        if !matches!(
-            binding.origin,
-            Some(NirBindingOrigin::Temp | NirBindingOrigin::TempPreserved)
-        ) {
-            continue;
-        }
-        let NirType::Int { bits, .. } = binding.ty else {
+        let Some(evidence) = evidence_by_name.get(&binding.name) else {
             continue;
         };
-        if bits <= 8 {
-            continue;
-        }
-
-        let mut evidence = ByteIndexAccumulatorEvidence::default();
-        collect_byte_index_accumulator_evidence(
-            &func.body,
-            &binding.name,
-            &known_binding_types,
-            &mut evidence,
-        );
         if evidence.def_count > 0
             && evidence.disallowed_uses == 0
             && evidence.byte_seed_defs > 0
@@ -3408,5 +3518,167 @@ mod tests {
         assert_eq!(func.locals[0].ty, expected);
         assert_eq!(func.params[0].ty, func.locals[0].ty);
         assert_eq!(func.locals[1].ty, NirType::Unknown);
+    }
+
+    // ── narrow_byte_index_accumulators (multi-candidate single-pass walk) ───
+
+    fn byte_ptr_ty() -> NirType {
+        NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }))
+    }
+
+    fn wide_int_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_owned()),
+            rhs,
+        }
+    }
+
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_owned())
+    }
+
+    fn byte_const(v: i64) -> PreHirExpr {
+        PreHirExpr::Const(
+            v,
+            NirType::Int {
+                bits: 8,
+                signed: false,
+            },
+        )
+    }
+
+    fn qualifying_accumulator_body(name: &str, ptr_name: &str) -> Vec<PreHirStmt> {
+        vec![
+            // byte_seed_defs
+            assign(name, byte_const(0)),
+            // byte_update_defs (`x = x + <byte const>` recognized as an
+            // accumulator update)
+            assign(
+                name,
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(var(name)),
+                    rhs: Box::new(byte_const(1)),
+                    ty: wide_int_ty(),
+                },
+            ),
+            // byte_pointer_offset_uses
+            PreHirStmt::Expr(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(var(ptr_name)),
+                rhs: Box::new(var(name)),
+                ty: byte_ptr_ty(),
+            }),
+        ]
+    }
+
+    #[test]
+    fn narrow_byte_index_accumulators_narrows_multiple_candidates_in_one_pass() {
+        let mut body = qualifying_accumulator_body("x", "bptr");
+        body.extend(qualifying_accumulator_body("z", "bptr"));
+        let mut func = make_func(
+            vec![
+                make_typed_binding("bptr", byte_ptr_ty(), NirBindingOrigin::ParamIndex(0)),
+                make_typed_binding("x", wide_int_ty(), NirBindingOrigin::Temp),
+                make_typed_binding("z", wide_int_ty(), NirBindingOrigin::Temp),
+            ],
+            body,
+            NirType::Unknown,
+        );
+
+        assert!(super::narrow_byte_index_accumulators(&mut func));
+        let expected = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        assert_eq!(func.locals[1].ty, expected, "x should narrow to byte");
+        assert_eq!(func.locals[2].ty, expected, "z should narrow to byte");
+    }
+
+    #[test]
+    fn narrow_byte_index_accumulators_skips_candidate_with_disallowed_use() {
+        let mut body = qualifying_accumulator_body("x", "bptr");
+        // A plain, unrecognized use of `x` elsewhere disqualifies it.
+        body.push(PreHirStmt::Expr(PreHirExpr::Call {
+            target: "sink".to_owned(),
+            args: vec![var("x")],
+            ty: NirType::Unknown,
+        }));
+        let mut func = make_func(
+            vec![
+                make_typed_binding("bptr", byte_ptr_ty(), NirBindingOrigin::ParamIndex(0)),
+                make_typed_binding("x", wide_int_ty(), NirBindingOrigin::Temp),
+            ],
+            body,
+            NirType::Unknown,
+        );
+
+        assert!(!super::narrow_byte_index_accumulators(&mut func));
+        assert_eq!(func.locals[1].ty, wide_int_ty());
+    }
+
+    #[test]
+    fn byte_index_accumulator_evidence_excludes_only_the_self_referential_candidate() {
+        // `x = x + (byte)z`: recognized as an accumulator update for `x`, so
+        // `x`'s own reference inside that rhs must NOT also count as a
+        // disallowed use of `x` -- but `z`, a *different* candidate embedded
+        // in the same rhs (via the cast), must still be recorded normally,
+        // since from `z`'s perspective this is just an ordinary use, not a
+        // self-update.
+        let candidates: HashSet<String> = ["x".to_owned(), "z".to_owned()].into_iter().collect();
+        let known_binding_types: HashMap<String, NirType> = [
+            ("x".to_owned(), wide_int_ty()),
+            ("z".to_owned(), wide_int_ty()),
+        ]
+        .into_iter()
+        .collect();
+        let body = vec![assign(
+            "x",
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(var("x")),
+                rhs: Box::new(PreHirExpr::Cast {
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                    expr: Box::new(var("z")),
+                }),
+                ty: wide_int_ty(),
+            },
+        )];
+
+        let mut evidence = HashMap::default();
+        super::collect_byte_index_accumulator_evidence(
+            &body,
+            &candidates,
+            &known_binding_types,
+            &mut evidence,
+        );
+
+        let x_evidence = evidence.get("x").expect("x should have evidence");
+        assert_eq!(x_evidence.def_count, 1);
+        assert_eq!(x_evidence.byte_update_defs, 1);
+        assert_eq!(
+            x_evidence.disallowed_uses, 0,
+            "x's own reference inside its recognized self-update must not double-count"
+        );
+
+        let z_evidence = evidence.get("z").expect("z should have evidence");
+        assert_eq!(
+            z_evidence.disallowed_uses, 1,
+            "z, embedded in x's update rhs, is still an ordinary (disallowed) use from z's own perspective"
+        );
+        assert_eq!(z_evidence.def_count, 0);
     }
 }
