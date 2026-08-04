@@ -58,6 +58,20 @@ enum TypeFlowEdge {
         output: String,
         ty: NirType,
     },
+    /// `output = lhs <op> rhs` (`op` one of Add/Sub). Ghidra's
+    /// `TypeOpIntAdd`/`TypeOpPtradd`/`TypeOpPtrsub` counterpart: pointer
+    /// arithmetic is common enough (`p + i`, `p - 1`) that leaving it
+    /// entirely to the separate `ptr_arith.rs` post-pass means a pointer
+    /// that pass never got to see (because an *earlier* stage misclassified
+    /// it) can't be recovered. Folding it into this same fixed point lets a
+    /// later-discovered pointer fact retroactively fix the arithmetic
+    /// result's type, same as any other edge here.
+    Arithmetic {
+        output: String,
+        lhs: Option<String>,
+        rhs: Option<String>,
+        op: PreHirBinaryOp,
+    },
 }
 
 impl TypeFlowEdge {
@@ -69,6 +83,18 @@ impl TypeFlowEdge {
             }
             Self::PointerAccess { pointer, .. } => vec![pointer],
             Self::Cast { output, .. } => vec![output],
+            Self::Arithmetic {
+                output, lhs, rhs, ..
+            } => {
+                let mut endpoints = vec![output.as_str()];
+                if let Some(lhs) = lhs {
+                    endpoints.push(lhs.as_str());
+                }
+                if let Some(rhs) = rhs {
+                    endpoints.push(rhs.as_str());
+                }
+                endpoints
+            }
         }
     }
 }
@@ -281,6 +307,41 @@ impl TypeFlowSolver {
                     },
                 );
             }
+            TypeFlowEdge::Arithmetic {
+                output,
+                lhs,
+                rhs,
+                op,
+            } => {
+                let lhs_fact = lhs.as_deref().map(|n| self.fact(n));
+                let rhs_fact = rhs.as_deref().map(|n| self.fact(n));
+                let lhs_ptr = lhs_fact
+                    .as_ref()
+                    .filter(|f| matches!(f.ty, NirType::Ptr(_)));
+                let rhs_ptr = rhs_fact
+                    .as_ref()
+                    .filter(|f| matches!(f.ty, NirType::Ptr(_)));
+                // Add commutes (`p + i` or `i + p`); Sub only propagates from
+                // the left (`p - i = p`, mirroring C -- `i - p` isn't valid
+                // pointer arithmetic, and `p - p` is an integer difference,
+                // not a pointer, so bail whenever *both* sides look like
+                // pointers).
+                let source = match op {
+                    PreHirBinaryOp::Add => lhs_ptr.or(rhs_ptr),
+                    PreHirBinaryOp::Sub if rhs_ptr.is_none() => lhs_ptr,
+                    _ => None,
+                };
+                if let Some(source) = source {
+                    self.refine(
+                        output,
+                        TypeFact {
+                            ty: source.ty.clone(),
+                            strength: source.strength.max(EvidenceStrength::Semantic),
+                            locked: false,
+                        },
+                    );
+                }
+            }
         }
     }
 
@@ -426,6 +487,31 @@ fn collect_assignment_edges(lhs: &PreHirLValue, rhs: &PreHirExpr, edges: &mut Ve
                 output: lhs_name.clone(),
                 ty: ty.clone(),
             }),
+            PreHirExpr::Binary {
+                op: op @ (PreHirBinaryOp::Add | PreHirBinaryOp::Sub),
+                lhs: bin_lhs,
+                rhs: bin_rhs,
+                ..
+            } => {
+                edges.push(TypeFlowEdge::Arithmetic {
+                    output: lhs_name.clone(),
+                    lhs: direct_var(bin_lhs).map(str::to_owned),
+                    rhs: direct_var(bin_rhs).map(str::to_owned),
+                    op: *op,
+                });
+                // Keep the generic width/signedness hint too, for the plain
+                // (non-pointer) integer-arithmetic case: the Arithmetic edge
+                // above is a no-op unless one operand resolves to a pointer,
+                // and `type_specificity` already ranks Ptr above these scalar
+                // hints so the two edges don't fight when both fire.
+                let ty = expr_type(rhs);
+                if ty != NirType::Unknown {
+                    edges.push(TypeFlowEdge::Cast {
+                        output: lhs_name.clone(),
+                        ty,
+                    });
+                }
+            }
             _ => {
                 let ty = expr_type(rhs);
                 if ty != NirType::Unknown {
