@@ -96,7 +96,11 @@ address, compiler, or corpus condition.
       regardless of cover shape (`same_high_variable_under_same_name_is_never_flagged`).
 - [x] Unit: distinct names are never flagged even with intersecting covers
       (`distinct_names_are_never_flagged_even_if_covers_intersect`).
-- [x] `cargo nextest run -p fission-pcode`: 961 passed, 1 skipped (baseline
+- [x] Unit: two p-code ops at the same source instruction address sharing a
+      name are never flagged even with intersecting covers
+      (`same_instruction_widening_chain_is_never_flagged`) -- added after
+      tracing a real corpus false positive (below).
+- [x] `cargo nextest run -p fission-pcode`: 962 passed, 1 skipped (baseline
       unchanged).
 - [x] `cargo nextest run --workspace`: no new failures vs. established
       baseline (7 pre-existing unrelated `fission-emulator` failures).
@@ -121,17 +125,34 @@ modeled as ordinary mergeable variables) -- excluded from the headline
 number as a likely non-bug category, not asserted as definitely benign.
 
 Top **non-flag** violation name families (all real corpus rows, examples
-verified against the source): generic temps `xVar*`/`uVar*` (698
-instances -- the classic "same generic name, two logically distinct SSA
-values with overlapping live ranges" case), hardware GPRs `edi`/`ebx`/`edx`/`esi`/`ecx`/`rax`
-(165), XMM lane pieces `xmm*_qa`/`xmm*_qb` (~150, overlaps with the P1
-LaneDivide gap already tracked in the 2026-07-25 audit).
+verified against the source): generic temps `xVar*`/`uVar*` (initially 698
+instances, see revision below), hardware GPRs `edi`/`ebx`/`edx`/`esi`/`ecx`/`rax`
+(165), XMM lane pieces `xmm*_qa`/`xmm*_qb`.
 
-**Conclusion**: the P0 gap is real and measurable (235 functions, ~7% of
-the dev corpus), but roughly an order of magnitude smaller than the raw
-11,006 count suggests once the flag-register naming convention is excluded.
-`xVar*`/`uVar*` generic-temp collisions are the largest single category and
-the most direct match for the audit's "return/join noise" symptom.
+**Revision after tracing a concrete case.** Manually tracing
+`apply_binop`'s `uVar14` collision found a second false-positive category:
+a single source instruction's p-code expansion legitimately touching the
+same storage at different widths (e.g. a CALL's 32-bit `EAX` result
+immediately zero-extended into 64-bit `RAX`, both p-code ops carrying the
+call's own address). The SSA model correctly treats these as distinct
+values, but sharing a display name between them is the intended "same
+value, different width view" case, not the cross-value collision this
+diagnostic targets. Added a same-source-instruction-address exemption
+(`scan_cover_violations`, plus regression test
+`same_instruction_widening_chain_is_never_flagged`). Re-measuring after
+this fix:
+
+| Bucket | Before | After same-instruction exemption |
+|---|---:|---:|
+| Non-flag violation instances | 1,078 | 822 |
+| Distinct functions with >=1 non-flag violation | 235 | 215 |
+
+**Conclusion**: the P0 gap is real and measurable (215 functions, ~6% of
+the dev corpus scanned), well below the raw 11,006 count once both the
+flag-register convention and the same-instruction widening-chain pattern
+are excluded. `xVar*`/`uVar*` generic-temp collisions remain the largest
+single category (608 of 822, 74%) and the most direct match for the
+audit's "return/join noise" symptom.
 
 ## 6. AI / Ghidra Firewall
 
@@ -150,15 +171,47 @@ the most direct match for the audit's "return/join noise" symptom.
       type_match/semantic_score movement -- no corrective change has landed
       yet, so no such movement exists to claim).
 
-## 8. Recommended next step
+## 8. Attempted corrective fix (reverted -- documenting for the next attempt)
 
-Wire a corrective pass targeting the largest, cleanest category first:
-generic-temp (`xVar*`/`uVar*`) name collisions at
-`merge_binding_name_for_materialized_output`'s reachability-proof
-acceptance point in `materialize/mod.rs` -- reject a name-reuse candidate
-whose SSA `HighVariable` differs from and interferes with the name's
-existing owner, falling back to a fresh temp name (mirrors Ghidra's
-`mergeTest` failure path: the merge is simply not performed, not an error).
-Remeasure with this same diagnostic (should approach zero for the targeted
-category) and with `fission-benchmark`'s `scripts/compare_runs.py` for
-`type_match`/`semantic_score` movement on the same corpus rows.
+Tried wiring a live guard at `ensure_temp_binding_for_output`'s and
+`ensure_explicit_merge_binding_for_block`'s generic-temp
+(`next_unused_temp_binding_name`) fallback: reject a candidate name already
+claimed by a different, interfering `SsaHighVariable`, allocating a fresh
+name instead (Ghidra's `mergeTest` failure path -- the merge is simply not
+performed).
+
+**Result: measurably no effect.** Re-running the same real-corpus scan
+after the guard landed produced byte-identical counts (822 / 215,
+including the same `apply_binop` `uVar14` case used to design it). Tracing
+`apply_binop` directly (`raw-pcode` dump + entry/exit instrumentation on
+`ensure_temp_binding_for_output`) found the second conflicting definition
+(`def_addr=0x4014fd def_seq=42`, a `Copy` into `EAX` at p-code op index 42)
+**never calls `ensure_temp_binding_for_output` at all** -- yet its
+`(varnode, def_addr, def_seq)` key is present in `materialized_vns` mapped
+to `uVar14`. There is exactly one `.insert()` call site into
+`materialized_vns` in the entire crate (re-verified), and that site is
+inside the very function that was never called for this key. The real
+insertion mechanism for this case was not found before time ran out on
+this session; it is not `next_unused_temp_binding_name` producing a
+non-fresh name (that function's freshness check against the append-only
+`self.temps` is airtight and was verified by direct trace) -- something
+else in `materialize` is writing this key, or a different, not-yet-found
+path shares state with it.
+
+**Reverted** (`git checkout` on `state.rs`/`init.rs`/`mod.rs`, guard
+methods removed from `cover_diagnostics.rs`) rather than ship inert code.
+What remains landed is only the verified diagnostic and its
+same-instruction-exemption refinement (Section 5).
+
+## 9. Recommended next step
+
+Before attempting another live guard: instrument
+`ensure_temp_binding_for_output`'s *entry* (not just its generic-name
+fallback) to log every call, cache hit or miss, and cross-reference against
+every key that ends up in `materialized_vns` for one traced function
+(`apply_binop` in `advanced_patterns_gcc-m32_O0.exe` at `0x4014dd` is a
+known, minimal repro -- 3 near-identical function-pointer-table lookups,
+one of which produces the untraceable `uVar14` collision at
+`def_addr=0x4014fd def_seq=42`). Find the actual write path for that key
+before designing a guard against it; the two candidate call sites this
+proposal guarded were, empirically, not it.

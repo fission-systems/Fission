@@ -88,7 +88,11 @@ fn high_variable_at_block_entry(
         .copied()
 }
 
-fn high_variables_interfere(scalar_ssa: &NirScalarSsa, a: SsaHighVariableId, b: SsaHighVariableId) -> bool {
+fn high_variables_interfere(
+    scalar_ssa: &NirScalarSsa,
+    a: SsaHighVariableId,
+    b: SsaHighVariableId,
+) -> bool {
     let Some(high_a) = scalar_ssa.high_variables.get(a.0 as usize) else {
         return false;
     };
@@ -126,14 +130,28 @@ fn scan_cover_violations(
     explicit_merge_bindings: &HashMap<(usize, VarnodeKey), String>,
 ) -> Vec<CoverViolation> {
     let addr_seq_index = build_addr_seq_index(pcode);
-    let mut by_name: HashMap<&str, Vec<SsaHighVariableId>> = HashMap::default();
+    // `(SsaHighVariableId, source_instruction_address)`. The address is kept
+    // alongside the id so a same-name pair can be told apart from a same-
+    // *instruction* pair below: a single source instruction commonly lowers
+    // to several p-code ops touching the same storage at different widths
+    // (e.g. a CALL's 32-bit EAX result immediately zero-extended into RAX,
+    // both at the call's own address) -- the SSA model correctly treats
+    // those as distinct values, but sharing a display name between them is
+    // the intended "same value, different width view" case, not the
+    // cross-block/cross-value name reuse this diagnostic targets. Block-
+    // entry (`explicit_merge_bindings`) sites carry no single instruction
+    // address, so they use `None` and are never exempted by this rule.
+    let mut by_name: HashMap<&str, Vec<(SsaHighVariableId, Option<u64>)>> = HashMap::default();
 
     for (key, name) in materialized_vns {
         let Some(&site) = addr_seq_index.get(&(key.def_addr, key.def_seq)) else {
             continue;
         };
         if let Some(high) = high_variable_at_output(scalar_ssa, site, &key.varnode) {
-            by_name.entry(name.as_str()).or_default().push(high);
+            by_name
+                .entry(name.as_str())
+                .or_default()
+                .push((high, Some(key.def_addr)));
         }
     }
     for ((block_idx, key), name) in explicit_merge_bindings {
@@ -141,19 +159,25 @@ fn scan_cover_violations(
             continue;
         };
         if let Some(high) = high_variable_at_block_entry(scalar_ssa, block_idx, key) {
-            by_name.entry(name.as_str()).or_default().push(high);
+            by_name.entry(name.as_str()).or_default().push((high, None));
         }
     }
 
     let mut violations = Vec::new();
-    for (name, ids) in &by_name {
-        for i in 0..ids.len() {
-            for j in (i + 1)..ids.len() {
-                if ids[i] != ids[j] && high_variables_interfere(scalar_ssa, ids[i], ids[j]) {
+    for (name, entries) in &by_name {
+        for i in 0..entries.len() {
+            for j in (i + 1)..entries.len() {
+                let (high_a, addr_a) = entries[i];
+                let (high_b, addr_b) = entries[j];
+                let same_instruction = addr_a.is_some() && addr_a == addr_b;
+                if high_a != high_b
+                    && !same_instruction
+                    && high_variables_interfere(scalar_ssa, high_a, high_b)
+                {
                     violations.push(CoverViolation {
                         name: (*name).to_string(),
-                        high_a: ids[i],
-                        high_b: ids[j],
+                        high_a,
+                        high_b,
                     });
                 }
             }
@@ -355,6 +379,77 @@ mod tests {
                 def_seq: 0,
             },
             "name_b".to_string(),
+        );
+        let violations = scan_cover_violations(&ssa, &pcode, &materialized, &HashMap::default());
+        assert!(violations.is_empty());
+    }
+
+    /// Two p-code ops at the *same* source instruction address (e.g. a
+    /// CALL's 32-bit EAX result immediately zero-extended into 64-bit RAX)
+    /// sharing a name must never be flagged, even with intersecting covers
+    /// -- reusing the display name across the same instruction's own
+    /// sub-defs is the intended "same value, different width" case, not a
+    /// cross-value name collision. Regression test for the false positive
+    /// found tracing a real corpus function (`apply_binop`): two defs both
+    /// named `uVar16` at the same address, different sizes, flagged before
+    /// this exemption existed.
+    #[test]
+    fn same_instruction_widening_chain_is_never_flagged() {
+        let ssa = sample_ssa_with_two_high_variables(true);
+        let vn = Varnode {
+            space_id: 4,
+            offset: 0x10,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let op0 = PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(vn.clone()),
+            inputs: vec![vn.clone()],
+            asm_mnemonic: None,
+        };
+        let op1 = PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1000, // same instruction as op0
+            output: Some(vn.clone()),
+            inputs: vec![vn],
+            asm_mnemonic: None,
+        };
+        let pcode = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![op0, op1],
+            }],
+        };
+        let varnode = VarnodeKey {
+            space_id: 4,
+            offset: 0x10,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut materialized = HashMap::default();
+        materialized.insert(
+            MaterializedVarnodeKey {
+                varnode: varnode.clone(),
+                def_addr: 0x1000,
+                def_seq: 0,
+            },
+            "shared_name".to_string(),
+        );
+        materialized.insert(
+            MaterializedVarnodeKey {
+                varnode,
+                def_addr: 0x1000,
+                def_seq: 1,
+            },
+            "shared_name".to_string(),
         );
         let violations = scan_cover_violations(&ssa, &pcode, &materialized, &HashMap::default());
         assert!(violations.is_empty());
