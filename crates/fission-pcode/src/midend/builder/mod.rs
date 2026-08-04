@@ -421,6 +421,19 @@ impl<'a> PreviewBuilder<'a> {
                     );
                 }
             }
+            let stack_ambiguities = self.scan_stack_slot_size_ambiguities();
+            if !stack_ambiguities.is_empty() {
+                eprintln!(
+                    "[DIAG] stack_slot_size_ambiguities fn={name} addr=0x{address:x} count={}",
+                    stack_ambiguities.len()
+                );
+                for ambiguity in &stack_ambiguities {
+                    eprintln!(
+                        "[DIAG] stack_slot_size_ambiguity name={} offset={} sizes={:?}",
+                        ambiguity.name, ambiguity.offset, ambiguity.sizes
+                    );
+                }
+            }
         }
 
         if temp_name_trace_enabled() {

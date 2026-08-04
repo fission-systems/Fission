@@ -3,4 +3,5 @@
 pub(super) use super::*;
 
 pub(in crate::midend::builder) mod aggregate_recovery;
+mod stack_slot_diagnostics;
 mod stack_slots;

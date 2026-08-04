@@ -925,8 +925,12 @@ fn resolve_pointer_value(
     }
     let value = ssa.value(value_id)?;
     let resolved = match value.definition {
-        SsaValueDefinition::Input => (value.storage.space_id == REGISTER_SPACE_ID
-            && options.cspec_stack_pointer_offset == Some(value.storage.offset))
+        SsaValueDefinition::Input => (is_register_space_id(value.storage.space_id)
+            && (options.cspec_stack_pointer_offset == Some(value.storage.offset)
+                || options
+                    .calling_convention
+                    .native_stack_pointer_register_offset(options.is_64bit)
+                    == Some(value.storage.offset)))
         .then(|| PointerRange::exact(SsaMemoryRegion::Stack, 0)),
         SsaValueDefinition::Phi { block } => {
             let phi = ssa

@@ -28,3 +28,32 @@ pub enum CallingConvention {
     /// x86 32-bit cdecl/stdcall calling convention (arguments passed on stack).
     X86_32,
 }
+
+impl CallingConvention {
+    /// The register-space `(space_id-relative) offset` of this convention's
+    /// native stack-pointer register (RSP/ESP or architectural equivalent),
+    /// independent of any per-function cspec/prototype data. Mirrors the
+    /// per-architecture offsets `stack_slots.rs`'s `resolve_stack_address_inner`
+    /// already hardcodes for its `StackBase::Rsp` case -- kept in one place
+    /// so a second consumer (`scalar_ssa.rs`'s `resolve_pointer_value`, whose
+    /// stack-pointer recognition was previously gated behind
+    /// `cspec_stack_pointer_offset`, only populated when prototype/cspec data
+    /// exists -- i.e. almost never for a stripped binary) doesn't need to
+    /// duplicate or drift from this table.
+    pub fn native_stack_pointer_register_offset(self, is_64bit: bool) -> Option<u64> {
+        match self {
+            CallingConvention::Arm32 => Some(0x54),
+            CallingConvention::PowerPc32 => Some(0x04),
+            CallingConvention::PowerPc64 => Some(0x08),
+            CallingConvention::LoongArch32 => Some(0x10c),
+            CallingConvention::LoongArch64 => Some(0x118),
+            CallingConvention::Mips32 => Some(0x74),
+            CallingConvention::Mips64 => Some(0xe8),
+            CallingConvention::AArch64 => Some(0x08),
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
+                if is_64bit { Some(0x20) } else { Some(0x10) }
+            }
+            CallingConvention::X86_32 => Some(0x10),
+        }
+    }
+}
