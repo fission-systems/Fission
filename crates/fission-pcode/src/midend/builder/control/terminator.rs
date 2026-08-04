@@ -3388,7 +3388,18 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<PreHirExpr, MlilPreviewError> {
         let peeled = self.peel_passthrough_varnode(vn);
-        if let Some((_, op)) = self.lookup_def_site(&peeled) {
+        // Unlike `lower_wrapped_varnode`'s own Copy/Cast peel fallback, this
+        // recursion never routes through `lower_varnode`'s `visiting`-set
+        // cycle guard -- it walks `op.inputs[0]` directly. A loop-carried
+        // selector (e.g. a switch discriminant fed by the loop induction
+        // variable) can have its Copy chain fold back on a def already on
+        // this call stack, which would otherwise recurse forever. Guard it
+        // with the same key locally.
+        let key = VarnodeKey::from(&peeled);
+        if !visiting.insert(key.clone()) {
+            return self.lower_wrapped_varnode(&peeled, visiting);
+        }
+        let result = if let Some((_, op)) = self.lookup_def_site(&peeled) {
             match op.opcode {
                 PcodeOpcode::Copy
                 | PcodeOpcode::Cast
@@ -3397,12 +3408,16 @@ impl<'a> PreviewBuilder<'a> {
                 | PcodeOpcode::SubPiece
                     if !op.inputs.is_empty() =>
                 {
-                    return self.lower_selector_source_expr(&op.inputs[0], visiting);
+                    let input = op.inputs[0].clone();
+                    self.lower_selector_source_expr(&input, visiting)
                 }
-                _ => {}
+                _ => self.lower_wrapped_varnode(&peeled, visiting),
             }
-        }
-        self.lower_wrapped_varnode(&peeled, visiting)
+        } else {
+            self.lower_wrapped_varnode(&peeled, visiting)
+        };
+        visiting.remove(&key);
+        result
     }
 
     fn extract_modulo_bound(expr: &PreHirExpr) -> Option<u64> {
