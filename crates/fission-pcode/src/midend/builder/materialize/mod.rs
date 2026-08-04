@@ -999,7 +999,14 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
         let preserve_materialization = Self::should_preserve_materialized_expr(&rhs);
-        let mut lhs_name = if let Some(name) = loop_carried_lhs_name {
+        let name_claim_is_safe = |this: &Self, name: &str| {
+            block_idx_for_rhs.is_none_or(|bi| {
+                !this.cover_proves_existing_name_claim_interferes(bi, op_idx, output, name)
+            })
+        };
+        let mut lhs_name = if let Some(name) =
+            loop_carried_lhs_name.filter(|n| name_claim_is_safe(self, n))
+        {
             self.seed_loop_carried_binding_initializer_from_edge_zero(block, output, &name);
             self.bind_materialized_output_to_existing_name(
                 op,
@@ -1008,7 +1015,9 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
-        } else if let Some(name) = direct_successor_merge_lhs_name {
+        } else if let Some(name) =
+            direct_successor_merge_lhs_name.filter(|n| name_claim_is_safe(self, n))
+        {
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -1016,7 +1025,7 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
-        } else if let Some(name) = merge_lhs_name {
+        } else if let Some(name) = merge_lhs_name.filter(|n| name_claim_is_safe(self, n)) {
             self.bind_materialized_output_to_existing_name(
                 op,
                 output,
@@ -1024,14 +1033,16 @@ impl<'a> PreviewBuilder<'a> {
                 preserve_materialization,
             );
             name
-        } else if let Some((name, binding_size)) =
-            self.live_register_lhs_name_for_partial_gpr_join_family(output)
+        } else if let Some((name, binding_size)) = self
+            .live_register_lhs_name_for_partial_gpr_join_family(output)
+            .filter(|(n, _)| name_claim_is_safe(self, n))
         {
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
         } else if let Some((name, binding_size)) = self
             .live_register_lhs_name_for_passthrough_join_store_producer(block, op_idx, output, &rhs)
+            .filter(|(n, _)| name_claim_is_safe(self, n))
         {
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
@@ -1045,12 +1056,14 @@ impl<'a> PreviewBuilder<'a> {
                 &rhs,
                 replacement_plan,
             )
+            .filter(|(n, _)| name_claim_is_safe(self, n))
         {
             self.ensure_live_register_binding(&name, binding_size);
             self.bind_materialized_output_to_existing_name(op, output, &name, true);
             name
-        } else if let Some(name) =
-            self.full_width_primary_return_surface_name(block, op_idx, op, output)
+        } else if let Some(name) = self
+            .full_width_primary_return_surface_name(block, op_idx, op, output)
+            .filter(|n| name_claim_is_safe(self, n))
         {
             // x64 SLEIGH freeze before same-block cmov: IntZExt rax ← eax must
             // use the HW surface so cmovl into EAX and epilogue `return rax`
@@ -1092,7 +1105,8 @@ impl<'a> PreviewBuilder<'a> {
             // primary-return writes so sum/cmov arms share one name with
             // `return eax`/`return rax`. Normalize folds adjacent
             // `eax = C; return eax` via collapse_trivial_assign_returns.
-            && let Some(name) = primary_return_live_out_name
+            && let Some(name) =
+                primary_return_live_out_name.filter(|n| name_claim_is_safe(self, n))
         {
             // Cross-block cmov tails (e.g. saturating_add underflow): the guarded
             // Copy writes the ABI return register with no prior def in *this*
@@ -1436,6 +1450,14 @@ impl<'a> PreviewBuilder<'a> {
             if crate::arch::x86::x86_gpr_family_index(name.as_str()).is_none()
                 && self.gpr_family_index_for_key(&output_key).is_none()
             {
+                return None;
+            }
+            if self.cover_proves_block_entry_reuse_unsafe(
+                definition_block_idx,
+                op_idx,
+                output,
+                merge_block_idx,
+            ) {
                 return None;
             }
             self.trace_path_sensitive_register_merge(

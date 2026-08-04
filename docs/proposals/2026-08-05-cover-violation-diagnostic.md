@@ -290,3 +290,95 @@ deliberately left untouched -- they route through different heuristics
 (`full_width_primary_return_surface_name`, `primary_return_live_out_name`,
 cross-block `merge_lhs_name`) not covered by this fix, and are the natural
 next slice.
+
+## 10. Second pass: generalizing the guard to the remaining name-reuse branches
+
+`materialize/mod.rs`'s output-binding chain has 8 branches that call
+`bind_materialized_output_to_existing_name` with a name computed by their
+own reachability proof (`loop_carried_lhs_name`, `direct_successor_merge_lhs_name`,
+`merge_lhs_name`, `live_register_lhs_name_for_partial_gpr_join_family`,
+`live_register_lhs_name_for_passthrough_join_store_producer`,
+`live_register_lhs_name_for_safe_missing_merge`,
+`full_width_primary_return_surface_name`, `same_block_prior_register_binding_name`
+(already guarded), `primary_return_live_out_name`). Section 9 only guarded
+one. Attribution tracing (a temporary `[BIND_BRANCH]` eprintln tagging each
+branch plus its resolved `SsaHighVariableId`, removed after use) against the
+real corpus's remaining `edi` violation (`__pei386_runtime_relocator`,
+`control_flow_gcc-m32_O0.exe`) traced the true mechanism precisely: one
+`edi` definition (`HighVariable(546)`) got the raw name via
+`ensure_temp_binding_for_output`'s already-existing "reuse the hardware
+register name if `!self.temps.contains_key(&candidate)`" fallback (line
+~703 in `builder/mod.rs`, pre-existing, not part of this session's earlier
+fix) -- purely an accident of block-visitation order, since it ran *before*
+any of the other branches touched `edi`. A second, unrelated `edi`
+definition (`HighVariable(146)`, a genuine loop-carried induction value)
+then claimed the same raw name later via `loop_carried_lhs_name` and
+`live_register_lhs_name_for_safe_missing_merge`, with neither branch ever
+checking whether `edi` was already spoken for by an interfering value.
+
+**First attempt (reverted)**: gated `ensure_temp_binding_for_output`'s raw-
+name fallback with a whole-function-scoped
+`storage_key_is_cover_ambiguous` check (any 2+ interfering `SsaHighVariable`s
+ever sharing this storage key anywhere in the function -> refuse the raw
+name for anyone). This fixed the `edi` case but broke
+`loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp`
+(caught by `cargo nextest run -p fission-pcode`, confirmed as a real
+regression by re-running on the pre-session baseline commit). Root cause:
+this check is too coarse. A legitimate `Copy ecx <- eax` inside a loop body
+speculatively unions `ecx`'s SSA value into `eax`'s (much larger,
+loop-spanning) `HighVariable` per `build_out_of_ssa_facts`'s own Copy-chain
+merge rule -- correct, since after that copy `ecx` and `eax` really do hold
+the same value. But `ecx`'s storage key is *also* independently touched by
+an unrelated same-block redefinition (`ecx = ecx & 1`) that never actually
+asks for the raw `ecx` name (it gets a normal synthetic name via a totally
+different path). The whole-function "any interfering pair anywhere"
+check has no way to know the second value was never going to collide in
+practice, and blocked a safe case. Reverted in favor of an order-dependent,
+already-happened-collisions-only check, matching Section 9's guard
+philosophy exactly rather than trying to prove safety in the abstract.
+
+**Real fix**: `PreviewBuilder::cover_proves_existing_name_claim_interferes`
+(`cover_diagnostics.rs`) -- given a candidate name, scans
+`materialized_vns`/`explicit_merge_bindings` (the same sources
+`scan_cover_violations` reads) for any *already-bound* entry under that
+exact name whose `SsaHighVariableId` is different from and interferes with
+the value currently being bound. Only ever blocks a collision that has
+concretely already happened, never speculates about bindings not yet made
+-- the same permissive-on-uncertainty contract as
+`cover_proves_distinct_and_interfering`. Wired as a `.filter(...)` gate on
+each of the 7 remaining name-reuse branches (all except
+`same_block_prior_register_binding_name`, already covered by Section 9's
+narrower same-block check): when a branch's candidate name is already
+claimed by an interfering value, that branch is treated as if it returned
+`None` and the chain falls through to the next candidate, ultimately to
+`ensure_temp_binding_for_output`'s fresh-name fallback.
+
+### Validation
+
+- [x] `cargo nextest run -p fission-pcode`: 962 passed, 1 skipped -- including
+      the previously-broken `loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp`.
+- [x] `cargo nextest run --workspace` (excluding the known-slow
+      `selfjit_matches_cranelift` differential tests): 938 passed, 7 failed
+      -- all 7 failures are the exact same pre-existing, unrelated
+      `fission-emulator` tests already established as baseline earlier this
+      session (`diag_alloc_meta`/`diag_livelock`/`diag_expand_stall`/
+      `srd_semantic_replay`/`static_crt_profile` x2), not caused by this
+      change.
+- [x] Concrete repro (`__pei386_runtime_relocator`,
+      `control_flow_gcc-m32_O0.exe`, addr `0x401bb0`): `edi` violation gone.
+- [x] All temporary attribution tracing (`[BIND_BRANCH]`,
+      `debug_high_variable_id`, `FISSION_AMBIG_TRACE`) removed after use;
+      only the durable guard remains.
+
+### Real-corpus diagnostic re-measurement (dev + adversarial corpus, 48+1
+binaries, ~452 functions)
+
+| Bucket | After Section 9 | After this pass |
+|---|---:|---:|
+| Non-flag violation instances | 137 | **7** |
+| Distinct functions with >=1 non-flag violation | 53 | **6** |
+
+Remaining 7: `xmm0_wh` (2), `rax` (2), `xVar6`/`uVar70`/`rsi` (1 each) --
+scattered, no longer dominated by one branch/register family. The
+`edi`/`esi`/`ecx`/`eax`/`ebx`/`r8`/`r9`/`edx`/`st0`-`st6` clusters that made
+up the bulk of the 137 are gone.

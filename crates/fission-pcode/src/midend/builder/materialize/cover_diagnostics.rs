@@ -154,6 +154,99 @@ impl<'a> PreviewBuilder<'a> {
         };
         high_a != high_b && high_variables_interfere(&self.scalar_ssa, high_a, high_b)
     }
+
+    /// `true` when `candidate` is *already* the rendered name of some other,
+    /// different, interfering `SsaHighVariable` in this function (per
+    /// `materialized_vns`/`explicit_merge_bindings`, the same sources
+    /// `scan_cover_violations` reads) -- i.e. reusing `candidate` for the
+    /// value defined at `(block_idx, op_idx)`/`output` would create a
+    /// `scan_cover_violations`-detectable collision right now. Order-
+    /// dependent by construction (like `cover_proves_distinct_and_interfering`):
+    /// only ever blocks a reuse whose conflicting claim has *already*
+    /// happened, never speculates about bindings not yet made.
+    pub(crate) fn cover_proves_existing_name_claim_interferes(
+        &self,
+        block_idx: usize,
+        op_idx: usize,
+        output: &Varnode,
+        candidate: &str,
+    ) -> bool {
+        let site = LoweringSite { block_idx, op_idx };
+        let Some(high_a) =
+            high_variable_at_output(&self.scalar_ssa, site, &VarnodeKey::from(output))
+        else {
+            return false;
+        };
+        let addr_seq_index = build_addr_seq_index(self.pcode);
+        for (key, name) in &self.materialized_vns {
+            if name != candidate {
+                continue;
+            }
+            let Some(&other_site) = addr_seq_index.get(&(key.def_addr, key.def_seq)) else {
+                continue;
+            };
+            if other_site == site {
+                continue;
+            }
+            let Some(high_b) = high_variable_at_output(&self.scalar_ssa, other_site, &key.varnode)
+            else {
+                continue;
+            };
+            if high_a != high_b && high_variables_interfere(&self.scalar_ssa, high_a, high_b) {
+                return true;
+            }
+        }
+        for ((other_block_idx, key), name) in &self.explicit_merge_bindings {
+            if name != candidate {
+                continue;
+            }
+            let Ok(other_block_idx) = u32::try_from(*other_block_idx) else {
+                continue;
+            };
+            let Some(high_b) = high_variable_at_block_entry(&self.scalar_ssa, other_block_idx, key)
+            else {
+                continue;
+            };
+            if high_a != high_b && high_variables_interfere(&self.scalar_ssa, high_a, high_b) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Live counterpart for name-reuse decisions that bind a value's LHS
+    /// name to whatever storage-identical name is live at *another* block's
+    /// entry (loop-carried / live-register merge bindings), rather than to
+    /// one specific same-block prior definition. `true` only when the SSA
+    /// Cover analysis positively proves the value defined at
+    /// `(block_idx, op_idx)`/`output` is a different, interfering
+    /// `SsaHighVariable` from whatever phi is live at `target_block_idx`'s
+    /// entry under the same storage key.
+    pub(crate) fn cover_proves_block_entry_reuse_unsafe(
+        &self,
+        block_idx: usize,
+        op_idx: usize,
+        output: &Varnode,
+        target_block_idx: usize,
+    ) -> bool {
+        let site = LoweringSite { block_idx, op_idx };
+        let Some(high_a) =
+            high_variable_at_output(&self.scalar_ssa, site, &VarnodeKey::from(output))
+        else {
+            return false;
+        };
+        let Ok(target_block_idx) = u32::try_from(target_block_idx) else {
+            return false;
+        };
+        let Some(high_b) = high_variable_at_block_entry(
+            &self.scalar_ssa,
+            target_block_idx,
+            &VarnodeKey::from(output),
+        ) else {
+            return false;
+        };
+        high_a != high_b && high_variables_interfere(&self.scalar_ssa, high_a, high_b)
+    }
 }
 
 /// Scan every rendered binding name for cases where it was assigned to more
