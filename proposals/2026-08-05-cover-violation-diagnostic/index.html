@@ -1082,13 +1082,52 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#9-recommended-next-step" class="md-nav__link">
+  <a href="#9-real-insertion-path-found-corrective-fix-landed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        9. Recommended next step
+        9. Real insertion path found, corrective fix landed
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="9. Real insertion path found, corrective fix landed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#real-corpus-diagnostic-re-measurement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-corpus diagnostic re-measurement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#real-corpus-type_match-semantic_score-measurement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-corpus type_match / semantic_score measurement
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1338,17 +1377,129 @@ path shares state with it.</p>
 methods removed from <code>cover_diagnostics.rs</code>) rather than ship inert code.
 What remains landed is only the verified diagnostic and its
 same-instruction-exemption refinement (Section 5).</p>
-<h2 id="9-recommended-next-step">9. Recommended next step<a class="headerlink" href="#9-recommended-next-step" title="Permanent link">&para;</a></h2>
-<p>Before attempting another live guard: instrument
-<code>ensure_temp_binding_for_output</code>'s <em>entry</em> (not just its generic-name
-fallback) to log every call, cache hit or miss, and cross-reference against
-every key that ends up in <code>materialized_vns</code> for one traced function
-(<code>apply_binop</code> in <code>advanced_patterns_gcc-m32_O0.exe</code> at <code>0x4014dd</code> is a
-known, minimal repro -- 3 near-identical function-pointer-table lookups,
-one of which produces the untraceable <code>uVar14</code> collision at
-<code>def_addr=0x4014fd def_seq=42</code>). Find the actual write path for that key
-before designing a guard against it; the two candidate call sites this
-proposal guarded were, empirically, not it.</p>
+<h2 id="9-real-insertion-path-found-corrective-fix-landed">9. Real insertion path found, corrective fix landed<a class="headerlink" href="#9-real-insertion-path-found-corrective-fix-landed" title="Permanent link">&para;</a></h2>
+<p>Following the recommended next step: a proper multi-line-aware regex scan
+(<code>materialized_vns\s*\.\s*insert\s*\(</code> over the whole crate, catching
+<code>.insert(</code> calls split across lines that the earlier single-line grep in
+Section 8 missed) found <strong>three</strong> insertion sites, not one --
+<code>ensure_temp_binding_for_output</code> (mod.rs), <code>bind_materialized_output_to_fresh_temp</code>
+(mod.rs, always-fresh, no cache check), and
+<code>bind_materialized_output_to_existing_name</code> (loop_carried/mod.rs, binds an
+op directly to a caller-supplied <em>existing</em> name string with <strong>no</strong>
+freshness or collision check at all).</p>
+<p>Tagging <code>bind_materialized_output_to_existing_name</code>'s ~9 call sites (the
+big <code>if let / else if let</code> chain in <code>materialize/mod.rs</code> around line 1000
+choosing which name-reuse heuristic applies) and re-tracing <code>apply_binop</code>
+found the exact culprit: <code>same_block_prior_register_binding_name</code> -&gt;
+<code>prove_same_block_register_join</code>. This heuristic exists for cmov-style
+same-block register redefinition chains (a default value, then a
+conditional override -- legitimately one logical value). Its guard
+(<code>output_has_consumed_interval_before_redefinition</code>) checks whether the
+<em>current</em> (new) definition is itself used-then-redefined later in the
+block, but does <strong>not</strong> check anything about the relationship between the
+current definition and the <em>prior</em> one it's about to reuse the name of.
+For <code>apply_binop</code>'s three sequential, independent lookup-table reads (each
+passing through <code>EAX</code> for an unrelated purpose), the last one has no
+further redefinition after it in the block, so the guard never fires, and
+it silently inherits <code>uVar14</code> from an earlier, semantically unrelated
+<code>EAX</code> definition.</p>
+<p><strong>Fix</strong>: added <code>PreviewBuilder::cover_proves_distinct_and_interfering</code>
+(<code>cover_diagnostics.rs</code>) -- the live counterpart of <code>scan_cover_violations</code>'s
+core test, resolving both definitions' <code>SsaHighVariableId</code> via the same
+already-computed Cover data and returning <code>true</code> only when the SSA model
+positively proves them distinct and interfering (permissive on missing
+data, so it only ever blocks what it can prove, never blocks on
+uncertainty). Wired into <code>prove_same_block_register_join</code>'s backward search:
+skip a candidate proven to interfere and keep looking further back, exactly
+mirroring <code>mergeTest</code>'s "this merge doesn't happen" (not an error).</p>
+<h3 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[x] <code>cargo nextest run -p fission-pcode</code>: 962 passed, 1 skipped (no
+      change -- including all existing <code>same_block_prior_register_binding_name</code>
+      / cmov-chain tests).</li>
+<li>[x] <code>cargo nextest run --workspace</code>: no regression in <code>fission-pcode</code> or
+      any crate depending on it; two <code>fission-emulator</code> JIT-differential
+      tests timed out under concurrent load from this session's own
+      Docker/benchmark runs (that crate has no dependency in the other
+      direction -- <code>fission-pcode</code> does not depend on <code>fission-emulator</code> --
+      and the same tests pass reliably at baseline; not attributed to this
+      change).</li>
+</ul>
+<h3 id="real-corpus-diagnostic-re-measurement">Real-corpus diagnostic re-measurement<a class="headerlink" href="#real-corpus-diagnostic-re-measurement" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th style="text-align: right;">Before this fix</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Non-flag violation instances</td>
+<td style="text-align: right;">822</td>
+<td style="text-align: right;"><strong>137</strong></td>
+</tr>
+<tr>
+<td>Distinct functions with &gt;=1 non-flag violation</td>
+<td style="text-align: right;">215</td>
+<td style="text-align: right;"><strong>53</strong></td>
+</tr>
+<tr>
+<td><code>xVar*</code>/<code>uVar*</code> instances specifically</td>
+<td style="text-align: right;">608</td>
+<td style="text-align: right;"><strong>25</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="real-corpus-type_match-semantic_score-measurement">Real-corpus type_match / semantic_score measurement<a class="headerlink" href="#real-corpus-type_match-semantic_score-measurement" title="Permanent link">&para;</a></h3>
+<p>Isolated before/after on the exact same corpus and profile (this fix only,
+<code>fission-benchmark/scripts/compare_runs.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Before</th>
+<th style="text-align: right;">After</th>
+<th style="text-align: right;">Delta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type_match</code></td>
+<td style="text-align: right;">0.4425</td>
+<td style="text-align: right;">0.4456</td>
+<td style="text-align: right;"><strong>+0.0031</strong></td>
+</tr>
+<tr>
+<td><code>semantic_score</code></td>
+<td style="text-align: right;">0.5044</td>
+<td style="text-align: right;">0.5131</td>
+<td style="text-align: right;"><strong>+0.0087</strong></td>
+</tr>
+<tr>
+<td><code>ok</code> rows</td>
+<td style="text-align: right;">182</td>
+<td style="text-align: right;">185</td>
+<td style="text-align: right;"><strong>+3</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Row-level: 5 fixed (<code>accumulate_pairs</code>/<code>find_pair_value</code>/<code>kv_lookup</code>
+gcc-m32 -O0 <code>runtime_error</code>-&gt;<code>ok</code>; <code>reverse_string</code> gcc-m32 -O0 and
+<code>sum_array</code> gcc -O2 <code>assertion_fail</code>-&gt;<code>ok</code>), 2 regressed (<code>clamp</code> gcc-m32
+-O2, <code>power</code> clang -O2, both <code>ok</code>-&gt;<code>assertion_fail</code>). Net positive but not
+side-effect-free -- reported in full rather than only the favorable
+direction.</p>
+<p><strong>Bottom line</strong>: the P0 gap ("Cover 기반 HighVariable 병합... 미완성") is
+now genuinely wired from analysis into a live decompiler decision, with a
+real (if modest) measured improvement and an honest accounting of the two
+regressions it introduced. The <code>edi</code>/<code>ebx</code>/<code>rax</code>-family hardware-register
+violations (44/2/7 of the remaining 137) and the <code>st*</code>/x87 family (36) were
+deliberately left untouched -- they route through different heuristics
+(<code>full_width_primary_return_surface_name</code>, <code>primary_return_live_out_name</code>,
+cross-block <code>merge_lhs_name</code>) not covered by this fix, and are the natural
+next slice.</p>
 
 
 
