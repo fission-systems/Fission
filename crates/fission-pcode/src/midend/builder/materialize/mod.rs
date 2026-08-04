@@ -1,6 +1,7 @@
 use super::*;
 
 mod contracts;
+mod cover_diagnostics;
 mod cross_block;
 mod incremental;
 mod loop_carried;

@@ -407,6 +407,22 @@ impl<'a> PreviewBuilder<'a> {
 
         self.trace_materialize_owner_repartition_summary();
 
+        if preview_builder_diag_enabled() {
+            let violations = self.scan_cover_violations();
+            if !violations.is_empty() {
+                eprintln!(
+                    "[DIAG] cover_violations fn={name} addr=0x{address:x} count={}",
+                    violations.len()
+                );
+                for violation in &violations {
+                    eprintln!(
+                        "[DIAG] cover_violation name={} high_a={} high_b={}",
+                        violation.name, violation.high_a.0, violation.high_b.0
+                    );
+                }
+            }
+        }
+
         if temp_name_trace_enabled() {
             TEMP_NAME_TRACE.with(|t| {
                 let mut trace = t.borrow_mut();
