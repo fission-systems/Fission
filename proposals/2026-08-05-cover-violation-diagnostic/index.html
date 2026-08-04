@@ -1131,6 +1131,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#10-second-pass-generalizing-the-guard-to-the-remaining-name-reuse-branches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Second pass: generalizing the guard to the remaining name-reuse branches
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Second pass: generalizing the guard to the remaining name-reuse branches">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#real-corpus-diagnostic-re-measurement-dev-adversarial-corpus-481" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-corpus diagnostic re-measurement (dev + adversarial corpus, 48+1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1500,6 +1539,108 @@ deliberately left untouched -- they route through different heuristics
 (<code>full_width_primary_return_surface_name</code>, <code>primary_return_live_out_name</code>,
 cross-block <code>merge_lhs_name</code>) not covered by this fix, and are the natural
 next slice.</p>
+<h2 id="10-second-pass-generalizing-the-guard-to-the-remaining-name-reuse-branches">10. Second pass: generalizing the guard to the remaining name-reuse branches<a class="headerlink" href="#10-second-pass-generalizing-the-guard-to-the-remaining-name-reuse-branches" title="Permanent link">&para;</a></h2>
+<p><code>materialize/mod.rs</code>'s output-binding chain has 8 branches that call
+<code>bind_materialized_output_to_existing_name</code> with a name computed by their
+own reachability proof (<code>loop_carried_lhs_name</code>, <code>direct_successor_merge_lhs_name</code>,
+<code>merge_lhs_name</code>, <code>live_register_lhs_name_for_partial_gpr_join_family</code>,
+<code>live_register_lhs_name_for_passthrough_join_store_producer</code>,
+<code>live_register_lhs_name_for_safe_missing_merge</code>,
+<code>full_width_primary_return_surface_name</code>, <code>same_block_prior_register_binding_name</code>
+(already guarded), <code>primary_return_live_out_name</code>). Section 9 only guarded
+one. Attribution tracing (a temporary <code>[BIND_BRANCH]</code> eprintln tagging each
+branch plus its resolved <code>SsaHighVariableId</code>, removed after use) against the
+real corpus's remaining <code>edi</code> violation (<code>__pei386_runtime_relocator</code>,
+<code>control_flow_gcc-m32_O0.exe</code>) traced the true mechanism precisely: one
+<code>edi</code> definition (<code>HighVariable(546)</code>) got the raw name via
+<code>ensure_temp_binding_for_output</code>'s already-existing "reuse the hardware
+register name if <code>!self.temps.contains_key(&amp;candidate)</code>" fallback (line
+~703 in <code>builder/mod.rs</code>, pre-existing, not part of this session's earlier
+fix) -- purely an accident of block-visitation order, since it ran <em>before</em>
+any of the other branches touched <code>edi</code>. A second, unrelated <code>edi</code>
+definition (<code>HighVariable(146)</code>, a genuine loop-carried induction value)
+then claimed the same raw name later via <code>loop_carried_lhs_name</code> and
+<code>live_register_lhs_name_for_safe_missing_merge</code>, with neither branch ever
+checking whether <code>edi</code> was already spoken for by an interfering value.</p>
+<p><strong>First attempt (reverted)</strong>: gated <code>ensure_temp_binding_for_output</code>'s raw-
+name fallback with a whole-function-scoped
+<code>storage_key_is_cover_ambiguous</code> check (any 2+ interfering <code>SsaHighVariable</code>s
+ever sharing this storage key anywhere in the function -&gt; refuse the raw
+name for anyone). This fixed the <code>edi</code> case but broke
+<code>loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp</code>
+(caught by <code>cargo nextest run -p fission-pcode</code>, confirmed as a real
+regression by re-running on the pre-session baseline commit). Root cause:
+this check is too coarse. A legitimate <code>Copy ecx &lt;- eax</code> inside a loop body
+speculatively unions <code>ecx</code>'s SSA value into <code>eax</code>'s (much larger,
+loop-spanning) <code>HighVariable</code> per <code>build_out_of_ssa_facts</code>'s own Copy-chain
+merge rule -- correct, since after that copy <code>ecx</code> and <code>eax</code> really do hold
+the same value. But <code>ecx</code>'s storage key is <em>also</em> independently touched by
+an unrelated same-block redefinition (<code>ecx = ecx &amp; 1</code>) that never actually
+asks for the raw <code>ecx</code> name (it gets a normal synthetic name via a totally
+different path). The whole-function "any interfering pair anywhere"
+check has no way to know the second value was never going to collide in
+practice, and blocked a safe case. Reverted in favor of an order-dependent,
+already-happened-collisions-only check, matching Section 9's guard
+philosophy exactly rather than trying to prove safety in the abstract.</p>
+<p><strong>Real fix</strong>: <code>PreviewBuilder::cover_proves_existing_name_claim_interferes</code>
+(<code>cover_diagnostics.rs</code>) -- given a candidate name, scans
+<code>materialized_vns</code>/<code>explicit_merge_bindings</code> (the same sources
+<code>scan_cover_violations</code> reads) for any <em>already-bound</em> entry under that
+exact name whose <code>SsaHighVariableId</code> is different from and interferes with
+the value currently being bound. Only ever blocks a collision that has
+concretely already happened, never speculates about bindings not yet made
+-- the same permissive-on-uncertainty contract as
+<code>cover_proves_distinct_and_interfering</code>. Wired as a <code>.filter(...)</code> gate on
+each of the 7 remaining name-reuse branches (all except
+<code>same_block_prior_register_binding_name</code>, already covered by Section 9's
+narrower same-block check): when a branch's candidate name is already
+claimed by an interfering value, that branch is treated as if it returned
+<code>None</code> and the chain falls through to the next candidate, ultimately to
+<code>ensure_temp_binding_for_output</code>'s fresh-name fallback.</p>
+<h3 id="validation_1">Validation<a class="headerlink" href="#validation_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[x] <code>cargo nextest run -p fission-pcode</code>: 962 passed, 1 skipped -- including
+      the previously-broken <code>loop_carried_stack_param_seed_preferred_over_anonymous_merge_temp</code>.</li>
+<li>[x] <code>cargo nextest run --workspace</code> (excluding the known-slow
+      <code>selfjit_matches_cranelift</code> differential tests): 938 passed, 7 failed
+      -- all 7 failures are the exact same pre-existing, unrelated
+      <code>fission-emulator</code> tests already established as baseline earlier this
+      session (<code>diag_alloc_meta</code>/<code>diag_livelock</code>/<code>diag_expand_stall</code>/
+      <code>srd_semantic_replay</code>/<code>static_crt_profile</code> x2), not caused by this
+      change.</li>
+<li>[x] Concrete repro (<code>__pei386_runtime_relocator</code>,
+      <code>control_flow_gcc-m32_O0.exe</code>, addr <code>0x401bb0</code>): <code>edi</code> violation gone.</li>
+<li>[x] All temporary attribution tracing (<code>[BIND_BRANCH]</code>,
+      <code>debug_high_variable_id</code>, <code>FISSION_AMBIG_TRACE</code>) removed after use;
+      only the durable guard remains.</li>
+</ul>
+<h3 id="real-corpus-diagnostic-re-measurement-dev-adversarial-corpus-481">Real-corpus diagnostic re-measurement (dev + adversarial corpus, 48+1<a class="headerlink" href="#real-corpus-diagnostic-re-measurement-dev-adversarial-corpus-481" title="Permanent link">&para;</a></h3>
+<p>binaries, ~452 functions)</p>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th style="text-align: right;">After Section 9</th>
+<th style="text-align: right;">After this pass</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Non-flag violation instances</td>
+<td style="text-align: right;">137</td>
+<td style="text-align: right;"><strong>7</strong></td>
+</tr>
+<tr>
+<td>Distinct functions with &gt;=1 non-flag violation</td>
+<td style="text-align: right;">53</td>
+<td style="text-align: right;"><strong>6</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Remaining 7: <code>xmm0_wh</code> (2), <code>rax</code> (2), <code>xVar6</code>/<code>uVar70</code>/<code>rsi</code> (1 each) --
+scattered, no longer dominated by one branch/register family. The
+<code>edi</code>/<code>esi</code>/<code>ecx</code>/<code>eax</code>/<code>ebx</code>/<code>r8</code>/<code>r9</code>/<code>edx</code>/<code>st0</code>-<code>st6</code> clusters that made
+up the bulk of the 137 are gone.</p>
 
 
 
