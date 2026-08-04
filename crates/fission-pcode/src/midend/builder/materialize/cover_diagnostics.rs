@@ -118,6 +118,42 @@ impl<'a> PreviewBuilder<'a> {
             &self.explicit_merge_bindings,
         )
     }
+
+    /// Live counterpart of `scan_cover_violations`'s core test, for gating a
+    /// same-block name-reuse decision before it happens (rather than
+    /// reporting it after the fact). `true` only when the SSA Cover
+    /// analysis positively proves the values defined at
+    /// `(block_idx, op_idx_a)`/`output_a` and `(block_idx, op_idx_b)`/
+    /// `output_b` are different, interfering `SsaHighVariable`s (Ghidra's
+    /// `HighIntersectTest` failure mode). `false` whenever either side
+    /// can't be resolved -- this only ever blocks a reuse the SSA model can
+    /// positively disprove, never blocks on missing/ambiguous data.
+    pub(crate) fn cover_proves_distinct_and_interfering(
+        &self,
+        block_idx: usize,
+        op_idx_a: usize,
+        output_a: &Varnode,
+        op_idx_b: usize,
+        output_b: &Varnode,
+    ) -> bool {
+        let site_a = LoweringSite {
+            block_idx,
+            op_idx: op_idx_a,
+        };
+        let site_b = LoweringSite {
+            block_idx,
+            op_idx: op_idx_b,
+        };
+        let Some(high_a) = high_variable_at_output(&self.scalar_ssa, site_a, &VarnodeKey::from(output_a))
+        else {
+            return false;
+        };
+        let Some(high_b) = high_variable_at_output(&self.scalar_ssa, site_b, &VarnodeKey::from(output_b))
+        else {
+            return false;
+        };
+        high_a != high_b && high_variables_interfere(&self.scalar_ssa, high_a, high_b)
+    }
 }
 
 /// Scan every rendered binding name for cases where it was assigned to more

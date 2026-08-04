@@ -203,15 +203,90 @@ methods removed from `cover_diagnostics.rs`) rather than ship inert code.
 What remains landed is only the verified diagnostic and its
 same-instruction-exemption refinement (Section 5).
 
-## 9. Recommended next step
+## 9. Real insertion path found, corrective fix landed
 
-Before attempting another live guard: instrument
-`ensure_temp_binding_for_output`'s *entry* (not just its generic-name
-fallback) to log every call, cache hit or miss, and cross-reference against
-every key that ends up in `materialized_vns` for one traced function
-(`apply_binop` in `advanced_patterns_gcc-m32_O0.exe` at `0x4014dd` is a
-known, minimal repro -- 3 near-identical function-pointer-table lookups,
-one of which produces the untraceable `uVar14` collision at
-`def_addr=0x4014fd def_seq=42`). Find the actual write path for that key
-before designing a guard against it; the two candidate call sites this
-proposal guarded were, empirically, not it.
+Following the recommended next step: a proper multi-line-aware regex scan
+(`materialized_vns\s*\.\s*insert\s*\(` over the whole crate, catching
+`.insert(` calls split across lines that the earlier single-line grep in
+Section 8 missed) found **three** insertion sites, not one --
+`ensure_temp_binding_for_output` (mod.rs), `bind_materialized_output_to_fresh_temp`
+(mod.rs, always-fresh, no cache check), and
+`bind_materialized_output_to_existing_name` (loop_carried/mod.rs, binds an
+op directly to a caller-supplied *existing* name string with **no**
+freshness or collision check at all).
+
+Tagging `bind_materialized_output_to_existing_name`'s ~9 call sites (the
+big `if let / else if let` chain in `materialize/mod.rs` around line 1000
+choosing which name-reuse heuristic applies) and re-tracing `apply_binop`
+found the exact culprit: `same_block_prior_register_binding_name` ->
+`prove_same_block_register_join`. This heuristic exists for cmov-style
+same-block register redefinition chains (a default value, then a
+conditional override -- legitimately one logical value). Its guard
+(`output_has_consumed_interval_before_redefinition`) checks whether the
+*current* (new) definition is itself used-then-redefined later in the
+block, but does **not** check anything about the relationship between the
+current definition and the *prior* one it's about to reuse the name of.
+For `apply_binop`'s three sequential, independent lookup-table reads (each
+passing through `EAX` for an unrelated purpose), the last one has no
+further redefinition after it in the block, so the guard never fires, and
+it silently inherits `uVar14` from an earlier, semantically unrelated
+`EAX` definition.
+
+**Fix**: added `PreviewBuilder::cover_proves_distinct_and_interfering`
+(`cover_diagnostics.rs`) -- the live counterpart of `scan_cover_violations`'s
+core test, resolving both definitions' `SsaHighVariableId` via the same
+already-computed Cover data and returning `true` only when the SSA model
+positively proves them distinct and interfering (permissive on missing
+data, so it only ever blocks what it can prove, never blocks on
+uncertainty). Wired into `prove_same_block_register_join`'s backward search:
+skip a candidate proven to interfere and keep looking further back, exactly
+mirroring `mergeTest`'s "this merge doesn't happen" (not an error).
+
+### Validation
+
+- [x] `cargo nextest run -p fission-pcode`: 962 passed, 1 skipped (no
+      change -- including all existing `same_block_prior_register_binding_name`
+      / cmov-chain tests).
+- [x] `cargo nextest run --workspace`: no regression in `fission-pcode` or
+      any crate depending on it; two `fission-emulator` JIT-differential
+      tests timed out under concurrent load from this session's own
+      Docker/benchmark runs (that crate has no dependency in the other
+      direction -- `fission-pcode` does not depend on `fission-emulator` --
+      and the same tests pass reliably at baseline; not attributed to this
+      change).
+
+### Real-corpus diagnostic re-measurement
+
+| Bucket | Before this fix | After |
+|---|---:|---:|
+| Non-flag violation instances | 822 | **137** |
+| Distinct functions with >=1 non-flag violation | 215 | **53** |
+| `xVar*`/`uVar*` instances specifically | 608 | **25** |
+
+### Real-corpus type_match / semantic_score measurement
+
+Isolated before/after on the exact same corpus and profile (this fix only,
+`fission-benchmark/scripts/compare_runs.py`):
+
+| Metric | Before | After | Delta |
+|---|---:|---:|---:|
+| `type_match` | 0.4425 | 0.4456 | **+0.0031** |
+| `semantic_score` | 0.5044 | 0.5131 | **+0.0087** |
+| `ok` rows | 182 | 185 | **+3** |
+
+Row-level: 5 fixed (`accumulate_pairs`/`find_pair_value`/`kv_lookup`
+gcc-m32 -O0 `runtime_error`->`ok`; `reverse_string` gcc-m32 -O0 and
+`sum_array` gcc -O2 `assertion_fail`->`ok`), 2 regressed (`clamp` gcc-m32
+-O2, `power` clang -O2, both `ok`->`assertion_fail`). Net positive but not
+side-effect-free -- reported in full rather than only the favorable
+direction.
+
+**Bottom line**: the P0 gap ("Cover 기반 HighVariable 병합... 미완성") is
+now genuinely wired from analysis into a live decompiler decision, with a
+real (if modest) measured improvement and an honest accounting of the two
+regressions it introduced. The `edi`/`ebx`/`rax`-family hardware-register
+violations (44/2/7 of the remaining 137) and the `st*`/x87 family (36) were
+deliberately left untouched -- they route through different heuristics
+(`full_width_primary_return_surface_name`, `primary_return_live_out_name`,
+cross-block `merge_lhs_name`) not covered by this fix, and are the natural
+next slice.

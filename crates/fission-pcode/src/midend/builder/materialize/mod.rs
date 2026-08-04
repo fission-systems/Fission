@@ -1272,6 +1272,7 @@ impl<'a> PreviewBuilder<'a> {
         {
             return None;
         }
+        let block_idx = self.lowering_block_index(block);
         let output_key = VarnodeKey::from(output);
         for prior_idx in (0..op_idx).rev() {
             let prior_op = &block.ops[prior_idx];
@@ -1283,6 +1284,23 @@ impl<'a> PreviewBuilder<'a> {
                 && !Self::varnode_key_may_alias_output(&prior_key, &output_key)
                 && !self.varnode_aliases_value(prior_out, output)
             {
+                continue;
+            }
+            // This heuristic exists for cmov-style same-block register
+            // redefinition chains (a default value, then a conditional
+            // override -- both representing one logical value). Without a
+            // Cover check it also fires when a register is simply reused as
+            // an unrelated scratch value later in the same block (e.g.
+            // three sequential, independent lookup-table reads that each
+            // pass through EAX for a different purpose). Ghidra's Cover
+            // system would never merge those into one HighVariable; skip
+            // this candidate the same way when the already-computed SSA
+            // Cover positively proves the two definitions' live ranges
+            // interfere, and keep searching further back for one that
+            // doesn't.
+            if self.cover_proves_distinct_and_interfering(
+                block_idx, op_idx, output, prior_idx, prior_out,
+            ) {
                 continue;
             }
             let name = self
