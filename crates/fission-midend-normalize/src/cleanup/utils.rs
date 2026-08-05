@@ -643,3 +643,62 @@ pub(super) fn collect_stmt_referenced_label_counts(
         | PreHirStmt::Continue => {}
     }
 }
+
+/// All `Label` names defined anywhere within `stmts`, including inside
+/// nested compound bodies (`If`/`While`/`For`/`DoWhile`/`Switch`/`Block`) --
+/// not just ones that are direct elements of `stmts` itself. Needed wherever
+/// a caller must find every label a segment defines to check whether any of
+/// them is still referenced from outside that segment: a `Label` nested
+/// inside e.g. a `While` body is just as real a jump target as a top-level
+/// one, and a shallow scan silently missing it drops the label -- and the
+/// loop/branch that still `Goto`s to it dangles.
+pub(super) fn collect_defined_labels(stmts: &[PreHirStmt]) -> Vec<String> {
+    let mut labels = Vec::new();
+    for stmt in stmts {
+        collect_stmt_defined_labels(stmt, &mut labels);
+    }
+    labels
+}
+
+fn collect_stmt_defined_labels(stmt: &PreHirStmt, labels: &mut Vec<String>) {
+    match stmt {
+        PreHirStmt::Label(l) => labels.push(l.clone()),
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => {
+            for stmt in body {
+                collect_stmt_defined_labels(stmt, labels);
+            }
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                for stmt in &case.body {
+                    collect_stmt_defined_labels(stmt, labels);
+                }
+            }
+            for stmt in default {
+                collect_stmt_defined_labels(stmt, labels);
+            }
+        }
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for stmt in then_body {
+                collect_stmt_defined_labels(stmt, labels);
+            }
+            for stmt in else_body {
+                collect_stmt_defined_labels(stmt, labels);
+            }
+        }
+        PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
+    }
+}

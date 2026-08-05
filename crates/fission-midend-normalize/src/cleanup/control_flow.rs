@@ -679,17 +679,21 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<PreHirStmt>) -> bool {
             // personality routine unwinds into at runtime, just one
             // `ref_counts`/`collect_referenced_label_counts` (both purely
             // Goto-based) have no way to see.
-            let external_ref_found = segment.iter().any(|s| {
-                if let PreHirStmt::Label(l) = s {
-                    if PROTECTED_LSDA_LABELS.with(|protected| protected.borrow().contains(l)) {
-                        return true;
-                    }
-                    let total_refs = ref_counts.get(l).copied().unwrap_or(0);
-                    let internal_refs = segment_label_refs.get(l).copied().unwrap_or(0);
-                    total_refs > internal_refs
-                } else {
-                    false
+            //
+            // `collect_defined_labels` walks into nested compound bodies
+            // (a label inside the `While`/`For`/`If` this segment contains
+            // is just as real a target as one at this level) -- a shallow
+            // `segment.iter()` scan for direct `Label` elements only sees
+            // top-level labels and silently drains ones nested one level
+            // down that a surviving `Goto` outside the segment still
+            // targets, leaving that `Goto` dangling.
+            let external_ref_found = collect_defined_labels(segment).iter().any(|l| {
+                if PROTECTED_LSDA_LABELS.with(|protected| protected.borrow().contains(l)) {
+                    return true;
                 }
+                let total_refs = ref_counts.get(l).copied().unwrap_or(0);
+                let internal_refs = segment_label_refs.get(l).copied().unwrap_or(0);
+                total_refs > internal_refs
             });
 
             if external_ref_found {

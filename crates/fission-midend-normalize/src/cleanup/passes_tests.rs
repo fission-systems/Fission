@@ -881,6 +881,44 @@ fn single_pred_label_inline_keeps_protected_lsda_landing_pad_in_dead_zone() {
 }
 
 #[test]
+fn single_pred_label_inline_keeps_dead_zone_with_externally_referenced_nested_label() {
+    // goto "a" is textually referenced exactly once, and "a" is found later,
+    // so the segment in between looks drainable at a glance -- but that
+    // segment is a `While` whose *body* defines "inner", and "inner" is
+    // `goto`'d from outside the segment (after label "a"). Draining the
+    // segment must not happen: it would delete "inner" along with the While
+    // that defines it, leaving the later `Goto("inner")` dangling.
+    let mut stmts = vec![
+        PreHirStmt::Goto("a".to_string()),
+        PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![
+                PreHirStmt::Label("inner".to_string()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(1, int(32)),
+                },
+            ],
+        },
+        PreHirStmt::Label("a".to_string()),
+        PreHirStmt::Goto("inner".to_string()),
+        PreHirStmt::Return(None),
+    ];
+
+    single_pred_label_inline(&mut stmts);
+
+    let defined: std::collections::HashSet<String> =
+        collect_defined_labels(&stmts).into_iter().collect();
+    let referenced = super::utils::collect_referenced_labels(&stmts);
+    for label in &referenced {
+        assert!(
+            defined.contains(label),
+            "goto target {label:?} must still have a matching label after cleanup"
+        );
+    }
+}
+
+#[test]
 fn prune_unused_temp_bindings_removes_dead_preserved_temp() {
     let mut func = PreHirFunction {
         name: "test_preserved_prune".to_string(),
