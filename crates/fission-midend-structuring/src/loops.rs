@@ -1365,6 +1365,19 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
         let Some(start_pos) = sorted_body.iter().position(|&i| i == start_idx) else {
             return Ok(None);
         };
+        // Rotate so the scan begins at the loop head and wraps around to any
+        // body block with a *lower* raw index instead of dropping it. Loop
+        // rotation codegen (routine at GCC -O1+) places the latch test before
+        // the head in the instruction stream -- `jmp head; latch: ...; head:
+        // ...; jcc latch` -- so the latch's block index can be lower than its
+        // own head's even though it executes *after* the head on every real
+        // iteration. A forward-only scan from `start_pos` silently orphaned
+        // that block from this subgraph, which downstream materialized it as
+        // a bogus second definition site for loop-invariant values read at
+        // the head (only one of which was actually reachable, so the other
+        // read them uninitialized).
+        sorted_body.rotate_left(start_pos);
+        let start_pos = 0;
 
         let mut result_stmts: Vec<PreHirStmt> = Vec::new();
         let mut emitted_labels: HashSet<u64> = HashSet::default();

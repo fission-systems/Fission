@@ -667,6 +667,12 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<PreHirStmt>) -> bool {
                 .map(|offset| offset + i + 1);
 
             let Some(j) = label_pos else {
+                if hoist_goto_target_from_guarded_infinite_loop(stmts, i, &goto_label, &ref_counts)
+                {
+                    did_inline = true;
+                    changed = true;
+                    continue;
+                }
                 i += 1;
                 continue;
             };
@@ -701,13 +707,6 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<PreHirStmt>) -> bool {
                 continue;
             }
 
-            eprintln!(
-                "[DEBUG-INLINE] inlining label={} at i={}, j={}, drained_count={}",
-                goto_label,
-                i,
-                j,
-                j - (i + 1)
-            );
             stmts.remove(j);
             if j > i + 1 {
                 stmts.drain(i + 1..j);
@@ -722,4 +721,103 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<PreHirStmt>) -> bool {
         }
     }
     changed
+}
+
+/// `goto L` whose only target is a `Label(L)` buried as the first statement
+/// inside a solitary `while (1) { L: ... }` guarded by a redundant `if
+/// (cond) { ... }` precheck -- GCC -O1+ loop-rotation output routinely
+/// hoists a do-while's own back-edge condition and reuses it as a bogus
+/// entry guard, even when the real entry is this unconditional goto landing
+/// straight inside the loop body. `single_pred_label_inline_flat`'s flat
+/// `Label` scan above only finds a target at this segment's own top level;
+/// here the label is nested two levels down (`If.then_body -> While.body`),
+/// so it falls through to this fallback instead. The same "everything
+/// between the goto and its target is unreachable" argument that justifies
+/// draining the segment above applies to the guard's own condition and dead
+/// `else` arm too: the only way execution reaches *any* part of this `If`
+/// is by jumping straight past its condition into the loop body, so the
+/// condition is never evaluated and the other arm never taken.
+fn hoist_goto_target_from_guarded_infinite_loop(
+    stmts: &mut Vec<PreHirStmt>,
+    goto_idx: usize,
+    goto_label: &str,
+    ref_counts: &HashMap<String, usize>,
+) -> bool {
+    let search_start = goto_idx + 1;
+    let Some(if_pos) = stmts[search_start..]
+        .iter()
+        .position(|s| guarded_infinite_loop_entry_label(s) == Some(goto_label))
+        .map(|offset| offset + search_start)
+    else {
+        return false;
+    };
+
+    let dead_zone = &stmts[search_start..if_pos];
+    let dead_zone_refs = collect_referenced_label_counts(dead_zone);
+    let external_ref_found = collect_defined_labels(dead_zone).iter().any(|l| {
+        if PROTECTED_LSDA_LABELS.with(|protected| protected.borrow().contains(l)) {
+            return true;
+        }
+        let total_refs = ref_counts.get(l).copied().unwrap_or(0);
+        let internal_refs = dead_zone_refs.get(l).copied().unwrap_or(0);
+        total_refs > internal_refs
+    });
+    if external_ref_found {
+        return false;
+    }
+
+    let PreHirStmt::If {
+        then_body,
+        else_body,
+        ..
+    } = stmts.remove(if_pos)
+    else {
+        unreachable!("position matched by guarded_infinite_loop_entry_label above");
+    };
+    let while_stmt = then_body
+        .into_iter()
+        .next()
+        .filter(|s| matches!(s, PreHirStmt::While { .. }))
+        .or_else(|| {
+            else_body
+                .into_iter()
+                .next()
+                .filter(|s| matches!(s, PreHirStmt::While { .. }))
+        })
+        .expect("shape re-checked by guarded_infinite_loop_entry_label above");
+    stmts.drain(search_start..if_pos);
+    stmts[goto_idx] = while_stmt;
+    true
+}
+
+/// If `stmt` is `If { then_body: [While { cond: nonzero const, body }],
+/// else_body: [] }` (or the same with the arms swapped), and `body`'s first
+/// statement is a `Label`, returns that label. `None` for anything else.
+fn guarded_infinite_loop_entry_label(stmt: &PreHirStmt) -> Option<&str> {
+    let PreHirStmt::If {
+        then_body,
+        else_body,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    let solitary_while = match (then_body.as_slice(), else_body.as_slice()) {
+        ([w @ PreHirStmt::While { .. }], []) | ([], [w @ PreHirStmt::While { .. }]) => w,
+        _ => return None,
+    };
+    let PreHirStmt::While {
+        cond: PreHirExpr::Const(value, _),
+        body,
+    } = solitary_while
+    else {
+        return None;
+    };
+    if *value == 0 {
+        return None;
+    }
+    match body.first() {
+        Some(PreHirStmt::Label(l)) => Some(l.as_str()),
+        _ => None,
+    }
 }

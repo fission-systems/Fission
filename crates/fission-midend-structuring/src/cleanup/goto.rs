@@ -197,9 +197,20 @@ fn guard_clause_promotion(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<Pre
                         {
                             // Collect the tail after the label.
                             let tail: Vec<PreHirStmt> = stmts[label_pos + 1..].to_vec();
+                            // `ref_counts == 1` only proves no *textual* Goto/Label
+                            // reference besides ours reaches `L` -- it can't see an
+                            // *implicit* one: a `while (1) { ... break ... }` inside
+                            // `code` (stmts[i+1..label_pos]) falls through to exactly
+                            // this position on `break`, with no goto/label naming `L`
+                            // anywhere. Promoting anyway would silently delete that
+                            // fallthrough's only remaining route to the tail (see the
+                            // `kv_lookup` "read xVar10 uninitialized" class of bug this
+                            // guards against). Require `code` to be provably unable to
+                            // fall through past its own end before consuming the tail.
+                            let code = &stmts[(i + 1)..label_pos];
                             // Only promote if the tail is a simple return or
                             // a short sequence ending with a return (assignments + return).
-                            if is_promotable_guard_tail(&tail) {
+                            if !stmts_may_fall_through(code) && is_promotable_guard_tail(&tail) {
                                 *changed = true;
                                 out.push(PreHirStmt::If {
                                     cond: cond.clone(),
@@ -222,6 +233,66 @@ fn guard_clause_promotion(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<Pre
         i += 1;
     }
     out
+}
+
+/// Conservative "can control reach past the end of `stmts`" check. Used to
+/// verify `code` (the statements between a promoted `if (cond) goto L` and
+/// `L` itself) cannot ALSO reach `L` by falling off its own end -- the only
+/// case `guard_clause_promotion`'s `ref_counts[L] == 1` textual check can't
+/// see, since a loop's own `break` reaches the position right after the
+/// loop with no `Goto`/`Label` naming it at all.
+///
+/// Errs toward `true` (assume it may fall through, so promotion is
+/// declined) for any shape not proven otherwise -- a missed optimization is
+/// far cheaper than silently deleting a live return path.
+fn stmts_may_fall_through(stmts: &[PreHirStmt]) -> bool {
+    match stmts.last() {
+        None => false,
+        Some(stmt) => stmt_may_fall_through(stmt),
+    }
+}
+
+fn stmt_may_fall_through(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Return(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+            false
+        }
+        PreHirStmt::Block(body) => stmts_may_fall_through(body),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            else_body.is_empty()
+                || stmts_may_fall_through(then_body)
+                || stmts_may_fall_through(else_body)
+        }
+        PreHirStmt::While {
+            cond: PreHirExpr::Const(v, _),
+            body,
+        } if *v != 0 => loop_body_has_reachable_break(body),
+        // Anything else (a non-infinite `While`, `DoWhile`, `For`, `Switch`,
+        // or a plain statement) is conservatively assumed fall-through.
+        _ => true,
+    }
+}
+
+/// `true` if `stmts` contains a `Break` reachable from this loop's own body
+/// -- i.e. not shadowed by a nested loop or `Switch`, which would own that
+/// `Break` instead.
+fn loop_body_has_reachable_break(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Break => true,
+        PreHirStmt::Block(body) => loop_body_has_reachable_break(body),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => loop_body_has_reachable_break(then_body) || loop_body_has_reachable_break(else_body),
+        PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => false,
+        PreHirStmt::Switch { .. } => false,
+        _ => false,
+    })
 }
 
 /// Returns true if the tail is suitable for guard clause inlining.
