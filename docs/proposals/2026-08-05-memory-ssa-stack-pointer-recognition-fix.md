@@ -229,3 +229,90 @@ and more tractable than "find real bugs": isolate why one specific memory
 value's phi-operand edge in `matrix_multiply` didn't get captured, fix that,
 then re-run this same corpus measurement to see how much of the 908 was
 that one systematic gap versus real slot-reuse cases.
+
+## 8. Third pass: the phi-connectivity gap was `write_effect`, not the union-find
+
+Section 7 guessed the gap was in `build_memory_ssa`'s phi-operand
+population. Direct tracing (`FISSION_MEMHIGH_TRACE2`, printing every
+`memory_values` entry's storage/definition alongside its `dynamic_guards`
+entry when applicable, removed after use) proved that guess wrong and found
+the real mechanism.
+
+`matrix_multiply`'s offset `-44` (`local_2c`) has 6 memory values: an
+`Input`, two `Phi`s (blocks 1 and 3, correctly forced-union-chained via
+`union_values` into one 5-member group -- the phi machinery was never
+broken), and three `Operation`-defined values. Two of those three
+(`SsaOpSite{block:2,op:2}` and `{block:7,op:59}`) have
+`guard=Some((Some(Stack), Exact, Store))` -- genuine, precisely-resolved
+stack writes, correctly included in the phi-chain group. The third,
+the one causing the false positive
+(`SsaOpSite{block:7,op:42}`), has `guard=Some((None, Unknown, Store))`.
+Cross-referencing the raw p-code: this op is `local_18[computed_index] =
+xmm0_da` -- a store through the function's *output array parameter*,
+nowhere near offset `-44`. Its pointer chain (rooted in a parameter
+register, not the stack pointer) correctly fails to resolve to any region
+at all in `resolve_pointer_value`.
+
+**Root cause**: `MemoryLayout::write_effect` (scalar_ssa.rs), when a
+guard's `region` is `None`, conservatively assumed the write "might touch
+any storage sharing the same raw p-code space id" -- which, because
+`SsaMemoryStorageKey`'s `space_id` is just the p-code memory-space number
+(shared by *all* pointer-based accesses, stack or heap, in this SLEIGH
+model) and not itself region-discriminating, silently included every
+*Stack* partition too. Every write through a pointer that doesn't
+provably trace back to the stack pointer (the overwhelmingly common case:
+any store into a parameter/heap/array pointer) fabricated a phantom
+"definition" of *every* promoted stack slot in the function. Since a
+phantom value has no real value-flow relationship to anything, it never
+ends up as a phi operand, and sits alone in its own `SsaMemoryHighVariable`
+group with a narrow, spuriously-interfering cover.
+
+**Fix**: narrowed the `None`-region branch to exclude `SsaMemoryRegion::Stack`
+partitions. Justification: given this session's earlier fix
+(Section 2-3) made `resolve_pointer_value` correctly resolve *every*
+stack-pointer-derived chain to `Some(Stack)`, a `None` result is now a
+*positive* proof the pointer's def-use chain does not trace back to the
+stack pointer -- and a non-escaping local (never had its address taken)
+cannot be written through an unrelated pointer under normal C/C++
+semantics. `read_effect` needed no change: it only ever expands through
+`exact_access`, which already requires `SsaGuardRangePrecision::Exact` and
+was never affected by this gap.
+
+### Validation
+
+- [x] `cargo nextest run -p fission-pcode`: 962 passed, 1 skipped.
+- [x] `cargo nextest run --workspace` (excluding `selfjit_matches_cranelift`):
+      only the same pre-existing, unrelated `fission-emulator` baseline
+      failures.
+- [x] Concrete repro (`matrix_multiply`, `memory_layouts_clang_O0.exe`):
+      the `stack_slot_cover_violation` for `local_2c` is gone.
+- [x] Before/after decompile output on a real corpus binary: byte-identical
+      (this subsystem still has no production consumer).
+
+### Real-corpus re-measurement (dev + realworld + holdout + adversarial)
+
+| Bucket | Before this fix | After |
+|---|---:|---:|
+| `stack_slot_cover_violation` instances | 908 | **225** |
+| Distinct functions with >=1 violation | 185 | **113** |
+
+### What's left: a second, separate, larger gap
+
+Tracing the smallest remaining case (`___w64_mingwthr_add_key_dtor`'s
+`home_0`, a register spill slot never address-taken) found a *different*
+mechanism responsible for most of what's left: `write_effect`'s `Call`
+case unconditionally treats every function call as writing to every
+promoted stack slot (`guard.kind == SsaDynamicGuardKind::Call =>
+self.storages().collect()`). This is a deliberate, generally-*correct*
+conservative assumption -- a callee genuinely can write to a caller's
+stack slot if its address escaped into an argument -- but is imprecise for
+the common case of a non-escaping local sitting near an unrelated call
+(`calloc`/`EnterCriticalSection`/`LeaveCriticalSection` in the traced
+case, none of which receive `home_0`'s address). Closing this gap properly
+needs real escape analysis (does any instruction take a given slot's
+address and pass it to a call) that does not exist anywhere in this
+memory-promotion-SSA subsystem yet -- a distinctly larger piece of work
+than the two fixes landed this session, called out explicitly rather than
+attempted in the same pass. `scan_stack_slot_cover_violations`'s doc
+comment documents this precisely so a future session doesn't have to
+re-derive it.

@@ -1142,10 +1142,27 @@ impl MemoryLayout {
                 .flatten()
                 .copied()
                 .collect::<Vec<_>>(),
+            // Unresolved region (not "resolved to Ram", genuinely unresolved
+            // -- `resolve_pointer_value` only ever returns `Some(Stack)` for
+            // a chain provably rooted at the stack pointer): exclude Stack
+            // partitions. A pointer whose def-use chain provably does not
+            // trace back to the stack pointer cannot write to a stack local
+            // that never had its address taken (the common case; escaping
+            // locals participate in `crossing_guards` via the call/precision
+            // machinery instead). Without this, every write through an
+            // unrelated parameter/heap pointer (e.g. `out_array[i] = v` next
+            // to an ordinary loop counter) fabricates a phantom write to
+            // *every* promoted stack slot in the function, breaking the
+            // memory-phi chain for that slot's real value (traced via a real
+            // corpus false positive: `matrix_multiply`'s loop counter got a
+            // spurious extra "definition" from an unrelated output-array
+            // store, see `docs/proposals/2026-08-05-memory-ssa-stack-pointer-recognition-fix.md`).
             None => self
                 .partitions
                 .iter()
-                .filter(|((_, candidate_space), _)| *candidate_space == space_id)
+                .filter(|((region, candidate_space), _)| {
+                    *candidate_space == space_id && *region != SsaMemoryRegion::Stack
+                })
                 .flat_map(|(_, storages)| storages.iter().copied())
                 .collect::<Vec<_>>(),
         };

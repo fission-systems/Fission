@@ -90,16 +90,28 @@ impl<'a> PreviewBuilder<'a> {
     /// variables reusing one offset with disjoint lifetimes" -- the latter
     /// is what `self.locals`' flat, identity-blind naming cannot detect.
     ///
-    /// KNOWN IMPRECISE as of this writing: real-corpus tracing (a single
-    /// `stack_slot_cover_violation` case, `matrix_multiply`'s innermost loop
-    /// counter) found the flagged pair was a false positive -- the rendered
-    /// pseudocode's loop counter is unambiguous, but one short-lived memory
-    /// value at the same offset wasn't transitively unioned into the loop
-    /// variable's phi-chain group (`build_memory_out_of_ssa_facts`'s
-    /// forced-union-only approach under-connects some real phi relationships
-    /// for deeply nested loops -- root cause not yet isolated). Do **not**
-    /// treat this scan's raw count as a bug count, and do not gate any
-    /// materialize decision on it, until that gap is understood and fixed.
+    /// A first real-corpus false-positive source was found and fixed
+    /// (`MemoryLayout::write_effect`'s unresolved-region fallback was
+    /// conservatively including Stack partitions -- an unrelated write
+    /// through a parameter/heap pointer that couldn't be resolved to any
+    /// region fabricated a phantom "definition" of every promoted stack
+    /// slot). Real-corpus violation count dropped 908 -> 225 after that fix.
+    ///
+    /// STILL KNOWN IMPRECISE: the remaining count is dominated by a
+    /// *different*, separate mechanism -- `write_effect`'s `Call` case
+    /// unconditionally treats every function call as writing to every
+    /// promoted stack slot (deliberately conservative and, in general,
+    /// correct: a callee genuinely can write to a caller's stack slot if
+    /// its address escaped into an argument). For a non-escaping local
+    /// (the common case -- a spill slot never address-taken, e.g. traced
+    /// `___w64_mingwthr_add_key_dtor`'s `home_0` flagged solely because
+    /// `calloc`/`EnterCriticalSection`/`LeaveCriticalSection` calls exist in
+    /// the function, none of which receive its address), this is also a
+    /// false positive, but fixing it needs real escape analysis (does any
+    /// instruction take this slot's address and pass it to a call) that
+    /// does not exist yet anywhere in this memory-promotion-SSA subsystem.
+    /// Do **not** treat this scan's raw count as a bug count, and do not
+    /// gate any materialize decision on it, until that gap is closed too.
     pub(crate) fn scan_stack_slot_cover_violations(&self) -> Vec<StackSlotCoverViolation> {
         let mut highs_by_offset: std::collections::BTreeMap<i64, Vec<SsaMemoryHighVariableId>> =
             std::collections::BTreeMap::new();
