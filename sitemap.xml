@@ -521,6 +521,10 @@
          <lastmod>2026-08-05</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-08-05-loop-carried-pointer-advance-load-address-conflict/</loc>
+         <lastmod>2026-08-05</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-08-05-memory-ssa-stack-pointer-recognition-fix/</loc>
          <lastmod>2026-08-05</lastmod>
     </url>
