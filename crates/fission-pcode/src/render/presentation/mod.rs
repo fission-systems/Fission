@@ -9,6 +9,7 @@
 //! - Post-pass structural firewall ([`invariants`]): on violation, restore pre-polish tree.
 
 mod invariants;
+mod naming;
 
 use super::{
     HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding,
@@ -80,6 +81,10 @@ fn apply_hir_presentation_passes(func: &mut HirFunction) {
             break;
         }
     }
+    // Once, after the structural fixed-point settles: loop-counter detection
+    // needs the final While/For/DoWhile shape, and running once avoids
+    // transient intermediate shapes producing conflicting guesses.
+    naming::apply_semantic_naming(func);
     simplify_presentation_casts(func);
     drop_unused_presentation_locals(func);
 }
