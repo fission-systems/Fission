@@ -1081,6 +1081,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#8-third-pass-the-phi-connectivity-gap-was-write_effect-not-the-union-find" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Third pass: the phi-connectivity gap was write_effect, not the union-find
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Third pass: the phi-connectivity gap was write_effect, not the union-find">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#real-corpus-re-measurement-dev-realworld-holdout-adversarial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-corpus re-measurement (dev + realworld + holdout + adversarial)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#whats-left-a-second-separate-larger-gap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's left: a second, separate, larger gap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1310,6 +1360,101 @@ and more tractable than "find real bugs": isolate why one specific memory
 value's phi-operand edge in <code>matrix_multiply</code> didn't get captured, fix that,
 then re-run this same corpus measurement to see how much of the 908 was
 that one systematic gap versus real slot-reuse cases.</p>
+<h2 id="8-third-pass-the-phi-connectivity-gap-was-write_effect-not-the-union-find">8. Third pass: the phi-connectivity gap was <code>write_effect</code>, not the union-find<a class="headerlink" href="#8-third-pass-the-phi-connectivity-gap-was-write_effect-not-the-union-find" title="Permanent link">&para;</a></h2>
+<p>Section 7 guessed the gap was in <code>build_memory_ssa</code>'s phi-operand
+population. Direct tracing (<code>FISSION_MEMHIGH_TRACE2</code>, printing every
+<code>memory_values</code> entry's storage/definition alongside its <code>dynamic_guards</code>
+entry when applicable, removed after use) proved that guess wrong and found
+the real mechanism.</p>
+<p><code>matrix_multiply</code>'s offset <code>-44</code> (<code>local_2c</code>) has 6 memory values: an
+<code>Input</code>, two <code>Phi</code>s (blocks 1 and 3, correctly forced-union-chained via
+<code>union_values</code> into one 5-member group -- the phi machinery was never
+broken), and three <code>Operation</code>-defined values. Two of those three
+(<code>SsaOpSite{block:2,op:2}</code> and <code>{block:7,op:59}</code>) have
+<code>guard=Some((Some(Stack), Exact, Store))</code> -- genuine, precisely-resolved
+stack writes, correctly included in the phi-chain group. The third,
+the one causing the false positive
+(<code>SsaOpSite{block:7,op:42}</code>), has <code>guard=Some((None, Unknown, Store))</code>.
+Cross-referencing the raw p-code: this op is <code>local_18[computed_index] =
+xmm0_da</code> -- a store through the function's <em>output array parameter</em>,
+nowhere near offset <code>-44</code>. Its pointer chain (rooted in a parameter
+register, not the stack pointer) correctly fails to resolve to any region
+at all in <code>resolve_pointer_value</code>.</p>
+<p><strong>Root cause</strong>: <code>MemoryLayout::write_effect</code> (scalar_ssa.rs), when a
+guard's <code>region</code> is <code>None</code>, conservatively assumed the write "might touch
+any storage sharing the same raw p-code space id" -- which, because
+<code>SsaMemoryStorageKey</code>'s <code>space_id</code> is just the p-code memory-space number
+(shared by <em>all</em> pointer-based accesses, stack or heap, in this SLEIGH
+model) and not itself region-discriminating, silently included every
+<em>Stack</em> partition too. Every write through a pointer that doesn't
+provably trace back to the stack pointer (the overwhelmingly common case:
+any store into a parameter/heap/array pointer) fabricated a phantom
+"definition" of <em>every</em> promoted stack slot in the function. Since a
+phantom value has no real value-flow relationship to anything, it never
+ends up as a phi operand, and sits alone in its own <code>SsaMemoryHighVariable</code>
+group with a narrow, spuriously-interfering cover.</p>
+<p><strong>Fix</strong>: narrowed the <code>None</code>-region branch to exclude <code>SsaMemoryRegion::Stack</code>
+partitions. Justification: given this session's earlier fix
+(Section 2-3) made <code>resolve_pointer_value</code> correctly resolve <em>every</em>
+stack-pointer-derived chain to <code>Some(Stack)</code>, a <code>None</code> result is now a
+<em>positive</em> proof the pointer's def-use chain does not trace back to the
+stack pointer -- and a non-escaping local (never had its address taken)
+cannot be written through an unrelated pointer under normal C/C++
+semantics. <code>read_effect</code> needed no change: it only ever expands through
+<code>exact_access</code>, which already requires <code>SsaGuardRangePrecision::Exact</code> and
+was never affected by this gap.</p>
+<h3 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[x] <code>cargo nextest run -p fission-pcode</code>: 962 passed, 1 skipped.</li>
+<li>[x] <code>cargo nextest run --workspace</code> (excluding <code>selfjit_matches_cranelift</code>):
+      only the same pre-existing, unrelated <code>fission-emulator</code> baseline
+      failures.</li>
+<li>[x] Concrete repro (<code>matrix_multiply</code>, <code>memory_layouts_clang_O0.exe</code>):
+      the <code>stack_slot_cover_violation</code> for <code>local_2c</code> is gone.</li>
+<li>[x] Before/after decompile output on a real corpus binary: byte-identical
+      (this subsystem still has no production consumer).</li>
+</ul>
+<h3 id="real-corpus-re-measurement-dev-realworld-holdout-adversarial">Real-corpus re-measurement (dev + realworld + holdout + adversarial)<a class="headerlink" href="#real-corpus-re-measurement-dev-realworld-holdout-adversarial" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th style="text-align: right;">Before this fix</th>
+<th style="text-align: right;">After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stack_slot_cover_violation</code> instances</td>
+<td style="text-align: right;">908</td>
+<td style="text-align: right;"><strong>225</strong></td>
+</tr>
+<tr>
+<td>Distinct functions with &gt;=1 violation</td>
+<td style="text-align: right;">185</td>
+<td style="text-align: right;"><strong>113</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="whats-left-a-second-separate-larger-gap">What's left: a second, separate, larger gap<a class="headerlink" href="#whats-left-a-second-separate-larger-gap" title="Permanent link">&para;</a></h3>
+<p>Tracing the smallest remaining case (<code>___w64_mingwthr_add_key_dtor</code>'s
+<code>home_0</code>, a register spill slot never address-taken) found a <em>different</em>
+mechanism responsible for most of what's left: <code>write_effect</code>'s <code>Call</code>
+case unconditionally treats every function call as writing to every
+promoted stack slot (<code>guard.kind == SsaDynamicGuardKind::Call =&gt;
+self.storages().collect()</code>). This is a deliberate, generally-<em>correct</em>
+conservative assumption -- a callee genuinely can write to a caller's
+stack slot if its address escaped into an argument -- but is imprecise for
+the common case of a non-escaping local sitting near an unrelated call
+(<code>calloc</code>/<code>EnterCriticalSection</code>/<code>LeaveCriticalSection</code> in the traced
+case, none of which receive <code>home_0</code>'s address). Closing this gap properly
+needs real escape analysis (does any instruction take a given slot's
+address and pass it to a call) that does not exist anywhere in this
+memory-promotion-SSA subsystem yet -- a distinctly larger piece of work
+than the two fixes landed this session, called out explicitly rather than
+attempted in the same pass. <code>scan_stack_slot_cover_violations</code>'s doc
+comment documents this precisely so a future session doesn't have to
+re-derive it.</p>
 
 
 
