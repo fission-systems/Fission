@@ -201,6 +201,22 @@ pub struct SsaCoverBlock {
     pub end_exclusive: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SsaMemoryHighVariableId(pub u32);
+
+/// Memory-side analog of `SsaHighVariable`: congruence over `SsaMemoryValueId`s
+/// at one exact stack/RAM storage location. Unlike the scalar case, memory
+/// values are only forced-congruent via `memory_phis` (there is no memory
+/// analog of a scalar `Copy`/`Cast` speculative merge -- a `Store` never reads
+/// a value implying congruence with what preceded it at that address).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SsaMemoryHighVariable {
+    pub id: SsaMemoryHighVariableId,
+    pub members: Vec<SsaMemoryValueId>,
+    /// Block-local half-open live intervals used for interference checks.
+    pub cover: Vec<SsaCoverBlock>,
+}
+
 /// One parallel-copy requirement for destroying a phi on an incoming edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SsaOutOfSsaCopy {
@@ -241,6 +257,10 @@ pub struct NirScalarSsa {
     pub high_variables: Vec<SsaHighVariable>,
     /// Dense by `SsaValueId`.
     pub value_high_variables: Vec<SsaHighVariableId>,
+    /// Dense by `SsaMemoryHighVariableId`.
+    pub memory_high_variables: Vec<SsaMemoryHighVariable>,
+    /// Dense by `SsaMemoryValueId`.
+    pub value_memory_high_variables: Vec<SsaMemoryHighVariableId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,6 +344,12 @@ pub enum ScalarSsaShapeError {
 impl NirScalarSsa {
     pub fn value(&self, id: SsaValueId) -> Option<&SsaValue> {
         self.values
+            .get(id.0 as usize)
+            .filter(|value| value.id == id)
+    }
+
+    pub fn memory_value(&self, id: SsaMemoryValueId) -> Option<&SsaMemoryValue> {
+        self.memory_values
             .get(id.0 as usize)
             .filter(|value| value.id == id)
     }

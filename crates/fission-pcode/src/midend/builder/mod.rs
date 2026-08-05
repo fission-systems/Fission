@@ -434,6 +434,19 @@ impl<'a> PreviewBuilder<'a> {
                     );
                 }
             }
+            let stack_cover_violations = self.scan_stack_slot_cover_violations();
+            if !stack_cover_violations.is_empty() {
+                eprintln!(
+                    "[DIAG] stack_slot_cover_violations fn={name} addr=0x{address:x} count={}",
+                    stack_cover_violations.len()
+                );
+                for violation in &stack_cover_violations {
+                    eprintln!(
+                        "[DIAG] stack_slot_cover_violation name={} offset={} high_a={} high_b={}",
+                        violation.name, violation.offset, violation.high_a.0, violation.high_b.0
+                    );
+                }
+            }
         }
 
         if temp_name_trace_enabled() {

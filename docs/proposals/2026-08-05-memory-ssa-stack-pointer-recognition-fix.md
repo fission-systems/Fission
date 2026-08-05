@@ -147,3 +147,85 @@ originally set out to measure. Building a real consumer (either a memory
 Cover/HighVariable layer mirroring `build_out_of_ssa_facts`, or a lighter
 per-storage-key live-range check directly gating `ensure_stack_slot_binding`)
 is the natural next step, and now has real data to work from.
+
+## 7. Second pass: a memory Cover/HighVariable layer, and why it's not ready
+
+With real `memory_values` data available (Section 5), the next step was
+building the Cover/HighVariable layer originally planned: does `self.locals`'
+flat, identity-blind offset keying conflate two logically different stack
+variables that happen to share one offset?
+
+**A same-size blind spot in the first diagnostic.** `scan_stack_slot_size_ambiguities`
+(Section 4) only catches different sizes at the same offset. Tracing a real
+function (`util_app_gcc_O0.exe`'s largest function, `[STACK_DIST]` temporary
+instrumentation, removed after use) showed this misses the actually common
+case entirely: one stack offset commonly has 40+ separate `SsaMemoryValueId`s
+in a single `-O0` function, *all the same size* -- normal SSA versioning
+from one variable being written repeatedly (e.g. a loop-carried counter),
+not evidence of anything wrong. Telling "one variable, many writes" apart
+from "two variables, one disjoint-lifetime reuse" needs the Cover/interference
+data, not a size or raw-count heuristic.
+
+**New types**: `SsaMemoryHighVariableId`/`SsaMemoryHighVariable` (`ssa.rs`,
+mirroring `SsaHighVariableId`/`SsaHighVariable` but for `SsaMemoryValueId`s)
+and `NirScalarSsa.memory_high_variables`/`value_memory_high_variables`.
+
+**`build_memory_out_of_ssa_facts`** (`scalar_ssa.rs`), mirroring
+`build_out_of_ssa_facts`, but *forced-union only* -- there is no memory
+analog of a scalar `Copy`/`Cast` speculative merge, since a `Store` never
+reads a prior value at the address it writes (unlike a register `Copy`,
+which explicitly does). `memory_phis` (control-flow-join merges) is the only
+source of congruence between two `SsaMemoryValueId`s. `build_memory_value_cover`
+mirrors `build_value_cover` verbatim, adapted to `SsaMemoryValue`/
+`memory_operation_inputs`/`outputs`/`memory_phis`.
+
+**`scan_stack_slot_cover_violations`** (`stack_slot_diagnostics.rs`): for
+each `self.locals` offset, flags pairs of distinct `SsaMemoryHighVariable`s
+with interfering covers -- the memory analog of `scan_cover_violations`.
+
+### Real-corpus measurement: found a real signal, but not yet trustworthy
+
+Corpus-wide (dev + realworld + holdout + adversarial, ~500+ functions):
+**908 raw violation instances across 185 functions**. Before treating this
+as a real bug count (the register-side work this session repeatedly showed
+the cost of *not* verifying a raw diagnostic count before acting on it),
+traced the smallest concrete case: `matrix_multiply` (`memory_layouts_clang_O0.exe`,
+one violation, `local_2c` / offset `-44`, the innermost loop's induction
+variable in a triple-nested matrix multiply).
+
+The rendered pseudocode for `local_2c` is **completely correct and
+unambiguous** (`for (local_2c = 0; local_2c < local_1c; local_2c = uVar63) { ... }`,
+no visible naming conflict). The flagged pair (`SsaMemoryHighVariableId`
+2 and 18) is a **false positive**: `memory_high_variables[18]` is a single,
+short-lived memory value (cover `[block 7, 86..90)`) that was never
+transitively unioned into the loop variable's phi-chain group, even though
+tracing `ssa.memory_phis` directly shows the phi-chain *should* connect it
+(nested-loop phi outputs correctly chain as operands of outer-loop phis for
+this exact offset elsewhere in the same function). The exact reason this
+one value's forced-union edge is missing was not isolated in this session
+-- likely an incompleteness in how `build_memory_ssa`'s phi-operand list is
+populated for this specific CFG shape (deeply nested loops), not in the
+union-find/Cover logic itself (which is a direct, careful port of the
+already-correct scalar version).
+
+**Conclusion, stated plainly in the code** (`scan_stack_slot_cover_violations`'s
+doc comment): this diagnostic's raw count is **not currently trustworthy**
+as a bug count, and must not be used to gate any real materialize decision
+until the phi-connectivity gap is found and fixed. It is real, tested,
+additive infrastructure (962/962 `fission-pcode` tests pass with it in
+place) and stays in the tree diagnostic-only, exactly as `scan_cover_violations`
+did before this session's own root-cause work made it trustworthy enough to
+act on.
+
+### Honest status vs. the original plan
+
+The original plan (Section 6) was "build the Cover layer, then wire it into
+`ensure_stack_slot_binding`." That wiring step was **not** done this round
+-- doing so on top of a diagnostic with a known, uninvestigated false-positive
+source would repeat exactly the mistake this session's earlier register-name
+work proved costly (a first "fix" that looked reasonable but was wrong,
+requiring a full revert once traced). The concrete next step is narrower
+and more tractable than "find real bugs": isolate why one specific memory
+value's phi-operand edge in `matrix_multiply` didn't get captured, fix that,
+then re-run this same corpus measurement to see how much of the 908 was
+that one systematic gap versus real slot-reuse cases.

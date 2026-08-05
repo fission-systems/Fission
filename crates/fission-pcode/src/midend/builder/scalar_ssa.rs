@@ -503,6 +503,10 @@ pub(super) fn build_scalar_ssa_with_context(
     ssa.out_of_ssa_copies = out_of_ssa_copies;
     ssa.high_variables = high_variables;
     ssa.value_high_variables = value_high_variables;
+    let (memory_high_variables, value_memory_high_variables) =
+        build_memory_out_of_ssa_facts(pcode, &ssa, predecessors, &dominance);
+    ssa.memory_high_variables = memory_high_variables;
+    ssa.value_memory_high_variables = value_memory_high_variables;
 
     ssa
 }
@@ -1715,6 +1719,177 @@ fn collect_value_uses(ssa: &NirScalarSsa) -> BTreeMap<SsaValueId, Vec<ValueUsePo
                     block: operand.predecessor,
                     op: None,
                 });
+            }
+        }
+    }
+    uses
+}
+
+/// Memory-side analog of `build_out_of_ssa_facts`. Unlike the scalar case,
+/// there is no speculative-merge step: a `Store` never reads a prior value
+/// at the address it writes, so there is no memory analog of a scalar
+/// `Copy`/`Cast` congruence. `memory_phis` (control-flow-join merges) is the
+/// *only* source of forced congruence between two `SsaMemoryValueId`s.
+fn build_memory_out_of_ssa_facts(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    predecessors: &[Vec<usize>],
+    dominance: &Dominance,
+) -> (Vec<SsaMemoryHighVariable>, Vec<SsaMemoryHighVariableId>) {
+    let mut parents: Vec<usize> = (0..ssa.memory_values.len()).collect();
+    for phis in ssa.memory_phis.values() {
+        for phi in phis {
+            for operand in &phi.operands {
+                union_values(
+                    &mut parents,
+                    phi.output.0 as usize,
+                    operand.value.0 as usize,
+                );
+            }
+        }
+    }
+
+    let uses = collect_memory_value_uses(ssa);
+    let empty_uses: Vec<MemoryValueUsePoint> = Vec::new();
+    let covers: Vec<Vec<SsaCoverBlock>> = ssa
+        .memory_values
+        .iter()
+        .map(|value| {
+            let value_uses = uses.get(&value.id).unwrap_or(&empty_uses);
+            build_memory_value_cover(pcode, ssa, value.id, value_uses, predecessors, dominance)
+        })
+        .collect();
+
+    let mut member_groups = BTreeMap::<usize, Vec<usize>>::new();
+    for index in 0..ssa.memory_values.len() {
+        let root = find_root(&mut parents, index);
+        member_groups.entry(root).or_default().push(index);
+    }
+
+    let mut high_variables = Vec::with_capacity(member_groups.len());
+    let mut value_high_variables =
+        vec![SsaMemoryHighVariableId(0); ssa.memory_values.len()];
+    for (id, members) in member_groups.into_values().enumerate() {
+        let hv_id = SsaMemoryHighVariableId(id as u32);
+        let cover = merge_covers(
+            members
+                .iter()
+                .flat_map(|&member| covers[member].iter().copied()),
+        );
+        for &member in &members {
+            value_high_variables[member] = hv_id;
+        }
+        high_variables.push(SsaMemoryHighVariable {
+            id: hv_id,
+            members: members
+                .into_iter()
+                .map(|index| ssa.memory_values[index].id)
+                .collect(),
+            cover,
+        });
+    }
+
+    (high_variables, value_high_variables)
+}
+
+fn build_memory_value_cover(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    value_id: SsaMemoryValueId,
+    uses: &[MemoryValueUsePoint],
+    predecessors: &[Vec<usize>],
+    dominance: &Dominance,
+) -> Vec<SsaCoverBlock> {
+    let value = ssa.memory_value(value_id).expect("known memory value");
+    let (definition_block, definition_start) = match value.definition {
+        SsaValueDefinition::Input => (0, 0),
+        SsaValueDefinition::Phi { block } => (block, 0),
+        SsaValueDefinition::Operation(site) => {
+            (site.block, site.op.saturating_mul(2).saturating_add(2))
+        }
+    };
+    let block_end = |block: u32| {
+        pcode.blocks.get(block as usize).map_or(1, |block| {
+            (block.ops.len() as u32).saturating_mul(2).saturating_add(3)
+        })
+    };
+    if uses.is_empty() {
+        return vec![SsaCoverBlock {
+            block: definition_block,
+            start: definition_start,
+            end_exclusive: definition_start.saturating_add(1),
+        }];
+    }
+
+    let mut cover = Vec::new();
+    for use_point in uses {
+        let use_end = use_point.op.map_or_else(
+            || block_end(use_point.block),
+            |op| op.saturating_mul(2).saturating_add(2),
+        );
+        let mut queue = VecDeque::from([(use_point.block, use_end)]);
+        let mut visited = BTreeSet::new();
+        while let Some((block, end)) = queue.pop_front() {
+            if !visited.insert(block) {
+                continue;
+            }
+            if block == definition_block {
+                if definition_start < end {
+                    cover.push(SsaCoverBlock {
+                        block,
+                        start: definition_start,
+                        end_exclusive: end,
+                    });
+                }
+                continue;
+            }
+            let definition_can_reach = matches!(value.definition, SsaValueDefinition::Input)
+                || dominance.dominates(definition_block as usize, block as usize);
+            if !definition_can_reach {
+                continue;
+            }
+            cover.push(SsaCoverBlock {
+                block,
+                start: 0,
+                end_exclusive: end,
+            });
+            for &predecessor in predecessors.get(block as usize).into_iter().flatten() {
+                queue.push_back((predecessor as u32, block_end(predecessor as u32)));
+            }
+        }
+    }
+    merge_covers(cover)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MemoryValueUsePoint {
+    block: u32,
+    op: Option<u32>,
+}
+
+fn collect_memory_value_uses(
+    ssa: &NirScalarSsa,
+) -> BTreeMap<SsaMemoryValueId, Vec<MemoryValueUsePoint>> {
+    let mut uses = BTreeMap::<SsaMemoryValueId, Vec<MemoryValueUsePoint>>::new();
+    for (site, pieces) in &ssa.memory_operation_inputs {
+        for piece in pieces {
+            uses.entry(piece.value)
+                .or_default()
+                .push(MemoryValueUsePoint {
+                    block: site.block,
+                    op: Some(site.op),
+                });
+        }
+    }
+    for phis in ssa.memory_phis.values() {
+        for phi in phis {
+            for operand in &phi.operands {
+                uses.entry(operand.value)
+                    .or_default()
+                    .push(MemoryValueUsePoint {
+                        block: operand.predecessor,
+                        op: None,
+                    });
             }
         }
     }
