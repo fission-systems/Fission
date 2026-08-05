@@ -1181,6 +1181,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#10-fifth-pass-wiring-into-selflocals-the-original-goal-finally-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Fifth pass: wiring into self.locals -- the original goal, finally live
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Fifth pass: wiring into self.locals -- the original goal, finally live">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#test-coverage-since-the-real-corpus-has-zero-true-positives-to-test-against" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test coverage (since the real corpus has zero true positives to test against)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validation_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#honest-bottom-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Honest bottom line
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1615,6 +1665,93 @@ Left as documented, accepted residual imprecision rather than pursued
 further this session -- diminishing returns at 98.7% already reached, and
 the remaining mechanism is understood well enough that a future session
 doesn't have to re-discover it via tracing.</p>
+<h2 id="10-fifth-pass-wiring-into-selflocals-the-original-goal-finally-live">10. Fifth pass: wiring into <code>self.locals</code> -- the original goal, finally live<a class="headerlink" href="#10-fifth-pass-wiring-into-selflocals-the-original-goal-finally-live" title="Permanent link">&para;</a></h2>
+<p>User asked explicitly to wire the (now precise) memory Cover data into a
+real production decision, closing the loop back to this whole
+investigation's original trigger: <code>stack_slots.rs</code>'s <code>ensure_stack_slot_binding</code>
+keys <code>self.locals</code> purely by <code>i64</code> offset, with no identity discriminant
+at all.</p>
+<p><strong>Precision requirement, learned the hard way in Section 8/9</strong>: a live
+guard built on <code>SsaMemoryHighVariable</code>'s <em>merged</em> per-block cover would
+reproduce the exact <code>_power</code> false positive that section fixed by <em>not</em>
+wiring anything in yet. So this pass first adds
+<code>NirScalarSsa.memory_value_covers: Vec&lt;Vec&lt;SsaCoverBlock&gt;&gt;</code> -- the
+per-value (pre-merge) cover <code>build_memory_out_of_ssa_facts</code> already computed
+internally as a local variable, now also persisted -- so a live check can
+compare one specific value's own range against another specific value's own
+range, never a whole group's artificially-broadened merged range.</p>
+<p><strong>Design</strong> (<code>stack_slot_diagnostics.rs</code>):
+- <code>resolve_current_stack_memory_value(offset)</code>: resolves the <code>SsaMemoryValueId</code>
+  the <em>current</em> op (<code>self.current_lowering_site</code>, already threaded through
+  every lowering call site in this builder) reads/writes at <code>offset</code>, via
+  <code>memory_operation_inputs</code>/<code>memory_operation_outputs</code> -- the same
+  <code>SsaOpSite</code>-keyed correlation <code>cover_diagnostics.rs</code> already established
+  for the register case. The access's size comes from the op itself, not a
+  caller-supplied value, so it can never disagree with what the SSA side
+  modeled.
+- <code>cover_proves_stack_slot_reuse_unsafe(offset)</code>: <code>true</code> only when the
+  current access's <code>SsaMemoryHighVariable</code> group differs from <em>every</em> group
+  already recorded as owning this offset's name (<code>stack_slot_memory_owners</code>,
+  a new <code>PreviewBuilder</code> field, <code>BTreeMap&lt;i64, Vec&lt;SsaMemoryHighVariableId&gt;&gt;</code>)
+  <em>and</em> its own per-value cover interferes with at least one owning group
+  member's own per-value cover.
+- <code>record_stack_slot_memory_owner(offset)</code>: called after a safe bind, adds
+  the current access's group to the offset's owner set (multiple
+  non-interfering groups can share one offset's name, mirroring the
+  scalar-side speculative-merge spirit -- Ghidra's own Cover/Merge allows
+  this too).</p>
+<p><strong>Wiring</strong> (<code>ensure_stack_slot_binding</code>): before reusing an existing
+<code>self.locals[offset]</code> entry, call <code>cover_proves_stack_slot_reuse_unsafe</code>.
+If it fires, skip <code>self.locals</code> entirely and hand back a one-off fresh temp
+name (<code>next_unused_temp_binding_name</code>) -- deliberately <em>not</em> cached into
+<code>self.locals</code> or <code>stack_slot_memory_owners</code> as a persistent "alternate"
+slot. Real-corpus testing found zero occurrences of this path actually
+firing (see below), so a fresh name per occurrence keeps this a minimal,
+provably-safe guard rather than a speculative redesign of <code>self.locals</code>'
+one-name-per-offset shape for a case that's never been observed. A future
+session that <em>does</em> find a real trigger has a documented, easy next step
+(track a stable alternate name per owning group instead of a fresh one
+each time) rather than starting from zero.</p>
+<h3 id="test-coverage-since-the-real-corpus-has-zero-true-positives-to-test-against">Test coverage (since the real corpus has zero true positives to test against)<a class="headerlink" href="#test-coverage-since-the-real-corpus-has-zero-true-positives-to-test-against" title="Permanent link">&para;</a></h3>
+<p>Five new unit tests in <code>stack_slot_diagnostics.rs</code>, directly constructing a
+<code>PreviewBuilder</code> with hand-crafted <code>memory_values</code>/<code>memory_high_variables</code>/
+<code>memory_value_covers</code>/<code>current_lowering_site</code> (mirroring <code>cover_diagnostics.rs</code>'s
+synthetic-<code>NirScalarSsa</code> test style) rather than reverse-engineering exact
+SLEIGH p-code byte positions to reproduce a real conflict: two groups with
+genuinely overlapping individual covers are correctly flagged unsafe; the
+same group already owning the name is safe; no recorded owner yet is safe;
+two groups with <em>non</em>-overlapping covers (the <code>_power</code> shape) are correctly
+<em>not</em> flagged; and a successful bind correctly records the new owner.</p>
+<h3 id="validation_2">Validation<a class="headerlink" href="#validation_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[x] <code>cargo nextest run -p fission-pcode</code>: 968 passed (963 prior + 5 new),
+      1 skipped.</li>
+<li>[x] <code>cargo nextest run --workspace</code>: only the same pre-existing,
+      unrelated <code>fission-emulator</code> baseline failures.</li>
+<li>[x] Real-corpus <code>scan_stack_slot_cover_violations</code> count: unchanged at 12
+      (the live gate and the diagnostic scan are independent computations
+      over the same data; the live gate never fires, so it cannot affect
+      what <code>self.locals</code> ends up containing for the diagnostic to later
+      re-scan).</li>
+<li>[x] Before/after decompile output, git-stash A/B, on four real corpus
+      binaries spanning the traced false-positive cases
+      (<code>control_flow_gcc-m32_O0.exe</code>, <code>memory_layouts_clang_O0.exe</code>
+      [<code>matrix_multiply</code>], <code>advanced_patterns_gcc_O2.exe</code>
+      [<code>___w64_mingwthr_add_key_dtor</code>], <code>math_gcc-m32_O2.exe</code> [<code>_power</code>]):
+      <strong>byte-identical</strong> in all four.</li>
+</ul>
+<h3 id="honest-bottom-line">Honest bottom line<a class="headerlink" href="#honest-bottom-line" title="Permanent link">&para;</a></h3>
+<p>As of this session, wiring this in has <strong>zero observed effect on real
+decompiler output</strong> -- not because the wiring is inert, but because no
+genuine stack-slot-reuse-for-a-different-variable case has been found
+anywhere in the corpus tested (dev + realworld + holdout + adversarial).
+The mechanism is real, tested against both directions (fires on a
+constructed true positive, stays silent on all four traced historical false
+positives), and now sits ready in the exact place this whole session's
+investigation was aimed at from the start -- but its practical value is
+currently unproven against real code, unlike the register-name fix (which
+had a measured, real corpus impact from the same session). Reported
+plainly rather than overstated.</p>
 
 
 
