@@ -1,5 +1,6 @@
 use super::contracts::*;
 use super::*;
+use fission_midend_core::ir::{NirPhiNode, SsaUseSite, SsaValueDefinition, SsaValueId};
 use std::collections::BTreeSet;
 
 impl<'a> PreviewBuilder<'a> {
@@ -1208,6 +1209,82 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
 
+        // The scan above only ever finds a candidate when a predecessor
+        // happens to contain a directly-scannable producer op whose first
+        // cross-block use lands exactly here -- it can't see a value
+        // flowing in through a longer chain, and it silently produces
+        // nothing at all when even one of the (assumed exactly two)
+        // predecessors doesn't have one. `scalar_ssa` already placed a
+        // real, dominance-frontier-correct phi for every storage that's
+        // live across this merge, independent of how deep any
+        // predecessor's own definition chain runs. But "live across this
+        // merge" is a much weaker condition than the scan's own
+        // `consumer_block_idx == block_idx` gate -- a phi exists here for
+        // any storage merely passing *through* this block on its way to a
+        // later use (e.g. feeding a further phi downstream), and eagerly
+        // materializing a binding for one of those duplicates whatever the
+        // real control-flow branches already compute, rather than filling
+        // a genuine gap (confirmed the hard way: an earlier version of this
+        // fix without `phi_output_is_consumed_in_block` synthesized a
+        // redundant `uVarN = cond ? a : b` alongside branches that already
+        // computed the same value, on real corpus functions). Require a
+        // *real* use of the phi's own output within this exact block --
+        // the same "first use lands here" bar the scan itself already
+        // clears -- before ever treating it as a synthesis candidate.
+        //
+        // `resolve_ssa_value_to_expr` additionally excludes any operand
+        // whose defining op sits inside a loop body -- see its own doc
+        // comment for why: a value redefined every iteration means "the
+        // op that defines this SSA value" is only a *one-iteration* delta,
+        // not the value actually reaching the merge block, wherever that
+        // merge sits relative to the loop (confirmed on `___chkstk_ms` in
+        // the dev corpus, where the merge block itself was NOT the loop
+        // header -- it was the join *after* the whole if-guarded loop --
+        // so gating on "is this merge block a loop head" alone missed it;
+        // the real invariant has to live at the operand, not the merge
+        // site).
+        if let Some(phis) = self.scalar_ssa.phis.get(&(block_idx as u32)).cloned() {
+            for phi in &phis {
+                if !self.phi_output_is_consumed_in_block(block_idx, phi.output) {
+                    continue;
+                }
+                let varnode = Varnode {
+                    space_id: phi.storage.space_id,
+                    offset: phi.storage.offset,
+                    size: phi.storage.size,
+                    is_constant: false,
+                    constant_val: 0,
+                };
+                let key = VarnodeKey::from(&varnode);
+                let scan_result_is_usable = pending.get(&key).is_some_and(|entry| {
+                    entry.predecessor_blocks.len() == 2
+                        && entry
+                            .predecessor_blocks
+                            .iter()
+                            .all(|pred| entry.incoming_by_pred.contains_key(pred))
+                });
+                if scan_result_is_usable {
+                    continue;
+                }
+                let Some((predecessor_blocks, incoming_by_pred)) =
+                    self.resolve_ssa_phi_incoming_by_pred(phi, block_idx)
+                else {
+                    continue;
+                };
+                pending.insert(
+                    key,
+                    PendingMergeBinding {
+                        output: varnode,
+                        predecessor_blocks,
+                        incoming_value_kinds: Vec::new(),
+                        incoming_values: vec!["<scalar_ssa phi>".to_string()],
+                        rhs_kind: DisallowedSingleConsumerRhsKind::Other,
+                        incoming_by_pred,
+                    },
+                );
+            }
+        }
+
         let mut entries = pending.into_iter().collect::<Vec<_>>();
         entries.sort_by_key(|(key, _)| (key.space_id, key.offset, key.size));
 
@@ -1307,6 +1384,127 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         Ok(())
+    }
+
+    /// `true` if `value_id` is read by any op within `block_idx` itself --
+    /// the same "first use lands here" bar the ad hoc predecessor-op scan
+    /// in `synthesize_explicit_merge_bindings_for_block` already requires
+    /// of its own candidates (`consumer_block_idx == block_idx`). A phi
+    /// existing at `block_idx` only proves the storage is live *across*
+    /// this merge, not that anything in this specific block reads it --
+    /// synthesizing a binding for the former is unsound: see the doc
+    /// comment at the phi loop's call site for the corpus regression this
+    /// gate exists to prevent.
+    fn phi_output_is_consumed_in_block(&self, block_idx: usize, value_id: SsaValueId) -> bool {
+        let Ok(block_idx) = u32::try_from(block_idx) else {
+            return false;
+        };
+        let start = SsaUseSite {
+            block: block_idx,
+            op: 0,
+            input: 0,
+        };
+        let Some(end_block) = block_idx.checked_add(1) else {
+            return false;
+        };
+        let end = SsaUseSite {
+            block: end_block,
+            op: 0,
+            input: 0,
+        };
+        self.scalar_ssa
+            .operation_inputs
+            .range(start..end)
+            .any(|(_, pieces)| pieces.iter().any(|piece| piece.value == value_id))
+    }
+
+    /// Resolve every operand of a scalar-SSA phi into the same
+    /// `(predecessor start address -> PreHirExpr)` shape the ad hoc scan in
+    /// `synthesize_explicit_merge_bindings_for_block` builds for its own
+    /// candidates, using the SSA congruence facts as ground truth instead of
+    /// "did I happen to find a producer op with a directly visible
+    /// cross-block use." `None` if any single operand can't be resolved
+    /// (see `resolve_ssa_value_to_expr`) -- a partial phi is not a safe
+    /// substitute for the scan's own best-effort result, so this only ever
+    /// adds a binding the scan didn't already provide, never removes one.
+    fn resolve_ssa_phi_incoming_by_pred(
+        &mut self,
+        phi: &NirPhiNode,
+        merge_block_idx: usize,
+    ) -> Option<(Vec<u64>, HashMap<u64, PreHirExpr>)> {
+        let mut predecessor_blocks = Vec::with_capacity(phi.operands.len());
+        let mut incoming_by_pred = HashMap::default();
+        for operand in &phi.operands {
+            let pred_addr = self.pcode.blocks.get(operand.predecessor as usize)?.start_address;
+            let expr = self.resolve_ssa_value_to_expr(operand.value, merge_block_idx)?;
+            predecessor_blocks.push(pred_addr);
+            incoming_by_pred.insert(pred_addr, expr);
+        }
+        Some((predecessor_blocks, incoming_by_pred))
+    }
+
+    /// Resolve an SSA value to a `PreHirExpr` by walking to its defining
+    /// p-code operation and lowering it the same way the ad hoc
+    /// predecessor-op scan already does for its own candidates. Declines
+    /// (`None`) rather than guessing for three cases:
+    ///
+    /// - The defining op sits inside a natural loop body that does *not*
+    ///   also contain `merge_block_idx`. "The op that defines this SSA
+    ///   value" is only a *one-iteration* delta relative to whatever the
+    ///   value was on entry to that iteration -- resolving it as a flat
+    ///   expression and evaluating it once at a merge point outside the
+    ///   loop silently drops every iteration but the last (confirmed on
+    ///   `___chkstk_ms` in the dev corpus: a synthesized
+    ///   `eax < 4096 ? iVar4 : ptr - 1024` applied the loop latch's
+    ///   one-iteration decrement as if the loop could only ever run once,
+    ///   producing a wrong pointer for any stack probe spanning more than
+    ///   one 4KiB page). When the merge block is *inside* the same loop
+    ///   (an if/else joining back within one iteration), the defining op
+    ///   still only runs once per pass through the merge, so that case
+    ///   stays allowed. Loop-carried values crossing an iteration boundary
+    ///   are already handled correctly elsewhere, by the
+    ///   `loop_carried_lhs_name`-style heuristics in `materialize/mod.rs`
+    ///   that reuse a name across iterations instead of trying to
+    ///   precompute a closed-form merged value.
+    /// - A value whose definition is itself another phi (would need a
+    ///   correctly-ordered recursive materialization this pass doesn't
+    ///   attempt -- the defining block may not have had its own merge
+    ///   bindings synthesized yet, depending on lowering order).
+    /// - A function-entry value (`Input`, ambiguous between "a genuine
+    ///   calling-convention parameter" and "just the first read of a
+    ///   caller-saved scratch register" without deeper integration than
+    ///   this fix adds).
+    ///
+    /// All three fall back to whatever the existing ad hoc scan already
+    /// produces (or doesn't) for that storage, unchanged.
+    fn resolve_ssa_value_to_expr(
+        &mut self,
+        value_id: SsaValueId,
+        merge_block_idx: usize,
+    ) -> Option<PreHirExpr> {
+        let value = self.scalar_ssa.values.get(value_id.0 as usize)?.clone();
+        let SsaValueDefinition::Operation(site) = value.definition else {
+            return None;
+        };
+        let defining_block = site.block as usize;
+        let crosses_loop_iteration_boundary = self.loop_bodies.iter().any(|loop_body| {
+            loop_body.body.contains(&defining_block) && !loop_body.body.contains(&merge_block_idx)
+        });
+        if crosses_loop_iteration_boundary {
+            return None;
+        }
+        let block = self.pcode.blocks.get(site.block as usize)?;
+        let block_addr = block.start_address;
+        let op = block.ops.get(site.op as usize)?.clone();
+        self.with_lowering_site(
+            LoweringSite {
+                block_idx: site.block as usize,
+                op_idx: site.op as usize,
+            },
+            |this| this.try_lower_materialized_output_rhs(block_addr, &op),
+        )
+        .ok()
+        .flatten()
     }
 
     fn synthesize_explicit_merge_select(

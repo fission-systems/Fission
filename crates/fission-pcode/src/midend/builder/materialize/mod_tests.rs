@@ -1744,6 +1744,96 @@ fn explicit_merge_select_materializes_store_value_diamond() {
     );
 }
 
+/// Regression for the `___chkstk_ms` miscompile found while wiring
+/// `synthesize_explicit_merge_bindings_for_block` to fall back to
+/// `scalar_ssa`'s own phi facts: a merge block downstream of a loop must
+/// never synthesize an eager select/binding from an operand whose defining
+/// op lives *inside* that loop's body, because "the op that defines this
+/// value" is only a one-iteration delta, not the value that actually
+/// reaches the merge after however many iterations really ran.
+///
+/// Shape: `v = 100;` then either skip straight to the merge, or enter a
+/// self-loop that repeatedly does `v = v - 1;` before eventually falling
+/// through to the same merge, which reads `v`. `v`'s value at the merge
+/// depends on how many iterations ran -- there is no flat expression for
+/// it, so no synthesis should fire here at all (for either predecessor).
+#[test]
+fn merge_bindings_decline_operand_defined_inside_a_loop_reaching_a_post_loop_merge() {
+    let v = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4000, 4);
+    let skip_cond = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4010, 4);
+    let loop_cond = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4018, 4);
+    let result = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4020, 4);
+
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(v.clone()), vec![constant(100)]),
+            op(
+                1,
+                PcodeOpcode::CBranch,
+                None,
+                vec![Varnode::constant(0x1020, 8), skip_cond],
+            ),
+        ],
+    );
+    entry.successors = vec![2, 1];
+
+    let mut loop_block = block_at(
+        0x1010,
+        1,
+        vec![
+            op(
+                2,
+                PcodeOpcode::IntSub,
+                Some(v.clone()),
+                vec![v.clone(), constant(1)],
+            ),
+            op(
+                3,
+                PcodeOpcode::CBranch,
+                None,
+                vec![Varnode::constant(0x1010, 8), loop_cond],
+            ),
+        ],
+    );
+    loop_block.successors = vec![1, 2];
+
+    let mut merge = block_at(
+        0x1020,
+        2,
+        vec![op(
+            4,
+            PcodeOpcode::IntAdd,
+            Some(result),
+            vec![v, constant(1)],
+        )],
+    );
+    merge.successors = Vec::new();
+
+    let pcode = pcode_function(vec![entry, loop_block, merge.clone()]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let stmts = builder
+        .synthesize_explicit_merge_bindings_for_block(&merge)
+        .expect("synthesize merge binding");
+
+    assert!(
+        stmts.iter().all(|stmt| !matches!(
+            stmt,
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Select { .. },
+                ..
+            }
+        )),
+        "a post-loop merge must never synthesize a select from an operand \
+         defined inside the loop body -- it only captures one iteration's \
+         delta, not the value after however many iterations really ran: \
+         {stmts:?}"
+    );
+}
+
 #[test]
 fn missing_merge_aarch64_zero_extend_uses_low_live_register_binding_for_safe_rhs() {
     let x12 = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x4060, 8);
