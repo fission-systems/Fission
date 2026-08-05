@@ -376,6 +376,93 @@ fn win64_ecx_intzext_and_shr_in_loop_body_uses_param_1() {
 }
 
 #[test]
+fn loop_carried_pointer_advance_not_hijacked_by_load_address_role() {
+    // Replica of `list_sum`'s `cur = cur->next` pattern: the loop body first
+    // reads *param_1 (registering "param_1" as a load-address binding, since
+    // it's the pointer used to address a load), then reloads the next-node
+    // pointer from *(param_1 + 8) and copies it back into param_1 -- the
+    // pointer advance that must keep the function from looping forever.
+    //
+    // Before the fix, `materialized_lhs_conflicts_with_load_address_role`
+    // saw "param_1" as a load-address binding, the RHS as load-derived, and
+    // the RHS's raw p-code type as a plain integer (`Node *` isn't
+    // recognized as `Ptr` this early), and forced the advance into a fresh,
+    // unused temp -- silently dropping the pointer update entirely.
+    let param_1 = reg(0x08, 8);
+    let value_temp = varnode(0x2100);
+    let addr_temp = varnode(0x2200);
+    let next_temp = varnode(0x2300);
+    let cond = varnode(0x10);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    99,
+                    PcodeOpcode::Copy,
+                    Some(varnode(0x99)),
+                    vec![param_1.clone()],
+                ),
+                op(0, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                // value = *param_1 (establishes the load-address binding)
+                op(
+                    1,
+                    PcodeOpcode::Load,
+                    Some(value_temp.clone()),
+                    vec![constant(0), param_1.clone()],
+                ),
+                // addr = param_1 + 8
+                op(
+                    2,
+                    PcodeOpcode::IntAdd,
+                    Some(addr_temp.clone()),
+                    vec![param_1.clone(), constant(8)],
+                ),
+                // next = *addr (plain-integer-typed load of the next pointer)
+                op(
+                    3,
+                    PcodeOpcode::Load,
+                    Some(next_temp.clone()),
+                    vec![constant(0), addr_temp.clone()],
+                ),
+                // param_1 = next -- the pointer advance under test
+                op(4, PcodeOpcode::Copy, Some(param_1.clone()), vec![next_temp.clone()]),
+                op(5, PcodeOpcode::CBranch, None, vec![constant(0x1010), cond]),
+            ],
+        ),
+        block_at(0x1020, 2, vec![op(6, PcodeOpcode::Return, None, vec![])]),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![1, 2];
+    let pcode = pcode_function(blocks);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::WindowsX64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let _ = builder
+        .lower_block_stmts(&pcode.blocks[0])
+        .expect("entry lowering");
+    let loop_body = builder
+        .lower_block_stmts(&pcode.blocks[1])
+        .expect("loop lowering");
+
+    assert!(
+        loop_body
+            .iter()
+            .any(|stmt| lhs_var(stmt) == Some("param_1")),
+        "pointer advance (param_1 = *(param_1 + 8)) must be materialized under \
+         the stable param_1 name, not dropped into an unused fresh temp: {loop_body:?}"
+    );
+}
+
+#[test]
 fn loop_carried_register_update_does_not_promote_prior_defined_abi_scratch() {
     let rdx = reg(0x10, 8);
     let mut blocks = vec![block_at(

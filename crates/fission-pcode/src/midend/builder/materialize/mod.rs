@@ -1004,6 +1004,7 @@ impl<'a> PreviewBuilder<'a> {
                 !this.cover_proves_existing_name_claim_interferes(bi, op_idx, output, name)
             })
         };
+        let mut lhs_name_is_proven_loop_carried = false;
         let mut lhs_name = if let Some(name) =
             loop_carried_lhs_name.filter(|n| name_claim_is_safe(self, n))
         {
@@ -1014,6 +1015,7 @@ impl<'a> PreviewBuilder<'a> {
                 &name,
                 preserve_materialization,
             );
+            lhs_name_is_proven_loop_carried = true;
             name
         } else if let Some(name) =
             direct_successor_merge_lhs_name.filter(|n| name_claim_is_safe(self, n))
@@ -1126,7 +1128,21 @@ impl<'a> PreviewBuilder<'a> {
                 .name;
             fallback_name
         };
-        if self.materialized_lhs_conflicts_with_load_address_role(&lhs_name, &rhs) {
+        // A name proven loop-carried (`prove_loop_carried_register_update`)
+        // already established that THIS definition is the update feeding the
+        // next iteration's read of the same register -- e.g. `cur = cur->next`
+        // reusing `cur`'s name for the reloaded pointer. The load-address-role
+        // check below exists to catch a *different*, unproven case (a name
+        // used as a load address elsewhere getting silently repurposed for an
+        // unrelated raw-integer value), and doesn't know about that proof; it
+        // would otherwise strip the correct name into a fresh temp because the
+        // reloaded pointer's p-code type is still a plain integer (`Node *`
+        // isn't recognized as `Ptr` until later type inference), leaving the
+        // loop's induction variable never reassigned -- an infinite loop at
+        // runtime, not merely a readability regression.
+        if !lhs_name_is_proven_loop_carried
+            && self.materialized_lhs_conflicts_with_load_address_role(&lhs_name, &rhs)
+        {
             lhs_name = self.bind_materialized_output_to_fresh_temp(
                 op,
                 output,
