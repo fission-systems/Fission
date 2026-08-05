@@ -1131,6 +1131,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-fourth-pass-real-escape-analysis-closing-the-call-gap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Fourth pass: real escape analysis, closing the Call gap
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Fourth pass: real escape analysis, closing the Call gap">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#real-corpus-re-measurement-dev-realworld-holdout-adversarial_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-corpus re-measurement (dev + realworld + holdout + adversarial)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#whats-left-a-precision-limit-not-a-bug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's left: a precision limit, not a bug
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1455,6 +1505,116 @@ than the two fixes landed this session, called out explicitly rather than
 attempted in the same pass. <code>scan_stack_slot_cover_violations</code>'s doc
 comment documents this precisely so a future session doesn't have to
 re-derive it.</p>
+<h2 id="9-fourth-pass-real-escape-analysis-closing-the-call-gap">9. Fourth pass: real escape analysis, closing the <code>Call</code> gap<a class="headerlink" href="#9-fourth-pass-real-escape-analysis-closing-the-call-gap" title="Permanent link">&para;</a></h2>
+<p>User explicitly chose to build the escape analysis rather than stop at
+Section 8's guard-narrowing pattern, accepting the larger scope.</p>
+<p><strong>Design.</strong> A <code>Call</code>/<code>CallInd</code> p-code op carries exactly one input (the
+target) in this codebase's lifted p-code -- confirmed by inspecting real
+corpus raw p-code, not assumed -- so arguments are never data-flow-connected
+to the call op itself; they're register- or stack-resident by calling-
+convention position. This rules out "does this call's own inputs include a
+stack address" as a viable check and requires two separate mechanisms:</p>
+<ul>
+<li><strong>Register-ABI conventions</strong> (x64, AArch64, etc.): a stack address is
+  "taken" if it is ever assigned into one of <code>RegisterNamer::int_param_offsets</code>
+  (already-existing per-calling-convention ABI knowledge, reused rather than
+  duplicated) -- deliberately whole-function-wide rather than per-call-site
+  (if a slot's address is ever placed in an argument register anywhere,
+  every call in the function conservatively might receive it; this trades
+  precision for not needing per-call-site reaching-value analysis).</li>
+<li><strong>Stack-ABI conventions</strong> (x86-32 cdecl/stdcall): arguments are pushed via
+  ordinary <code>Store</code> ops before the call, with no argument-register
+  involvement at all. Handled by the same general mechanism: an address is
+  "taken" if it is ever used as a <code>Store</code>'s <em>value</em> operand (spilled/staged
+  anywhere, not just at a call -- also covers <code>&amp;local</code> written into a
+  global or struct) or a <code>Return</code>'s operand.</li>
+</ul>
+<p>Implemented as <code>compute_escaping_stack_storages</code> (scalar_ssa.rs), run once
+per function inside <code>MemoryLayout::build</code> (now takes <code>pcode</code>/<code>ssa</code>/<code>options</code>
+in addition to <code>guards</code>) and stored on a new <code>MemoryLayout.escaping</code> field.
+<code>write_effect</code>'s <code>Call</code> case now returns <code>self.escaping</code> instead of
+<code>self.storages()</code>.</p>
+<p><strong>A real bug found via the test suite, not corpus tracing this time</strong>:
+<code>validate_scalar_ssa_with_context</code>'s cross-check re-derives <code>memory_values</code>
+via a <em>second</em> <code>build_memory_ssa</code> call against a deliberately sparse
+<code>expected_memory: NirScalarSsa</code> that historically only needed
+<code>dynamic_guards</code> populated (memory-SSA construction never touched scalar
+<code>values</code>/<code>operation_inputs</code>/<code>phis</code> before this session). <code>compute_escaping_stack_storages</code>
+breaks that assumption -- it resolves pointer chains through exactly those
+fields. Running against the sparse re-derivation, escape resolution
+silently found nothing (empty <code>values</code> means every <code>resolve_pointer_value</code>
+call fails immediately), diverging from the real build and failing
+<code>StoragePartitionsMismatch</code> on a legitimate escaping-local test case. Fixed
+by also cloning <code>values</code>/<code>operation_inputs</code>/<code>operation_outputs</code>/<code>phis</code> into
+<code>expected_memory</code>.</p>
+<p><strong>Test coverage</strong>: the existing
+<code>signed_stack_location_is_promoted_and_unknown_call_kills_it</code> test asserted
+the <em>old</em> behavior (an unrelated unknown call always kills a stack write) as
+a hard invariant -- exactly the imprecision this pass fixes. Split into two:
+<code>..._does_not_kill_non_escaping_local</code> (address only ever dereferenced
+directly -- must survive the call unchanged) and <code>..._kills_escaping_local</code>
+(address also stored to an unrelated location before the call -- must still
+be killed). Both pass, and between them pin down the exact boundary this
+analysis draws.</p>
+<h3 id="validation_1">Validation<a class="headerlink" href="#validation_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[x] <code>cargo nextest run -p fission-pcode</code>: 963 passed (962 prior + replaced
+      test), 1 skipped.</li>
+<li>[x] <code>cargo nextest run --workspace</code>: only the same pre-existing,
+      unrelated <code>fission-emulator</code> baseline failures.</li>
+<li>[x] Concrete repros: both <code>matrix_multiply</code>'s <code>local_2c</code> (Section 8) and
+      <code>___w64_mingwthr_add_key_dtor</code>'s <code>home_0</code> (this section) no longer
+      appear in <code>scan_stack_slot_cover_violations</code>'s output.</li>
+<li>[x] Before/after decompile output on a real corpus binary: byte-identical
+      (still diagnostic-only, wired into no production decision).</li>
+</ul>
+<h3 id="real-corpus-re-measurement-dev-realworld-holdout-adversarial_1">Real-corpus re-measurement (dev + realworld + holdout + adversarial)<a class="headerlink" href="#real-corpus-re-measurement-dev-realworld-holdout-adversarial_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th style="text-align: right;">After Section 8</th>
+<th style="text-align: right;">After this pass</th>
+<th style="text-align: right;">Total change from Section 7 baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stack_slot_cover_violation</code> instances</td>
+<td style="text-align: right;">225</td>
+<td style="text-align: right;"><strong>12</strong></td>
+<td style="text-align: right;">908 -&gt; 12 (<strong>98.7%</strong> reduction)</td>
+</tr>
+<tr>
+<td>Distinct functions with &gt;=1 violation</td>
+<td style="text-align: right;">113</td>
+<td style="text-align: right;"><strong>7</strong></td>
+<td style="text-align: right;">185 -&gt; 7</td>
+</tr>
+</tbody>
+</table>
+<h3 id="whats-left-a-precision-limit-not-a-bug">What's left: a precision limit, not a bug<a class="headerlink" href="#whats-left-a-precision-limit-not-a-bug" title="Permanent link">&para;</a></h3>
+<p>Traced the smallest remaining case (<code>_power</code>, <code>math_gcc-m32_O2.exe</code>, 1
+violation). Every contributing memory value has a clean, genuine
+<code>(Some(Stack), Exact, Store)</code> guard -- no phantom write-effect source this
+time. The forced-union phi chain is also complete and correct (verified by
+hand-tracing all <code>memory_phis</code> operand/output pairs for the offset into one
+5-member union-find group). The false positive instead comes from
+<code>SsaMemoryHighVariable</code>'s cover being a single <em>merged, per-block</em> range: a
+5-member loop-carried phi-chain group's members individually touch
+different, non-overlapping sub-ranges of a block, but their <em>merged</em> cover
+spans the block almost entirely (<code>0..131</code>), which then numerically
+"interferes" with a third, genuinely disjoint value's narrow real range
+(<code>88..100</code>) even though no actual member was live during that window.</p>
+<p>This is the same class of approximation Ghidra's own block-granular
+<code>Cover</code>/<code>Merge</code> machinery has -- not specific to this implementation.
+Resolving it precisely would need per-value point-in-time liveness instead
+of per-block ranges, a materially larger redesign of the Cover
+representation itself (affecting the scalar side too, not just memory).
+Left as documented, accepted residual imprecision rather than pursued
+further this session -- diminishing returns at 98.7% already reached, and
+the remaining mechanism is understood well enough that a future session
+doesn't have to re-discover it via tracing.</p>
 
 
 
