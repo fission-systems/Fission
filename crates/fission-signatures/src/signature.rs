@@ -15,6 +15,9 @@ pub struct FunctionSignature {
     pub params: Vec<String>,
     /// Return type description
     pub ret_type: String,
+    /// Owning library/module of the matched function (e.g. `"ucrtbase"`),
+    /// when the pattern source records it.
+    pub library: Option<String>,
 
     // === Call Graph Relation Matching (Ghidra FID parity) ===
     /// Names of functions this function is expected to call (children)
@@ -49,6 +52,7 @@ impl FunctionSignature {
             min_size: 16,
             params: Vec::new(),
             ret_type: String::new(),
+            library: None,
             expected_callees: Vec::new(),
             expected_callers: Vec::new(),
             force_relation: false,

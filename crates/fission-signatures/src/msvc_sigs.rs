@@ -18,7 +18,6 @@ use super::signature::FunctionSignature;
 #[derive(Deserialize)]
 struct JsonCrtSignature {
     name: String,
-    #[allow(dead_code)]
     library: String,
     pattern: String,
     mask: String,
@@ -70,12 +69,14 @@ pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
         .unwrap_or_else(|e| panic!("Failed to parse {}: {e}", path.display()));
     for item in crt_items {
         let pattern = crt_pattern_to_vec(&item.pattern, &item.mask);
+        let library = (!item.library.is_empty()).then_some(item.library);
         let sig = FunctionSignature {
             name: item.name,
             pattern,
             min_size: 8,
             params: Vec::new(),
             ret_type: String::new(),
+            library,
             expected_callees: Vec::new(),
             expected_callers: Vec::new(),
             force_relation: false,
@@ -134,6 +135,21 @@ mod tests {
         assert!(names.contains(&"memcpy"), "memcpy should be present");
         assert!(names.contains(&"malloc"), "malloc should be present");
         assert!(names.contains(&"strlen"), "strlen should be present");
+    }
+
+    #[test]
+    fn load_msvc_signatures_populates_library() {
+        let mut sigs = Vec::new();
+        load_msvc_signatures(&mut sigs);
+        let memcpy = sigs
+            .iter()
+            .find(|s| s.name == "memcpy")
+            .expect("memcpy signature should be present");
+        assert_eq!(
+            memcpy.library.as_deref(),
+            Some("ucrtbase"),
+            "library from the pattern JSON should carry through onto FunctionSignature"
+        );
     }
 
     #[test]

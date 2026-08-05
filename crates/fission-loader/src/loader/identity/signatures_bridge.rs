@@ -29,11 +29,17 @@ pub(super) fn signature_pattern_identity(
     };
 
     let mut evidence = Vec::new();
+    let description = match &hit.library {
+        Some(library) => {
+            format!("CRT/runtime pattern matched near entry (bounded window): {library}")
+        }
+        None => "CRT/runtime pattern matched near entry (bounded window)".to_string(),
+    };
     evidence_budget.push_simple(
         &mut evidence,
         IdentitySource::SignaturePattern,
         EvidenceLocation::VirtualAddress(binary.entry_point),
-        "CRT/runtime pattern matched near entry (bounded window)",
+        description,
         hit.name.clone(),
     );
 
@@ -43,7 +49,7 @@ pub(super) fn signature_pattern_identity(
 
     vec![IdentityDetection {
         kind: IdentityKind::Runtime,
-        name: hit.name.clone(),
+        name: hit.library.clone().unwrap_or_else(|| hit.name.clone()),
         version: None,
         confidence,
         source: IdentitySource::SignaturePattern,
