@@ -316,3 +316,103 @@ than the two fixes landed this session, called out explicitly rather than
 attempted in the same pass. `scan_stack_slot_cover_violations`'s doc
 comment documents this precisely so a future session doesn't have to
 re-derive it.
+
+## 9. Fourth pass: real escape analysis, closing the `Call` gap
+
+User explicitly chose to build the escape analysis rather than stop at
+Section 8's guard-narrowing pattern, accepting the larger scope.
+
+**Design.** A `Call`/`CallInd` p-code op carries exactly one input (the
+target) in this codebase's lifted p-code -- confirmed by inspecting real
+corpus raw p-code, not assumed -- so arguments are never data-flow-connected
+to the call op itself; they're register- or stack-resident by calling-
+convention position. This rules out "does this call's own inputs include a
+stack address" as a viable check and requires two separate mechanisms:
+
+- **Register-ABI conventions** (x64, AArch64, etc.): a stack address is
+  "taken" if it is ever assigned into one of `RegisterNamer::int_param_offsets`
+  (already-existing per-calling-convention ABI knowledge, reused rather than
+  duplicated) -- deliberately whole-function-wide rather than per-call-site
+  (if a slot's address is ever placed in an argument register anywhere,
+  every call in the function conservatively might receive it; this trades
+  precision for not needing per-call-site reaching-value analysis).
+- **Stack-ABI conventions** (x86-32 cdecl/stdcall): arguments are pushed via
+  ordinary `Store` ops before the call, with no argument-register
+  involvement at all. Handled by the same general mechanism: an address is
+  "taken" if it is ever used as a `Store`'s *value* operand (spilled/staged
+  anywhere, not just at a call -- also covers `&local` written into a
+  global or struct) or a `Return`'s operand.
+
+Implemented as `compute_escaping_stack_storages` (scalar_ssa.rs), run once
+per function inside `MemoryLayout::build` (now takes `pcode`/`ssa`/`options`
+in addition to `guards`) and stored on a new `MemoryLayout.escaping` field.
+`write_effect`'s `Call` case now returns `self.escaping` instead of
+`self.storages()`.
+
+**A real bug found via the test suite, not corpus tracing this time**:
+`validate_scalar_ssa_with_context`'s cross-check re-derives `memory_values`
+via a *second* `build_memory_ssa` call against a deliberately sparse
+`expected_memory: NirScalarSsa` that historically only needed
+`dynamic_guards` populated (memory-SSA construction never touched scalar
+`values`/`operation_inputs`/`phis` before this session). `compute_escaping_stack_storages`
+breaks that assumption -- it resolves pointer chains through exactly those
+fields. Running against the sparse re-derivation, escape resolution
+silently found nothing (empty `values` means every `resolve_pointer_value`
+call fails immediately), diverging from the real build and failing
+`StoragePartitionsMismatch` on a legitimate escaping-local test case. Fixed
+by also cloning `values`/`operation_inputs`/`operation_outputs`/`phis` into
+`expected_memory`.
+
+**Test coverage**: the existing
+`signed_stack_location_is_promoted_and_unknown_call_kills_it` test asserted
+the *old* behavior (an unrelated unknown call always kills a stack write) as
+a hard invariant -- exactly the imprecision this pass fixes. Split into two:
+`..._does_not_kill_non_escaping_local` (address only ever dereferenced
+directly -- must survive the call unchanged) and `..._kills_escaping_local`
+(address also stored to an unrelated location before the call -- must still
+be killed). Both pass, and between them pin down the exact boundary this
+analysis draws.
+
+### Validation
+
+- [x] `cargo nextest run -p fission-pcode`: 963 passed (962 prior + replaced
+      test), 1 skipped.
+- [x] `cargo nextest run --workspace`: only the same pre-existing,
+      unrelated `fission-emulator` baseline failures.
+- [x] Concrete repros: both `matrix_multiply`'s `local_2c` (Section 8) and
+      `___w64_mingwthr_add_key_dtor`'s `home_0` (this section) no longer
+      appear in `scan_stack_slot_cover_violations`'s output.
+- [x] Before/after decompile output on a real corpus binary: byte-identical
+      (still diagnostic-only, wired into no production decision).
+
+### Real-corpus re-measurement (dev + realworld + holdout + adversarial)
+
+| Bucket | After Section 8 | After this pass | Total change from Section 7 baseline |
+|---|---:|---:|---:|
+| `stack_slot_cover_violation` instances | 225 | **12** | 908 -> 12 (**98.7%** reduction) |
+| Distinct functions with >=1 violation | 113 | **7** | 185 -> 7 |
+
+### What's left: a precision limit, not a bug
+
+Traced the smallest remaining case (`_power`, `math_gcc-m32_O2.exe`, 1
+violation). Every contributing memory value has a clean, genuine
+`(Some(Stack), Exact, Store)` guard -- no phantom write-effect source this
+time. The forced-union phi chain is also complete and correct (verified by
+hand-tracing all `memory_phis` operand/output pairs for the offset into one
+5-member union-find group). The false positive instead comes from
+`SsaMemoryHighVariable`'s cover being a single *merged, per-block* range: a
+5-member loop-carried phi-chain group's members individually touch
+different, non-overlapping sub-ranges of a block, but their *merged* cover
+spans the block almost entirely (`0..131`), which then numerically
+"interferes" with a third, genuinely disjoint value's narrow real range
+(`88..100`) even though no actual member was live during that window.
+
+This is the same class of approximation Ghidra's own block-granular
+`Cover`/`Merge` machinery has -- not specific to this implementation.
+Resolving it precisely would need per-value point-in-time liveness instead
+of per-block ranges, a materially larger redesign of the Cover
+representation itself (affecting the scalar side too, not just memory).
+Left as documented, accepted residual imprecision rather than pursued
+further this session -- diminishing returns at 98.7% already reached, and
+the remaining mechanism is understood well enough that a future session
+doesn't have to re-discover it via tracing.

@@ -90,28 +90,35 @@ impl<'a> PreviewBuilder<'a> {
     /// variables reusing one offset with disjoint lifetimes" -- the latter
     /// is what `self.locals`' flat, identity-blind naming cannot detect.
     ///
-    /// A first real-corpus false-positive source was found and fixed
-    /// (`MemoryLayout::write_effect`'s unresolved-region fallback was
-    /// conservatively including Stack partitions -- an unrelated write
-    /// through a parameter/heap pointer that couldn't be resolved to any
-    /// region fabricated a phantom "definition" of every promoted stack
-    /// slot). Real-corpus violation count dropped 908 -> 225 after that fix.
+    /// Two real-corpus false-positive sources were found and fixed:
+    /// 1. `MemoryLayout::write_effect`'s unresolved-region fallback was
+    ///    conservatively including Stack partitions -- an unrelated write
+    ///    through a parameter/heap pointer that couldn't be resolved to any
+    ///    region fabricated a phantom "definition" of every promoted stack
+    ///    slot. (908 -> 225 real-corpus violations.)
+    /// 2. `write_effect`'s `Call` case unconditionally treated every
+    ///    function call as writing to every promoted stack slot. Real escape
+    ///    analysis (`compute_escaping_stack_storages`) now narrows this to
+    ///    slots whose address is provably taken (stored elsewhere, returned,
+    ///    or placed in an argument-passing register). (225 -> 12.)
     ///
-    /// STILL KNOWN IMPRECISE: the remaining count is dominated by a
-    /// *different*, separate mechanism -- `write_effect`'s `Call` case
-    /// unconditionally treats every function call as writing to every
-    /// promoted stack slot (deliberately conservative and, in general,
-    /// correct: a callee genuinely can write to a caller's stack slot if
-    /// its address escaped into an argument). For a non-escaping local
-    /// (the common case -- a spill slot never address-taken, e.g. traced
-    /// `___w64_mingwthr_add_key_dtor`'s `home_0` flagged solely because
-    /// `calloc`/`EnterCriticalSection`/`LeaveCriticalSection` calls exist in
-    /// the function, none of which receive its address), this is also a
-    /// false positive, but fixing it needs real escape analysis (does any
-    /// instruction take this slot's address and pass it to a call) that
-    /// does not exist yet anywhere in this memory-promotion-SSA subsystem.
-    /// Do **not** treat this scan's raw count as a bug count, and do not
-    /// gate any materialize decision on it, until that gap is closed too.
+    /// STILL KNOWN IMPRECISE: the remaining ~12 real-corpus instances traced
+    /// to a different cause -- not a false union-find/escape gap, but the
+    /// inherent precision limit of a single merged per-block `Cover` range
+    /// per `SsaMemoryHighVariable`. A loop-carried phi-chain group's merged
+    /// cover can span an entire block even though no *individual* member's
+    /// own live range actually overlaps a third, genuinely disjoint write
+    /// that happens to sit temporally between two of the group's own
+    /// sub-ranges (traced case: `_power`'s accumulator, `math_gcc-m32_O2.exe`
+    /// -- a real Store at block-local position 88..100 flagged against a
+    /// 5-member phi-chain group whose *merged* cover for that block is
+    /// 0..131, even though no single member is live across 88..100).
+    /// Ghidra's own block-granular `Cover`/`Merge` has the same class of
+    /// approximation; resolving it here would need per-value point-in-time
+    /// liveness rather than per-block ranges -- a larger, separate
+    /// undertaking. Do **not** treat this scan's raw count as a bug count,
+    /// and do not gate any materialize decision on it, until that gap (or a
+    /// documented acceptance of its residual imprecision) is addressed.
     pub(crate) fn scan_stack_slot_cover_violations(&self) -> Vec<StackSlotCoverViolation> {
         let mut highs_by_offset: std::collections::BTreeMap<i64, Vec<SsaMemoryHighVariableId>> =
             std::collections::BTreeMap::new();

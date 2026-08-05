@@ -7,6 +7,7 @@
 //! COPY/CAST congruence.
 
 use super::*;
+use crate::midend::cspec::RegisterNamer;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -497,7 +498,7 @@ pub(super) fn build_scalar_ssa_with_context(
 
     ssa.dynamic_guards =
         build_dynamic_guards(pcode, &dominance.reachable, &ssa, options, type_context);
-    build_memory_ssa(pcode, successors, &dominance, &mut ssa);
+    build_memory_ssa(pcode, successors, &dominance, options, &mut ssa);
     let (out_of_ssa_copies, high_variables, value_high_variables) =
         build_out_of_ssa_facts(pcode, &ssa, successors, predecessors, &dominance);
     ssa.out_of_ssa_copies = out_of_ssa_copies;
@@ -1038,10 +1039,22 @@ fn signed_constant_delta(varnode: &Varnode) -> Option<i64> {
 #[derive(Debug, Default)]
 struct MemoryLayout {
     partitions: BTreeMap<(SsaMemoryRegion, u64), Vec<SsaMemoryStorageKey>>,
+    /// Stack storage keys whose address provably escapes this function (used
+    /// as a call argument, stored into another location, or returned).
+    /// `write_effect`'s `Call` case only conservatively assumes a write to
+    /// storages in this set -- a non-escaping local's address was never
+    /// taken, so no callee can write through it. See
+    /// `compute_escaping_stack_storages`.
+    escaping: BTreeSet<SsaMemoryStorageKey>,
 }
 
 impl MemoryLayout {
-    fn build(guards: &BTreeMap<SsaOpSite, SsaDynamicGuard>) -> Self {
+    fn build(
+        pcode: &PcodeFunction,
+        ssa: &NirScalarSsa,
+        options: &MlilPreviewOptions,
+        guards: &BTreeMap<SsaOpSite, SsaDynamicGuard>,
+    ) -> Self {
         let mut ranges = BTreeMap::<(SsaMemoryRegion, u64), Vec<(i128, i128)>>::new();
         for guard in guards.values() {
             if !matches!(
@@ -1092,6 +1105,7 @@ impl MemoryLayout {
             }
             layout.partitions.insert(identity, partitions);
         }
+        layout.escaping = compute_escaping_stack_storages(pcode, ssa, options, &layout);
         layout
     }
 
@@ -1129,7 +1143,7 @@ impl MemoryLayout {
             return Vec::new();
         }
         if guard.kind == SsaDynamicGuardKind::Call {
-            return self.storages().collect();
+            return self.escaping.iter().copied().collect();
         }
         let Some(space_id) = guard.space_id else {
             return self.storages().collect();
@@ -1189,6 +1203,109 @@ impl MemoryLayout {
     }
 }
 
+/// Stack storage keys whose address provably escapes this function: used as
+/// a `Store`'s *value* operand (spilled/staged somewhere else -- covers the
+/// x86-32 push-args-on-stack calling convention, where a `Call` op itself
+/// carries no argument inputs at all), a `Return`'s operand, or ever
+/// assigned into one of the calling convention's integer argument-passing
+/// registers (covers register-ABI calling conventions -- x64/AArch64/etc.
+/// A `Call` p-code op has exactly one input, the target; arguments are
+/// register-resident by ABI convention, not data-flow-connected to the call
+/// op itself, so this checks "was a stack address ever placed in an
+/// argument register" rather than "is this specific call's argument a
+/// stack address").
+///
+/// Deliberately coarse: a slot found escaping via *any* mechanism, at *any*
+/// point in the function, is treated as escaping for *every* call in the
+/// function (not just the one that plausibly received it). This trades
+/// precision for simplicity and soundness -- the same posture as the rest
+/// of this dynamic-guard machinery, which already only ever *narrows* a
+/// default-conservative assumption when it has positive proof, never the
+/// other way around.
+fn compute_escaping_stack_storages(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    options: &MlilPreviewOptions,
+    layout: &MemoryLayout,
+) -> BTreeSet<SsaMemoryStorageKey> {
+    let mut escaping = BTreeSet::new();
+    for (block_idx, block) in pcode.blocks.iter().enumerate() {
+        for (op_idx, op) in block.ops.iter().enumerate() {
+            let site = SsaOpSite {
+                block: block_idx as u32,
+                op: op_idx as u32,
+            };
+            match op.opcode {
+                PcodeOpcode::Store if op.inputs.len() >= 2 => {
+                    let value_index = op.inputs.len() - 1;
+                    mark_escaping_input(pcode, ssa, options, layout, site, value_index, &mut escaping);
+                }
+                PcodeOpcode::Return => {
+                    for input_index in 0..op.inputs.len() {
+                        mark_escaping_input(
+                            pcode, ssa, options, layout, site, input_index, &mut escaping,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let register_namer = RegisterNamer::from_options(options);
+    for value in &ssa.values {
+        if !is_register_space_id(value.storage.space_id)
+            || !register_namer
+                .int_param_offsets
+                .contains(&value.storage.offset)
+        {
+            continue;
+        }
+        let mut visiting = BTreeSet::new();
+        if let Some(range) = resolve_pointer_value(pcode, ssa, options, value.id, &mut visiting, 64)
+        {
+            mark_escaping_range(layout, &range, &mut escaping);
+        }
+    }
+    escaping
+}
+
+fn mark_escaping_input(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    options: &MlilPreviewOptions,
+    layout: &MemoryLayout,
+    site: SsaOpSite,
+    input_index: usize,
+    escaping: &mut BTreeSet<SsaMemoryStorageKey>,
+) {
+    let mut visiting = BTreeSet::new();
+    if let Some(range) =
+        resolve_pointer_input(pcode, ssa, options, site, input_index, &mut visiting, 64)
+    {
+        mark_escaping_range(layout, &range, escaping);
+    }
+}
+
+fn mark_escaping_range(
+    layout: &MemoryLayout,
+    range: &PointerRange,
+    escaping: &mut BTreeSet<SsaMemoryStorageKey>,
+) {
+    if range.region != SsaMemoryRegion::Stack {
+        return;
+    }
+    let Some(escape_end) = range.maximum.checked_add(1) else {
+        return;
+    };
+    for storage in layout.storages() {
+        let storage_end = storage.offset + i128::from(storage.size);
+        if range.minimum < storage_end && storage.offset < escape_end {
+            escaping.insert(storage);
+        }
+    }
+}
+
 fn allocate_memory_value(
     ssa: &mut NirScalarSsa,
     storage: SsaMemoryStorageKey,
@@ -1207,9 +1324,10 @@ fn build_memory_ssa(
     pcode: &PcodeFunction,
     successors: &[Vec<usize>],
     dominance: &Dominance,
+    options: &MlilPreviewOptions,
     ssa: &mut NirScalarSsa,
 ) {
-    let layout = MemoryLayout::build(&ssa.dynamic_guards);
+    let layout = MemoryLayout::build(pcode, ssa, options, &ssa.dynamic_guards);
     if layout.partitions.is_empty() {
         return;
     }
@@ -2150,9 +2268,19 @@ pub(super) fn validate_scalar_ssa_with_context(
     }
     let mut expected_memory = NirScalarSsa {
         dynamic_guards: ssa.dynamic_guards.clone(),
+        // `compute_escaping_stack_storages` (called from `build_memory_ssa`)
+        // resolves pointer chains through `values`/`operation_inputs`/`phis`
+        // to find stack addresses reaching a call/store/return -- carry
+        // these over too, or this re-derivation sees an empty scalar SSA
+        // and always concludes nothing escapes, diverging from the real
+        // build and spuriously failing `StoragePartitionsMismatch`.
+        values: ssa.values.clone(),
+        operation_inputs: ssa.operation_inputs.clone(),
+        operation_outputs: ssa.operation_outputs.clone(),
+        phis: ssa.phis.clone(),
         ..NirScalarSsa::default()
     };
-    build_memory_ssa(pcode, successors, &dominance, &mut expected_memory);
+    build_memory_ssa(pcode, successors, &dominance, options, &mut expected_memory);
     if ssa.memory_values != expected_memory.memory_values
         || ssa.memory_inputs != expected_memory.memory_inputs
         || ssa.memory_operation_inputs != expected_memory.memory_operation_inputs
@@ -3095,7 +3223,13 @@ mod tests {
     }
 
     #[test]
-    fn signed_stack_location_is_promoted_and_unknown_call_kills_it() {
+    fn signed_stack_location_is_promoted_and_unknown_call_does_not_kill_non_escaping_local() {
+        // `address` (this local's address) is only ever used to directly
+        // dereference it (Store's address operand, Load's address operand)
+        // -- never passed to the call, stored elsewhere, or returned. A
+        // non-escaping local's address was never taken by anything the
+        // callee could have received, so an unrelated unknown call must not
+        // conservatively kill it (`compute_escaping_stack_storages`).
         let stack_pointer = register_sized(0x20, 8);
         let address = unique_sized(0, 8);
         let pcode = function(vec![vec![
@@ -3139,8 +3273,86 @@ mod tests {
             .unwrap();
 
         let store = ssa.memory_operation_outputs[&SsaOpSite { block: 0, op: 1 }][0].value;
-        let call = ssa.memory_operation_outputs[&SsaOpSite { block: 0, op: 2 }][0].value;
         let load = ssa.memory_operation_inputs[&SsaOpSite { block: 0, op: 3 }][0].value;
+        assert!(
+            !ssa.memory_operation_outputs.contains_key(&SsaOpSite { block: 0, op: 2 }),
+            "unknown call must not fabricate a write to a non-escaping local"
+        );
+        assert_eq!(store, load);
+        assert_eq!(
+            ssa.memory_values[load.0 as usize].storage,
+            SsaMemoryStorageKey {
+                region: SsaMemoryRegion::Stack,
+                space_id: 3,
+                offset: -8,
+                size: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn signed_stack_location_is_promoted_and_unknown_call_kills_escaping_local() {
+        // Same shape as the non-escaping case above, except `address` is
+        // also stored into an unrelated location (`Store [0x2000] <- address`)
+        // before the call -- the classic "spilled to a global/out-param" or
+        // x86-32 "pushed as a stack argument" escape shape. This local's
+        // address genuinely could have reached the callee, so the unknown
+        // call must still conservatively kill it.
+        let stack_pointer = register_sized(0x20, 8);
+        let address = unique_sized(0, 8);
+        let pcode = function(vec![vec![
+            op(
+                0x1000,
+                PcodeOpcode::IntAdd,
+                Some(address.clone()),
+                vec![stack_pointer, Varnode::constant(-8, 8)],
+            ),
+            op(
+                0x1001,
+                PcodeOpcode::Store,
+                None,
+                vec![
+                    Varnode::constant(3, 8),
+                    address.clone(),
+                    Varnode::constant(7, 4),
+                ],
+            ),
+            op(
+                0x1002,
+                PcodeOpcode::Store,
+                None,
+                vec![
+                    Varnode::constant(3, 8),
+                    Varnode::constant(0x2000, 8),
+                    address.clone(),
+                ],
+            ),
+            op(
+                0x1003,
+                PcodeOpcode::CallInd,
+                None,
+                vec![register_sized(0x30, 8)],
+            ),
+            op(
+                0x1004,
+                PcodeOpcode::Load,
+                Some(unique_sized(0x10, 4)),
+                vec![Varnode::constant(3, 8), address],
+            ),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+        let options = MlilPreviewOptions {
+            cspec_stack_pointer_offset: Some(0x20),
+            ..MlilPreviewOptions::default()
+        };
+        let ssa = build_scalar_ssa_with_context(&pcode, &successors, &predecessors, &options, None);
+        validate_scalar_ssa_with_context(&pcode, &successors, &predecessors, &ssa, &options, None)
+            .unwrap();
+
+        let store = ssa.memory_operation_outputs[&SsaOpSite { block: 0, op: 1 }][0].value;
+        let call = ssa.memory_operation_outputs[&SsaOpSite { block: 0, op: 3 }][0].value;
+        let load = ssa.memory_operation_inputs[&SsaOpSite { block: 0, op: 4 }][0].value;
         assert_ne!(store, call);
         assert_eq!(call, load);
         assert_eq!(
