@@ -157,6 +157,9 @@ pub fn cleanup_func_stmt_list(func: &mut PreHirFunction) {
     PROTECTED_LSDA_LABELS.with(|protected| {
         global_refs.extend(protected.borrow().iter().cloned());
     });
+    let defined_labels: HashSet<String> = crate::cleanup::utils::collect_defined_labels(&func.body)
+        .into_iter()
+        .collect();
     cleanup_stmt_list_with_options_and_preserved(
         &mut func.body,
         &func.name,
@@ -167,6 +170,7 @@ pub fn cleanup_func_stmt_list(func: &mut PreHirFunction) {
         },
         &preserved_temps,
         Some(&global_refs),
+        Some(&defined_labels),
     );
 }
 
@@ -1527,6 +1531,11 @@ fn cleanup_stmt_list(stmts: &mut Vec<PreHirStmt>, func_name: &str, depth: usize)
     } else {
         None
     };
+    let defined_labels: Option<HashSet<String>> = (depth == 0).then(|| {
+        crate::cleanup::utils::collect_defined_labels(stmts)
+            .into_iter()
+            .collect()
+    });
     cleanup_stmt_list_with_options_and_preserved(
         stmts,
         func_name,
@@ -1537,6 +1546,7 @@ fn cleanup_stmt_list(stmts: &mut Vec<PreHirStmt>, func_name: &str, depth: usize)
         },
         &preserved_temps,
         global_refs.as_ref(),
+        defined_labels.as_ref(),
     );
 }
 
@@ -1556,6 +1566,11 @@ fn cleanup_stmt_list_with_options(
     } else {
         None
     };
+    let defined_labels: Option<HashSet<String>> = (depth == 0).then(|| {
+        crate::cleanup::utils::collect_defined_labels(stmts)
+            .into_iter()
+            .collect()
+    });
     cleanup_stmt_list_with_options_and_preserved(
         stmts,
         func_name,
@@ -1563,6 +1578,7 @@ fn cleanup_stmt_list_with_options(
         options,
         &preserved_temps,
         global_refs.as_ref(),
+        defined_labels.as_ref(),
     );
 }
 
@@ -1573,6 +1589,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
     options: CleanupStmtOptions,
     preserved_temps: &HashSet<&str>,
     global_refs: Option<&HashSet<String>>,
+    defined_labels: Option<&HashSet<String>>,
 ) {
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
@@ -1585,6 +1602,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     options,
                     preserved_temps,
                     global_refs,
+                    defined_labels,
                 )
             }
             PreHirStmt::For {
@@ -1599,6 +1617,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                             options,
                             preserved_temps,
                             global_refs,
+                            defined_labels,
                         );
                     }
                 }
@@ -1611,6 +1630,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                             options,
                             preserved_temps,
                             global_refs,
+                            defined_labels,
                         );
                     }
                 }
@@ -1621,6 +1641,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     options,
                     preserved_temps,
                     global_refs,
+                    defined_labels,
                 )
             }
             PreHirStmt::If {
@@ -1635,6 +1656,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     options,
                     preserved_temps,
                     global_refs,
+                    defined_labels,
                 );
                 cleanup_stmt_list_with_options_and_preserved(
                     else_body,
@@ -1643,6 +1665,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     options,
                     preserved_temps,
                     global_refs,
+                    defined_labels,
                 );
             }
             PreHirStmt::Switch { cases, default, .. } => {
@@ -1654,6 +1677,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                         options,
                         preserved_temps,
                         global_refs,
+                        defined_labels,
                     );
                 }
                 cleanup_stmt_list_with_options_and_preserved(
@@ -1663,6 +1687,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
                     options,
                     preserved_temps,
                     global_refs,
+                    defined_labels,
                 );
             }
             PreHirStmt::Assign { .. }
@@ -1698,7 +1723,21 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("rewrite_found_path_break_to_return");
         }
-        if rewrite_orphan_loop_gotos_to_continue(stmts) {
+        let current_defined = if depth == 0 {
+            Some(
+                crate::cleanup::utils::collect_defined_labels(stmts)
+                    .into_iter()
+                    .collect::<HashSet<String>>(),
+            )
+        } else {
+            None
+        };
+        let active_defined = if depth == 0 {
+            current_defined.as_ref()
+        } else {
+            defined_labels
+        };
+        if rewrite_orphan_loop_gotos_to_continue(stmts, active_defined) {
             changed = true;
             last_changed_pass = Some("rewrite_orphan_loop_gotos_to_continue");
         }

@@ -1194,64 +1194,29 @@ fn is_self_increment_assign(name: &str, rhs: &PreHirExpr) -> bool {
 /// loop. If the loop bound-check form `if (bound <= i) break;` is present,
 /// inject `i++` before `continue` so the orphan edge matches the usual
 /// search-loop continue (skip-to-increment) rather than spinning forever.
-pub fn rewrite_orphan_loop_gotos_to_continue(stmts: &mut Vec<PreHirStmt>) -> bool {
-    let defined = collect_defined_labels(stmts);
-    rewrite_orphan_loop_gotos_to_continue_rec(stmts, &defined, false, None)
-}
-
-fn collect_defined_labels(stmts: &[PreHirStmt]) -> HashSet<String> {
-    let mut labels = HashSet::default();
-    collect_defined_labels_in_stmts(stmts, &mut labels);
-    labels
-}
-
-fn collect_defined_labels_in_stmts(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
-    for stmt in stmts {
-        match stmt {
-            PreHirStmt::Label(name) => {
-                out.insert(name.clone());
-            }
-            PreHirStmt::Block(body)
-            | PreHirStmt::While { body, .. }
-            | PreHirStmt::DoWhile { body, .. } => collect_defined_labels_in_stmts(body, out),
-            PreHirStmt::For {
-                init, update, body, ..
-            } => {
-                if let Some(init) = init {
-                    collect_defined_labels_in_stmt(init, out);
-                }
-                if let Some(update) = update {
-                    collect_defined_labels_in_stmt(update, out);
-                }
-                collect_defined_labels_in_stmts(body, out);
-            }
-            PreHirStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                collect_defined_labels_in_stmts(then_body, out);
-                collect_defined_labels_in_stmts(else_body, out);
-            }
-            PreHirStmt::Switch { cases, default, .. } => {
-                for case in cases {
-                    collect_defined_labels_in_stmts(&case.body, out);
-                }
-                collect_defined_labels_in_stmts(default, out);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn collect_defined_labels_in_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
-    match stmt {
-        PreHirStmt::Label(name) => {
-            out.insert(name.clone());
-        }
-        PreHirStmt::Block(body) => collect_defined_labels_in_stmts(body, out),
-        _ => {}
-    }
+///
+/// `defined` must be the set of labels defined anywhere in the *whole
+/// function*, not just `stmts` -- this is called once per nesting level
+/// during `cleanup_stmt_list_with_options_and_preserved`'s per-branch
+/// recursion, so `stmts` is frequently just one arm of an `If` (e.g. a
+/// `while` loop's `then_body`, with the label its one exit `goto` targets
+/// sitting in the sibling `else_body`). Computing `defined` from `stmts`
+/// alone would see that label as nonexistent ("orphaned") purely because
+/// it's a sibling's label rather than genuinely unreferenced anywhere, and
+/// blindly rewrite a real, meaningful jump into `continue` -- silently
+/// dropping whatever code lived at that label (e.g. a loop's increment
+/// step) and turning a finite loop into an infinite one at runtime.
+pub fn rewrite_orphan_loop_gotos_to_continue(
+    stmts: &mut Vec<PreHirStmt>,
+    defined: Option<&HashSet<String>>,
+) -> bool {
+    // Without whole-function label visibility we cannot tell a genuinely
+    // orphaned goto from one whose label just lives in a sibling scope --
+    // skip rather than guess (see the doc comment above).
+    let Some(defined) = defined else {
+        return false;
+    };
+    rewrite_orphan_loop_gotos_to_continue_rec(stmts, defined, false, None)
 }
 
 fn rewrite_orphan_loop_gotos_to_continue_rec(

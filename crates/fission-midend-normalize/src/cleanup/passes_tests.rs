@@ -533,7 +533,11 @@ fn rewrite_orphan_loop_gotos_to_continue_rewrites_missing_label() {
             PreHirStmt::Return(Some(PreHirExpr::Var("v".to_string()))),
         ],
     }];
-    assert!(rewrite_orphan_loop_gotos_to_continue(&mut stmts));
+    let defined: HashSet<String> = collect_defined_labels(&stmts).into_iter().collect();
+    assert!(rewrite_orphan_loop_gotos_to_continue(
+        &mut stmts,
+        Some(&defined)
+    ));
     let PreHirStmt::While { body, .. } = &stmts[0] else {
         panic!("expected while");
     };

@@ -652,7 +652,7 @@ pub(super) fn collect_stmt_referenced_label_counts(
 /// inside e.g. a `While` body is just as real a jump target as a top-level
 /// one, and a shallow scan silently missing it drops the label -- and the
 /// loop/branch that still `Goto`s to it dangles.
-pub(super) fn collect_defined_labels(stmts: &[PreHirStmt]) -> Vec<String> {
+pub(crate) fn collect_defined_labels(stmts: &[PreHirStmt]) -> Vec<String> {
     let mut labels = Vec::new();
     for stmt in stmts {
         collect_stmt_defined_labels(stmt, &mut labels);
