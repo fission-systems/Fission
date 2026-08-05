@@ -43,6 +43,13 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) params: BTreeMap<usize, PreHirBinding>,
     pub(crate) locals: BTreeMap<i64, StackSlot>,
     pub(crate) locals_next_id: StackSlotId,
+    /// Which `SsaMemoryHighVariable` group(s) currently "own" each
+    /// `self.locals` offset's canonical name -- i.e. have already been
+    /// proven (or assumed, absent proof otherwise) safe to share it. Consulted
+    /// by `ensure_stack_slot_binding`'s live Cover-interference guard; see
+    /// `cover_proves_stack_slot_reuse_unsafe`.
+    pub(crate) stack_slot_memory_owners:
+        BTreeMap<i64, Vec<fission_midend_core::ir::SsaMemoryHighVariableId>>,
     pub(crate) temps: BTreeMap<String, PreHirBinding>,
     pub(crate) temp_next_id: u32,
     pub(crate) materialized_vns: HashMap<MaterializedVarnodeKey, String>,

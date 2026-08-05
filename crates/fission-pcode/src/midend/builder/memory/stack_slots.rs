@@ -867,7 +867,27 @@ impl<'a> PreviewBuilder<'a> {
             },
         };
 
-        if let Some(entry) = self.locals.get_mut(&offset) {
+        if self.locals.contains_key(&offset) {
+            if self.cover_proves_stack_slot_reuse_unsafe(offset) {
+                // The SSA memory Cover positively proves this access belongs
+                // to a different, interfering logical variable from whatever
+                // already owns this offset's canonical name -- give it its
+                // own one-off name instead of silently conflating the two
+                // under `self.locals[offset]`'s name (the stack-slot analog
+                // of the register name-collision bug fixed earlier this
+                // session; see docs/proposals/2026-08-05-memory-ssa-stack-pointer-recognition-fix.md).
+                // Deliberately not cached into `self.locals` or
+                // `stack_slot_memory_owners`: as of this session's real-corpus
+                // testing this path has never been observed to fire, so a
+                // fresh name per occurrence (rather than a second persistent
+                // "alternate" slot) keeps this a minimal, provably-safe
+                // guard rather than a speculative redesign of `self.locals`'
+                // one-name-per-offset shape.
+                let name = self.next_unused_temp_binding_name(&ty);
+                return Some((name, ty));
+            }
+            self.record_stack_slot_memory_owner(offset);
+            let entry = self.locals.get_mut(&offset).expect("checked above");
             if entry.ty == NirType::Unknown {
                 entry.ty = ty.clone();
             }
@@ -896,7 +916,9 @@ impl<'a> PreviewBuilder<'a> {
         {
             entry.origin = origin;
         }
-        Some((entry.name.clone(), entry.ty.clone()))
+        let result = (entry.name.clone(), entry.ty.clone());
+        self.record_stack_slot_memory_owner(offset);
+        Some(result)
     }
 
     pub(in crate::midend::builder) fn ensure_incoming_stack_param_binding(

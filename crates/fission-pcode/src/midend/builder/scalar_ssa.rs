@@ -504,10 +504,11 @@ pub(super) fn build_scalar_ssa_with_context(
     ssa.out_of_ssa_copies = out_of_ssa_copies;
     ssa.high_variables = high_variables;
     ssa.value_high_variables = value_high_variables;
-    let (memory_high_variables, value_memory_high_variables) =
+    let (memory_high_variables, value_memory_high_variables, memory_value_covers) =
         build_memory_out_of_ssa_facts(pcode, &ssa, predecessors, &dominance);
     ssa.memory_high_variables = memory_high_variables;
     ssa.value_memory_high_variables = value_memory_high_variables;
+    ssa.memory_value_covers = memory_value_covers;
 
     ssa
 }
@@ -1870,7 +1871,11 @@ fn build_memory_out_of_ssa_facts(
     ssa: &NirScalarSsa,
     predecessors: &[Vec<usize>],
     dominance: &Dominance,
-) -> (Vec<SsaMemoryHighVariable>, Vec<SsaMemoryHighVariableId>) {
+) -> (
+    Vec<SsaMemoryHighVariable>,
+    Vec<SsaMemoryHighVariableId>,
+    Vec<Vec<SsaCoverBlock>>,
+) {
     let mut parents: Vec<usize> = (0..ssa.memory_values.len()).collect();
     for phis in ssa.memory_phis.values() {
         for phi in phis {
@@ -1924,7 +1929,7 @@ fn build_memory_out_of_ssa_facts(
         });
     }
 
-    (high_variables, value_high_variables)
+    (high_variables, value_high_variables, covers)
 }
 
 fn build_memory_value_cover(

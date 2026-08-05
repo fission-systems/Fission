@@ -16,7 +16,7 @@
 //! any one `self.locals` offset cover 2+ distinct SSA memory value sizes.
 use super::super::*;
 use fission_midend_core::ir::{
-    SsaMemoryHighVariableId, SsaMemoryRegion, SsaMemoryStorageKey,
+    SsaCoverBlock, SsaMemoryHighVariableId, SsaMemoryRegion, SsaMemoryStorageKey, SsaOpSite,
 };
 
 /// One `self.locals` offset whose bound SSA memory accesses belong to two or
@@ -161,6 +161,124 @@ impl<'a> PreviewBuilder<'a> {
         }
         violations
     }
+
+    /// Resolve the `SsaMemoryValueId` the *current* access (per
+    /// `self.current_lowering_site`), if it can be resolved with confidence.
+    /// The access's size comes from the op itself (the `Load`'s output
+    /// varnode, or the `Store`'s value-operand varnode), not from the
+    /// caller, so this can never disagree with what the SSA side actually
+    /// modeled. Conservative: returns `None` (not a guess) whenever the
+    /// current op isn't a plain `Load`/`Store`, the SSA side has no
+    /// matching piece, or the resolved value's own storage offset doesn't
+    /// exactly match `offset` -- callers must treat `None` as "can't prove
+    /// anything," never as a stand-in for a specific answer.
+    fn resolve_current_stack_memory_value(
+        &self,
+        offset: i64,
+    ) -> Option<fission_midend_core::ir::SsaMemoryValueId> {
+        let site = self.current_lowering_site?;
+        let op = self.pcode.blocks.get(site.block_idx)?.ops.get(site.op_idx)?;
+        let ssa_site = SsaOpSite {
+            block: u32::try_from(site.block_idx).ok()?,
+            op: u32::try_from(site.op_idx).ok()?,
+        };
+        let pieces = match op.opcode {
+            PcodeOpcode::Load => self.scalar_ssa.memory_operation_inputs.get(&ssa_site),
+            PcodeOpcode::Store => self.scalar_ssa.memory_operation_outputs.get(&ssa_site),
+            _ => None,
+        }?;
+        let piece = pieces.iter().find(|piece| piece.byte_offset == 0)?;
+        let value = self.scalar_ssa.memory_value(piece.value)?;
+        if value.storage.region != SsaMemoryRegion::Stack || value.storage.offset != i128::from(offset)
+        {
+            return None;
+        }
+        Some(piece.value)
+    }
+
+    /// Live counterpart of `scan_stack_slot_cover_violations`'s core test,
+    /// gating a `self.locals` name-reuse decision before it happens. Uses
+    /// per-value covers (`memory_value_covers`), not a group's merged
+    /// cover, specifically to avoid the over-approximation traced in
+    /// `_power` (Section 8/9 of the memory-SSA proposal doc) -- a
+    /// loop-carried group's *merged* cover can span a whole block even
+    /// though no individual member is live across a given sub-range within
+    /// it. `true` only when the current access's value provably belongs to
+    /// a different `SsaMemoryHighVariable` from *every* group already
+    /// recorded as owning this offset's name, AND that value's own cover
+    /// interferes with at least one owning group's member's own cover.
+    /// `false` whenever the current access can't be resolved, or hasn't
+    /// been claimed by anyone yet, or already matches a recorded owner --
+    /// this only ever blocks a reuse the SSA model can positively disprove.
+    pub(crate) fn cover_proves_stack_slot_reuse_unsafe(&self, offset: i64) -> bool {
+        let Some(value_id) = self.resolve_current_stack_memory_value(offset) else {
+            return false;
+        };
+        let Some(&new_group) = self
+            .scalar_ssa
+            .value_memory_high_variables
+            .get(value_id.0 as usize)
+        else {
+            return false;
+        };
+        let Some(owners) = self.stack_slot_memory_owners.get(&offset) else {
+            return false;
+        };
+        if owners.contains(&new_group) {
+            return false;
+        }
+        let Some(new_cover) = self.scalar_ssa.memory_value_covers.get(value_id.0 as usize) else {
+            return false;
+        };
+        owners.iter().any(|owner_group| {
+            let Some(owner_hv) = self
+                .scalar_ssa
+                .memory_high_variables
+                .get(owner_group.0 as usize)
+            else {
+                return false;
+            };
+            owner_hv.members.iter().any(|&member| {
+                self.scalar_ssa
+                    .memory_value_covers
+                    .get(member.0 as usize)
+                    .is_some_and(|owner_cover| covers_interfere(new_cover, owner_cover))
+            })
+        })
+    }
+
+    /// Record that the current access's `SsaMemoryHighVariable` group has
+    /// (successfully) claimed `offset`'s canonical name -- called after a
+    /// `self.locals` bind that `cover_proves_stack_slot_reuse_unsafe`
+    /// (called beforehand) did not reject. A no-op when the current access
+    /// can't be resolved, matching this module's permissive-on-uncertainty
+    /// posture: an unresolved access neither claims nor blocks anything.
+    pub(crate) fn record_stack_slot_memory_owner(&mut self, offset: i64) {
+        let Some(value_id) = self.resolve_current_stack_memory_value(offset) else {
+            return;
+        };
+        let Some(&group) = self
+            .scalar_ssa
+            .value_memory_high_variables
+            .get(value_id.0 as usize)
+        else {
+            return;
+        };
+        let owners = self.stack_slot_memory_owners.entry(offset).or_default();
+        if !owners.contains(&group) {
+            owners.push(group);
+        }
+    }
+}
+
+fn covers_interfere(left: &[SsaCoverBlock], right: &[SsaCoverBlock]) -> bool {
+    left.iter().any(|left| {
+        right.iter().any(|right| {
+            left.block == right.block
+                && left.start < right.end_exclusive
+                && right.start < left.end_exclusive
+        })
+    })
 }
 
 fn memory_high_variables_interfere(
@@ -181,4 +299,180 @@ fn memory_high_variables_interfere(
                 && right.start < left.end_exclusive
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pcode::PcodeBasicBlock;
+    use fission_midend_core::ir::{
+        SsaMemoryHighVariable, SsaMemoryValue, SsaMemoryValueId, SsaValueDefinition,
+    };
+
+    const OFFSET: i64 = -8;
+
+    fn base_pcode() -> PcodeFunction {
+        PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: vec![],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x1010,
+                        output: None,
+                        inputs: vec![
+                            Varnode::constant(3, 8),
+                            Varnode {
+                                space_id: UNIQUE_SPACE_ID,
+                                offset: 0,
+                                size: 8,
+                                is_constant: false,
+                                constant_val: 0,
+                            },
+                            Varnode::constant(2, 4),
+                        ],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        }
+    }
+
+    /// Two `SsaMemoryHighVariable` groups (A: member value 0, B: member
+    /// value 1), both storage-keyed to `OFFSET`, with *interfering*
+    /// individual covers in block 1 (A spans the whole block, B is a
+    /// narrower overlapping sub-range) -- the exact shape a genuine
+    /// stack-slot-reuse-for-a-different-variable bug would produce. The
+    /// current access (`SsaOpSite{block:1, op:0}`, a `Store`) writes value 1
+    /// (group B).
+    fn builder_with_interfering_groups(owner: SsaMemoryHighVariableId) -> PreviewBuilder<'static> {
+        let pcode: &'static PcodeFunction = Box::leak(Box::new(base_pcode()));
+        let options: &'static MlilPreviewOptions =
+            Box::leak(Box::new(MlilPreviewOptions::default()));
+        let mut builder = PreviewBuilder::new(pcode, options, None);
+
+        let storage = SsaMemoryStorageKey {
+            region: SsaMemoryRegion::Stack,
+            space_id: 3,
+            offset: i128::from(OFFSET),
+            size: 4,
+        };
+        builder.scalar_ssa.memory_values = vec![
+            SsaMemoryValue {
+                id: SsaMemoryValueId(0),
+                storage,
+                definition: SsaValueDefinition::Input,
+            },
+            SsaMemoryValue {
+                id: SsaMemoryValueId(1),
+                storage,
+                definition: SsaValueDefinition::Operation(SsaOpSite { block: 1, op: 0 }),
+            },
+        ];
+        builder.scalar_ssa.value_memory_high_variables =
+            vec![SsaMemoryHighVariableId(0), SsaMemoryHighVariableId(1)];
+        builder.scalar_ssa.memory_high_variables = vec![
+            SsaMemoryHighVariable {
+                id: SsaMemoryHighVariableId(0),
+                members: vec![SsaMemoryValueId(0)],
+                cover: vec![SsaCoverBlock {
+                    block: 1,
+                    start: 0,
+                    end_exclusive: 10,
+                }],
+            },
+            SsaMemoryHighVariable {
+                id: SsaMemoryHighVariableId(1),
+                members: vec![SsaMemoryValueId(1)],
+                cover: vec![SsaCoverBlock {
+                    block: 1,
+                    start: 4,
+                    end_exclusive: 6,
+                }],
+            },
+        ];
+        builder.scalar_ssa.memory_value_covers = vec![
+            vec![SsaCoverBlock {
+                block: 1,
+                start: 0,
+                end_exclusive: 10,
+            }],
+            vec![SsaCoverBlock {
+                block: 1,
+                start: 4,
+                end_exclusive: 6,
+            }],
+        ];
+        builder.scalar_ssa.memory_operation_outputs.insert(
+            SsaOpSite { block: 1, op: 0 },
+            vec![fission_midend_core::ir::SsaMemoryAccessPiece {
+                byte_offset: 0,
+                value: SsaMemoryValueId(1),
+            }],
+        );
+        builder.current_lowering_site = Some(LoweringSite {
+            block_idx: 1,
+            op_idx: 0,
+        });
+        builder
+            .stack_slot_memory_owners
+            .insert(OFFSET, vec![owner]);
+        builder
+    }
+
+    #[test]
+    fn different_interfering_group_is_unsafe() {
+        let builder = builder_with_interfering_groups(SsaMemoryHighVariableId(0));
+        assert!(builder.cover_proves_stack_slot_reuse_unsafe(OFFSET));
+    }
+
+    #[test]
+    fn same_group_already_owns_name_is_safe() {
+        let builder = builder_with_interfering_groups(SsaMemoryHighVariableId(1));
+        assert!(!builder.cover_proves_stack_slot_reuse_unsafe(OFFSET));
+    }
+
+    #[test]
+    fn no_recorded_owner_yet_is_safe() {
+        let mut builder = builder_with_interfering_groups(SsaMemoryHighVariableId(0));
+        builder.stack_slot_memory_owners.remove(&OFFSET);
+        assert!(!builder.cover_proves_stack_slot_reuse_unsafe(OFFSET));
+    }
+
+    #[test]
+    fn different_non_interfering_group_is_safe() {
+        let mut builder = builder_with_interfering_groups(SsaMemoryHighVariableId(0));
+        // Move group A's cover away from group B's -- no more overlap.
+        builder.scalar_ssa.memory_high_variables[0].cover = vec![SsaCoverBlock {
+            block: 1,
+            start: 6,
+            end_exclusive: 10,
+        }];
+        builder.scalar_ssa.memory_value_covers[0] = vec![SsaCoverBlock {
+            block: 1,
+            start: 6,
+            end_exclusive: 10,
+        }];
+        assert!(!builder.cover_proves_stack_slot_reuse_unsafe(OFFSET));
+    }
+
+    #[test]
+    fn record_stack_slot_memory_owner_adds_current_group() {
+        let mut builder = builder_with_interfering_groups(SsaMemoryHighVariableId(0));
+        builder.stack_slot_memory_owners.remove(&OFFSET);
+        builder.record_stack_slot_memory_owner(OFFSET);
+        assert_eq!(
+            builder.stack_slot_memory_owners.get(&OFFSET),
+            Some(&vec![SsaMemoryHighVariableId(1)])
+        );
+    }
 }

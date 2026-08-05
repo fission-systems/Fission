@@ -141,6 +141,7 @@ impl<'a> PreviewBuilder<'a> {
             params: BTreeMap::new(),
             locals: BTreeMap::new(),
             locals_next_id: 0,
+            stack_slot_memory_owners: BTreeMap::new(),
             temps: BTreeMap::new(),
             temp_next_id: 0,
             materialized_vns: HashMap::default(),

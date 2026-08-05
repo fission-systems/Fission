@@ -416,3 +416,99 @@ Left as documented, accepted residual imprecision rather than pursued
 further this session -- diminishing returns at 98.7% already reached, and
 the remaining mechanism is understood well enough that a future session
 doesn't have to re-discover it via tracing.
+
+## 10. Fifth pass: wiring into `self.locals` -- the original goal, finally live
+
+User asked explicitly to wire the (now precise) memory Cover data into a
+real production decision, closing the loop back to this whole
+investigation's original trigger: `stack_slots.rs`'s `ensure_stack_slot_binding`
+keys `self.locals` purely by `i64` offset, with no identity discriminant
+at all.
+
+**Precision requirement, learned the hard way in Section 8/9**: a live
+guard built on `SsaMemoryHighVariable`'s *merged* per-block cover would
+reproduce the exact `_power` false positive that section fixed by *not*
+wiring anything in yet. So this pass first adds
+`NirScalarSsa.memory_value_covers: Vec<Vec<SsaCoverBlock>>` -- the
+per-value (pre-merge) cover `build_memory_out_of_ssa_facts` already computed
+internally as a local variable, now also persisted -- so a live check can
+compare one specific value's own range against another specific value's own
+range, never a whole group's artificially-broadened merged range.
+
+**Design** (`stack_slot_diagnostics.rs`):
+- `resolve_current_stack_memory_value(offset)`: resolves the `SsaMemoryValueId`
+  the *current* op (`self.current_lowering_site`, already threaded through
+  every lowering call site in this builder) reads/writes at `offset`, via
+  `memory_operation_inputs`/`memory_operation_outputs` -- the same
+  `SsaOpSite`-keyed correlation `cover_diagnostics.rs` already established
+  for the register case. The access's size comes from the op itself, not a
+  caller-supplied value, so it can never disagree with what the SSA side
+  modeled.
+- `cover_proves_stack_slot_reuse_unsafe(offset)`: `true` only when the
+  current access's `SsaMemoryHighVariable` group differs from *every* group
+  already recorded as owning this offset's name (`stack_slot_memory_owners`,
+  a new `PreviewBuilder` field, `BTreeMap<i64, Vec<SsaMemoryHighVariableId>>`)
+  *and* its own per-value cover interferes with at least one owning group
+  member's own per-value cover.
+- `record_stack_slot_memory_owner(offset)`: called after a safe bind, adds
+  the current access's group to the offset's owner set (multiple
+  non-interfering groups can share one offset's name, mirroring the
+  scalar-side speculative-merge spirit -- Ghidra's own Cover/Merge allows
+  this too).
+
+**Wiring** (`ensure_stack_slot_binding`): before reusing an existing
+`self.locals[offset]` entry, call `cover_proves_stack_slot_reuse_unsafe`.
+If it fires, skip `self.locals` entirely and hand back a one-off fresh temp
+name (`next_unused_temp_binding_name`) -- deliberately *not* cached into
+`self.locals` or `stack_slot_memory_owners` as a persistent "alternate"
+slot. Real-corpus testing found zero occurrences of this path actually
+firing (see below), so a fresh name per occurrence keeps this a minimal,
+provably-safe guard rather than a speculative redesign of `self.locals`'
+one-name-per-offset shape for a case that's never been observed. A future
+session that *does* find a real trigger has a documented, easy next step
+(track a stable alternate name per owning group instead of a fresh one
+each time) rather than starting from zero.
+
+### Test coverage (since the real corpus has zero true positives to test against)
+
+Five new unit tests in `stack_slot_diagnostics.rs`, directly constructing a
+`PreviewBuilder` with hand-crafted `memory_values`/`memory_high_variables`/
+`memory_value_covers`/`current_lowering_site` (mirroring `cover_diagnostics.rs`'s
+synthetic-`NirScalarSsa` test style) rather than reverse-engineering exact
+SLEIGH p-code byte positions to reproduce a real conflict: two groups with
+genuinely overlapping individual covers are correctly flagged unsafe; the
+same group already owning the name is safe; no recorded owner yet is safe;
+two groups with *non*-overlapping covers (the `_power` shape) are correctly
+*not* flagged; and a successful bind correctly records the new owner.
+
+### Validation
+
+- [x] `cargo nextest run -p fission-pcode`: 968 passed (963 prior + 5 new),
+      1 skipped.
+- [x] `cargo nextest run --workspace`: only the same pre-existing,
+      unrelated `fission-emulator` baseline failures.
+- [x] Real-corpus `scan_stack_slot_cover_violations` count: unchanged at 12
+      (the live gate and the diagnostic scan are independent computations
+      over the same data; the live gate never fires, so it cannot affect
+      what `self.locals` ends up containing for the diagnostic to later
+      re-scan).
+- [x] Before/after decompile output, git-stash A/B, on four real corpus
+      binaries spanning the traced false-positive cases
+      (`control_flow_gcc-m32_O0.exe`, `memory_layouts_clang_O0.exe`
+      [`matrix_multiply`], `advanced_patterns_gcc_O2.exe`
+      [`___w64_mingwthr_add_key_dtor`], `math_gcc-m32_O2.exe` [`_power`]):
+      **byte-identical** in all four.
+
+### Honest bottom line
+
+As of this session, wiring this in has **zero observed effect on real
+decompiler output** -- not because the wiring is inert, but because no
+genuine stack-slot-reuse-for-a-different-variable case has been found
+anywhere in the corpus tested (dev + realworld + holdout + adversarial).
+The mechanism is real, tested against both directions (fires on a
+constructed true positive, stays silent on all four traced historical false
+positives), and now sits ready in the exact place this whole session's
+investigation was aimed at from the start -- but its practical value is
+currently unproven against real code, unlike the register-name fix (which
+had a measured, real corpus impact from the same session). Reported
+plainly rather than overstated.

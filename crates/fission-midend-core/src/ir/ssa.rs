@@ -261,6 +261,15 @@ pub struct NirScalarSsa {
     pub memory_high_variables: Vec<SsaMemoryHighVariable>,
     /// Dense by `SsaMemoryValueId`.
     pub value_memory_high_variables: Vec<SsaMemoryHighVariableId>,
+    /// Per-value (pre-merge) live-range cover, dense by `SsaMemoryValueId`.
+    /// Deliberately kept separate from `memory_high_variables[..].cover`
+    /// (which merges every group member's cover into one per-block range):
+    /// a live name-reuse check needs to compare *this specific value's* own
+    /// range against another specific value's own range, not against a
+    /// whole group's merged range, which can spuriously "cover" a block
+    /// almost entirely even when no individual member is live across a
+    /// given sub-range within it.
+    pub memory_value_covers: Vec<Vec<SsaCoverBlock>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
