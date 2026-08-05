@@ -33,7 +33,7 @@
 /// 3. Reconstruct the high-level expression using the flag definitions.
 /// 4. Return `true` if any substitution was made (caller re-runs cleanup passes).
 use crate::prelude::*;
-use crate::analysis::defuse::DefUseMap;
+use crate::analysis::defuse::{DefUseMap, collect_expr_vars};
 use crate::analysis::liveness::LivenessTransfer;
 use crate::cleanup::expr_has_side_effects;
 use crate::{HashMap, HashSet};
@@ -774,12 +774,182 @@ fn remove_globally_unused_flags(
     });
 }
 
+fn flag_expr_uses(expr: &PreHirExpr) -> HashSet<String> {
+    let mut vars = HashSet::default();
+    collect_expr_vars(expr, &mut vars);
+    vars.retain(|name| is_flag_var(name));
+    vars
+}
+
+/// `true` if `stmts` contains a `Goto`/`Label` anywhere within the reach of
+/// [`dead_flag_sites_recursive`]'s own recursion (`Block`/`If`/`Switch`
+/// bodies -- the constructs it descends into). A live `Goto` can jump past
+/// whatever this backward walk assumes is "live after this point" (which
+/// only accounts for falling through normally), so a flag definition right
+/// before one could look dead to a naive backward scan while still being
+/// needed at the jump target. Bailing the whole list to the conservative
+/// whole-subtree summary when either appears keeps the walk purely additive:
+/// it can only find *more* dead sites than today, never fewer, and never an
+/// unsafe one.
+fn contains_goto_or_label(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Goto(_) | PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body) => contains_goto_or_label(body),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => contains_goto_or_label(then_body) || contains_goto_or_label(else_body),
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|case| contains_goto_or_label(&case.body))
+                || contains_goto_or_label(default)
+        }
+        _ => false,
+    })
+}
+
+/// Recursively finds pure flag definitions that are dead given `live_out`
+/// (the flag names some code after `stmts` needs), recording their addresses
+/// into `dead`, and returns the live-in set for `stmts`.
+///
+/// This complements `dead_flag_definition_sites`, which only inspects
+/// `stmts`' own direct elements and treats any nested compound statement as
+/// one opaque, whole-subtree-summarized unit (documented there as avoiding
+/// "a second structured-CFG engine"). That leaves flag definitions inside a
+/// `Block`/`If`/`Switch` -- including the single wrapping `Block` almost
+/// every function body starts with -- entirely unexamined by precise
+/// per-definition liveness; they fall through to `remove_globally_unused_
+/// flags`' coarser whole-function zero-use check instead, which a single
+/// genuine use anywhere (e.g. a variable-shift-count flag-preservation
+/// idiom like `sf = cond ? new_sf : sf;`) poisons for *every* other,
+/// locally-dead definition of that flag in the entire function.
+///
+/// `While`/`For`/`DoWhile` bodies, and any list containing a `Goto`/`Label`
+/// (see `contains_goto_or_label`), stay opaque here too -- deliberately
+/// narrower in scope than a full structured-CFG liveness engine, matching
+/// this pass's existing precedent of preferring a safe, bounded
+/// approximation over a proof this analysis can't cheaply make.
+fn dead_flag_sites_recursive(
+    stmts: &[PreHirStmt],
+    live_out: &HashSet<String>,
+    dead: &mut HashSet<usize>,
+) -> HashSet<String> {
+    if contains_goto_or_label(stmts) {
+        let mut live_in = live_out.clone();
+        live_in.extend(
+            LivenessTransfer::for_stmts(stmts)
+                .uses_before_definition()
+                .filter(|name| is_flag_var(name))
+                .map(str::to_string),
+        );
+        return live_in;
+    }
+    let mut live = live_out.clone();
+    for stmt in stmts.iter().rev() {
+        live = dead_flag_site_in_stmt(stmt, &live, dead);
+    }
+    live
+}
+
+fn dead_flag_site_in_stmt(
+    stmt: &PreHirStmt,
+    live_out: &HashSet<String>,
+    dead: &mut HashSet<usize>,
+) -> HashSet<String> {
+    if let Some((name, rhs)) = flag_definition(stmt) {
+        let mut live_in = live_out.clone();
+        if !live_out.contains(name) && !expr_has_side_effects(rhs) {
+            dead.insert(std::ptr::from_ref(stmt) as usize);
+        }
+        live_in.remove(name);
+        live_in.extend(flag_expr_uses(rhs));
+        return live_in;
+    }
+    match stmt {
+        PreHirStmt::Block(body) => dead_flag_sites_recursive(body, live_out, dead),
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let then_live = dead_flag_sites_recursive(then_body, live_out, dead);
+            let else_live = dead_flag_sites_recursive(else_body, live_out, dead);
+            let mut live_in: HashSet<String> = then_live.union(&else_live).cloned().collect();
+            live_in.extend(flag_expr_uses(cond));
+            live_in
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            let mut live_in = HashSet::default();
+            for case in cases {
+                live_in.extend(dead_flag_sites_recursive(&case.body, live_out, dead));
+            }
+            live_in.extend(dead_flag_sites_recursive(default, live_out, dead));
+            live_in.extend(flag_expr_uses(expr));
+            live_in
+        }
+        // Loops (and, defensively, anything else) stay opaque: fold in
+        // whatever this subtree conservatively uses without attempting to
+        // mark anything inside it dead.
+        _ => {
+            let mut live_in = live_out.clone();
+            live_in.extend(
+                LivenessTransfer::for_stmt(stmt)
+                    .uses_before_definition()
+                    .filter(|name| is_flag_var(name))
+                    .map(str::to_string),
+            );
+            live_in
+        }
+    }
+}
+
+fn remove_dead_sites_recursive(
+    stmts: &mut Vec<PreHirStmt>,
+    dead_sites: &HashSet<usize>,
+    changed: &mut bool,
+) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            PreHirStmt::Block(body) => remove_dead_sites_recursive(body, dead_sites, changed),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                remove_dead_sites_recursive(then_body, dead_sites, changed);
+                remove_dead_sites_recursive(else_body, dead_sites, changed);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    remove_dead_sites_recursive(&mut case.body, dead_sites, changed);
+                }
+                remove_dead_sites_recursive(default, dead_sites, changed);
+            }
+            _ => {}
+        }
+    }
+    remove_dead_sites(stmts, dead_sites, changed);
+}
+
 /// Remove pure x86 flag definitions using CFG liveness for unstructured HIR
 /// plus structured liveness summaries for nested bodies.
 fn remove_dead_flag_assigns(func: &mut PreHirFunction) {
     let dead_sites = dead_flag_definition_sites(&func.body);
     let mut changed = false;
     remove_dead_sites(&mut func.body, &dead_sites, &mut changed);
+
+    // Second, more precise pass: descends into Block/If/Switch bodies (see
+    // `dead_flag_sites_recursive`'s doc comment) to catch definitions the
+    // pass above can't see because they're nested one level down from
+    // `func.body`'s own top-level statements -- notably, inside the single
+    // wrapping `Block` almost every function body has.
+    let mut nested_dead_sites = HashSet::default();
+    dead_flag_sites_recursive(&func.body, &HashSet::default(), &mut nested_dead_sites);
+    remove_dead_sites_recursive(&mut func.body, &nested_dead_sites, &mut changed);
 
     // Flag definitions form dependency chains (for example CF feeds ZF/PF).
     // Removing the terminal dead definition can expose its predecessors, so
@@ -1063,6 +1233,36 @@ mod tests {
 
         assert!(apply_dead_flag_cleanup_pass(&mut func));
         assert_eq!(flag_assign_count(&func.body), 0);
+    }
+
+    #[test]
+    fn dead_flag_cleanup_prunes_locally_dead_definition_inside_wrapping_block_despite_global_use() {
+        // Mirrors the real shape almost every function body has: a single
+        // top-level `Block` wrapping everything. Without recursing into it,
+        // the precise CFG pass can't see either `zf` definition (neither is
+        // a direct element of `func.body`), and the coarser whole-function
+        // fallback sees `zf` used at least once (in the `If` below) and so
+        // refuses to prune *either* definition -- even the first one, which
+        // is unconditionally overwritten by the second before ever being
+        // read.
+        let mut func = PreHirFunction {
+            body: vec![
+                PreHirStmt::Block(vec![
+                    assign("zf", eq(var("stale_a"), var("stale_b"))),
+                    assign("zf", eq(var("live_a"), var("live_b"))),
+                    PreHirStmt::If {
+                        cond: var("zf"),
+                        then_body: Vec::new(),
+                        else_body: Vec::new(),
+                    },
+                ]),
+                PreHirStmt::Return(None),
+            ],
+            ..PreHirFunction::default()
+        };
+
+        assert!(apply_dead_flag_cleanup_pass(&mut func));
+        assert_eq!(flag_assign_count(&func.body), 1);
     }
 
     #[test]
