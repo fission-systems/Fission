@@ -1556,17 +1556,15 @@ fn build_out_of_ssa_facts(
                     source: operand.value,
                     destination: phi.output,
                 });
-                union_values(
-                    &mut parents,
-                    phi.output.0 as usize,
-                    operand.value.0 as usize,
-                );
             }
         }
     }
     copies.sort_unstable();
     copies.dedup();
 
+    // Covers must exist before phi congruence can be interference-checked
+    // (moved ahead of where the adjacent Copy/Cast merge below already
+    // needed them) -- see `coalesce_phi_congruence_class`.
     let uses = collect_value_uses(ssa);
     let value_covers = (0..ssa.values.len())
         .map(|index| {
@@ -1581,6 +1579,29 @@ fn build_out_of_ssa_facts(
             )
         })
         .collect::<Vec<_>>();
+
+    // Phi congruence: coalesce a phi's output with each operand only when
+    // proven non-interfering (Sreedhar et al., "Translating Out of Static
+    // Single Assignment Form" -- see `coalesce_phi_congruence_class` for how
+    // this differs from a literal port). Two members of one phi genuinely
+    // CAN be simultaneously live (e.g. a loop-carried value's preheader
+    // definition is still live at the header while the latch's back-edge
+    // definition is also live, if something between the header and the
+    // latch reads the preheader value again) -- forcing them into the same
+    // high-variable regardless, as this used to do unconditionally, made
+    // `SsaHighVariable` claim two genuinely-distinct-at-once values are "the
+    // same variable", which is exactly the class of bug this session's
+    // `materialize`/`cross_block.rs` merge-binding fixes were chasing by
+    // hand at the PreHIR layer -- this closes the gap at the fact layer
+    // those fixes should have been able to rely on.
+    for phis in ssa.phis.values() {
+        for phi in phis {
+            let operand_values: Vec<SsaValueId> =
+                phi.operands.iter().map(|operand| operand.value).collect();
+            coalesce_phi_congruence_class(&mut parents, phi.output, &operand_values, &value_covers);
+        }
+    }
+
     for (site, op) in pcode
         .blocks
         .iter()
@@ -1694,6 +1715,52 @@ fn build_out_of_ssa_facts(
     }
 
     (copies, high_variables, value_high_variables)
+}
+
+/// Coalesce a phi's `output` with as many of its `operands` as can be
+/// proven mutually non-interfering, anchored on `output`'s (evolving)
+/// congruence class.
+///
+/// This is a greedy, not globally-optimal, resolution of Sreedhar et al.'s
+/// candidate-interference step: their version additionally mints a fresh
+/// value for whichever side of an interfering pair gets copied, then
+/// updates that fresh value's (narrower) liveness so a *later* candidate in
+/// the same phi can still coalesce with it. Fission's SSA facts are built
+/// as one static batch rather than mutated incrementally, and
+/// `out_of_ssa_copies` already carries a distinct, pre-existing
+/// [`SsaValueId`] for every phi operand -- there is no copy destination
+/// left to mint. So instead of choosing *which side* of an interfering pair
+/// to isolate, this always keeps the phi output as the anchor and simply
+/// declines to coalesce anything that would interfere with the group as
+/// currently formed. Because each candidate is checked against the
+/// *merged* cover of everything already folded into the anchor (via
+/// `groups_interfere`, which unions covers across every current member of
+/// both sides), an operand that only conflicts with an *earlier* operand
+/// (not with `output` itself) is still correctly excluded -- interference
+/// is transitive through the group, not just checked pairwise against the
+/// original anchor.
+///
+/// This can occasionally leave one more member uncoalesced than an optimal
+/// vertex-cover choice would (a missed cosmetic/representational
+/// optimization), but it is never unsound: it only ever declines a merge
+/// that could have been proven safe, never forces one that isn't.
+fn coalesce_phi_congruence_class(
+    parents: &mut [usize],
+    output: SsaValueId,
+    operands: &[SsaValueId],
+    covers: &[Vec<SsaCoverBlock>],
+) {
+    for &operand in operands {
+        let anchor_root = find_root(parents, output.0 as usize);
+        let candidate_root = find_root(parents, operand.0 as usize);
+        if anchor_root == candidate_root {
+            continue;
+        }
+        if groups_interfere(parents, anchor_root, candidate_root, covers) {
+            continue;
+        }
+        union_values(parents, anchor_root, candidate_root);
+    }
 }
 
 fn groups_interfere(
@@ -3487,6 +3554,91 @@ mod tests {
         assert_ne!(
             separated.value_high_variables[source_value.0 as usize],
             separated.value_high_variables[destination_value.0 as usize]
+        );
+    }
+
+    #[test]
+    fn phi_congruence_coalesces_noninterfering_operands() {
+        // Same loop-header shape as `loop_header_phi_receives_entry_and_latch_values`:
+        // the phi's output and both its incoming values only ever meet at the
+        // phi itself, so nothing here can interfere -- confirms the common
+        // case still coalesces for free after switching from unconditional
+        // union to interference-checked union.
+        let pcode = function(vec![
+            vec![copy(0x1000, register(0), Varnode::constant(0, 4))],
+            vec![copy(0x1010, unique(0), register(0))],
+            vec![copy(0x1020, register(0), Varnode::constant(1, 4))],
+            vec![],
+        ]);
+        let successors = vec![vec![1], vec![2, 3], vec![1], vec![]];
+        let predecessors = vec![vec![], vec![0, 2], vec![1], vec![1]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+
+        let phi = &ssa.phis[&1][0];
+        let output_group = ssa.value_high_variables[phi.output.0 as usize];
+        for operand in &phi.operands {
+            assert_eq!(
+                ssa.value_high_variables[operand.value.0 as usize], output_group,
+                "non-interfering phi operand from predecessor {} should coalesce with the phi output",
+                operand.predecessor
+            );
+        }
+    }
+
+    #[test]
+    fn coalesce_phi_congruence_class_declines_interfering_operand() {
+        // Direct unit test of the coalescing helper: constructing a genuine
+        // interfering phi (output vs. a same-phi operand) through hand-built
+        // p-code is impractical -- within one block, straight-line SSA
+        // renaming makes a later-defined operand value always start after
+        // any earlier use of the phi output on the same storage ends, so
+        // the two can never overlap that way. Exercising the helper
+        // directly against hand-built covers isolates exactly the
+        // interference-vs-coalesce decision this session's fix changes,
+        // without fighting cover-derivation arithmetic that has nothing to
+        // do with it.
+        //
+        // values: 0 = phi output, 1 = non-interfering operand, 2 = interfering operand
+        let mut parents: Vec<usize> = (0..3).collect();
+        let covers = vec![
+            // output: live across block 5, positions [0, 10)
+            vec![SsaCoverBlock {
+                block: 5,
+                start: 0,
+                end_exclusive: 10,
+            }],
+            // non-interfering operand: block 5, [10, 20) -- disjoint from output
+            vec![SsaCoverBlock {
+                block: 5,
+                start: 10,
+                end_exclusive: 20,
+            }],
+            // interfering operand: block 5, [5, 15) -- overlaps output's [0, 10)
+            vec![SsaCoverBlock {
+                block: 5,
+                start: 5,
+                end_exclusive: 15,
+            }],
+        ];
+
+        coalesce_phi_congruence_class(
+            &mut parents,
+            SsaValueId(0),
+            &[SsaValueId(1), SsaValueId(2)],
+            &covers,
+        );
+
+        assert_eq!(
+            find_root(&mut parents, 0),
+            find_root(&mut parents, 1),
+            "non-interfering operand must coalesce with the phi output"
+        );
+        assert_ne!(
+            find_root(&mut parents, 0),
+            find_root(&mut parents, 2),
+            "interfering operand must NOT be forced into the phi output's group"
         );
     }
 }
