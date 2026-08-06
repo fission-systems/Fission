@@ -101,27 +101,37 @@ where
             let mut first_unsupported_match = None;
             let trace_terminal = crate::runtime::diagnostics::terminal_verify_trace_enabled();
             let mut matched_any_pattern = false;
-            let leaf_entries: Vec<CompiledDecisionLeafEntry> = if node.leaf_entries.is_empty() {
-                if subtable.sla_subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty() {
-                    return Ok(None);
-                }
-                let mut entries = Vec::new();
-                for constructor_index in node.leaf_constructor_indexes.iter().copied() {
-                    let Ok(constructor_id) = u32::try_from(constructor_index) else {
+            // `Cow` rather than an unconditional `.clone()`: this terminal
+            // branch runs on every decision-tree leaf visit (i.e. every
+            // constructor selection at every subtable level of every
+            // instruction decode), and the common case -- `node.leaf_entries`
+            // already populated -- doesn't need an owned copy at all, only
+            // the one-time immutable iteration below. Only the synthesized
+            // (empty-`leaf_entries`) branch genuinely produces new data that
+            // has nowhere to be borrowed from.
+            let leaf_entries: std::borrow::Cow<'_, [CompiledDecisionLeafEntry]> =
+                if node.leaf_entries.is_empty() {
+                    if subtable.sla_subtable_id != 0 || !subtable.constructors_by_sla_id.is_empty()
+                    {
                         return Ok(None);
-                    };
-                    entries.push(CompiledDecisionLeafEntry {
-                        subtable_id: 0,
-                        constructor_id,
-                        constructor_index,
-                        pattern: always_true_instruction_pattern(),
-                    });
-                }
-                entries
-            } else {
-                node.leaf_entries.clone()
-            };
-            for entry in &leaf_entries {
+                    }
+                    let mut entries = Vec::new();
+                    for constructor_index in node.leaf_constructor_indexes.iter().copied() {
+                        let Ok(constructor_id) = u32::try_from(constructor_index) else {
+                            return Ok(None);
+                        };
+                        entries.push(CompiledDecisionLeafEntry {
+                            subtable_id: 0,
+                            constructor_id,
+                            constructor_index,
+                            pattern: always_true_instruction_pattern(),
+                        });
+                    }
+                    std::borrow::Cow::Owned(entries)
+                } else {
+                    std::borrow::Cow::Borrowed(node.leaf_entries.as_slice())
+                };
+            for entry in leaf_entries.as_ref() {
                 let Some((constructor_index, constructor)) =
                     resolve_leaf_constructor(subtable, entry)
                 else {
