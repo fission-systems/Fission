@@ -1678,14 +1678,14 @@ mod tests {
             constructor_slot: 0,
             mnemonic: "test".to_string(),
             construct_tpl_kind: CompiledConstructTplKind::Generic,
-            constructor_template: CompiledConstructorTemplate {
+            constructor_template: std::sync::Arc::new(CompiledConstructorTemplate {
                 handles: Vec::new(),
                 decode_steps: Vec::new(),
                 num_labels: 0,
                 result: None,
                 ops: Vec::new(),
                 template_source: CompiledTemplateSource::SpecDerived,
-            },
+            }),
             named_templates: Vec::new(),
             context_commits: Vec::new(),
             display_template: CompiledDisplayTemplate {

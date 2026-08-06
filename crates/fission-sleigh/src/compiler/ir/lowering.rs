@@ -346,7 +346,7 @@ fn executable_constructor_from_sla_template(
         operand_specs: sla_template.operand_specs.clone(),
         display_operands: sla_template.display_operands.clone(),
         construct_tpl_kind: CompiledConstructTplKind::Generic,
-        constructor_template: CompiledConstructorTemplate {
+        constructor_template: std::sync::Arc::new(CompiledConstructorTemplate {
             handles: sla_template
                 .operand_specs
                 .iter()
@@ -370,7 +370,7 @@ fn executable_constructor_from_sla_template(
             result: sla_template.constructor_template.result.clone(),
             ops: sla_template.constructor_template.ops.clone(),
             template_source: CompiledTemplateSource::SpecDerived,
-        },
+        }),
         named_templates: sla_template.named_templates.clone(),
         runtime_ready: unsupported_template_kind.is_none(),
         unsupported_template_kind,
@@ -757,7 +757,7 @@ impl Collector {
                 .map(|operand_index| CompiledOperandDecodeStep::DecodeOperand { operand_index }),
         );
 
-        let constructor_template = CompiledConstructorTemplate {
+        let constructor_template = std::sync::Arc::new(CompiledConstructorTemplate {
             handles: operand_specs
                 .iter()
                 .cloned()
@@ -773,7 +773,7 @@ impl Collector {
             result: None,
             ops: Vec::new(),
             template_source: CompiledTemplateSource::SpecDerived,
-        };
+        });
 
         Some(CompiledExecutableConstructor {
             constructor_id: u32::MAX,

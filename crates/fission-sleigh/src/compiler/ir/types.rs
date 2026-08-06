@@ -290,7 +290,13 @@ pub struct CompiledExecutableConstructor {
     #[serde(default)]
     pub display_operands: Vec<CompiledDisplayOperand>,
     pub construct_tpl_kind: CompiledConstructTplKind,
-    pub constructor_template: CompiledConstructorTemplate,
+    // `Arc<..>` rather than an owned value: `RuntimeConstructState` (the
+    // owned result of walking a constructor -- see `construct.rs`) clones
+    // this out of the long-lived, immutable compiled spec on *every*
+    // constructor match during decode (the runtime hot path), so an owned
+    // deep-clone here meant re-copying this whole handles/decode_steps tree
+    // per match. An Arc clone is a refcount bump.
+    pub constructor_template: std::sync::Arc<CompiledConstructorTemplate>,
     /// Named p-code sections from Ghidra's `namedtempl`.
     /// Index corresponds to the section number (ATTR_SECTION value).
     #[serde(default)]

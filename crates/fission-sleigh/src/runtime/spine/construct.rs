@@ -13,7 +13,7 @@ pub struct RuntimeConstructState {
     pub constructor_slot: usize,
     pub mnemonic: String,
     pub construct_tpl_kind: CompiledConstructTplKind,
-    pub constructor_template: CompiledConstructorTemplate,
+    pub constructor_template: std::sync::Arc<CompiledConstructorTemplate>,
     /// Named p-code sections (Ghidra's namedtempl). Each entry corresponds to
     /// a section number (ATTR_SECTION). Used by CROSSBUILD / sectioned constructors.
     pub named_templates: Vec<Option<CompiledConstructTpl>>,
