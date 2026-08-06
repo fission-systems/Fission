@@ -65,9 +65,51 @@ pub(super) enum ScalarSsaValidationError {
 #[derive(Debug)]
 struct Dominance {
     reachable: BTreeSet<usize>,
-    dominators: Vec<BTreeSet<usize>>,
+    /// Immediate dominator per block: `None` for the root and for
+    /// unreachable blocks, `Some(parent)` otherwise.
+    idom: Vec<Option<usize>>,
     children: Vec<Vec<usize>>,
     frontier: Vec<BTreeSet<usize>>,
+}
+
+/// Reverse postorder over `successors`, restricted to blocks reachable from
+/// `start` (an iterative DFS to avoid stack overflow on deep CFGs).
+fn compute_rpo(start: usize, successors: &[Vec<usize>], block_count: usize) -> Vec<usize> {
+    let mut visited = vec![false; block_count];
+    let mut post_order = Vec::with_capacity(block_count);
+    let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
+    visited[start] = true;
+    while let Some(&mut (node, ref mut next_idx)) = stack.last_mut() {
+        if *next_idx < successors[node].len() {
+            let successor = successors[node][*next_idx];
+            *next_idx += 1;
+            if successor < block_count && !visited[successor] {
+                visited[successor] = true;
+                stack.push((successor, 0));
+            }
+        } else {
+            post_order.push(node);
+            stack.pop();
+        }
+    }
+    post_order.reverse();
+    post_order
+}
+
+/// Cooper/Harvey/Kennedy "intersect": walk both candidates up the
+/// (partially built) idom tree, using RPO number order as a cheap
+/// ancestor/descendant test, until they meet at their nearest common
+/// dominator.
+fn cooper_intersect(mut a: usize, mut b: usize, idom: &[usize], rpo_number: &[usize]) -> usize {
+    while a != b {
+        while rpo_number[a] > rpo_number[b] {
+            a = idom[a];
+        }
+        while rpo_number[b] > rpo_number[a] {
+            b = idom[b];
+        }
+    }
+    a
 }
 
 impl Dominance {
@@ -88,54 +130,63 @@ impl Dominance {
             }
         }
 
-        let mut dominators = vec![BTreeSet::new(); block_count];
-        for &block in &reachable {
-            if block == 0 {
-                dominators[block].insert(block);
-            } else {
-                dominators[block] = reachable.clone();
-            }
+        // Reverse-postorder + iterative idom-array intersection (Cooper,
+        // Harvey & Kennedy 2001) in place of the old per-block full
+        // dominator-*set* fixed point: that version cloned/intersected a
+        // `BTreeSet` of (up to) every reachable block for every block on
+        // every iteration until convergence, which is quadratic-ish in
+        // block count on top of the per-iteration set-clone cost. This
+        // computes only the immediate-dominator array -- O(edges) rounds of
+        // O(near-constant, amortized) unions -- and `dominates()` below
+        // walks that array instead of doing an O(1) full-set membership
+        // check, which is the right trade given queries are far more
+        // frequent than this one-time-per-function construction but each
+        // query only walks a handful of idom-tree levels.
+        let rpo_order = if block_count == 0 {
+            Vec::new()
+        } else {
+            compute_rpo(0, successors, block_count)
+        };
+        let mut rpo_number = vec![usize::MAX; block_count];
+        for (pos, &block) in rpo_order.iter().enumerate() {
+            rpo_number[block] = pos;
         }
-
-        loop {
-            let mut changed = false;
-            for &block in reachable.iter().filter(|&&block| block != 0) {
-                let reachable_predecessors: Vec<usize> = predecessors
-                    .get(block)
-                    .into_iter()
-                    .flatten()
-                    .copied()
-                    .filter(|predecessor| reachable.contains(predecessor))
-                    .collect();
-                let mut next = if let Some((&first, rest)) = reachable_predecessors.split_first() {
-                    let mut intersection = dominators[first].clone();
-                    for predecessor in rest {
-                        intersection
-                            .retain(|candidate| dominators[*predecessor].contains(candidate));
+        const UNDEF: usize = usize::MAX;
+        let mut idom_raw = vec![UNDEF; block_count];
+        if !rpo_order.is_empty() {
+            idom_raw[0] = 0;
+            let mut changed = true;
+            while changed {
+                changed = false;
+                for &block in rpo_order.iter().skip(1) {
+                    let mut new_idom = UNDEF;
+                    for &predecessor in &predecessors[block] {
+                        if predecessor >= block_count || idom_raw[predecessor] == UNDEF {
+                            continue;
+                        }
+                        new_idom = if new_idom == UNDEF {
+                            predecessor
+                        } else {
+                            cooper_intersect(new_idom, predecessor, &idom_raw, &rpo_number)
+                        };
                     }
-                    intersection
-                } else {
-                    BTreeSet::new()
-                };
-                next.insert(block);
-                if next != dominators[block] {
-                    dominators[block] = next;
-                    changed = true;
+                    if new_idom != UNDEF && idom_raw[block] != new_idom {
+                        idom_raw[block] = new_idom;
+                        changed = true;
+                    }
                 }
             }
-            if !changed {
-                break;
-            }
         }
-
-        let mut idom = vec![None; block_count];
-        for &block in reachable.iter().filter(|&&block| block != 0) {
-            idom[block] = dominators[block]
-                .iter()
-                .copied()
-                .filter(|candidate| *candidate != block)
-                .max_by_key(|candidate| (dominators[*candidate].len(), *candidate));
-        }
+        // `None` for the root (no immediate dominator) and for unreachable
+        // blocks (never assigned above), `Some(parent)` otherwise --
+        // matches the shape the pre-existing children/frontier computation
+        // below and `dominates()` expect.
+        let idom: Vec<Option<usize>> = (0..block_count)
+            .map(|block| {
+                (block != 0 && reachable.contains(&block) && idom_raw[block] != UNDEF)
+                    .then_some(idom_raw[block])
+            })
+            .collect();
 
         let mut children = vec![Vec::new(); block_count];
         for (block, parent) in idom.iter().copied().enumerate() {
@@ -173,16 +224,26 @@ impl Dominance {
 
         Self {
             reachable,
-            dominators,
+            idom,
             children,
             frontier,
         }
     }
 
     fn dominates(&self, definition: usize, use_block: usize) -> bool {
-        self.dominators
-            .get(use_block)
-            .is_some_and(|dominators| dominators.contains(&definition))
+        if !self.reachable.contains(&use_block) {
+            return false;
+        }
+        let mut cur = use_block;
+        loop {
+            if cur == definition {
+                return true;
+            }
+            match self.idom.get(cur).copied().flatten() {
+                Some(parent) => cur = parent,
+                None => return false,
+            }
+        }
     }
 }
 
