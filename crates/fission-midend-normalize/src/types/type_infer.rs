@@ -277,6 +277,19 @@ fn apply_address_role_pointer_override_for_locals(func: &mut PreHirFunction) -> 
 }
 
 pub(super) fn transitive_address_pointer_locals(func: &PreHirFunction) -> HashMap<String, NirType> {
+    let dependencies = DefinitionDependencyMap::build(&func.body);
+    transitive_address_pointer_locals_with_dependencies(func, &dependencies)
+}
+
+/// Same as [`transitive_address_pointer_locals`], but takes an
+/// already-built [`DefinitionDependencyMap`] instead of rebuilding one from
+/// `func.body` -- the dependency graph reflects the HIR's *shape*, not
+/// current binding types, so it stays valid across a caller's repeated
+/// type-refinement rounds and only needs to be built once per body.
+pub(super) fn transitive_address_pointer_locals_with_dependencies(
+    func: &PreHirFunction,
+    dependencies: &DefinitionDependencyMap,
+) -> HashMap<String, NirType> {
     let pointer_roots: HashSet<String> = func
         .params
         .iter()
@@ -291,7 +304,6 @@ pub(super) fn transitive_address_pointer_locals(func: &PreHirFunction) -> HashMa
         .iter()
         .map(|binding| binding.name.as_str())
         .collect();
-    let dependencies = DefinitionDependencyMap::build(&func.body);
     dependencies
         .address_contributors(&func.body, &pointer_roots)
         .into_iter()
@@ -300,8 +312,11 @@ pub(super) fn transitive_address_pointer_locals(func: &PreHirFunction) -> HashMa
         .collect()
 }
 
-fn apply_transitive_address_pointer_override_for_locals(func: &mut PreHirFunction) -> bool {
-    let contributors = transitive_address_pointer_locals(func);
+fn apply_transitive_address_pointer_override_for_locals(
+    func: &mut PreHirFunction,
+    dependencies: &DefinitionDependencyMap,
+) -> bool {
+    let contributors = transitive_address_pointer_locals_with_dependencies(func, dependencies);
     if contributors.is_empty() {
         return false;
     }
@@ -3150,7 +3165,7 @@ pub fn apply_type_inference_pass(func: &mut PreHirFunction) -> bool {
         &dependencies,
         &address_binding_types,
     );
-    changed |= apply_transitive_address_pointer_override_for_locals(func);
+    changed |= apply_transitive_address_pointer_override_for_locals(func, &dependencies);
     changed |= promote_signed_neutral_word_load_pointees(func, &dependencies);
 
     changed

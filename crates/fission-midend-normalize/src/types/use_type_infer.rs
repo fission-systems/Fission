@@ -2266,11 +2266,12 @@ fn has_exact_scalar_constraint(constraints: Option<&Vec<UseConstraint>>) -> bool
 fn restore_scalar_only_pointer_locals(
     func: &mut PreHirFunction,
     constraints: &HashMap<String, Vec<UseConstraint>>,
+    roles: &HashMap<String, BindingUseRole>,
+    dependencies: &DefinitionDependencyMap,
 ) -> bool {
-    let mut roles = HashMap::<String, BindingUseRole>::default();
-    collect_binding_use_roles(&func.body, &mut roles);
     let pointer_compare_peers = super::type_infer::pointer_compare_peer_promotions(func);
-    let transitive_address_locals = super::type_infer::transitive_address_pointer_locals(func);
+    let transitive_address_locals =
+        super::type_infer::transitive_address_pointer_locals_with_dependencies(func, dependencies);
     let scalar_ty = NirType::Int {
         bits: if func.is_64bit { 64 } else { 32 },
         signed: false,
@@ -2335,13 +2336,22 @@ fn should_skip_pointer_constraint_for_scalar_local(
 pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
     let before = type_state_signature(func);
     let dependencies = DefinitionDependencyMap::build(&func.body);
+    // `func.body`'s shape (as opposed to binding types) never changes across
+    // this function's rounds below -- every sub-pass in the loop only
+    // rewrites `.ty` fields, never statements/expressions -- so the use-role
+    // classification (which reads only expression shape: Deref/Index/Load
+    // context vs. arithmetic context) is round-invariant. Computing it once
+    // here instead of on every round (and again inside
+    // `restore_scalar_only_pointer_locals`, which used to rebuild its own
+    // copy) turns up to 8 full-body walks per call into 1.
+    let mut roles = HashMap::<String, BindingUseRole>::default();
+    collect_binding_use_roles(&func.body, &mut roles);
     let mut flow_changed = false;
     // Iterate to convergence (alias chains may require multiple rounds).
     for _ in 0..4 {
         let current_flow_changed = super::type_flow::apply_type_flow_pass(func);
         flow_changed |= current_flow_changed;
         let mut constraints: HashMap<String, Vec<UseConstraint>> = HashMap::default();
-        let mut roles = HashMap::<String, BindingUseRole>::default();
         let known_binding_types = collect_known_binding_types(func);
         let pointer_roots = func
             .params
@@ -2351,7 +2361,6 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
             })
             .collect();
         let address_contributors = dependencies.address_contributors(&func.body, &pointer_roots);
-        collect_binding_use_roles(&func.body, &mut roles);
         collect_constraints(
             &func.body,
             &func.return_type,
@@ -2380,7 +2389,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
-        round_changed |= restore_scalar_only_pointer_locals(func, &constraints);
+        round_changed |= restore_scalar_only_pointer_locals(func, &constraints, &roles, &dependencies);
         round_changed |= narrow_byte_index_accumulators(func);
         if !round_changed {
             break;
