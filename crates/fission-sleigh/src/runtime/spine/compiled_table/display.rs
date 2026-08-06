@@ -1124,8 +1124,8 @@ mod tests {
             relative_length: 0,
             length: 0,
             match_trace: spine::RuntimeMatchTrace {
-                root_bucket: "test".to_string(),
-                probes: Vec::new(),
+                root_bucket: "test".into(),
+                probes: spine::ProbeChain::default(),
                 leaf_constructor_indexes: Vec::new(),
                 matched_leaf_pattern: None,
             },

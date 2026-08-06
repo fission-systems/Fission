@@ -520,7 +520,7 @@ fn generated_runtime_records_decision_trace_for_startup_store() {
         .expect("constructor match");
     let strategy = RuntimeDecodeStrategy::for_table();
     let state = bind_instruction(&compiled, strategy, &ctx, selection).expect("bind instruction");
-    assert_eq!(state.match_trace.root_bucket, "instruction");
+    assert_eq!(state.match_trace.root_bucket.as_ref(), "instruction");
     assert!(!state.match_trace.probes.is_empty());
     assert!(!state.construct_nodes.is_empty());
     assert!(

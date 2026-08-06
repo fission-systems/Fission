@@ -24,16 +24,49 @@ pub struct RuntimeSelection<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeMatchTrace {
-    pub root_bucket: String,
-    pub probes: Vec<RuntimeMatchProbe>,
+    // `Arc<str>`: this whole struct is cloned once per candidate branch
+    // value in `walk_decision_tree`'s backtracking search (every value the
+    // current decision node's probe returns, for every internal node
+    // visited during every instruction decode), so every field here should
+    // be cheap to clone.
+    pub root_bucket: std::sync::Arc<str>,
+    pub probes: ProbeChain,
     pub leaf_constructor_indexes: Vec<usize>,
-    pub matched_leaf_pattern: Option<CompiledDisjointPattern>,
+    pub matched_leaf_pattern: Option<std::sync::Arc<CompiledDisjointPattern>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeMatchProbe {
     pub probe: CompiledDecisionProbe,
     pub value: u8,
+}
+
+/// A persistent (structure-sharing) singly-linked list of
+/// [`RuntimeMatchProbe`]s: `push` prepends one new `Arc`-boxed node in front
+/// of the existing chain, and `clone` is then just an `Option<Arc<..>>`
+/// clone (a refcount bump) regardless of how long the chain has grown --
+/// unlike `Vec<RuntimeMatchProbe>`, which would need a full O(depth)
+/// reallocate-and-copy on every one of those same backtracking clones.
+/// Write-only in current use (push + is_empty; see `tests.rs`), so no
+/// iteration/indexing API is provided.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProbeChain(Option<std::sync::Arc<ProbeChainNode>>);
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ProbeChainNode {
+    probe: RuntimeMatchProbe,
+    prev: ProbeChain,
+}
+
+impl ProbeChain {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    pub fn push(&mut self, probe: RuntimeMatchProbe) {
+        let prev = std::mem::take(self);
+        self.0 = Some(std::sync::Arc::new(ProbeChainNode { probe, prev }));
+    }
 }
 
 pub fn select_constructor<'a, E, M>(
@@ -59,8 +92,8 @@ where
             &mut evaluator,
             &mut constructor_matches,
             RuntimeMatchTrace {
-                root_bucket: table_name.clone(),
-                probes: Vec::new(),
+                root_bucket: table_name.as_str().into(),
+                probes: ProbeChain::default(),
                 leaf_constructor_indexes: Vec::new(),
                 matched_leaf_pattern: None,
             },
@@ -124,7 +157,7 @@ where
                             subtable_id: 0,
                             constructor_id,
                             constructor_index,
-                            pattern: always_true_instruction_pattern(),
+                            pattern: always_true_instruction_pattern().into(),
                         });
                     }
                     std::borrow::Cow::Owned(entries)

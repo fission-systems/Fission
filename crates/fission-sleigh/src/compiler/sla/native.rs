@@ -225,7 +225,7 @@ impl SlaDecisionTree {
                                 entry.subtable_id
                             },
                             constructor_id: entry.constructor_id,
-                            pattern: entry.pattern.clone(),
+                            pattern: entry.pattern.as_ref().clone(),
                         })
                         .collect(),
                 })

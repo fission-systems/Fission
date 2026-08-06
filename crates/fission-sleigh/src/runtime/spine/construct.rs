@@ -49,7 +49,7 @@ pub struct RuntimeConstructState {
     /// info lives in `match_trace` directly. Consumed by
     /// `instruction_pattern_mask` (FID hashing) to recover pattern bits that
     /// would otherwise be silently lost when a wrapper is replaced.
-    pub replaced_wrapper_patterns: Vec<(usize, CompiledDisjointPattern)>,
+    pub replaced_wrapper_patterns: Vec<(usize, std::sync::Arc<CompiledDisjointPattern>)>,
 }
 
 #[derive(Debug, Clone)]

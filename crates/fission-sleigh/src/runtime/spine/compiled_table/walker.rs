@@ -119,7 +119,7 @@ fn bind_instruction_with_inst_next<'a>(
         // Root instruction: two-pass so `inst_next` sees the full length (Ghidra
         // resolveHandles-after-resolve). Nested walkers inherit the parent's shared
         // fallthrough from the second pass.
-        if parent_inst_next.is_none() && selection.trace.root_bucket == "instruction" {
+        if parent_inst_next.is_none() && selection.trace.root_bucket.as_ref() == "instruction" {
             let probe = CompiledParserWalker::new(
                 compiled,
                 strategy,
@@ -503,11 +503,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         } else if selection.constructor.constructor_template.template_source
             == CompiledTemplateSource::SpecDerived
         {
-            if selection.trace.root_bucket == "instruction"
+            if selection.trace.root_bucket.as_ref() == "instruction"
                 && constructor_consumes_sequential_operand_bytes(compiled, selection.constructor)?
             {
                 instruction_terminal_pattern_len(&selection)?
-            } else if selection.trace.root_bucket == "instruction" {
+            } else if selection.trace.root_bucket.as_ref() == "instruction" {
                 // Some instruction-level constructors encode address bytes directly in the
                 // terminal matcher instead of through a descendant operand subtable. If the
                 // matcher is context-only, the SLA-derived constructor minimum length is the

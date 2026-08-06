@@ -739,7 +739,7 @@ fn decode_decision_node(
                         subtable_id,
                         constructor_id,
                         constructor_index,
-                        pattern,
+                        pattern: pattern.into(),
                     });
             }
         }

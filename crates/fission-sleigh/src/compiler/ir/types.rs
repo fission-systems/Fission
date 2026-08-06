@@ -436,7 +436,10 @@ pub struct CompiledDecisionLeafEntry {
     #[serde(default)]
     pub constructor_id: u32,
     pub constructor_index: usize,
-    pub pattern: CompiledDisjointPattern,
+    // `Arc<..>`: cloned into `RuntimeMatchTrace.matched_leaf_pattern` on
+    // every successful decision-tree terminal match (the runtime decode hot
+    // path), and `CompiledDisjointPattern::Or` can nest arbitrarily deep.
+    pub pattern: std::sync::Arc<CompiledDisjointPattern>,
 }
 
 #[derive(
