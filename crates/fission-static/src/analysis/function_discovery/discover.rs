@@ -7,6 +7,11 @@ use super::ranges::{executable_ranges, is_in_executable_ranges, runtime_load_spe
 use super::targets::{collect_instruction_targets, discovery_candidate_targets};
 use super::types::{FunctionDiscoveryProfile, FunctionDiscoveryReport};
 
+fn discovery_diag_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FISSION_DISCOVERY_DIAG").is_some())
+}
+
 pub fn discover_functions_with_runtime(
     binary: &mut LoadedBinary,
     profile: FunctionDiscoveryProfile,
@@ -33,7 +38,11 @@ pub fn discover_functions_with_runtime(
         virtual_address: u64,
     }
 
-    let mut chunks = Vec::new();
+    // Collect each executable section's usable byte range first so the chunk
+    // size below can be sized against the *total* executable footprint, not
+    // decided per-section in isolation.
+    let mut section_ranges: Vec<(&[u8], u64)> = Vec::new();
+    let mut total_executable_bytes = 0usize;
     for section in binary
         .sections
         .iter()
@@ -51,13 +60,31 @@ pub fn discover_functions_with_runtime(
             continue;
         };
         let bytes = &binary.data.as_slice()[file_start..file_end];
+        total_executable_bytes += bytes.len();
+        section_ranges.push((bytes, section.virtual_address));
+    }
 
-        const DISCOVERY_CHUNK_SIZE: usize = 512 * 1024; // 512KB chunks
+    // A fixed 512KB chunk size starves this scan's own parallelism on any
+    // binary whose executable sections total a few MB or less -- a 617KB
+    // `.text` (a fairly ordinary Rust binary) yields only 2 chunks no matter
+    // how many cores are available. Instead, target roughly
+    // `4x` the current thread count worth of chunks (the 4x over-partitions
+    // so an uneven chunk -- one with more decodable code, more call/jump
+    // targets -- doesn't leave other threads idle near the end), floored at
+    // a minimum so tiny binaries don't pay per-chunk overhead for no
+    // benefit.
+    const MIN_DISCOVERY_CHUNK_SIZE: usize = 64 * 1024; // 64KB
+    let target_chunk_count = rayon::current_num_threads().max(1) * 4;
+    let discovery_chunk_size = (total_executable_bytes / target_chunk_count.max(1))
+        .max(MIN_DISCOVERY_CHUNK_SIZE);
+
+    let mut chunks = Vec::new();
+    for (bytes, virtual_address) in section_ranges {
         let mut offset = 0;
         while offset < bytes.len() {
-            let chunk_end = (offset + DISCOVERY_CHUNK_SIZE).min(bytes.len());
+            let chunk_end = (offset + discovery_chunk_size).min(bytes.len());
             let chunk_bytes = &bytes[offset..chunk_end];
-            let chunk_va = section.virtual_address + offset as u64;
+            let chunk_va = virtual_address + offset as u64;
             chunks.push(ScanChunk {
                 bytes: chunk_bytes,
                 virtual_address: chunk_va,
@@ -65,8 +92,17 @@ pub fn discover_functions_with_runtime(
             offset = chunk_end;
         }
     }
+    if discovery_diag_enabled() {
+        eprintln!(
+            "DISCOVERY_DIAG: chunks={} total_bytes={} chunk_size={}",
+            chunks.len(),
+            chunks.iter().map(|c| c.bytes.len()).sum::<usize>(),
+            discovery_chunk_size,
+        );
+    }
 
     use rayon::prelude::*;
+    let stage_start = std::time::Instant::now();
 
     let (total_decoded, call_targets, jump_targets, jump_edges) = chunks
         .into_par_iter()
@@ -112,6 +148,9 @@ pub fn discover_functions_with_runtime(
             },
         );
 
+    if discovery_diag_enabled() {
+        eprintln!("DISCOVERY_DIAG: scan_stage={:?}", stage_start.elapsed());
+    }
     report.decoded_instruction_count = total_decoded;
     report.call_target_count = call_targets.len();
     report.jump_target_count = jump_targets.len();
@@ -120,14 +159,18 @@ pub fn discover_functions_with_runtime(
         binary.functions.iter().map(|f| f.address).collect();
     tracker_seeds.extend(call_targets.iter().copied());
 
-    let pdb_keys: Vec<u64> = binary.pdb_functions.keys().copied().collect();
-    let _ = std::fs::write("/tmp/fission_pdb_truth.json", format!("{:?}", pdb_keys));
-
     let mut all_references = std::collections::HashSet::new();
     all_references.extend(call_targets.iter().copied());
     all_references.extend(jump_targets.iter().copied());
 
     let mut candidates = discovery_candidate_targets(profile, call_targets, &jump_targets);
+    if discovery_diag_enabled() {
+        eprintln!(
+            "DISCOVERY_DIAG: candidates={} validate_stage_start",
+            candidates.len()
+        );
+    }
+    let validate_start = std::time::Instant::now();
 
     let valid_call_targets: Vec<u64> = candidates
         .par_iter()
@@ -153,12 +196,19 @@ pub fn discover_functions_with_runtime(
             if valid { Some(addr) } else { None }
         })
         .collect();
+    if discovery_diag_enabled() {
+        eprintln!(
+            "DISCOVERY_DIAG: validate_stage={:?}",
+            validate_start.elapsed()
+        );
+    }
     eprintln!(
         "SCANNER_STATS: call_targets validated = {} / {}",
         valid_call_targets.len(),
         candidates.len()
     );
     candidates = valid_call_targets.clone();
+    let tail_start = std::time::Instant::now();
 
     let known_function_addresses: std::collections::HashSet<u64> = binary
         .functions
@@ -520,6 +570,9 @@ pub fn discover_functions_with_runtime(
         binary.rebuild_function_indices();
     }
 
+    if discovery_diag_enabled() {
+        eprintln!("DISCOVERY_DIAG: tail_stage={:?}", tail_start.elapsed());
+    }
     report
 }
 
