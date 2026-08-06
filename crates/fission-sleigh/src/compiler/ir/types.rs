@@ -652,7 +652,12 @@ pub enum CompiledOperandSpec {
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
 pub struct CompiledResolvedVarnode {
-    pub name: String,
+    // `Arc<str>` rather than `String`: this struct is cloned on every
+    // decoded operand that names a fixed register (the runtime decode
+    // hot path -- see `walker.rs`'s `decode_operand`), so a `String` here
+    // meant a fresh heap allocation + memcpy per clone. An `Arc<str>`
+    // clone is just a refcount bump.
+    pub name: std::sync::Arc<str>,
     pub space: CompiledSpaceRef,
     pub offset: u64,
     pub size: u32,

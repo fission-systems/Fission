@@ -370,7 +370,7 @@ pub(super) fn format_operand_with_display_kind(
 
     match operand {
         BoundOperand::Register { index, size } => format!("reg{size}_{index}"),
-        BoundOperand::NamedVarnode { name, .. } => name.clone(),
+        BoundOperand::NamedVarnode { name, .. } => name.to_string(),
         BoundOperand::Immediate { value, .. } => format!("0x{value:x}"),
         BoundOperand::Relative { target } => format!("0x{target:x}"),
         BoundOperand::Memory {

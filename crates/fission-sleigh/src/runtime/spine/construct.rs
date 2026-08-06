@@ -92,7 +92,11 @@ pub enum BoundOperand {
         size: u32,
     },
     NamedVarnode {
-        name: String,
+        // `Arc<str>`, matching `CompiledResolvedVarnode.name`: this variant
+        // is constructed on every decoded fixed-varnode operand (the
+        // runtime decode hot path), so cloning it should be a refcount
+        // bump, not a fresh allocation.
+        name: std::sync::Arc<str>,
         display_index: Option<u32>,
         size: u32,
     },

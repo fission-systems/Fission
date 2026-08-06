@@ -71,7 +71,7 @@ pub(super) fn decode_display_symbols(
         fixed_varnodes.insert(
             id,
             CompiledResolvedVarnode {
-                name,
+                name: name.into(),
                 space,
                 offset,
                 size,
@@ -205,7 +205,7 @@ pub(super) fn decoded_display_kind(symbol: &DecodedDisplaySymbol) -> CompiledDis
         }
         DecodedDisplaySymbol::VarnodeList { entries, .. } => {
             CompiledDisplayOperandKind::VarnodeList(
-                entries.iter().map(|entry| entry.name.clone()).collect(),
+                entries.iter().map(|entry| entry.name.to_string()).collect(),
             )
         }
         DecodedDisplaySymbol::FixedVarnode(_) => CompiledDisplayOperandKind::Generic,

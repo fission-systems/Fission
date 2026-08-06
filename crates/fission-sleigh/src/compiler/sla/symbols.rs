@@ -200,7 +200,7 @@ pub(super) fn decode_register_map(
         out.insert(
             name.clone(),
             CompiledResolvedVarnode {
-                name,
+                name: name.into(),
                 space,
                 offset,
                 size,
