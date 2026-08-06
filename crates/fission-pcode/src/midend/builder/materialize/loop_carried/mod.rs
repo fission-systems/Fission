@@ -560,7 +560,7 @@ impl<'a> PreviewBuilder<'a> {
         let name = self.sla_hw_name(output.offset, output.size)?;
         // Avoid colliding with an existing formal parameter binding that happens
         // to share a hardware name (should not occur for GPRs, but stay safe).
-        if self.params.values().any(|binding| binding.name == name) {
+        if self.used_param_local_names.contains(&name) {
             return None;
         }
         Some(name)

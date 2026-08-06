@@ -150,9 +150,7 @@ fn temp_name_trace_enabled() -> bool {
 
 impl<'a> PreviewBuilder<'a> {
     fn binding_name_exists(&self, name: &str) -> bool {
-        self.temps.contains_key(name)
-            || self.params.values().any(|binding| binding.name == name)
-            || self.locals.values().any(|slot| slot.name == name)
+        self.temps.contains_key(name) || self.used_param_local_names.contains(name)
     }
 
     fn next_unused_temp_binding_name(&mut self, ty: &NirType) -> String {
@@ -730,8 +728,7 @@ impl<'a> PreviewBuilder<'a> {
                 let candidate = self
                     .sla_hw_name(output.offset, output.size)
                     .unwrap_or_else(|| "reg".to_string());
-                if !self.params.values().any(|b| b.name == candidate)
-                    && !self.locals.values().any(|s| s.name == candidate)
+                if !self.used_param_local_names.contains(&candidate)
                     && (Self::is_x86_status_flag_output(output)
                         || !self.temps.contains_key(&candidate))
                 {
@@ -831,10 +828,7 @@ impl<'a> PreviewBuilder<'a> {
         };
         let name = if let Some(hw) = hw_name {
             // Reuse an existing binding with the same hardware name if present.
-            if self.temps.contains_key(&hw)
-                || self.params.values().any(|b| b.name == hw)
-                || self.locals.values().any(|s| s.name == hw)
-            {
+            if self.temps.contains_key(&hw) || self.used_param_local_names.contains(&hw) {
                 hw
             } else {
                 hw
@@ -859,9 +853,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn ensure_live_register_binding(&mut self, name: &str, size: u32) -> String {
-        if self.params.values().any(|binding| binding.name == name)
-            || self.locals.values().any(|slot| slot.name == name)
-        {
+        if self.used_param_local_names.contains(name) {
             return name.to_string();
         }
         self.temps

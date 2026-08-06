@@ -76,6 +76,7 @@ impl<'a> PreviewBuilder<'a> {
                     origin: Some(NirBindingOrigin::ParamIndex(param_index)),
                     initializer: None,
                 });
+            self.used_param_local_names.insert(alias_name.clone());
             self.refine_register_param_type_from_varnode(param_index, vn);
             return Some(alias_name);
         }
@@ -93,6 +94,7 @@ impl<'a> PreviewBuilder<'a> {
             origin: Some(NirBindingOrigin::ParamIndex(index)),
             initializer: None,
         });
+        self.used_param_local_names.insert(name.clone());
         self.refine_register_param_type_from_varnode(index, vn);
         Some(name)
     }
@@ -902,6 +904,7 @@ impl<'a> PreviewBuilder<'a> {
         let id = self.locals_next_id;
         self.locals_next_id += 1;
         let name = self.unique_stack_slot_binding_name(&kind_name, id);
+        self.used_param_local_names.insert(name.clone());
         let entry = self.locals.entry(offset).or_insert_with(|| StackSlot {
             id,
             name,
@@ -933,13 +936,14 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 placeholder_ty.clone()
             };
-            self.params.entry(slot).or_insert_with(|| PreHirBinding {
+            let entry = self.params.entry(slot).or_insert_with(|| PreHirBinding {
                 name: format!("param_{}", slot + 1),
                 ty: slot_ty,
                 surface_type_name: None,
                 origin: Some(NirBindingOrigin::ParamIndex(slot)),
                 initializer: None,
             });
+            self.used_param_local_names.insert(entry.name.clone());
         }
 
         let binding = self
@@ -1009,9 +1013,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn binding_name_in_use(&self, name: &str) -> bool {
-        self.params.values().any(|binding| binding.name == name)
-            || self.locals.values().any(|slot| slot.name == name)
-            || self.temps.contains_key(name)
+        self.used_param_local_names.contains(name) || self.temps.contains_key(name)
     }
 
     pub(in crate::midend::builder) fn rsp_local_display_offset(&self, offset: i64) -> i64 {

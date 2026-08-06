@@ -116,6 +116,7 @@ impl<'a> PreviewBuilder<'a> {
         let id = self.locals_next_id;
         self.locals_next_id += 1;
         let name = self.unique_stack_slot_binding_name(&kind_name, id);
+        self.used_param_local_names.insert(name.clone());
         self.locals.insert(
             offset,
             StackSlot {

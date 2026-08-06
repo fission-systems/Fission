@@ -51,6 +51,18 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) stack_slot_memory_owners:
         BTreeMap<i64, Vec<fission_midend_core::ir::SsaMemoryHighVariableId>>,
     pub(crate) temps: BTreeMap<String, PreHirBinding>,
+    /// Mirrors every name ever assigned into `params`/`locals` (NOT `temps`,
+    /// which is already an O(log n) `BTreeMap<String, _>` lookup by name).
+    /// `params`/`locals` are keyed by index/offset, not name, so checking
+    /// "is this candidate name already taken by a param or local" used to be
+    /// an O(params.len() + locals.len()) linear scan repeated for every
+    /// candidate name -- and name generation itself retries in a loop, so a
+    /// single fresh temp/local name could scan the whole builder state
+    /// several times over. Kept in sync at every `params`/`locals`
+    /// insertion site; safe to be over-inclusive (e.g. after a slot's name
+    /// is superseded) since that only makes name generation skip an
+    /// otherwise-free name, never reuse a taken one.
+    pub(crate) used_param_local_names: HashSet<String>,
     pub(crate) temp_next_id: u32,
     pub(crate) materialized_vns: HashMap<MaterializedVarnodeKey, String>,
     pub(crate) load_address_bindings: HashSet<String>,

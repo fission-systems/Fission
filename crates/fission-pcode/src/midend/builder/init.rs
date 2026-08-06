@@ -143,6 +143,7 @@ impl<'a> PreviewBuilder<'a> {
             locals_next_id: 0,
             stack_slot_memory_owners: BTreeMap::new(),
             temps: BTreeMap::new(),
+            used_param_local_names: HashSet::default(),
             temp_next_id: 0,
             materialized_vns: HashMap::default(),
             load_address_bindings: HashSet::default(),
