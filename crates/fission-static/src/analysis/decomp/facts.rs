@@ -6,9 +6,11 @@ use fission_loader::loader::types::{
 };
 use fission_pcode::midend::cspec::register_model_for_language;
 use fission_signatures::FidDatabaseSet;
-use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{
+    DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
+};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Generous upper bound on a single function's instruction count for FID
 /// hashing -- mirrors `fission_decompiler::fid`'s decode safety valve, not a
@@ -92,6 +94,16 @@ pub struct FactStore {
     pdb_functions: Arc<HashMap<u64, PdbFunctionInfo>>,
     structuring_hints: HashMap<u64, fission_midend_core::NirFunctionHints>,
     pub calling_conventions: HashMap<u64, fission_core::CallingConvention>,
+    /// Functions whose full raw p-code was already lifted to
+    /// `DecodeStopReason::TerminalControlFlow` completion by FID signature
+    /// matching (see `ingest_signature_matches_with_databases`) -- shared so
+    /// the main decompile pipeline can skip repeating that same decode, the
+    /// dominant cost of a `decomp --all` batch on binaries with many
+    /// unnamed functions. `Arc<Mutex<..>>` rather than a bare field so
+    /// `FactStore` clones keep sharing one cache instead of forking it
+    /// (matches `#[derive(Clone)]`'s existing "cheap shared clone" contract
+    /// for this type, and `Mutex` itself isn't `Clone`).
+    decoded_function_cache: Arc<Mutex<HashMap<u64, Arc<DecodedPcodeFunction>>>>,
 }
 
 impl Default for FactStore {
@@ -105,6 +117,7 @@ impl Default for FactStore {
             pdb_functions: Arc::new(HashMap::new()),
             structuring_hints: HashMap::new(),
             calling_conventions: HashMap::new(),
+            decoded_function_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -132,6 +145,7 @@ impl FactStore {
             pdb_functions: Arc::clone(&binary.pdb_functions),
             structuring_hints: HashMap::new(),
             calling_conventions: HashMap::new(),
+            decoded_function_cache: Arc::new(Mutex::new(HashMap::new())),
         };
 
         for function in &program.functions {
@@ -334,15 +348,25 @@ impl FactStore {
                 let bytes = binary.view_bytes(func.address, max_bytes)?;
                 let memory_context = decode_memory_context_for(binary, func.address, max_bytes);
                 let contract = DecodeContract::decomp_function(FID_INSTRUCTION_LIMIT);
-                let decoded = frontend
-                    .lift_raw_pcode_function_with_context_and_memory_context(
-                        bytes,
-                        func.address,
-                        contract,
-                        &memory_context,
-                        None,
-                    )
-                    .ok()?;
+                let decoded = Arc::new(
+                    frontend
+                        .lift_raw_pcode_function_with_context_and_memory_context(
+                            bytes,
+                            func.address,
+                            contract,
+                            &memory_context,
+                            None,
+                        )
+                        .ok()?,
+                );
+                // Share this decode with the main decompile pipeline when it
+                // reached the same DecodeContract kind (decomp_function,
+                // stop_at_indirect_branch=false) this call itself used and
+                // ran to full completion -- see `get_cached_decoded_function`
+                // for the exact safety argument. Caching regardless of
+                // whether a FID signature match is ultimately found below:
+                // the decode itself is equally reusable either way.
+                self.cache_decoded_function_if_complete(func.address, &decoded);
                 if std::env::var_os("FISSION_FID_DIAG").is_some() {
                     let elapsed = diag_start.elapsed();
                     if elapsed.as_millis() > 200 {
@@ -370,6 +394,44 @@ impl FactStore {
 
     pub fn ingest_calling_convention(&mut self, address: u64, cc: fission_core::CallingConvention) {
         self.calling_conventions.insert(address, cc);
+    }
+
+    /// Returns a previously-cached full raw p-code decode for `address`, if
+    /// one exists. Every cached entry is guaranteed
+    /// `DecodeStopReason::TerminalControlFlow` (see
+    /// `cache_decoded_function_if_complete`), so it's safe for a caller to
+    /// reuse regardless of what instruction/byte budget *it* would have
+    /// used -- a terminal-control-flow decode already explored every
+    /// reachable path to completion, so it can only be a superset of what a
+    /// smaller budget would have found. It is **not** safe to reuse across a
+    /// `stop_at_indirect_branch` mismatch (`DecodeContract::strict_function`
+    /// vs `decomp_function`) -- callers wanting the strict contract must not
+    /// consult this cache, since indirect-branch continuation genuinely
+    /// changes what's reachable, not just how much budget was spent finding
+    /// it.
+    pub fn get_cached_decoded_function(&self, address: u64) -> Option<Arc<DecodedPcodeFunction>> {
+        self.decoded_function_cache
+            .lock()
+            .ok()?
+            .get(&address)
+            .cloned()
+    }
+
+    /// Caches `decoded` for `address` if (and only if) it reached
+    /// `DecodeStopReason::TerminalControlFlow` -- see
+    /// `get_cached_decoded_function` for why that's the safety bar for
+    /// reuse across callers with different budgets.
+    pub fn cache_decoded_function_if_complete(
+        &self,
+        address: u64,
+        decoded: &Arc<DecodedPcodeFunction>,
+    ) {
+        if decoded.stop_reason != DecodeStopReason::TerminalControlFlow {
+            return;
+        }
+        if let Ok(mut cache) = self.decoded_function_cache.lock() {
+            cache.entry(address).or_insert_with(|| Arc::clone(decoded));
+        }
     }
 
     pub fn ingest_name_fact(&mut self, address: u64, name: String, provenance: FactProvenance) {

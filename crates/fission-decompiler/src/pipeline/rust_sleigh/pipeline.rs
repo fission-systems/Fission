@@ -96,6 +96,15 @@ pub fn decompile_with_rust_sleigh_with_facts(
         return Ok(summary_result);
     }
 
+    // Only offered when our own contract kind will match
+    // (`continue_past_indirect_branch` => `DecodeContract::decomp_function`,
+    // same as FID matching uses) -- see `FactStore::get_cached_decoded_
+    // function`'s doc comment for why a `strict_function` request must not
+    // reuse this cache.
+    let cached_decoded = config
+        .continue_past_indirect_branch
+        .then(|| facts.get_cached_decoded_function(entry_address))
+        .flatten();
     let (pcode, diag, userops) = match decode_rust_sleigh_pcode(
         binary,
         name,
@@ -104,6 +113,7 @@ pub fn decompile_with_rust_sleigh_with_facts(
         instruction_limit,
         config.continue_past_indirect_branch,
         config.retry_on_decode_error,
+        cached_decoded,
     ) {
         Ok(ok) => ok,
         Err(fail) => {
@@ -156,6 +166,7 @@ pub fn decompile_with_rust_sleigh_with_facts(
                     .min(config.instruction_budget_cap.max(1)),
                 false,
                 config.retry_on_decode_error,
+                None,
             ) {
                 Ok(ok) => ok,
                 Err(fail) => {

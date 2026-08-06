@@ -49,6 +49,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
     instruction_limit: usize,
     continue_past_indirect_branch: bool,
     retry_on_decode_error: bool,
+    cached_decoded: Option<std::sync::Arc<fission_sleigh::runtime::DecodedPcodeFunction>>,
 ) -> Result<
     (
         PcodeFunction,
@@ -122,6 +123,24 @@ pub(crate) fn decode_rust_sleigh_pcode(
         DecodeContract::strict_function(instruction_limit)
     };
     let memory_context = decode_memory_context(binary, decode_entry_address, max_bytes);
+    // A cache hit is only offered by the caller when its own contract kind
+    // matches (`decomp_function`, i.e. `continue_past_indirect_branch`) --
+    // see `FactStore::get_cached_decoded_function`'s doc comment for why
+    // that's required, not just a budget check. Skips the (expensive) lift
+    // call entirely; everything downstream reads the same `DecodedPcodeFunction`
+    // shape either way.
+    if let Some(cached) = cached_decoded.filter(|_| continue_past_indirect_branch) {
+        let template_source_counts = cached.template_source_counts.clone();
+        return Ok((
+            cached.function.clone(),
+            DecodeDiag {
+                attempts: 0,
+                stop_reason: "success_cached_fid_decode".into(),
+                template_source_counts,
+            },
+            userops,
+        ));
+    }
     let result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
         bytes,
         decode_entry_address,
@@ -272,9 +291,17 @@ mod tests {
         }
 
         let binary = LoadedBinary::from_file(fixture).expect("load ARM4_be control_flow fixture");
-        let (pcode, diag, _userops) =
-            decode_rust_sleigh_pcode(&binary, "run_control_flow", 0x100150, 616, 512, true, true)
-                .expect("indirect branch should not fall through into inline jump-table data");
+        let (pcode, diag, _userops) = decode_rust_sleigh_pcode(
+            &binary,
+            "run_control_flow",
+            0x100150,
+            616,
+            512,
+            true,
+            true,
+            None,
+        )
+        .expect("indirect branch should not fall through into inline jump-table data");
 
         assert_eq!(diag.attempts, 1);
         assert_eq!(diag.stop_reason, "success_first_lift");
@@ -304,7 +331,7 @@ mod tests {
 
         let binary = LoadedBinary::from_file(fixture).expect("load ARM5_be control_flow fixture");
         let (pcode, diag, _userops) =
-            decode_rust_sleigh_pcode(&binary, "test_switch", 0x100000, 92, 512, true, true)
+            decode_rust_sleigh_pcode(&binary, "test_switch", 0x100000, 92, 512, true, true, None)
                 .expect("conditional bx return should not end the function early");
 
         assert_eq!(diag.attempts, 1);
