@@ -15,6 +15,7 @@ use super::{
     HirBinaryOp, HirExpr, HirFunction, HirLValue, HirStmt, HirUnaryOp, NirBinding,
     NirBindingOrigin, NirType,
 };
+use fission_midend_core::ir::HirSwitchCase;
 use invariants::check_hir_presentation_invariants;
 use std::collections::{HashMap, HashSet};
 
@@ -55,6 +56,14 @@ fn apply_hir_presentation_passes(func: &mut HirFunction) {
         changed |= fold_while_true_break_guard(&mut func.body);
         // `i = 0; while (i < n) { …; i = i + 1; }` → `for (i = 0; i < n; i = i + 1)`.
         changed |= fold_seed_while_to_for(&mut func.body);
+        // `if (x==c1) {..} else if (x==c2) {..} else ..` → `switch(x) {..}`
+        // (GCC/Clang "switch lowering": a small or sparse-case switch
+        // compiled to an if-chain instead of a jump table). Runs before the
+        // pure-value/return-to-select folds below, which want the same
+        // 2-arm `if`/`else` shape a 3+-arm chain also matches one level at
+        // a time -- letting them go first would eat the chain into nested
+        // ternaries before this pass ever sees it as a chain.
+        changed |= recover_switch_from_lowered_if_chain(&mut func.body);
         // `if (c) { x = a; } else { x = b; }` → `x = c ? a : b` (pure values only).
         changed |= fold_if_else_pure_same_var_assign(&mut func.body);
         // `if (c) { return a; } else { return b; }` → `return c ? a : b` (pure values).
@@ -2252,6 +2261,157 @@ fn expr_result_type(expr: &HirExpr) -> NirType {
         }
         HirExpr::Var(_) | HirExpr::AggregateCopy { .. } => NirType::Unknown,
     }
+}
+
+/// Minimum matched arms before an if-chain is worth presenting as a switch.
+/// Two cases reads just as naturally as `if`/`else if`; the payoff shows up
+/// once there are enough arms that the repeated `x == ` noise dominates.
+const MIN_LOWERED_SWITCH_CASES: usize = 3;
+
+/// `if (x == c1) {..} else if (x == c2) {..} else if (x == c3) {..} else {..}`
+/// → `switch (x) { case c1: ..; case c2: ..; case c3: ..; default: ..; }`.
+///
+/// GCC and Clang sometimes lower a `switch` with too few or too sparse
+/// cases to this exact if-chain shape instead of emitting a jump table
+/// (the "switch lowering" compiler transform documented in the SAILR
+/// paper, USENIX 2024) -- Fission's own switch recovery
+/// (`fission-midend-structuring`'s jump-table-based rule) never sees a
+/// jump table to key off in this case, so the chain surfaces as nested
+/// `if`/`else` instead of the switch it started as.
+///
+/// A real `switch` statement evaluates its expression exactly once; an
+/// if-chain evaluates it up to once per untaken arm. Collapsing multiple
+/// evaluations into one is only safe when the expression is provably
+/// side-effect-free (`expr_is_presentation_pure`) -- otherwise a call or a
+/// load that used to run on every untaken comparison would silently stop
+/// running.
+fn recover_switch_from_lowered_if_chain(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        changed |= recover_switch_from_lowered_if_chain_in_stmt(stmt);
+    }
+    for stmt in stmts.iter_mut() {
+        if let Some(switch_stmt) = try_build_switch_from_if_chain(stmt) {
+            *stmt = switch_stmt;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn recover_switch_from_lowered_if_chain_in_stmt(stmt: &mut HirStmt) -> bool {
+    match stmt {
+        HirStmt::Block(body) => recover_switch_from_lowered_if_chain(body),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let a = recover_switch_from_lowered_if_chain(then_body);
+            let b = recover_switch_from_lowered_if_chain(else_body);
+            a || b
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            recover_switch_from_lowered_if_chain(body)
+        }
+        HirStmt::For { init, update, body, .. } => {
+            let mut changed = recover_switch_from_lowered_if_chain(body);
+            if let Some(i) = init {
+                changed |= recover_switch_from_lowered_if_chain_in_stmt(i);
+            }
+            if let Some(u) = update {
+                changed |= recover_switch_from_lowered_if_chain_in_stmt(u);
+            }
+            changed
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases.iter_mut() {
+                changed |= recover_switch_from_lowered_if_chain(&mut case.body);
+            }
+            changed |= recover_switch_from_lowered_if_chain(default);
+            changed
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+/// `x == c` or `c == x` → `(x, c)`.
+fn match_eq_const(cond: &HirExpr) -> Option<(&HirExpr, i64)> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs,
+        rhs,
+        ..
+    } = cond
+    else {
+        return None;
+    };
+    if let HirExpr::Const(value, _) = rhs.as_ref() {
+        return Some((lhs.as_ref(), *value));
+    }
+    if let HirExpr::Const(value, _) = lhs.as_ref() {
+        return Some((rhs.as_ref(), *value));
+    }
+    None
+}
+
+fn try_build_switch_from_if_chain(stmt: &HirStmt) -> Option<HirStmt> {
+    let HirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = stmt
+    else {
+        return None;
+    };
+    let (switch_expr, first_value) = match_eq_const(cond)?;
+    if !expr_is_presentation_pure(switch_expr) {
+        return None;
+    }
+    let mut cases = vec![HirSwitchCase {
+        values: vec![first_value],
+        body: then_body.clone(),
+    }];
+    let mut seen_values: HashSet<i64> = [first_value].into_iter().collect();
+    let mut tail: &Vec<HirStmt> = else_body;
+    loop {
+        let [HirStmt::If {
+            cond: next_cond,
+            then_body: next_then,
+            else_body: next_else,
+        }] = tail.as_slice()
+        else {
+            break;
+        };
+        let Some((next_expr, next_value)) = match_eq_const(next_cond) else {
+            break;
+        };
+        if next_expr != switch_expr || seen_values.contains(&next_value) {
+            break;
+        }
+        cases.push(HirSwitchCase {
+            values: vec![next_value],
+            body: next_then.clone(),
+        });
+        seen_values.insert(next_value);
+        tail = next_else;
+    }
+    if cases.len() < MIN_LOWERED_SWITCH_CASES {
+        return None;
+    }
+    Some(HirStmt::Switch {
+        expr: switch_expr.clone(),
+        cases,
+        default: tail.clone(),
+    })
 }
 
 /// Fold null-check join sugar:
@@ -4987,6 +5147,136 @@ mod tests {
         assert!(
             !code.contains("goto") && code.contains("param_1"),
             "must keep formal and drop control noise:\n{code}"
+        );
+    }
+
+    fn eq_const(var: &str, value: i64) -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(HirExpr::Var(var.into())),
+            rhs: Box::new(HirExpr::Const(value, int_ty(32, true))),
+            ty: NirType::Bool,
+        }
+    }
+
+    #[test]
+    fn hir_presentation_recovers_switch_from_lowered_if_chain() {
+        let mut func = HirFunction {
+            name: "lowered_switch".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::If {
+                cond: eq_const("param_1", 1),
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(10, int_ty(32, true))))],
+                else_body: vec![HirStmt::If {
+                    cond: eq_const("param_1", 2),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(20, int_ty(32, true))))],
+                    else_body: vec![HirStmt::If {
+                        cond: eq_const("param_1", 3),
+                        then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                            30,
+                            int_ty(32, true),
+                        )))],
+                        else_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                            -1,
+                            int_ty(32, true),
+                        )))],
+                    }],
+                }],
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            code.contains("switch (param_1)")
+                && code.contains("case 1:")
+                && code.contains("case 2:")
+                && code.contains("case 3:")
+                && code.contains("default:"),
+            "three-arm lowered if-chain should recover to a switch:\n{code}"
+        );
+        assert!(
+            !code.contains("if ("),
+            "if-chain should be fully consumed by the switch:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_keeps_two_arm_if_chain_as_if_else() {
+        // Below MIN_LOWERED_SWITCH_CASES: two arms read fine as if/else,
+        // not worth the switch(){} ceremony.
+        let mut func = HirFunction {
+            name: "two_arm".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::If {
+                cond: eq_const("param_1", 1),
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(10, int_ty(32, true))))],
+                else_body: vec![HirStmt::If {
+                    cond: eq_const("param_1", 2),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(20, int_ty(32, true))))],
+                    else_body: vec![HirStmt::Return(Some(HirExpr::Const(-1, int_ty(32, true))))],
+                }],
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("switch ("),
+            "two-arm if-chain must not become a switch:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_declines_switch_recovery_for_impure_load_expr() {
+        // `*param_1 == c` repeated per arm would need to re-read memory up
+        // to N times; a switch would collapse that to exactly one read.
+        // Not safe to assume equivalent -- must stay an if-chain.
+        let load = |ptr: &str| HirExpr::Load {
+            ptr: Box::new(HirExpr::Var(ptr.into())),
+            ty: int_ty(32, true),
+        };
+        let cond = |ptr: &str, value: i64| HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(load(ptr)),
+            rhs: Box::new(HirExpr::Const(value, int_ty(32, true))),
+            ty: NirType::Bool,
+        };
+        let mut func = HirFunction {
+            name: "impure_switch".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::If {
+                cond: cond("param_1", 1),
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(10, int_ty(32, true))))],
+                else_body: vec![HirStmt::If {
+                    cond: cond("param_1", 2),
+                    then_body: vec![HirStmt::Return(Some(HirExpr::Const(20, int_ty(32, true))))],
+                    else_body: vec![HirStmt::If {
+                        cond: cond("param_1", 3),
+                        then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                            30,
+                            int_ty(32, true),
+                        )))],
+                        else_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                            -1,
+                            int_ty(32, true),
+                        )))],
+                    }],
+                }],
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("switch ("),
+            "impure (Load) switch expression must not collapse to a single-evaluation switch:\n{code}"
         );
     }
 
