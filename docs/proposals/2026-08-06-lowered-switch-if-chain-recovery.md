@@ -321,3 +321,52 @@ the second). `classify_range` itself also has a pre-existing ground-truth
 divergence on negative/`INT_MAX` inputs (confirmed present identically before
 and after this round's changes, so not introduced here) -- a separate,
 unrelated bug worth its own investigation, not chased down in this round.
+
+## 8. Fifth round: closing the "not yet a switch" gap from round 4
+
+Directly addressed round 4's "not yet a switch" blocker: generalized
+`conditional_move.rs`'s Default-Override fold (`var = default; if (cond) { var
+= override; }`) to also match when exactly one single-use predicate-defining
+assignment sits between the default and its guarding `if` -- the common
+`t = cond_expr; if (t) {...}` / `if (!t) {...}` shape GCC/Clang routinely
+produce, which defeated the fold's strict positional adjacency even though
+nothing about the underlying shape differs. Safety bar: the predicate's whole-
+function use count (via a `DefUseMap` built once per `apply_conditional_move_pass`
+call) must be exactly 1, its definition must be pure
+(`!expr_has_side_effects`), and only the two unambiguous cond shapes (`pred`
+bare or `!pred`) are inlined -- never a compound condition. `classify_range`
+(`gcc -O2`) now collapses fully: `return uVar20 > 0 ? 1 : xVar16;` for the
+`then` branch, matching the `else` branch's earlier full collapse -- both
+branches are now a single `Return(Select(..))`, the exact shape
+`recover_switch_from_select_decision_tree` (round 2) already knows how to
+turn into a `switch`. (A residual gap remains before that fold can actually
+fire: interior dead stores like `uVar11 = param_1;` survive in the branch
+body alongside the collapsed return, so `fold_if_else_pure_returns_to_select`
+-- which requires each branch to be *exactly* `[Return(expr)]` -- still
+declines. That's a normalize-level dead/uninlined-copy cleanup gap, not a
+switch-recovery one; flagging as a further follow-up rather than chasing it
+this round.)
+
+**Verification**: full workspace test suite green, same 7 pre-existing
+`fission-emulator` failures as every prior round, no new failures. Corpus-wide
+git-stash A/B diff (209 binaries): function count identical (11,757 before
+and after), only 15/209 files changed (much narrower than round 4's 148, as
+expected for a positionally-scoped fold generalization), total line count
+dropped slightly (more full return-collapses now DCE-eligible). Ran
+`fission_cli verify --tier ground-truth` across every function in two x86
+binaries that showed this diff (`control_flow_gcc_O1.exe`,
+`control_flow_gcc_O2.exe`): zero new divergences in either, and in *both*
+binaries one additional function moved from `Unsupported` to `Equivalent`
+(the fold's inlining made an unsigned-overflow-checked min/max comparator
+simple enough for the verifier's sampler to model) -- net evidence in favor
+of correctness, not just neutral. One diff on an aarch64 binary
+(`control_flow_gcc-aarch64_O0`, `fde_unencoded_compare`) showed a constant
+changing its printed form from `-1` to `4294967295` inside the newly-merged
+`Select`; traced this to the transform doing an exact `.clone()` of the
+original `PreHirExpr::Const` node (same underlying value, unrelated
+downstream type-inference/printer logic evidently renders the same bit
+pattern differently once it's a `Select` operand vs. a bare statement RHS) --
+ground-truth verification wasn't available for this specific function
+(pointer-arg sampling unsupported), so this is reasoned-through rather than
+directly proven; flagging as a loose end worth a direct look if it recurs
+elsewhere, not a confirmed bug.

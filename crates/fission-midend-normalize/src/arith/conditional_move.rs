@@ -1,3 +1,5 @@
+use crate::analysis::defuse::DefUseMap;
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
 use crate::HashMap;
@@ -10,47 +12,55 @@ pub fn apply_conditional_move_pass(func: &mut PreHirFunction) -> bool {
     for local in &func.locals {
         type_map.insert(local.name.clone(), local.ty.clone());
     }
+    // Whole-function use counts, so Step 3 below can safely tell whether a
+    // predicate temp sitting between a default assign and its guarding `if`
+    // is read anywhere else before inlining it away.
+    let use_counts = DefUseMap::build(&func.body).use_count;
 
     let mut changed = false;
-    if rewrite_stmts(&mut func.body, &type_map) {
+    if rewrite_stmts(&mut func.body, &type_map, &use_counts) {
         changed = true;
     }
     changed
 }
 
-fn rewrite_stmts(stmts: &mut Vec<PreHirStmt>, type_map: &HashMap<String, NirType>) -> bool {
+fn rewrite_stmts(
+    stmts: &mut Vec<PreHirStmt>,
+    type_map: &HashMap<String, NirType>,
+    use_counts: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
 
     // Step 1: Recursively simplify nested blocks first
     for stmt in stmts.iter_mut() {
         match stmt {
             PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= rewrite_stmts(body, type_map);
+                changed |= rewrite_stmts(body, type_map, use_counts);
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
-                    changed |= rewrite_stmt_nested(init_stmt.as_mut(), type_map);
+                    changed |= rewrite_stmt_nested(init_stmt.as_mut(), type_map, use_counts);
                 }
                 if let Some(update_stmt) = update {
-                    changed |= rewrite_stmt_nested(update_stmt.as_mut(), type_map);
+                    changed |= rewrite_stmt_nested(update_stmt.as_mut(), type_map, use_counts);
                 }
-                changed |= rewrite_stmts(body, type_map);
+                changed |= rewrite_stmts(body, type_map, use_counts);
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= rewrite_stmts(then_body, type_map);
-                changed |= rewrite_stmts(else_body, type_map);
+                changed |= rewrite_stmts(then_body, type_map, use_counts);
+                changed |= rewrite_stmts(else_body, type_map, use_counts);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= rewrite_stmts(&mut case.body, type_map);
+                    changed |= rewrite_stmts(&mut case.body, type_map, use_counts);
                 }
-                changed |= rewrite_stmts(default, type_map);
+                changed |= rewrite_stmts(default, type_map, use_counts);
             }
             _ => {}
         }
@@ -88,44 +98,14 @@ fn rewrite_stmts(stmts: &mut Vec<PreHirStmt>, type_map: &HashMap<String, NirType
         }
     }
 
-    // Step 3: Handle Default-Override pattern (merging adjacent statements)
+    // Step 3: Handle Default-Override pattern (merging adjacent statements,
+    // or statements separated by exactly one single-use predicate temp --
+    // see `try_match_default_override`).
     let mut i = 0;
     while i < stmts.len().saturating_sub(1) {
-        let is_match = {
-            let left = &stmts[i];
-            let right = &stmts[i + 1];
-            match (left, right) {
-                (
-                    PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(var_l),
-                        rhs: default_val,
-                    },
-                    PreHirStmt::If {
-                        cond,
-                        then_body,
-                        else_body,
-                    },
-                ) if else_body.is_empty() => {
-                    if let Some((var_r, override_val)) = match_single_assign(then_body) {
-                        if var_l == &var_r {
-                            Some((
-                                var_l.clone(),
-                                cond.clone(),
-                                override_val,
-                                default_val.clone(),
-                            ))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        };
+        let is_match = try_match_default_override(stmts, i, use_counts);
 
-        if let Some((var_name, cond, override_val, default_val)) = is_match {
+        if let Some((var_name, cond, override_val, default_val, consumed)) = is_match {
             let ty = type_map.get(&var_name).cloned().unwrap_or_else(|| {
                 let et = expr_type(&override_val);
                 if et != NirType::Unknown {
@@ -143,7 +123,9 @@ fn rewrite_stmts(stmts: &mut Vec<PreHirStmt>, type_map: &HashMap<String, NirType
                     ty,
                 },
             };
-            stmts.remove(i + 1);
+            for _ in 0..consumed {
+                stmts.remove(i + 1);
+            }
             changed = true;
             // Do not increment i, examine the merged statement against the next one
         } else {
@@ -154,22 +136,136 @@ fn rewrite_stmts(stmts: &mut Vec<PreHirStmt>, type_map: &HashMap<String, NirType
     changed
 }
 
-fn rewrite_stmt_nested(stmt: &mut PreHirStmt, type_map: &HashMap<String, NirType>) -> bool {
+/// Matches the "Default-Override" shape at `stmts[i]`:
+/// `var = default; if (cond) { var = override; }` (with `else` empty),
+/// returning `(var, cond, override, default, consumed)` where `consumed` is
+/// how many statements after `stmts[i]` the match spans (so the caller knows
+/// how many to remove).
+///
+/// Also tolerates exactly one intervening single-use predicate-defining
+/// assignment between the default and the `if` -- GCC/Clang routinely
+/// materialize a flag/comparison into a named temp one statement before
+/// testing it (`xVar15 = uVar20 <= 0; if (!xVar15) ...`), which otherwise
+/// defeats simple positional adjacency even though nothing about the shape
+/// is actually different. Only inlines the two narrowest, unambiguous cond
+/// shapes (`pred` bare, or `!pred`) -- not a general substitution -- and
+/// only when `pred` is provably read nowhere else in the function (via the
+/// whole-function `use_counts` built once in `apply_conditional_move_pass`)
+/// and its definition is pure, so hoisting its evaluation into the merged
+/// `Select` at `stmts[i]`'s position changes nothing observable.
+fn try_match_default_override(
+    stmts: &[PreHirStmt],
+    i: usize,
+    use_counts: &HashMap<String, usize>,
+) -> Option<(String, PreHirExpr, PreHirExpr, PreHirExpr, usize)> {
+    let PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(var_l),
+        rhs: default_val,
+    } = &stmts[i]
+    else {
+        return None;
+    };
+
+    if let Some((cond, override_val)) = match_default_override_if(var_l, stmts.get(i + 1)) {
+        return Some((var_l.clone(), cond, override_val, default_val.clone(), 1));
+    }
+
+    if let PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(pred_name),
+        rhs: pred_expr,
+    } = stmts.get(i + 1)?
+    {
+        if pred_name != var_l
+            && !expr_has_side_effects(pred_expr)
+            && use_counts.get(pred_name.as_str()).copied().unwrap_or(0) == 1
+        {
+            let (cond, override_val) = match_default_override_if(var_l, stmts.get(i + 2))?;
+            let negated = cond_predicate_polarity(&cond, pred_name)?;
+            let inlined_cond = if negated {
+                PreHirExpr::Unary {
+                    op: PreHirUnaryOp::Not,
+                    expr: Box::new(pred_expr.clone()),
+                    ty: NirType::Bool,
+                }
+            } else {
+                pred_expr.clone()
+            };
+            return Some((
+                var_l.clone(),
+                inlined_cond,
+                override_val,
+                default_val.clone(),
+                2,
+            ));
+        }
+    }
+
+    None
+}
+
+/// If `stmt` is `If { cond, then_body: [var_l = override;], else_body: [] }`,
+/// returns `(cond, override)`.
+fn match_default_override_if(
+    var_l: &str,
+    stmt: Option<&PreHirStmt>,
+) -> Option<(PreHirExpr, PreHirExpr)> {
+    let PreHirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = stmt?
+    else {
+        return None;
+    };
+    if !else_body.is_empty() {
+        return None;
+    }
+    let (var_r, override_val) = match_single_assign(then_body)?;
+    if var_r == var_l {
+        Some((cond.clone(), override_val))
+    } else {
+        None
+    }
+}
+
+/// `true` if `cond` is exactly `!Var(pred_name)`, `false` if exactly
+/// `Var(pred_name)`, `None` for anything else -- deliberately narrow so this
+/// never has to reason about a compound condition.
+fn cond_predicate_polarity(cond: &PreHirExpr, pred_name: &str) -> Option<bool> {
+    match cond {
+        PreHirExpr::Var(name) if name == pred_name => Some(false),
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr,
+            ..
+        } => match expr.as_ref() {
+            PreHirExpr::Var(name) if name == pred_name => Some(true),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn rewrite_stmt_nested(
+    stmt: &mut PreHirStmt,
+    type_map: &HashMap<String, NirType>,
+    use_counts: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     match stmt {
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= rewrite_stmts(body, type_map);
+            changed |= rewrite_stmts(body, type_map, use_counts);
         }
         PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(init_stmt) = init {
-                changed |= rewrite_stmt_nested(init_stmt.as_mut(), type_map);
+                changed |= rewrite_stmt_nested(init_stmt.as_mut(), type_map, use_counts);
             }
             if let Some(update_stmt) = update {
-                changed |= rewrite_stmt_nested(update_stmt.as_mut(), type_map);
+                changed |= rewrite_stmt_nested(update_stmt.as_mut(), type_map, use_counts);
             }
-            changed |= rewrite_stmts(body, type_map);
+            changed |= rewrite_stmts(body, type_map, use_counts);
         }
         PreHirStmt::If {
             cond,
@@ -198,15 +294,15 @@ fn rewrite_stmt_nested(stmt: &mut PreHirStmt, type_map: &HashMap<String, NirType
                 };
                 changed = true;
             } else {
-                changed |= rewrite_stmts(then_body, type_map);
-                changed |= rewrite_stmts(else_body, type_map);
+                changed |= rewrite_stmts(then_body, type_map, use_counts);
+                changed |= rewrite_stmts(else_body, type_map, use_counts);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                changed |= rewrite_stmts(&mut case.body, type_map);
+                changed |= rewrite_stmts(&mut case.body, type_map, use_counts);
             }
-            changed |= rewrite_stmts(default, type_map);
+            changed |= rewrite_stmts(default, type_map, use_counts);
         }
         _ => {}
     }
