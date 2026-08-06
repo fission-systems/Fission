@@ -276,8 +276,12 @@ pub struct CompiledExecutableConstructor {
     pub mnemonic: String,
     pub source: String,
     pub display: String,
-    #[serde(default = "CompiledDisplayTemplate::empty")]
-    pub display_template: CompiledDisplayTemplate,
+    // `Arc<..>`, matching `constructor_template` above: cloned into every
+    // `RuntimeConstructState` produced by `walk()` (the runtime decode hot
+    // path), so an owned deep-clone here meant re-copying the whole display
+    // piece list per constructor match.
+    #[serde(default = "default_arc_display_template")]
+    pub display_template: std::sync::Arc<CompiledDisplayTemplate>,
     pub signature_hash: u64,
     pub minimum_length: u32,
     pub context_changes: Vec<CompiledContextOp>,
@@ -287,8 +291,9 @@ pub struct CompiledExecutableConstructor {
     pub matcher: CompiledPatternMatcher,
     pub opsize_variants: Vec<u8>,
     pub operand_specs: Vec<CompiledOperandSpec>,
+    // Same reasoning as `display_template` above.
     #[serde(default)]
-    pub display_operands: Vec<CompiledDisplayOperand>,
+    pub display_operands: std::sync::Arc<Vec<CompiledDisplayOperand>>,
     pub construct_tpl_kind: CompiledConstructTplKind,
     // `Arc<..>` rather than an owned value: `RuntimeConstructState` (the
     // owned result of walking a constructor -- see `construct.rs`) clones
@@ -361,6 +366,10 @@ pub enum CompiledDisplayOperandKind {
     NameTable(Vec<String>),
     ValueMap(Vec<i64>),
     VarnodeList(Vec<String>),
+}
+
+fn default_arc_display_template() -> std::sync::Arc<CompiledDisplayTemplate> {
+    std::sync::Arc::new(CompiledDisplayTemplate::empty())
 }
 
 impl CompiledDisplayTemplate {

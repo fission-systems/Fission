@@ -1694,8 +1694,9 @@ mod tests {
                 first_whitespace: None,
                 flowthru_operand_index: None,
                 display: String::new(),
-            },
-            display_operands: Vec::new(),
+            }
+            .into(),
+            display_operands: Vec::new().into(),
             construct_nodes: Vec::new(),
             handles: Vec::new(),
             exported_handle: None,

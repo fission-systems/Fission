@@ -1024,7 +1024,7 @@ mod tests {
             )],
             Vec::new(),
         );
-        state.display_template.first_whitespace = Some(2);
+        std::sync::Arc::make_mut(&mut state.display_template).first_whitespace = Some(2);
 
         let err = render_display_template_parts(&state).expect_err("invalid split should fail");
 
@@ -1108,8 +1108,9 @@ mod tests {
                 first_whitespace: None,
                 flowthru_operand_index: None,
                 display: String::new(),
-            },
-            display_operands: Vec::new(),
+            }
+            .into(),
+            display_operands: Vec::new().into(),
             construct_nodes: Vec::new(),
             operands: handles
                 .iter()

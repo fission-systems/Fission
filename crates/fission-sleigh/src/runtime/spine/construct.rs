@@ -19,8 +19,8 @@ pub struct RuntimeConstructState {
     pub named_templates: Vec<Option<CompiledConstructTpl>>,
     /// Deferred global context commits (Ghidra's `globalset` / `ContextCommit`).
     pub context_commits: Vec<CompiledContextCommit>,
-    pub display_template: CompiledDisplayTemplate,
-    pub display_operands: Vec<CompiledDisplayOperand>,
+    pub display_template: std::sync::Arc<CompiledDisplayTemplate>,
+    pub display_operands: std::sync::Arc<Vec<CompiledDisplayOperand>>,
     pub construct_nodes: Vec<RuntimeConstructNode>,
     pub handles: Vec<RuntimeHandle>,
     pub exported_handle: Option<RuntimeHandle>,

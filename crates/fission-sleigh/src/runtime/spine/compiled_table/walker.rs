@@ -738,16 +738,16 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         &mut self,
         handles: &[RuntimeHandle],
     ) -> Result<Option<RuntimeHandle>> {
-        let Some(export_tpl) = self
-            .selection
-            .constructor
-            .constructor_template
-            .result
-            .clone()
-        else {
+        // Clone the Arc (cheap: a refcount bump), not the `CompiledHandleTpl`
+        // it points to: borrowing `export_tpl` directly from `self` would
+        // conflict with the `&mut self` call below for the whole borrow's
+        // lifetime, which is exactly why this used to `.clone()` the
+        // pointee instead.
+        let constructor_template = std::sync::Arc::clone(&self.selection.constructor.constructor_template);
+        let Some(export_tpl) = constructor_template.result.as_ref() else {
             return Ok(None);
         };
-        let fixed = self.fixed_handle_from_handle_tpl(&export_tpl, handles)?;
+        let fixed = self.fixed_handle_from_handle_tpl(export_tpl, handles)?;
         let value = self
             .display_operand_from_exported_display_template(handles)
             .transpose()?;

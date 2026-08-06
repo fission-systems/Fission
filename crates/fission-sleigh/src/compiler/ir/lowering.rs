@@ -336,7 +336,7 @@ fn executable_constructor_from_sla_template(
             .unwrap_or_else(|| format!("ctor_{}", local_index)),
         source,
         display: display_template.display.clone(),
-        display_template,
+        display_template: display_template.into(),
         signature_hash,
         minimum_length: sla_template.minimum_length,
         context_changes: sla_template.context_changes.clone(),
@@ -344,7 +344,7 @@ fn executable_constructor_from_sla_template(
         matcher: CompiledPatternMatcher::BitConstraints(vec![]),
         opsize_variants: Vec::new(),
         operand_specs: sla_template.operand_specs.clone(),
-        display_operands: sla_template.display_operands.clone(),
+        display_operands: sla_template.display_operands.clone().into(),
         construct_tpl_kind: CompiledConstructTplKind::Generic,
         constructor_template: std::sync::Arc::new(CompiledConstructorTemplate {
             handles: sla_template
@@ -782,21 +782,24 @@ impl Collector {
             mnemonic: mnemonic.to_string(),
             source: source.to_string(),
             display: signature.to_string(),
-            display_template: CompiledDisplayTemplate::from_literal_display(signature.to_string()),
+            display_template: CompiledDisplayTemplate::from_literal_display(signature.to_string())
+                .into(),
             signature_hash,
             minimum_length,
             context_changes,
             matcher,
             opsize_variants,
             operand_specs: operand_specs.clone(),
-            display_operands: operand_specs
-                .iter()
-                .enumerate()
-                .map(|(operand_index, _)| CompiledDisplayOperand {
-                    operand_index,
-                    kind: CompiledDisplayOperandKind::Generic,
-                })
-                .collect(),
+            display_operands: std::sync::Arc::new(
+                operand_specs
+                    .iter()
+                    .enumerate()
+                    .map(|(operand_index, _)| CompiledDisplayOperand {
+                        operand_index,
+                        kind: CompiledDisplayOperandKind::Generic,
+                    })
+                    .collect(),
+            ),
             construct_tpl_kind: CompiledConstructTplKind::Generic,
             constructor_template,
             named_templates: Vec::new(),
