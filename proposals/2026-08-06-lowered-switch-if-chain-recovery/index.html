@@ -1042,6 +1042,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#7-fourth-round-normalize-level-flag-value-simplification-partial-progress-on-gap-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Fourth round: normalize-level flag-value simplification (partial progress on gap 1)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-fifth-round-closing-the-not-yet-a-switch-gap-from-round-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Fifth round: closing the "not yet a switch" gap from round 4
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1276,6 +1298,135 @@ arm + default) -- the expected, correct shape of this exact restructuring.</p>
 to angr's actual ~940-line scope, but has landed a real, verified,
 corpus-confirmed win. Flagging (1) and (2) as follow-ups rather than
 attempting them in this round.</p>
+<h2 id="7-fourth-round-normalize-level-flag-value-simplification-partial-progress-on-gap-1">7. Fourth round: normalize-level flag-value simplification (partial progress on gap 1)<a class="headerlink" href="#7-fourth-round-normalize-level-flag-value-simplification-partial-progress-on-gap-1" title="Permanent link">&para;</a></h2>
+<p>Investigated gap (1) directly: <code>classify_range</code> under <code>gcc -O2</code> computes each
+branch's result via raw x86 EFLAGS arithmetic (<code>zf</code>/<code>sf</code> materialized into a
+0/1 or -1/0 value, e.g. <code>-(uint)zf</code>), not a tree of direct comparisons. That
+turned out to be three separate, narrower gaps in the PreHir-level
+<code>fission-midend-normalize</code> crate (upstream of, and unrelated to, the
+presentation-layer switch-recovery machinery from rounds 1-3), all now fixed:</p>
+<ol>
+<li><strong><code>canonicalize_condition_expr</code>'s <code>(a - b) != 0 -&gt; a != b</code> identity was
+   condition-only.</strong> It's actually a pure value-level identity (<code>Sub</code>/<code>Xor</code>
+   is zero iff its operands are equal, in <em>any</em> consuming context, not just a
+   branch test) but was only ever invoked from <code>normalize_condition_expr</code>,
+   never from the generic bottom-up <code>normalize_expr</code> that runs on every
+   expression position. Split it out into its own <code>canonicalize_sub_xor_zero_compare</code>
+   (<code>arith/flags_cond.rs</code>) and wired it into <code>normalize_expr</code>'s fixed-point
+   chain (<code>pipeline/run.rs</code>). This alone fixed the <code>-O2</code> else-branch:
+   <code>(uint)(param_1 - 10 != 0) + 2</code> -&gt; <code>(uint)(param_1 != 10) + 2</code>.</li>
+<li><strong><code>Select</code>'s <code>cond</code> wasn't condition-normalized.</strong> <code>normalize_expr</code>'s
+   <code>Select</code> case called plain <code>normalize_expr(cond)</code> instead of
+   <code>normalize_condition_expr(cond)</code>, even though a ternary's <code>cond</code> is a
+   truthiness test with exactly the same semantics as an <code>if</code>/<code>while</code>
+   condition. Switched it to <code>normalize_condition_expr</code>, and additionally
+   taught <code>normalize_condition_expr</code> to recurse into <code>&amp;&amp;</code>/<code>||</code>/<code>!</code> operands
+   (<code>normalize_condition_logical_operands</code>) -- those operands are themselves
+   always boolean-context truthiness tests (that's what makes them valid
+   logical-connective operands), so the same condition-only rewrites are
+   equally safe on each one, not just on the connective as a whole. Without
+   this, <code>!zf &amp;&amp; (x &lt; 0) == 0</code> never simplified because <code>canonicalize_condition_expr</code>
+   only ever looked at the top-level AND node, which doesn't itself match any
+   rewrite pattern.</li>
+<li><strong>Flag-var reads outside a branch condition were never substituted at
+   all.</strong> <code>flag_recovery.rs</code>'s reaching-definition walker
+   (<code>recover_in_stmts_with_reaching_defs</code>) only ever called <code>recover_in_cond</code>
+   on actual <code>If</code>/<code>While</code>/<code>For</code> conditions; a plain <code>x = -(uint)zf;</code> (reading
+   a flag as an ordinary value) was invisible to it, and multiply-defined
+   flags (like <code>zf</code>, redefined per-branch here) don't qualify for the
+   separate whole-function single-definition fallback either -- so the flag
+   stayed a permanently-opaque <code>Var</code> reference. Added <code>recover_flag_value_use</code>
+   and wired it into every value-producing statement form the walker visits
+   (<code>Assign</code> RHS and non-<code>Var</code> LHS subexpressions, <code>Expr</code>, <code>Return</code>,
+   <code>Switch</code>'s scrutinee, <code>VaStart</code>), using the same per-branch reaching-def
+   map already threaded through for conditions.</li>
+</ol>
+<p>Net effect on <code>classify_range</code> (<code>gcc -O2</code>, <code>--layer hir</code>): the <code>then</code> branch
+went from an opaque <code>!zf &amp;&amp; xVar15 &lt; 0 == 0 ? 1 : xVar16</code> (with <code>xVar16</code>
+itself an un-recovered <code>-(uint)xVar15</code> flag materialization) to
+<code>xVar15 = uVar11 != 0; xVar16 = -(uint)xVar15; xVar15 = uVar20 &lt;= 0; if (!xVar15) rax = 1;</code>
+-- i.e. every flag is now a direct, correctly-signed comparison
+(<code>uVar11 != 0</code>, <code>uVar20 &lt;= 0</code>) instead of a raw EFLAGS variable. The <code>else</code>
+branch fully collapsed to <code>return (uint)((uint)(param_1 != 10) + 2);</code>.</p>
+<p><strong>Not yet a switch</strong>: the <code>then</code> branch is still an <code>if (!xVar15) rax = 1; return rax;</code>
+default-override shape with some interleaved dead stores (<code>rax = 0;</code> etc.)
+between the real default assignment and the override -- <code>conditional_move.rs</code>'s
+"Default-Override" fold requires the assign/if pair to be <em>exactly</em> adjacent,
+so the leftover dead code in between blocks it. Getting this the rest of the
+way to a recovered switch needs either a DCE pass to run first (to make the
+pair adjacent) or loosening that fold's adjacency requirement -- left as a
+further follow-up rather than attempted this round, since the value here
+(untangling raw flag-arithmetic into direct comparisons) is a general
+normalize-quality improvement independent of whether this specific function
+ever becomes a switch.</p>
+<p><strong>Verification</strong>: full workspace test suite green (only the 7 pre-existing,
+unrelated <code>fission-emulator</code> failures remain, same baseline as prior rounds);
+one existing unit test's expected string updated (<code>!uVar0 || uVar0 &lt; esi</code>
+instead of <code>uVar0 == 0 || uVar0 &lt; esi</code>) since it was pinning the pre-fix
+<code>==0</code> style that this round's condition-recursion fix now also applies one
+level deeper -- a legitimate style consequence, not a masked bug, since the
+codebase already applied this exact <code>==0 -&gt; !x</code> preference at the top level
+everywhere else. Corpus-wide git-stash A/B diff (209 binaries, 11,757
+functions): function count identical before/after (no functions gained or
+lost), total decompiled line count dropped ~0.8% (more dead flag stores now
+prunable once their reads are substituted), 148/209 files changed --
+spot-checked several diffs, all copy-propagation/flag-recovery quality
+improvements, no operator or value changes. Ran <code>fission_cli verify --tier
+ground-truth</code> (real-machine-code-oracle equivalence) across every function in
+two of the most heavily-diffed binaries (<code>advanced_patterns_gcc_O0.exe</code> and
+<code>c/advanced_patterns_clang_O0.exe</code>): pass/fail sets are
+byte-identical before vs. after in both (2 pre-existing divergences in the
+first, unrelated to this change and present identically on both sides; 0 in
+the second). <code>classify_range</code> itself also has a pre-existing ground-truth
+divergence on negative/<code>INT_MAX</code> inputs (confirmed present identically before
+and after this round's changes, so not introduced here) -- a separate,
+unrelated bug worth its own investigation, not chased down in this round.</p>
+<h2 id="8-fifth-round-closing-the-not-yet-a-switch-gap-from-round-4">8. Fifth round: closing the "not yet a switch" gap from round 4<a class="headerlink" href="#8-fifth-round-closing-the-not-yet-a-switch-gap-from-round-4" title="Permanent link">&para;</a></h2>
+<p>Directly addressed round 4's "not yet a switch" blocker: generalized
+<code>conditional_move.rs</code>'s Default-Override fold (<code>var = default; if (cond) { var
+= override; }</code>) to also match when exactly one single-use predicate-defining
+assignment sits between the default and its guarding <code>if</code> -- the common
+<code>t = cond_expr; if (t) {...}</code> / <code>if (!t) {...}</code> shape GCC/Clang routinely
+produce, which defeated the fold's strict positional adjacency even though
+nothing about the underlying shape differs. Safety bar: the predicate's whole-
+function use count (via a <code>DefUseMap</code> built once per <code>apply_conditional_move_pass</code>
+call) must be exactly 1, its definition must be pure
+(<code>!expr_has_side_effects</code>), and only the two unambiguous cond shapes (<code>pred</code>
+bare or <code>!pred</code>) are inlined -- never a compound condition. <code>classify_range</code>
+(<code>gcc -O2</code>) now collapses fully: <code>return uVar20 &gt; 0 ? 1 : xVar16;</code> for the
+<code>then</code> branch, matching the <code>else</code> branch's earlier full collapse -- both
+branches are now a single <code>Return(Select(..))</code>, the exact shape
+<code>recover_switch_from_select_decision_tree</code> (round 2) already knows how to
+turn into a <code>switch</code>. (A residual gap remains before that fold can actually
+fire: interior dead stores like <code>uVar11 = param_1;</code> survive in the branch
+body alongside the collapsed return, so <code>fold_if_else_pure_returns_to_select</code>
+-- which requires each branch to be <em>exactly</em> <code>[Return(expr)]</code> -- still
+declines. That's a normalize-level dead/uninlined-copy cleanup gap, not a
+switch-recovery one; flagging as a further follow-up rather than chasing it
+this round.)</p>
+<p><strong>Verification</strong>: full workspace test suite green, same 7 pre-existing
+<code>fission-emulator</code> failures as every prior round, no new failures. Corpus-wide
+git-stash A/B diff (209 binaries): function count identical (11,757 before
+and after), only 15/209 files changed (much narrower than round 4's 148, as
+expected for a positionally-scoped fold generalization), total line count
+dropped slightly (more full return-collapses now DCE-eligible). Ran
+<code>fission_cli verify --tier ground-truth</code> across every function in two x86
+binaries that showed this diff (<code>control_flow_gcc_O1.exe</code>,
+<code>control_flow_gcc_O2.exe</code>): zero new divergences in either, and in <em>both</em>
+binaries one additional function moved from <code>Unsupported</code> to <code>Equivalent</code>
+(the fold's inlining made an unsigned-overflow-checked min/max comparator
+simple enough for the verifier's sampler to model) -- net evidence in favor
+of correctness, not just neutral. One diff on an aarch64 binary
+(<code>control_flow_gcc-aarch64_O0</code>, <code>fde_unencoded_compare</code>) showed a constant
+changing its printed form from <code>-1</code> to <code>4294967295</code> inside the newly-merged
+<code>Select</code>; traced this to the transform doing an exact <code>.clone()</code> of the
+original <code>PreHirExpr::Const</code> node (same underlying value, unrelated
+downstream type-inference/printer logic evidently renders the same bit
+pattern differently once it's a <code>Select</code> operand vs. a bare statement RHS) --
+ground-truth verification wasn't available for this specific function
+(pointer-arg sampling unsupported), so this is reasoned-through rather than
+directly proven; flagging as a loose end worth a direct look if it recurs
+elsewhere, not a confirmed bug.</p>
 
 
 
