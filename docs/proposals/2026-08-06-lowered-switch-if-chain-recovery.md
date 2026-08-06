@@ -130,20 +130,98 @@ is a meaningfully harder, higher-stakes correctness problem than anything
 attempted so far in this feature, and getting it wrong would silently
 produce a wrong case boundary rather than just missing an optimization.
 
-## 5. Known limitation / follow-up
+## 5. Third round: the biased-subtraction range check, resolved
 
-Three concrete gaps remain, in roughly increasing order of risk:
+Gap (1) above -- `classify_range`'s actual case-1/2/3 blocker,
+`param_1 - 1 > 2` -- turned out tractable with a real correctness argument,
+not just a heuristic. Confirmed directly against the corpus's own NIR
+(`--layer nir`) that the compiled comparison is genuinely **unsigned**:
+`uVar36 = param_1; uVar36--; if (2 < uVar36) goto default;` (Fission's own
+`uVar` naming already reflects `NirType::Int { signed: false }`, and the op
+is the unsigned `Gt`, not `SGt`). This is GCC/Clang's standard "bias and
+compare" range-check idiom -- `(unsigned)(x - lo) <= (hi - lo)` for
+`lo <= x <= hi`, folding the lower-bound check into the upper-bound one via
+deliberate unsigned wraparound when `x < lo`. Subtracting a constant is an
+exact bijection over any fixed-width integer domain, so once the comparison
+is confirmed unsigned, `(x - bias) CMP bound` translates to an *exact*
+`[range_lo, range_hi]` on `x` -- not an approximation.
 
-1. **Biased/arithmetic range comparisons** (`x - k > c`) -- the specific gap
-   blocking `classify_range` under `gcc -O0`, and the most natural next
-   step of this exact mechanism, but needs a real correctness argument for
-   the arithmetic normalization before it's safe to attempt.
-2. **Range comparisons without equality splits** (`gcc -O2`'s shape for the
-   same function: `param_1 <= 3` mixed with flag computation, no bare `==`
-   case boundaries at all) -- a different codegen strategy this pass's
-   "equality split = case, everything else = range/leaf" model doesn't
-   cover.
-3. **Raw, unstructured multi-target `goto` range checks** (`clang -O0`'s
+Added `DirectSplitOnVar::Range` to `classify_direct_split`, gated tightly:
+only fires for an *explicit* `Sub` on the switch variable (a bare
+`x CMP const` stays on the existing `NotEq` path, which recurses
+unconditionally into both arms and was already correct for that shape --
+see the bug below for why conflating the two paths is unsafe), only for the
+four genuinely unsigned ops (`Gt`/`Ge`/`Lt`/`Le`, never the signed
+variants), and capped at `MAX_RANGE_SPLIT_EXPANSION` (64) values to avoid
+flooding an unrelated large bounds check into a wall of case labels. The
+in-range arm only expands into per-value cases when it resolves to one flat
+leaf with no further splits of its own (verified the same way
+`collect_select_tree_leaves` already required for range-in-general);
+otherwise the whole split is declined, not guessed at. Case values that
+end up sharing one result expression (the normal outcome of a range
+expansion) are now grouped into one `HirSwitchCase { values: [1, 2, 3], .. }`
+rather than three separate `case 1: .. break; case 2: .. break;` blocks.
+
+**A second bug found and fixed while wiring this in**: the existing
+`NotEq` handling recursed into *both* arms of every non-equality split
+unconditionally, which had been fine when `NotEq` only ever led to further
+splits or flat constants -- but `classify_range`'s conditional default,
+`param_1 < 0 ? -1 : 3`, is itself a `NotEq`-shaped split (`SLt`) that
+recurring unconditionally shattered into two separately-tracked leaves
+(`-1` and `3`), which the "every default leaf must be identical" check then
+correctly (but unhelpfully) rejected as inconsistent -- silently declining
+the whole tree. Fixed with `subtree_has_real_case_boundary`: only descend
+into a `NotEq`/`Range` arm if it actually leads to a real case boundary
+(an `==` split, or a `Range` split whose in-range arm is a flat leaf)
+somewhere inside; an arm with no real boundary is the default's own
+internal logic and must stay intact as one leaf, exactly like the
+already-existing "unrelated case-body ternary" protection.
+
+**Verification**: a new test reproduces `classify_range`'s decision tree
+node-for-node (same range-check shape, same four-times-repeated
+`x < 0 ? -1 : 3` default, same nesting) and asserts full recovery.
+`cargo nextest run` across the same five crates: 1400/1400 passed. No
+panics across the full corpus. Corpus-wide A/B: **exactly +1** total
+`switch (` occurrence (224 → 225), isolated to precisely one file
+(`control_flow_gcc_O0.txt`) -- confirmed directly:
+
+```c
+int classify_range(int param_1)
+{
+    switch (param_1) {
+        case 10:
+            return 2;
+        case 0:
+            return 0;
+        case 1:
+        case 2:
+        case 3:
+            return 1;
+        default:
+            return param_1 < 0 ? -1 : 3;
+    }
+}
+```
+
+Semantically identical to the original source (case order differs, which
+doesn't matter for a `switch`). Every other file in the corpus shows *zero*
+change in `switch`/`goto`/`return`/`break` counts -- the fix is precisely
+targeted, not incidentally touching anything else. `return` count in the
+one changed file moved from 106 to 109 (+3), exactly matching one
+`return <nested ternary>;` being replaced by four `return`s (one per case
+arm + default) -- the expected, correct shape of this exact restructuring.
+
+## 6. Remaining known limitations
+
+Two gaps remain, both larger, separate undertakings:
+
+1. **Range comparisons without any equality splits** (`gcc -O2`'s shape for
+   the same function: `param_1 <= 3` mixed with flag computation, no bare
+   `==` case boundaries at all) -- a different codegen strategy this pass's
+   "equality split = case, range split = grouped cases" model doesn't cover
+   on its own (though the underlying `Range` machinery built this round is
+   at least a plausible foundation for it).
+2. **Raw, unstructured multi-target `goto` range checks** (`clang -O0`'s
    shape) -- never even reaches structured `If`/`Select` form, so no
    presentation-layer pass can see it; would need `recover_if_else_from_gotos`
    itself extended, a materially different and larger undertaking given
@@ -152,6 +230,7 @@ Three concrete gaps remain, in roughly increasing order of risk:
    (see `docs/proposals/2026-08-06-cross-block-merge-binding-scalar-ssa-fallback.md`'s
    two-iteration debugging story for the general shape of that risk).
 
-This is now genuinely close to angr's actual ~940-line scope, not the "few
-days" original estimate. Flagging (2) and especially (3) as real, larger
-follow-ups rather than attempting them in this round.
+This feature is now well past the "few days" original estimate and close
+to angr's actual ~940-line scope, but has landed a real, verified,
+corpus-confirmed win. Flagging (1) and (2) as follow-ups rather than
+attempting them in this round.

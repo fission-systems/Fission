@@ -2550,16 +2550,49 @@ fn compared_var(cond: &HirExpr) -> Option<&HirExpr> {
 /// If `cond` is a direct comparison of `switch_var` against a constant
 /// (`switch_var CMP const` or `const CMP switch_var`, no arithmetic on
 /// `switch_var`), or the bare zero-check idiom `!switch_var`, returns
-/// `Some(Eq(value))` for an equality split (a genuine case boundary) or
-/// `Some(NotEq)` for any other direct comparison (a range-narrowing split
-/// that doesn't itself name a case value). `None` for anything else --
-/// including a direct comparison on some *other* variable, or any
-/// arithmetic on `switch_var` -- which stops the walk at this node rather
-/// than risk misreading an unrelated condition as part of the tree.
+/// `Some(Eq(value))` for an equality split (a genuine case boundary),
+/// `Some(Range{..})` for the compiler's biased-subtraction unsigned range
+/// check idiom (see below), or `Some(NotEq)` for any other direct
+/// comparison (a range-narrowing split that doesn't itself name a case
+/// value or a clean finite range). `None` for anything else -- including a
+/// direct comparison on some *other* variable, or arithmetic on
+/// `switch_var` other than the specific biased-subtraction shape -- which
+/// stops the walk at this node rather than risk misreading an unrelated
+/// condition as part of the tree.
 enum DirectSplitOnVar {
     Eq(i64),
     NotEq,
+    /// `(switch_var - bias) UNSIGNED_CMP bound`, recognized as an exact
+    /// range test: the "in-range" arm covers exactly
+    /// `switch_var ∈ [range_lo, range_hi]` (inclusive); `in_range_is_then`
+    /// records which arm (`then` or `else`) that is.
+    ///
+    /// This is GCC/Clang's standard "bias and compare" range-check idiom
+    /// (`(unsigned)(x - lo) <= (hi - lo)` for `lo <= x <= hi`, folding the
+    /// lower-bound check into the upper-bound one via unsigned wraparound
+    /// when `x < lo`) -- confirmed on the dev corpus's own `classify_range`
+    /// (`gcc -O0`): its case-1/2/3 grouping compiles to exactly
+    /// `uVarN = param_1; uVarN--; if (2 < uVarN) goto default;`, an
+    /// **unsigned** temp (Fission's own `uVar` naming already reflects
+    /// `NirType::Int { signed: false }`) compared with a plain relational
+    /// op. Only accepted for the genuinely unsigned ops (`Gt`/`Ge`/`Lt`/`Le`)
+    /// -- the signed variants (`SGt`/etc.) don't have this wraparound
+    /// property, so a biased *signed* comparison is left as `NotEq`
+    /// instead (recursed into structurally, not range-expanded).
+    Range {
+        range_lo: i64,
+        range_hi: i64,
+        in_range_is_then: bool,
+    },
 }
+
+/// Cap on how many individual case values a single biased-range split is
+/// allowed to expand into. A genuine switch-lowering range is small by
+/// construction (it came from a handful of adjacent `case` labels); a much
+/// larger bound is more likely an unrelated bounds check that only
+/// coincidentally matches the bias-subtraction shape, and expanding it
+/// would just flood the reconstructed switch with case labels.
+const MAX_RANGE_SPLIT_EXPANSION: i64 = 64;
 
 fn classify_direct_split(cond: &HirExpr, switch_var: &HirExpr) -> Option<DirectSplitOnVar> {
     if let HirExpr::Unary {
@@ -2590,6 +2623,58 @@ fn classify_direct_split(cond: &HirExpr, switch_var: &HirExpr) -> Option<DirectS
             | HirBinaryOp::SGe
     ) {
         return None;
+    }
+    // Biased-subtraction unsigned range check: `(switch_var - bias) CMP
+    // bound`, const-right canonical form (guaranteed by
+    // `canonicalize_presentation_conditions` running every iteration of
+    // the same fixed-point loop this pass is part of). Deliberately
+    // requires an *explicit* `Sub` -- a bare `switch_var CMP const` must
+    // stay on the generic `NotEq` path below, since that one recurses
+    // into *both* arms unconditionally, while a range split only commits
+    // to expanding the in-range arm when it proves out as a single flat
+    // leaf (see `collect_select_tree_leaves`); silently reclassifying an
+    // ordinary bounds check this way could turn a working recursive split
+    // into a declined one.
+    if matches!(
+        op,
+        HirBinaryOp::Gt | HirBinaryOp::Ge | HirBinaryOp::Lt | HirBinaryOp::Le
+    ) && let HirExpr::Binary {
+        op: HirBinaryOp::Sub,
+        lhs: base,
+        rhs: bias_expr,
+        ..
+    } = lhs.as_ref()
+        && base.as_ref() == switch_var
+        && let (HirExpr::Const(bias, _), HirExpr::Const(bound, _)) =
+            (bias_expr.as_ref(), rhs.as_ref())
+    {
+        let range = match op {
+            HirBinaryOp::Gt => bias
+                .checked_add(*bound)
+                .map(|hi| (*bias, hi, false)),
+            HirBinaryOp::Ge => bias
+                .checked_add(*bound)
+                .and_then(|hi| hi.checked_sub(1))
+                .map(|hi| (*bias, hi, false)),
+            HirBinaryOp::Lt => bias
+                .checked_add(*bound)
+                .and_then(|hi| hi.checked_sub(1))
+                .map(|hi| (*bias, hi, true)),
+            HirBinaryOp::Le => bias
+                .checked_add(*bound)
+                .map(|hi| (*bias, hi, true)),
+            _ => unreachable!(),
+        };
+        if let Some((range_lo, range_hi, in_range_is_then)) = range
+            && range_lo <= range_hi
+            && range_hi - range_lo < MAX_RANGE_SPLIT_EXPANSION
+        {
+            return Some(DirectSplitOnVar::Range {
+                range_lo,
+                range_hi,
+                in_range_is_then,
+            });
+        }
     }
     let const_value = if lhs.as_ref() == switch_var {
         match rhs.as_ref() {
@@ -2636,13 +2721,118 @@ fn collect_select_tree_leaves<'a>(
     match classify_direct_split(cond, switch_var) {
         Some(DirectSplitOnVar::Eq(value)) => {
             cases.push((value, then_expr.as_ref()));
-            collect_select_tree_leaves(else_expr, switch_var, cases, default_leaves);
+            descend_or_treat_as_leaf(else_expr, switch_var, cases, default_leaves);
         }
         Some(DirectSplitOnVar::NotEq) => {
-            collect_select_tree_leaves(then_expr, switch_var, cases, default_leaves);
-            collect_select_tree_leaves(else_expr, switch_var, cases, default_leaves);
+            descend_or_treat_as_leaf(then_expr, switch_var, cases, default_leaves);
+            descend_or_treat_as_leaf(else_expr, switch_var, cases, default_leaves);
+        }
+        Some(DirectSplitOnVar::Range {
+            range_lo,
+            range_hi,
+            in_range_is_then,
+        }) => {
+            let (in_range_expr, out_of_range_expr) = if in_range_is_then {
+                (then_expr.as_ref(), else_expr.as_ref())
+            } else {
+                (else_expr.as_ref(), then_expr.as_ref())
+            };
+            // The whole `[range_lo, range_hi]` can only be attributed to
+            // one shared expression unambiguously if that side is a
+            // single flat leaf with no case/range splits of its own --
+            // otherwise which specific values within the range go where
+            // isn't something this pass can resolve, so decline the
+            // range read entirely (both arms) rather than guess.
+            let mut in_range_cases = Vec::new();
+            let mut in_range_defaults = Vec::new();
+            collect_select_tree_leaves(
+                in_range_expr,
+                switch_var,
+                &mut in_range_cases,
+                &mut in_range_defaults,
+            );
+            if in_range_cases.is_empty() && in_range_defaults.len() == 1 {
+                let leaf = in_range_defaults[0];
+                for value in range_lo..=range_hi {
+                    cases.push((value, leaf));
+                }
+                descend_or_treat_as_leaf(out_of_range_expr, switch_var, cases, default_leaves);
+            } else {
+                default_leaves.push(expr);
+            }
         }
         None => default_leaves.push(expr),
+    }
+}
+
+/// Only descend into a range/inequality split's arm if it actually leads
+/// to a genuine case boundary (an `==` split, or a `Range` split whose
+/// in-range arm resolves to one flat leaf) somewhere inside; otherwise the
+/// whole arm is just the *default*'s own internal logic (e.g.
+/// `x < 0 ? -1 : 3`, matching a real `default: return value < 0 ? -1 : 3;`
+/// clause) and must be kept intact as one leaf, not flattened into
+/// separately-tracked (and then spuriously "inconsistent") pieces. An `Eq`
+/// split always descends unconditionally (it *is* the case boundary), so
+/// this is only used for `NotEq`/`Range` arms.
+fn descend_or_treat_as_leaf<'a>(
+    expr: &'a HirExpr,
+    switch_var: &HirExpr,
+    cases: &mut Vec<(i64, &'a HirExpr)>,
+    default_leaves: &mut Vec<&'a HirExpr>,
+) {
+    if subtree_has_real_case_boundary(expr, switch_var) {
+        collect_select_tree_leaves(expr, switch_var, cases, default_leaves);
+    } else {
+        default_leaves.push(expr);
+    }
+}
+
+/// `true` if `expr` cannot be decomposed any further by
+/// `classify_direct_split` -- i.e. `collect_select_tree_leaves` would
+/// record it as exactly one default leaf and stop, whether or not it
+/// happens to itself be a `Select` (an unrelated leaf ternary counts as
+/// flat too, same as any other non-decomposable value).
+fn is_flat_leaf(expr: &HirExpr, switch_var: &HirExpr) -> bool {
+    let HirExpr::Select { cond, .. } = expr else {
+        return true;
+    };
+    classify_direct_split(cond, switch_var).is_none()
+}
+
+/// `true` if `expr` is (or, through a chain of `classify_direct_split`
+/// splits on `switch_var`, reaches) a genuine case boundary anywhere --
+/// either an `==` split, or a `Range` split usable exactly the way
+/// `collect_select_tree_leaves` would use it (its in-range arm resolves to
+/// one flat leaf, the same precondition that function itself checks before
+/// actually expanding a range).
+fn subtree_has_real_case_boundary(expr: &HirExpr, switch_var: &HirExpr) -> bool {
+    let HirExpr::Select {
+        cond,
+        then_expr,
+        else_expr,
+        ..
+    } = expr
+    else {
+        return false;
+    };
+    match classify_direct_split(cond, switch_var) {
+        Some(DirectSplitOnVar::Eq(_)) => true,
+        Some(DirectSplitOnVar::NotEq) => {
+            subtree_has_real_case_boundary(then_expr, switch_var)
+                || subtree_has_real_case_boundary(else_expr, switch_var)
+        }
+        Some(DirectSplitOnVar::Range {
+            in_range_is_then, ..
+        }) => {
+            let (in_range_expr, out_of_range_expr) = if in_range_is_then {
+                (then_expr.as_ref(), else_expr.as_ref())
+            } else {
+                (else_expr.as_ref(), then_expr.as_ref())
+            };
+            is_flat_leaf(in_range_expr, switch_var)
+                || subtree_has_real_case_boundary(out_of_range_expr, switch_var)
+        }
+        None => false,
     }
 }
 
@@ -2674,7 +2864,11 @@ fn try_build_switch_from_select_tree(stmt: &HirStmt) -> Option<HirStmt> {
         }
     };
 
-    let mut cases: Vec<HirSwitchCase> = Vec::new();
+    // Group by identical result expression (mainly for a range split's
+    // expansion, where many values legitimately share one body) so the
+    // rebuilt switch reads as `case 1: case 2: case 3: return 1;` rather
+    // than three separate cases each repeating the same body + `break;`.
+    let mut grouped: Vec<(&HirExpr, Vec<i64>)> = Vec::new();
     let mut seen_values: HashSet<i64> = HashSet::default();
     for (value, result) in raw_cases {
         if !seen_values.insert(value) {
@@ -2683,14 +2877,24 @@ fn try_build_switch_from_select_tree(stmt: &HirStmt) -> Option<HirStmt> {
             // recovery assumes); decline rather than guess which wins.
             return None;
         }
-        cases.push(HirSwitchCase {
-            values: vec![value],
-            body: vec![HirStmt::Return(Some(result.clone()))],
-        });
+        match grouped.iter_mut().find(|(expr, _)| *expr == result) {
+            Some((_, values)) => values.push(value),
+            None => grouped.push((result, vec![value])),
+        }
     }
-    if cases.len() < MIN_LOWERED_SWITCH_CASES {
+    if seen_values.len() < MIN_LOWERED_SWITCH_CASES {
         return None;
     }
+    let cases: Vec<HirSwitchCase> = grouped
+        .into_iter()
+        .map(|(result, mut values)| {
+            values.sort_unstable();
+            HirSwitchCase {
+                values,
+                body: vec![HirStmt::Return(Some(result.clone()))],
+            }
+        })
+        .collect();
     Some(HirStmt::Switch {
         expr: switch_var.clone(),
         cases,
@@ -5573,6 +5777,15 @@ mod tests {
         }
     }
 
+    fn lt_const(var: &str, value: i64) -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(HirExpr::Var(var.into())),
+            rhs: Box::new(HirExpr::Const(value, int_ty(32, true))),
+            ty: NirType::Bool,
+        }
+    }
+
     fn select(cond: HirExpr, then_expr: HirExpr, else_expr: HirExpr) -> HirExpr {
         HirExpr::Select {
             cond: Box::new(cond),
@@ -5689,6 +5902,82 @@ mod tests {
                 && code.contains("case 2:")
                 && code.contains("param_2"),
             "case 5's own unrelated ternary must survive verbatim as its body:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_recovers_switch_with_biased_range_group_and_conditional_default() {
+        // Direct reproduction of the dev corpus's `classify_range` (`gcc
+        // -O0`), source: `switch (value) { case 0: return 0; case 1: case
+        // 2: case 3: return 1; case 10: return 2; default: return value <
+        // 0 ? -1 : 3; }`. The compiler's actual decision tree:
+        //   x==10 ? 2
+        //   : x>10 ? DFLT
+        //   : !x ? 0
+        //   : x<0 ? DFLT
+        //   : (uint)(x-1)>2 ? DFLT : 1
+        // where DFLT = `x<0 ? -1 : 3` appears at four *differently shaped*
+        // leaves. The case-1/2/3 grouping is only reachable through the
+        // biased-subtraction unsigned range check (`Gt` on `x-1`, not a
+        // signed comparison) -- this is the exact case that motivated
+        // adding `DirectSplitOnVar::Range` and, separately, the
+        // `subtree_has_real_case_boundary` fix (an earlier version of this
+        // pass shattered the `x<0 ? -1 : 3` default into two inconsistent
+        // leaves, `-1` and `3`, and declined the whole tree).
+        let default_expr = || select(lt_const("param_1", 0), const_i(-1), const_i(3));
+        let range_split = select(
+            HirExpr::Binary {
+                op: HirBinaryOp::Gt,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(HirExpr::Var("param_1".into())),
+                    rhs: Box::new(const_i(1)),
+                    ty: int_ty(32, true),
+                }),
+                rhs: Box::new(const_i(2)),
+                ty: NirType::Bool,
+            },
+            default_expr(),
+            const_i(1),
+        );
+        let tree = select(
+            eq_const("param_1", 10),
+            const_i(2),
+            select(
+                gt_const("param_1", 10),
+                default_expr(),
+                select(
+                    HirExpr::Unary {
+                        op: HirUnaryOp::Not,
+                        expr: Box::new(HirExpr::Var("param_1".into())),
+                        ty: NirType::Bool,
+                    },
+                    const_i(0),
+                    select(lt_const("param_1", 0), default_expr(), range_split),
+                ),
+            ),
+        );
+        let mut func = HirFunction {
+            name: "classify_range".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::Return(Some(tree))],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            code.contains("switch (param_1)")
+                && code.contains("case 10:")
+                && code.contains("case 0:")
+                && code.contains("case 1:")
+                && code.contains("case 2:")
+                && code.contains("case 3:")
+                && code.contains("default:")
+                && code.contains("param_1 < 0"),
+            "should fully recover the grouped-range case and preserve the \
+             conditional default expression intact:\n{code}"
         );
     }
 
