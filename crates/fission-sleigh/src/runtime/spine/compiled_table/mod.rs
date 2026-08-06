@@ -14,9 +14,9 @@ use crate::compiler::{
     CompiledSubtableDefinition, CompiledTemplateSource, CompiledVarnodeTpl,
 };
 use crate::runtime::spine::{
-    self, BoundOperand, DecisionProbeEvaluator, RuntimeConstructState, RuntimeFixedHandle,
-    RuntimeHandle, RuntimeInstructionContext, RuntimePcodeEmitter, RuntimeSelection,
-    RuntimeTemplateEvaluator, RuntimeTemplateExecutor,
+    self, BoundOperand, DecisionProbeEvaluator, ProbeValues, RuntimeConstructState,
+    RuntimeFixedHandle, RuntimeHandle, RuntimeInstructionContext, RuntimePcodeEmitter,
+    RuntimeSelection, RuntimeTemplateEvaluator, RuntimeTemplateExecutor,
 };
 use crate::runtime::{
     DecodedFlowKind, DecodedInstruction, DecodedReference, DecodedReferenceKind,

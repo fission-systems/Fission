@@ -1,4 +1,5 @@
 use anyhow::Result;
+use smallvec::SmallVec;
 
 use crate::compiler::{
     CompiledDecisionLeafEntry, CompiledDecisionProbe, CompiledDisjointPattern,
@@ -6,8 +7,16 @@ use crate::compiler::{
     CompiledSubtableDefinition,
 };
 
+/// Almost every decision probe resolves to exactly one branch value; only
+/// `ContextBitSlice` probes over unknown context bits can fan out to more
+/// than one candidate. Inline capacity 4 keeps the overwhelmingly common
+/// single-value case (and small multi-value fan-outs) off the heap on the
+/// per-instruction decode hot path, while still spilling to a heap `Vec`
+/// for the rare wide fan-out.
+pub type ProbeValues = SmallVec<[u8; 4]>;
+
 pub trait DecisionProbeEvaluator {
-    fn probe_values(&mut self, probe: CompiledDecisionProbe) -> Result<Vec<u8>>;
+    fn probe_values(&mut self, probe: CompiledDecisionProbe) -> Result<ProbeValues>;
     fn instruction_bytes(&self, offset: i32, size: u32) -> Result<u32>;
     fn context_bytes(&self, offset: i32, size: u32) -> Result<u32>;
 }
@@ -458,8 +467,8 @@ mod tests {
     }
 
     impl DecisionProbeEvaluator for BytesEvaluator {
-        fn probe_values(&mut self, _probe: CompiledDecisionProbe) -> Result<Vec<u8>> {
-            Ok(vec![0])
+        fn probe_values(&mut self, _probe: CompiledDecisionProbe) -> Result<ProbeValues> {
+            Ok(ProbeValues::from_slice(&[0]))
         }
 
         fn instruction_bytes(&self, offset: i32, size: u32) -> Result<u32> {
@@ -474,7 +483,7 @@ mod tests {
     struct FailingProbeEvaluator;
 
     impl DecisionProbeEvaluator for FailingProbeEvaluator {
-        fn probe_values(&mut self, _probe: CompiledDecisionProbe) -> Result<Vec<u8>> {
+        fn probe_values(&mut self, _probe: CompiledDecisionProbe) -> Result<ProbeValues> {
             bail!("synthetic probe failure")
         }
 

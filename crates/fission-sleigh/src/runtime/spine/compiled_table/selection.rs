@@ -60,9 +60,9 @@ impl<'a, 'b> CompiledDecisionProbeEvaluator<'a, 'b> {
 }
 
 impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
-    fn probe_values(&mut self, probe: CompiledDecisionProbe) -> Result<Vec<u8>> {
+    fn probe_values(&mut self, probe: CompiledDecisionProbe) -> Result<ProbeValues> {
         Ok(match probe {
-            CompiledDecisionProbe::Terminal => vec![0],
+            CompiledDecisionProbe::Terminal => smallvec::smallvec![0],
             CompiledDecisionProbe::InstructionBitSlice {
                 offset,
                 mask,
@@ -77,7 +77,7 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     *self.ctx.bytes.get(absolute).ok_or_else(|| {
                         anyhow!("missing instruction byte probe at offset {offset}")
                     })?;
-                vec![(byte & mask) >> shift]
+                smallvec::smallvec![(byte & mask) >> shift]
             }
             CompiledDecisionProbe::ContextBitSlice {
                 offset,
@@ -93,7 +93,7 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
             .map(|value| {
                 decision_probe_value_u8((value & u64::from(mask)) >> shift, "context bit slice")
             })
-            .collect::<Result<Vec<_>>>()?,
+            .collect::<Result<ProbeValues>>()?,
             CompiledDecisionProbe::SlaInstructionBits {
                 start_bit,
                 bit_size,
@@ -128,14 +128,14 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     .and_then(|value| value.checked_sub(bit_size))
                     .ok_or_else(|| anyhow!("instruction bit probe shift underflow"))?;
                 let value = (word >> shift) & ((1u64 << bit_size) - 1);
-                vec![decision_probe_value_u8(value, "SLA instruction bits")?]
+                smallvec::smallvec![decision_probe_value_u8(value, "SLA instruction bits")?]
             }
             CompiledDecisionProbe::SlaContextBits {
                 start_bit,
                 bit_size,
             } => {
                 ensure_u8_decision_probe_width(bit_size, "SLA context bits")?;
-                vec![decision_probe_value_u8(
+                smallvec::smallvec![decision_probe_value_u8(
                     u64::from(packed_context_bits(
                         self.ctx.context_register,
                         start_bit,
@@ -144,7 +144,7 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     "SLA context bits",
                 )?]
             }
-            CompiledDecisionProbe::TerminalPatternCheck => vec![0],
+            CompiledDecisionProbe::TerminalPatternCheck => smallvec::smallvec![0],
         })
     }
 

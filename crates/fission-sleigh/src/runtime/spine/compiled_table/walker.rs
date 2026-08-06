@@ -617,20 +617,24 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             mnemonic: self.selection.constructor.mnemonic.as_str().into(),
         });
 
-        for change in self.selection.constructor.context_changes.clone() {
-            self.apply_context_change(&change)?;
+        // `constructor` copies out the `&'a CompiledExecutableConstructor`
+        // reference itself (a `Copy` type, independent of `self`'s borrow),
+        // so the two loops below can iterate `constructor`'s fields by
+        // reference and still freely call `&mut self` methods inside them --
+        // without it, borrowing straight off `self.selection.constructor`
+        // for the loop's duration would conflict with those calls, which is
+        // why this used to clone `context_changes`/`decode_steps` wholesale
+        // on every constructor walk (the runtime decode hot path) just to
+        // sidestep the borrow.
+        let constructor = self.selection.constructor;
+        for change in &constructor.context_changes {
+            self.apply_context_change(change)?;
         }
 
-        let decode_steps = self
-            .selection
-            .constructor
-            .constructor_template
-            .decode_steps
-            .clone();
-        for step in decode_steps {
+        for step in &constructor.constructor_template.decode_steps {
             match step {
                 CompiledOperandDecodeStep::DecodeOperand { operand_index } => {
-                    self.decode_operand(operand_index)?;
+                    self.decode_operand(*operand_index)?;
                 }
                 CompiledOperandDecodeStep::DescendSubtable {
                     table_name,
@@ -640,7 +644,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     // ParserWalker uses getOffset(offsetbase) + reloffset before
                     // descending into a subtable.
                     let mut subtable_offset = (None, None, None);
-                    for h in &self.selection.constructor.constructor_template.handles {
+                    for h in &constructor.constructor_template.handles {
                         if let CompiledOperandSpec::SubtableEvaluation {
                             table_name: ref tn,
                             reloffset,
@@ -669,12 +673,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                     let wrapper_absolute_offset = self.ctx.cursor;
                     let wrapper_pattern = self.selection.trace.matched_leaf_pattern.clone();
                     let mut sub_state = self.decode_subtable(
-                        &table_name,
+                        table_name,
                         reloffset,
                         offsetbase,
                         operand_absolute_offset,
                     )?;
-                    if replace_current {
+                    if *replace_current {
                         if let Some(pattern) = wrapper_pattern {
                             sub_state
                                 .replaced_wrapper_patterns
