@@ -1171,9 +1171,15 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
 }
 
 pub fn prune_unused_temp_bindings(func: &mut PreHirFunction) -> bool {
+    // Built once for the whole function: this used to call
+    // `count_uses_in_stmt_list` (a fresh full-body walk) per local binding,
+    // making this O(locals * body size) on every one of the ~30 pipeline
+    // stages that call this pass. A single whole-body use-count map makes
+    // each binding's check O(1) instead.
+    let use_map = DefUseMap::build(&func.body);
     let mut changed = false;
     func.locals.retain(|binding| {
-        let used = count_uses_in_stmt_list(&func.body, &binding.name) > 0;
+        let used = use_map.use_count.get(binding.name.as_str()).copied().unwrap_or(0) > 0;
         let assigned_side_effect =
             stmt_list_assigns_var_from_side_effecting_expr(&func.body, &binding.name);
         let keep = should_keep_unused_temp_binding(
@@ -1252,9 +1258,12 @@ pub fn prune_unused_dead_local_bindings(func: &mut PreHirFunction) -> bool {
         .iter()
         .map(|binding| binding.name.as_str())
         .collect::<HashSet<_>>();
+    // Built once for the whole function rather than per-binding: same
+    // rationale as `prune_unused_temp_bindings` above.
+    let use_map = DefUseMap::build(&func.body);
     let mut changed = false;
     func.locals.retain(|binding| {
-        // LHS assigns do not count as "uses" in `count_uses_in_stmt_list`, so a
+        // LHS assigns do not count as "uses" in `use_map`, so a
         // write-only stack home (`local_18 = param_3`) would previously drop its
         // binding while leaving the assign — undeclared identifier / compile_error
         // (`matrix_multiply`-class). Keep the binding whenever the name is still
@@ -1263,7 +1272,7 @@ pub fn prune_unused_dead_local_bindings(func: &mut PreHirFunction) -> bool {
             || param_names.contains(binding.name.as_str())
             || binding.name.starts_with("slot_")
             || matches!(binding.ty, NirType::Aggregate { .. })
-            || count_uses_in_stmt_list(&func.body, &binding.name) > 0
+            || use_map.use_count.get(binding.name.as_str()).copied().unwrap_or(0) > 0
             || binding
                 .initializer
                 .as_ref()
