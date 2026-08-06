@@ -68,6 +68,13 @@ fn apply_hir_presentation_passes(func: &mut HirFunction) {
         changed |= fold_if_else_pure_same_var_assign(&mut func.body);
         // `if (c) { return a; } else { return b; }` → `return c ? a : b` (pure values).
         changed |= fold_if_else_pure_returns_to_select(&mut func.body);
+        // `return x==10 ? 2 : x>10 ? DFLT : ...` → `switch (x) {..}` -- the
+        // *other* real "switch lowering" shape (a binary-search-style
+        // decision tree, already collapsed into one nested Select by the
+        // fold just above), companion to the linear if-chain recovery
+        // earlier in this loop. Must run after that fold settles the tree
+        // shape, not before.
+        changed |= recover_switch_from_select_decision_tree(&mut func.body);
         // `if (c) { return a; } return b;` → `return c ? a : b` (pure values).
         changed |= fold_if_return_fallthrough_return(&mut func.body);
         // `x = seed; if (c) { x = a; }` → `x = c ? a : seed` (pure; empty else).
@@ -2411,6 +2418,283 @@ fn try_build_switch_from_if_chain(stmt: &HirStmt) -> Option<HirStmt> {
         expr: switch_expr.clone(),
         cases,
         default: tail.clone(),
+    })
+}
+
+/// `return x==10 ? 2 : x>10 ? DFLT : x==0 ? 0 : x<0 ? DFLT : x==1||x==2||x==3 ? 1 : DFLT`
+/// → `switch (x) { case 10: return 2; case 0: return 0; case 1: case 2: case 3: return 1; default: return DFLT; }`.
+///
+/// Companion to `recover_switch_from_lowered_if_chain` for a *different*
+/// real compiled shape of the same "switch lowering" deoptimization:
+/// GCC's binary-search-style lowering for a small, sparse-case switch
+/// builds a tree of direct comparisons against the switch variable rather
+/// than a linear equality chain, and Fission's own `fold_if_else_pure_
+/// returns_to_select` (which runs first, to give the linear-chain
+/// recovery above a chance against shapes it *does* match) has already
+/// collapsed that tree into one big nested `Select` expression by the
+/// time this pass runs.
+///
+/// Only recurses into a `Select` as "still inside the decision tree" when
+/// its condition is *directly* `switch_var CMP const` (or the bare-negation
+/// zero-check idiom `!switch_var`) -- never into an unrelated or
+/// arithmetic-derived condition (e.g. `x - 1 > 2`), since that could just
+/// as easily be a case body's own unrelated ternary, and misreading it as
+/// a tree split would silently corrupt that case's value. Every leaf the
+/// walk stops at is required to be *either* a matched `==` case *or*
+/// structurally identical (`HirExpr`'s derived `PartialEq`) to every other
+/// such leaf -- multiple unreachable-looking default leaves are extremely
+/// common in these trees (see the module-level proposal doc) precisely
+/// because the compiler's search tree doesn't bottom out evenly, so this
+/// only accepts the tree when it can prove there is genuinely one default
+/// value, not merely the first one found.
+fn recover_switch_from_select_decision_tree(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        changed |= recover_switch_from_select_decision_tree_in_stmt(stmt);
+    }
+    for stmt in stmts.iter_mut() {
+        if let Some(switch_stmt) = try_build_switch_from_select_tree(stmt) {
+            *stmt = switch_stmt;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn recover_switch_from_select_decision_tree_in_stmt(stmt: &mut HirStmt) -> bool {
+    match stmt {
+        HirStmt::Block(body) => recover_switch_from_select_decision_tree(body),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let a = recover_switch_from_select_decision_tree(then_body);
+            let b = recover_switch_from_select_decision_tree(else_body);
+            a || b
+        }
+        HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            recover_switch_from_select_decision_tree(body)
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            let mut changed = recover_switch_from_select_decision_tree(body);
+            if let Some(i) = init {
+                changed |= recover_switch_from_select_decision_tree_in_stmt(i);
+            }
+            if let Some(u) = update {
+                changed |= recover_switch_from_select_decision_tree_in_stmt(u);
+            }
+            changed
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            let mut changed = false;
+            for case in cases.iter_mut() {
+                changed |= recover_switch_from_select_decision_tree(&mut case.body);
+            }
+            changed |= recover_switch_from_select_decision_tree(default);
+            changed
+        }
+        HirStmt::Assign { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(_)
+        | HirStmt::Break
+        | HirStmt::Continue => false,
+    }
+}
+
+/// The non-constant operand of a direct `var CMP const` (or `const CMP
+/// var`) comparison, or the operand of a bare `!var` zero-check -- used
+/// only to identify *which* variable a decision tree's root is keyed on,
+/// before `classify_direct_split` walks the rest of the tree against it.
+fn compared_var(cond: &HirExpr) -> Option<&HirExpr> {
+    if let HirExpr::Unary {
+        op: HirUnaryOp::Not,
+        expr,
+        ..
+    } = cond
+    {
+        return Some(expr.as_ref());
+    }
+    let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
+        return None;
+    };
+    if !matches!(
+        op,
+        HirBinaryOp::Eq
+            | HirBinaryOp::Ne
+            | HirBinaryOp::Lt
+            | HirBinaryOp::Le
+            | HirBinaryOp::Gt
+            | HirBinaryOp::Ge
+            | HirBinaryOp::SLt
+            | HirBinaryOp::SLe
+            | HirBinaryOp::SGt
+            | HirBinaryOp::SGe
+    ) {
+        return None;
+    }
+    if matches!(rhs.as_ref(), HirExpr::Const(_, _)) {
+        Some(lhs.as_ref())
+    } else if matches!(lhs.as_ref(), HirExpr::Const(_, _)) {
+        Some(rhs.as_ref())
+    } else {
+        None
+    }
+}
+
+/// If `cond` is a direct comparison of `switch_var` against a constant
+/// (`switch_var CMP const` or `const CMP switch_var`, no arithmetic on
+/// `switch_var`), or the bare zero-check idiom `!switch_var`, returns
+/// `Some(Eq(value))` for an equality split (a genuine case boundary) or
+/// `Some(NotEq)` for any other direct comparison (a range-narrowing split
+/// that doesn't itself name a case value). `None` for anything else --
+/// including a direct comparison on some *other* variable, or any
+/// arithmetic on `switch_var` -- which stops the walk at this node rather
+/// than risk misreading an unrelated condition as part of the tree.
+enum DirectSplitOnVar {
+    Eq(i64),
+    NotEq,
+}
+
+fn classify_direct_split(cond: &HirExpr, switch_var: &HirExpr) -> Option<DirectSplitOnVar> {
+    if let HirExpr::Unary {
+        op: HirUnaryOp::Not,
+        expr,
+        ..
+    } = cond
+    {
+        if expr.as_ref() == switch_var {
+            return Some(DirectSplitOnVar::Eq(0));
+        }
+        return None;
+    }
+    let HirExpr::Binary { op, lhs, rhs, .. } = cond else {
+        return None;
+    };
+    if !matches!(
+        op,
+        HirBinaryOp::Eq
+            | HirBinaryOp::Ne
+            | HirBinaryOp::Lt
+            | HirBinaryOp::Le
+            | HirBinaryOp::Gt
+            | HirBinaryOp::Ge
+            | HirBinaryOp::SLt
+            | HirBinaryOp::SLe
+            | HirBinaryOp::SGt
+            | HirBinaryOp::SGe
+    ) {
+        return None;
+    }
+    let const_value = if lhs.as_ref() == switch_var {
+        match rhs.as_ref() {
+            HirExpr::Const(v, _) => Some(*v),
+            _ => None,
+        }
+    } else if rhs.as_ref() == switch_var {
+        match lhs.as_ref() {
+            HirExpr::Const(v, _) => Some(*v),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let value = const_value?;
+    if matches!(op, HirBinaryOp::Eq) {
+        Some(DirectSplitOnVar::Eq(value))
+    } else {
+        Some(DirectSplitOnVar::NotEq)
+    }
+}
+
+/// Recursively decompose a `Select` decision tree into `(case_value,
+/// result_expr)` pairs plus every "opaque" leaf reached (candidate default
+/// values). Only ever recurses through `classify_direct_split`-recognized
+/// nodes; anything else is a leaf, whether or not it happens to itself be
+/// a `Select` (an unrelated ternary inside a case body must stay intact).
+fn collect_select_tree_leaves<'a>(
+    expr: &'a HirExpr,
+    switch_var: &HirExpr,
+    cases: &mut Vec<(i64, &'a HirExpr)>,
+    default_leaves: &mut Vec<&'a HirExpr>,
+) {
+    let HirExpr::Select {
+        cond,
+        then_expr,
+        else_expr,
+        ..
+    } = expr
+    else {
+        default_leaves.push(expr);
+        return;
+    };
+    match classify_direct_split(cond, switch_var) {
+        Some(DirectSplitOnVar::Eq(value)) => {
+            cases.push((value, then_expr.as_ref()));
+            collect_select_tree_leaves(else_expr, switch_var, cases, default_leaves);
+        }
+        Some(DirectSplitOnVar::NotEq) => {
+            collect_select_tree_leaves(then_expr, switch_var, cases, default_leaves);
+            collect_select_tree_leaves(else_expr, switch_var, cases, default_leaves);
+        }
+        None => default_leaves.push(expr),
+    }
+}
+
+fn try_build_switch_from_select_tree(stmt: &HirStmt) -> Option<HirStmt> {
+    let HirStmt::Return(Some(root)) = stmt else {
+        return None;
+    };
+    let HirExpr::Select { cond, .. } = root else {
+        return None;
+    };
+    let switch_var = compared_var(cond)?;
+    if !expr_is_presentation_pure(switch_var) {
+        return None;
+    }
+    let mut raw_cases: Vec<(i64, &HirExpr)> = Vec::new();
+    let mut default_leaves: Vec<&HirExpr> = Vec::new();
+    collect_select_tree_leaves(root, switch_var, &mut raw_cases, &mut default_leaves);
+
+    // Every default leaf must be the exact same expression -- otherwise
+    // the tree's true fallthrough behavior is ambiguous and it's not safe
+    // to collapse to one `default:` arm.
+    let default_expr = match default_leaves.split_first() {
+        None => return None,
+        Some((first, rest)) => {
+            if rest.iter().any(|leaf| *leaf != *first) {
+                return None;
+            }
+            *first
+        }
+    };
+
+    let mut cases: Vec<HirSwitchCase> = Vec::new();
+    let mut seen_values: HashSet<i64> = HashSet::default();
+    for (value, result) in raw_cases {
+        if !seen_values.insert(value) {
+            // Same value reached twice with a different tree shape --
+            // ambiguous (or the tree isn't the clean partition this
+            // recovery assumes); decline rather than guess which wins.
+            return None;
+        }
+        cases.push(HirSwitchCase {
+            values: vec![value],
+            body: vec![HirStmt::Return(Some(result.clone()))],
+        });
+    }
+    if cases.len() < MIN_LOWERED_SWITCH_CASES {
+        return None;
+    }
+    Some(HirStmt::Switch {
+        expr: switch_var.clone(),
+        cases,
+        default: vec![HirStmt::Return(Some(default_expr.clone()))],
     })
 }
 
@@ -5277,6 +5561,134 @@ mod tests {
         assert!(
             !code.contains("switch ("),
             "impure (Load) switch expression must not collapse to a single-evaluation switch:\n{code}"
+        );
+    }
+
+    fn gt_const(var: &str, value: i64) -> HirExpr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Gt,
+            lhs: Box::new(HirExpr::Var(var.into())),
+            rhs: Box::new(HirExpr::Const(value, int_ty(32, true))),
+            ty: NirType::Bool,
+        }
+    }
+
+    fn select(cond: HirExpr, then_expr: HirExpr, else_expr: HirExpr) -> HirExpr {
+        HirExpr::Select {
+            cond: Box::new(cond),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+            ty: int_ty(32, true),
+        }
+    }
+
+    fn const_i(v: i64) -> HirExpr {
+        HirExpr::Const(v, int_ty(32, true))
+    }
+
+    #[test]
+    fn hir_presentation_recovers_switch_from_binary_search_decision_tree() {
+        // return x==5 ? 100 : x>5 ? (x==10 ? 200 : -1) : (x==1 ? 300 : -1)
+        // A GCC-style binary-search-lowered switch: three cases (5, 10, 1)
+        // reached via a mix of equality (case boundaries) and range
+        // (`x > 5`) splits, with the *same* default (-1) appearing at two
+        // different, differently-shaped leaves.
+        let tree = select(
+            eq_const("param_1", 5),
+            const_i(100),
+            select(
+                gt_const("param_1", 5),
+                select(eq_const("param_1", 10), const_i(200), const_i(-1)),
+                select(eq_const("param_1", 1), const_i(300), const_i(-1)),
+            ),
+        );
+        let mut func = HirFunction {
+            name: "binary_search_switch".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::Return(Some(tree))],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            code.contains("switch (param_1)")
+                && code.contains("case 5:")
+                && code.contains("case 10:")
+                && code.contains("case 1:")
+                && code.contains("default:"),
+            "binary-search decision tree with 3 cases should recover to a switch:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_declines_decision_tree_with_inconsistent_default() {
+        // Same shape, but the two "default" leaves disagree (-1 vs -2) --
+        // the tree's true fallthrough value is ambiguous, must not guess.
+        let tree = select(
+            eq_const("param_1", 5),
+            const_i(100),
+            select(
+                gt_const("param_1", 5),
+                select(eq_const("param_1", 10), const_i(200), const_i(-1)),
+                select(eq_const("param_1", 1), const_i(300), const_i(-2)),
+            ),
+        );
+        let mut func = HirFunction {
+            name: "inconsistent_default".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::Return(Some(tree))],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("switch ("),
+            "inconsistent default leaves must not collapse to a switch:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_decision_tree_leaves_unrelated_leaf_ternary_intact() {
+        // return x==5 ? (y>0 ? 7 : 9) : x>5 ? -1 : (x==1 ? 300 : (x==2 ? 400 : -1))
+        // `y>0 ? 7 : 9` is an unrelated ternary that happens to be case 5's
+        // *own result value* -- since its condition isn't a direct
+        // comparison on `x` (param_1), it must never be walked into or
+        // decomposed, just carried through as case 5's body verbatim.
+        let unrelated_leaf = select(gt_const("param_2", 0), const_i(7), const_i(9));
+        let tree = select(
+            eq_const("param_1", 5),
+            unrelated_leaf,
+            select(
+                gt_const("param_1", 5),
+                const_i(-1),
+                select(
+                    eq_const("param_1", 1),
+                    const_i(300),
+                    select(eq_const("param_1", 2), const_i(400), const_i(-1)),
+                ),
+            ),
+        );
+        let mut func = HirFunction {
+            name: "unrelated_leaf".into(),
+            params: vec![param("param_1"), param("param_2")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::Return(Some(tree))],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            code.contains("switch (param_1)")
+                && code.contains("case 5:")
+                && code.contains("case 1:")
+                && code.contains("case 2:")
+                && code.contains("param_2"),
+            "case 5's own unrelated ternary must survive verbatim as its body:\n{code}"
         );
     }
 
