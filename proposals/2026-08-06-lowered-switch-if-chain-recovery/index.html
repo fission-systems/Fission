@@ -1021,10 +1021,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-known-limitation-follow-up" class="md-nav__link">
+  <a href="#5-third-round-the-biased-subtraction-range-check-resolved" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Known limitation / follow-up
+        5. Third round: the biased-subtraction range check, resolved
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-remaining-known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Remaining known limitations
       
     </span>
   </a>
@@ -1170,18 +1181,88 @@ the relevant domain (so the implied case-value set can be safely derived)
 is a meaningfully harder, higher-stakes correctness problem than anything
 attempted so far in this feature, and getting it wrong would silently
 produce a wrong case boundary rather than just missing an optimization.</p>
-<h2 id="5-known-limitation-follow-up">5. Known limitation / follow-up<a class="headerlink" href="#5-known-limitation-follow-up" title="Permanent link">&para;</a></h2>
-<p>Three concrete gaps remain, in roughly increasing order of risk:</p>
+<h2 id="5-third-round-the-biased-subtraction-range-check-resolved">5. Third round: the biased-subtraction range check, resolved<a class="headerlink" href="#5-third-round-the-biased-subtraction-range-check-resolved" title="Permanent link">&para;</a></h2>
+<p>Gap (1) above -- <code>classify_range</code>'s actual case-1/2/3 blocker,
+<code>param_1 - 1 &gt; 2</code> -- turned out tractable with a real correctness argument,
+not just a heuristic. Confirmed directly against the corpus's own NIR
+(<code>--layer nir</code>) that the compiled comparison is genuinely <strong>unsigned</strong>:
+<code>uVar36 = param_1; uVar36--; if (2 &lt; uVar36) goto default;</code> (Fission's own
+<code>uVar</code> naming already reflects <code>NirType::Int { signed: false }</code>, and the op
+is the unsigned <code>Gt</code>, not <code>SGt</code>). This is GCC/Clang's standard "bias and
+compare" range-check idiom -- <code>(unsigned)(x - lo) &lt;= (hi - lo)</code> for
+<code>lo &lt;= x &lt;= hi</code>, folding the lower-bound check into the upper-bound one via
+deliberate unsigned wraparound when <code>x &lt; lo</code>. Subtracting a constant is an
+exact bijection over any fixed-width integer domain, so once the comparison
+is confirmed unsigned, <code>(x - bias) CMP bound</code> translates to an <em>exact</em>
+<code>[range_lo, range_hi]</code> on <code>x</code> -- not an approximation.</p>
+<p>Added <code>DirectSplitOnVar::Range</code> to <code>classify_direct_split</code>, gated tightly:
+only fires for an <em>explicit</em> <code>Sub</code> on the switch variable (a bare
+<code>x CMP const</code> stays on the existing <code>NotEq</code> path, which recurses
+unconditionally into both arms and was already correct for that shape --
+see the bug below for why conflating the two paths is unsafe), only for the
+four genuinely unsigned ops (<code>Gt</code>/<code>Ge</code>/<code>Lt</code>/<code>Le</code>, never the signed
+variants), and capped at <code>MAX_RANGE_SPLIT_EXPANSION</code> (64) values to avoid
+flooding an unrelated large bounds check into a wall of case labels. The
+in-range arm only expands into per-value cases when it resolves to one flat
+leaf with no further splits of its own (verified the same way
+<code>collect_select_tree_leaves</code> already required for range-in-general);
+otherwise the whole split is declined, not guessed at. Case values that
+end up sharing one result expression (the normal outcome of a range
+expansion) are now grouped into one <code>HirSwitchCase { values: [1, 2, 3], .. }</code>
+rather than three separate <code>case 1: .. break; case 2: .. break;</code> blocks.</p>
+<p><strong>A second bug found and fixed while wiring this in</strong>: the existing
+<code>NotEq</code> handling recursed into <em>both</em> arms of every non-equality split
+unconditionally, which had been fine when <code>NotEq</code> only ever led to further
+splits or flat constants -- but <code>classify_range</code>'s conditional default,
+<code>param_1 &lt; 0 ? -1 : 3</code>, is itself a <code>NotEq</code>-shaped split (<code>SLt</code>) that
+recurring unconditionally shattered into two separately-tracked leaves
+(<code>-1</code> and <code>3</code>), which the "every default leaf must be identical" check then
+correctly (but unhelpfully) rejected as inconsistent -- silently declining
+the whole tree. Fixed with <code>subtree_has_real_case_boundary</code>: only descend
+into a <code>NotEq</code>/<code>Range</code> arm if it actually leads to a real case boundary
+(an <code>==</code> split, or a <code>Range</code> split whose in-range arm is a flat leaf)
+somewhere inside; an arm with no real boundary is the default's own
+internal logic and must stay intact as one leaf, exactly like the
+already-existing "unrelated case-body ternary" protection.</p>
+<p><strong>Verification</strong>: a new test reproduces <code>classify_range</code>'s decision tree
+node-for-node (same range-check shape, same four-times-repeated
+<code>x &lt; 0 ? -1 : 3</code> default, same nesting) and asserts full recovery.
+<code>cargo nextest run</code> across the same five crates: 1400/1400 passed. No
+panics across the full corpus. Corpus-wide A/B: <strong>exactly +1</strong> total
+<code>switch (</code> occurrence (224 → 225), isolated to precisely one file
+(<code>control_flow_gcc_O0.txt</code>) -- confirmed directly:</p>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kt">int</span><span class="w"> </span><span class="nf">classify_range</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">param_1</span><span class="p">)</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="p">{</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">param_1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">10</span><span class="p">:</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">0</span><span class="p">:</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">1</span><span class="p">:</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">2</span><span class="p">:</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="mi">3</span><span class="p">:</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">        </span><span class="k">default</span><span class="o">:</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">param_1</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="mi">-1</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>Semantically identical to the original source (case order differs, which
+doesn't matter for a <code>switch</code>). Every other file in the corpus shows <em>zero</em>
+change in <code>switch</code>/<code>goto</code>/<code>return</code>/<code>break</code> counts -- the fix is precisely
+targeted, not incidentally touching anything else. <code>return</code> count in the
+one changed file moved from 106 to 109 (+3), exactly matching one
+<code>return &lt;nested ternary&gt;;</code> being replaced by four <code>return</code>s (one per case
+arm + default) -- the expected, correct shape of this exact restructuring.</p>
+<h2 id="6-remaining-known-limitations">6. Remaining known limitations<a class="headerlink" href="#6-remaining-known-limitations" title="Permanent link">&para;</a></h2>
+<p>Two gaps remain, both larger, separate undertakings:</p>
 <ol>
-<li><strong>Biased/arithmetic range comparisons</strong> (<code>x - k &gt; c</code>) -- the specific gap
-   blocking <code>classify_range</code> under <code>gcc -O0</code>, and the most natural next
-   step of this exact mechanism, but needs a real correctness argument for
-   the arithmetic normalization before it's safe to attempt.</li>
-<li><strong>Range comparisons without equality splits</strong> (<code>gcc -O2</code>'s shape for the
-   same function: <code>param_1 &lt;= 3</code> mixed with flag computation, no bare <code>==</code>
-   case boundaries at all) -- a different codegen strategy this pass's
-   "equality split = case, everything else = range/leaf" model doesn't
-   cover.</li>
+<li><strong>Range comparisons without any equality splits</strong> (<code>gcc -O2</code>'s shape for
+   the same function: <code>param_1 &lt;= 3</code> mixed with flag computation, no bare
+   <code>==</code> case boundaries at all) -- a different codegen strategy this pass's
+   "equality split = case, range split = grouped cases" model doesn't cover
+   on its own (though the underlying <code>Range</code> machinery built this round is
+   at least a plausible foundation for it).</li>
 <li><strong>Raw, unstructured multi-target <code>goto</code> range checks</strong> (<code>clang -O0</code>'s
    shape) -- never even reaches structured <code>If</code>/<code>Select</code> form, so no
    presentation-layer pass can see it; would need <code>recover_if_else_from_gotos</code>
@@ -1191,9 +1272,10 @@ produce a wrong case boundary rather than just missing an optimization.</p>
    (see <code>docs/proposals/2026-08-06-cross-block-merge-binding-scalar-ssa-fallback.md</code>'s
    two-iteration debugging story for the general shape of that risk).</li>
 </ol>
-<p>This is now genuinely close to angr's actual ~940-line scope, not the "few
-days" original estimate. Flagging (2) and especially (3) as real, larger
-follow-ups rather than attempting them in this round.</p>
+<p>This feature is now well past the "few days" original estimate and close
+to angr's actual ~940-line scope, but has landed a real, verified,
+corpus-confirmed win. Flagging (1) and (2) as follow-ups rather than
+attempting them in this round.</p>
 
 
 
