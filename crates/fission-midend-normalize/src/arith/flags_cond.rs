@@ -502,6 +502,44 @@ fn is_truthy_condition_type(ty: &NirType) -> bool {
     )
 }
 
+/// `(a - b) != 0` → `a != b`, `(a - b) == 0` → `a == b` (and the same for
+/// `Xor` in place of `Sub`). Unlike the rest of [`canonicalize_condition_expr`],
+/// this is a pure value-level identity -- `Sub`/`Xor` is zero iff its operands
+/// are equal, for any integer width, regardless of how the result is
+/// consumed (a boolean truthiness test *or* a plain 0/1 value fed into further
+/// arithmetic, e.g. GCC's `-O2` "set the low bit from a flag" idiom
+/// `(uint)(x - 10 != 0) + 2`). So this alone is safe to run on *any*
+/// expression position, not just actual branch/ternary conditions.
+pub fn canonicalize_sub_xor_zero_compare(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: op @ (PreHirBinaryOp::Ne | PreHirBinaryOp::Eq),
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if !is_zero_const(rhs.as_ref()) {
+        return None;
+    }
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub | PreHirBinaryOp::Xor,
+        lhs: inner_lhs,
+        rhs: inner_rhs,
+        ..
+    } = lhs.as_ref()
+    else {
+        return None;
+    };
+    Some(PreHirExpr::Binary {
+        op: *op,
+        lhs: inner_lhs.clone(),
+        rhs: inner_rhs.clone(),
+        ty: NirType::Bool,
+    })
+}
+
 pub fn canonicalize_condition_expr(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
         PreHirExpr::Binary {
@@ -517,26 +555,8 @@ pub fn canonicalize_condition_expr(expr: &PreHirExpr) -> Option<PreHirExpr> {
                     ..
                 }
             );
-            match lhs.as_ref() {
-                PreHirExpr::Binary {
-                    op: inner_op @ (PreHirBinaryOp::Sub | PreHirBinaryOp::Xor),
-                    lhs: inner_lhs,
-                    rhs: inner_rhs,
-                    ty: inner_ty,
-                } => {
-                    let new_op = if is_eq {
-                        PreHirBinaryOp::Eq
-                    } else {
-                        PreHirBinaryOp::Ne
-                    };
-                    return Some(PreHirExpr::Binary {
-                        op: new_op,
-                        lhs: inner_lhs.clone(),
-                        rhs: inner_rhs.clone(),
-                        ty: NirType::Bool,
-                    });
-                }
-                _ => {}
+            if let Some(recovered) = canonicalize_sub_xor_zero_compare(expr) {
+                return Some(recovered);
             }
             if is_truthy_condition_type(&expr_type(lhs)) {
                 if is_eq {

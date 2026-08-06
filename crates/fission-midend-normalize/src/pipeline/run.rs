@@ -8,7 +8,8 @@ use super::super::arith::{
     apply_conditional_move_pass, apply_double_precision_reconstruction_pass, apply_float_sign_pass,
     apply_ignore_nan_pass, apply_or_compare_pass, apply_subfloat_flow_pass,
     apply_three_way_compare_pass, canonicalize_condition_expr, canonicalize_flag_intrinsics,
-    canonicalize_integer_expr, cleanup_arithmetic_wrappers, collapse_zero_offset_cast,
+    canonicalize_integer_expr, canonicalize_sub_xor_zero_compare, cleanup_arithmetic_wrappers,
+    collapse_zero_offset_cast,
     merge_consecutive_shifts, normalize_boolean_logic, recognize_compiler_runtime_division,
     recognize_concat_zext_or, recognize_dumpty_hump_cast, recognize_dumpty_hump_late,
     recognize_hi_lo_extract, recognize_humpty_dumpty_or, recognize_magic_number_division,
@@ -1500,6 +1501,14 @@ pub fn normalize_stmt(stmt: &mut PreHirStmt) {
 
 fn normalize_condition_expr(expr: &mut PreHirExpr) {
     normalize_expr(expr);
+    // `&&`/`||`/`!` operands are themselves truthiness tests (that's what
+    // makes them valid logical-connective operands), so the same
+    // condition-only rewrites this function applies at the top are equally
+    // safe recursively on each one -- e.g. `!zf && (x < 0) == 0` needs
+    // `(x < 0) == 0 -> !(x < 0)` applied to its *second* AND operand, not
+    // just to the AND expression as a whole (which doesn't itself match any
+    // `canonicalize_condition_expr` pattern).
+    normalize_condition_logical_operands(expr);
     let mut current = expr.clone();
     loop {
         let next = canonicalize_condition_expr(&current);
@@ -1512,6 +1521,28 @@ fn normalize_condition_expr(expr: &mut PreHirExpr) {
         }
     }
     *expr = current;
+}
+
+fn normalize_condition_logical_operands(expr: &mut PreHirExpr) {
+    match expr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalAnd | PreHirBinaryOp::LogicalOr,
+            lhs,
+            rhs,
+            ..
+        } => {
+            normalize_condition_expr(lhs);
+            normalize_condition_expr(rhs);
+        }
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr: inner,
+            ..
+        } => {
+            normalize_condition_expr(inner);
+        }
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2002,7 +2033,11 @@ pub fn normalize_expr(expr: &mut PreHirExpr) {
             else_expr,
             ..
         } => {
-            normalize_expr(cond);
+            // `cond` is a truthiness test exactly like an `if`/`while`
+            // condition (nonzero => then, zero => else), so it gets the same
+            // condition-only canonicalizations (e.g. `x == 0` -> `!x`) that
+            // aren't safe on a plain value position.
+            normalize_condition_expr(cond);
             normalize_expr(then_expr);
             normalize_expr(else_expr);
         }
@@ -2030,6 +2065,7 @@ pub fn normalize_expr(expr: &mut PreHirExpr) {
             .or_else(|| merge_consecutive_shifts(&current))
             .or_else(|| recognize_wide_integer_recombine(&current))
             .or_else(|| canonicalize_flag_intrinsics(&current))
+            .or_else(|| canonicalize_sub_xor_zero_compare(&current))
             .or_else(|| normalize_boolean_logic(&current))
             .or_else(|| cleanup_arithmetic_wrappers(&current))
             .or_else(|| collapse_zero_offset_cast(&current));

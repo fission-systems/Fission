@@ -434,6 +434,25 @@ fn recover_in_stmts(stmts: &mut Vec<PreHirStmt>, defs: &HashMap<String, PreHirEx
     }
 }
 
+/// Substitute reaching flag-var reads inside a plain *value* position (an
+/// assignment RHS, a `return`/statement expression, ...) -- as opposed to
+/// [`recover_in_cond`], which only handles actual branch/loop conditions.
+/// Raw flags read as ordinary 0/1 values (GCC/Clang's "materialize a flag
+/// into a register" idiom, e.g. `x = -(uint)zf;`) never went through any
+/// condition path at all, so without this they're left as opaque `Var`
+/// references forever.
+fn recover_flag_value_use(
+    expr: &mut PreHirExpr,
+    defs: &HashMap<String, PreHirExpr>,
+    changed: &mut bool,
+) {
+    if let Some(substituted) = substitute_single_flags(expr, defs) {
+        *expr = substituted;
+        *changed = true;
+        super::super::pipeline::normalize_expr(expr);
+    }
+}
+
 fn recover_in_stmts_with_reaching_defs(
     stmts: &mut Vec<PreHirStmt>,
     defs: &mut HashMap<String, PreHirExpr>,
@@ -445,8 +464,25 @@ fn recover_in_stmts_with_reaching_defs(
                 lhs: PreHirLValue::Var(name),
                 rhs,
             } if is_flag_var(name) => {
+                recover_flag_value_use(rhs, defs, changed);
                 defs.insert(name.clone(), rhs.clone());
             }
+            PreHirStmt::Assign { lhs, rhs } => {
+                match lhs {
+                    PreHirLValue::Deref { ptr, .. } => recover_flag_value_use(ptr, defs, changed),
+                    PreHirLValue::Index { base, index, .. } => {
+                        recover_flag_value_use(base, defs, changed);
+                        recover_flag_value_use(index, defs, changed);
+                    }
+                    PreHirLValue::FieldAccess { base, .. } => {
+                        recover_flag_value_use(base, defs, changed)
+                    }
+                    PreHirLValue::Var(_) => {}
+                }
+                recover_flag_value_use(rhs, defs, changed);
+            }
+            PreHirStmt::Expr(expr) => recover_flag_value_use(expr, defs, changed),
+            PreHirStmt::VaStart { va_list, .. } => recover_flag_value_use(va_list, defs, changed),
             PreHirStmt::Block(body) => {
                 let mut nested_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(body, &mut nested_defs, changed);
@@ -491,7 +527,12 @@ fn recover_in_stmts_with_reaching_defs(
                     recover_in_stmts_box_with_reaching_defs(update, &mut body_defs, changed);
                 }
             }
-            PreHirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                recover_flag_value_use(expr, defs, changed);
                 for case in cases {
                     let mut case_defs = defs.clone();
                     recover_in_stmts_with_reaching_defs(&mut case.body, &mut case_defs, changed);
@@ -499,14 +540,15 @@ fn recover_in_stmts_with_reaching_defs(
                 let mut default_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(default, &mut default_defs, changed);
             }
-            PreHirStmt::Label(_)
-            | PreHirStmt::Goto(_)
-            | PreHirStmt::Return(_)
-            | PreHirStmt::Break
-            | PreHirStmt::Continue => {
+            PreHirStmt::Return(expr) => {
+                if let Some(expr) = expr {
+                    recover_flag_value_use(expr, defs, changed);
+                }
                 defs.clear();
             }
-            _ => {}
+            PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+                defs.clear();
+            }
         }
     }
 }

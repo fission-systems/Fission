@@ -1004,7 +1004,7 @@ fn normalize_keeps_builder_preserved_temp_in_if_condition() {
         "builder-preserved temp should remain materialized; got: {code}"
     );
     assert!(
-        code.contains("if (uVar0 == 0 || uVar0 < esi)"),
+        code.contains("if (!uVar0 || uVar0 < esi)"),
         "condition should keep the preserved temp instead of reinlining it; got: {code}"
     );
 }

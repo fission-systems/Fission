@@ -34,7 +34,8 @@ pub use div_mod::{
 };
 pub use double_precision::apply_double_precision_reconstruction_pass;
 pub use flags_cond::{
-    canonicalize_condition_expr, canonicalize_flag_intrinsics, normalize_boolean_logic,
+    canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_sub_xor_zero_compare,
+    normalize_boolean_logic,
 };
 pub use float_sign::apply_float_sign_pass;
 pub use ignore_nan::apply_ignore_nan_pass;

@@ -234,3 +234,90 @@ This feature is now well past the "few days" original estimate and close
 to angr's actual ~940-line scope, but has landed a real, verified,
 corpus-confirmed win. Flagging (1) and (2) as follow-ups rather than
 attempting them in this round.
+
+## 7. Fourth round: normalize-level flag-value simplification (partial progress on gap 1)
+
+Investigated gap (1) directly: `classify_range` under `gcc -O2` computes each
+branch's result via raw x86 EFLAGS arithmetic (`zf`/`sf` materialized into a
+0/1 or -1/0 value, e.g. `-(uint)zf`), not a tree of direct comparisons. That
+turned out to be three separate, narrower gaps in the PreHir-level
+`fission-midend-normalize` crate (upstream of, and unrelated to, the
+presentation-layer switch-recovery machinery from rounds 1-3), all now fixed:
+
+1. **`canonicalize_condition_expr`'s `(a - b) != 0 -> a != b` identity was
+   condition-only.** It's actually a pure value-level identity (`Sub`/`Xor`
+   is zero iff its operands are equal, in *any* consuming context, not just a
+   branch test) but was only ever invoked from `normalize_condition_expr`,
+   never from the generic bottom-up `normalize_expr` that runs on every
+   expression position. Split it out into its own `canonicalize_sub_xor_zero_compare`
+   (`arith/flags_cond.rs`) and wired it into `normalize_expr`'s fixed-point
+   chain (`pipeline/run.rs`). This alone fixed the `-O2` else-branch:
+   `(uint)(param_1 - 10 != 0) + 2` -> `(uint)(param_1 != 10) + 2`.
+2. **`Select`'s `cond` wasn't condition-normalized.** `normalize_expr`'s
+   `Select` case called plain `normalize_expr(cond)` instead of
+   `normalize_condition_expr(cond)`, even though a ternary's `cond` is a
+   truthiness test with exactly the same semantics as an `if`/`while`
+   condition. Switched it to `normalize_condition_expr`, and additionally
+   taught `normalize_condition_expr` to recurse into `&&`/`||`/`!` operands
+   (`normalize_condition_logical_operands`) -- those operands are themselves
+   always boolean-context truthiness tests (that's what makes them valid
+   logical-connective operands), so the same condition-only rewrites are
+   equally safe on each one, not just on the connective as a whole. Without
+   this, `!zf && (x < 0) == 0` never simplified because `canonicalize_condition_expr`
+   only ever looked at the top-level AND node, which doesn't itself match any
+   rewrite pattern.
+3. **Flag-var reads outside a branch condition were never substituted at
+   all.** `flag_recovery.rs`'s reaching-definition walker
+   (`recover_in_stmts_with_reaching_defs`) only ever called `recover_in_cond`
+   on actual `If`/`While`/`For` conditions; a plain `x = -(uint)zf;` (reading
+   a flag as an ordinary value) was invisible to it, and multiply-defined
+   flags (like `zf`, redefined per-branch here) don't qualify for the
+   separate whole-function single-definition fallback either -- so the flag
+   stayed a permanently-opaque `Var` reference. Added `recover_flag_value_use`
+   and wired it into every value-producing statement form the walker visits
+   (`Assign` RHS and non-`Var` LHS subexpressions, `Expr`, `Return`,
+   `Switch`'s scrutinee, `VaStart`), using the same per-branch reaching-def
+   map already threaded through for conditions.
+
+Net effect on `classify_range` (`gcc -O2`, `--layer hir`): the `then` branch
+went from an opaque `!zf && xVar15 < 0 == 0 ? 1 : xVar16` (with `xVar16`
+itself an un-recovered `-(uint)xVar15` flag materialization) to
+`xVar15 = uVar11 != 0; xVar16 = -(uint)xVar15; xVar15 = uVar20 <= 0; if (!xVar15) rax = 1;`
+-- i.e. every flag is now a direct, correctly-signed comparison
+(`uVar11 != 0`, `uVar20 <= 0`) instead of a raw EFLAGS variable. The `else`
+branch fully collapsed to `return (uint)((uint)(param_1 != 10) + 2);`.
+
+**Not yet a switch**: the `then` branch is still an `if (!xVar15) rax = 1; return rax;`
+default-override shape with some interleaved dead stores (`rax = 0;` etc.)
+between the real default assignment and the override -- `conditional_move.rs`'s
+"Default-Override" fold requires the assign/if pair to be *exactly* adjacent,
+so the leftover dead code in between blocks it. Getting this the rest of the
+way to a recovered switch needs either a DCE pass to run first (to make the
+pair adjacent) or loosening that fold's adjacency requirement -- left as a
+further follow-up rather than attempted this round, since the value here
+(untangling raw flag-arithmetic into direct comparisons) is a general
+normalize-quality improvement independent of whether this specific function
+ever becomes a switch.
+
+**Verification**: full workspace test suite green (only the 7 pre-existing,
+unrelated `fission-emulator` failures remain, same baseline as prior rounds);
+one existing unit test's expected string updated (`!uVar0 || uVar0 < esi`
+instead of `uVar0 == 0 || uVar0 < esi`) since it was pinning the pre-fix
+`==0` style that this round's condition-recursion fix now also applies one
+level deeper -- a legitimate style consequence, not a masked bug, since the
+codebase already applied this exact `==0 -> !x` preference at the top level
+everywhere else. Corpus-wide git-stash A/B diff (209 binaries, 11,757
+functions): function count identical before/after (no functions gained or
+lost), total decompiled line count dropped ~0.8% (more dead flag stores now
+prunable once their reads are substituted), 148/209 files changed --
+spot-checked several diffs, all copy-propagation/flag-recovery quality
+improvements, no operator or value changes. Ran `fission_cli verify --tier
+ground-truth` (real-machine-code-oracle equivalence) across every function in
+two of the most heavily-diffed binaries (`advanced_patterns_gcc_O0.exe` and
+`c/advanced_patterns_clang_O0.exe`): pass/fail sets are
+byte-identical before vs. after in both (2 pre-existing divergences in the
+first, unrelated to this change and present identically on both sides; 0 in
+the second). `classify_range` itself also has a pre-existing ground-truth
+divergence on negative/`INT_MAX` inputs (confirmed present identically before
+and after this round's changes, so not introduced here) -- a separate,
+unrelated bug worth its own investigation, not chased down in this round.
