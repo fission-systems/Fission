@@ -49,7 +49,8 @@ fn context_commit_const_space_check_requires_primary_space_metadata() {
             bit_offset: 0,
             bit_width: 1,
             sign_extend: false,
-        },
+        }
+        .into(),
         fixed: RuntimeFixedHandle::default(),
         debug_value: None,
         subtable_state: None,

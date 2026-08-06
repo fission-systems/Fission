@@ -66,7 +66,7 @@ pub struct RuntimeConstructNode {
 #[allow(dead_code)]
 pub struct RuntimeHandle {
     pub operand_index: usize,
-    pub spec: CompiledOperandSpec,
+    pub spec: std::sync::Arc<CompiledOperandSpec>,
     pub fixed: RuntimeFixedHandle,
     pub debug_value: Option<BoundOperand>,
     pub subtable_state: Option<Box<RuntimeConstructState>>,

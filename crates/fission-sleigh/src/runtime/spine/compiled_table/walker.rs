@@ -645,12 +645,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                             table_name: ref tn,
                             reloffset,
                             offsetbase,
-                        } = h.spec
+                        } = h.spec.as_ref()
                         {
                             if tn.as_str() == table_name.as_str() {
                                 subtable_offset = (
-                                    Some(reloffset),
-                                    Some(offsetbase),
+                                    Some(*reloffset),
+                                    Some(*offsetbase),
                                     Some(self.operand_absolute_offset(&h.spec)?),
                                 );
                                 break;
@@ -757,7 +757,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 table_name: self.selection.constructor.source.clone(),
                 reloffset: 0,
                 offsetbase: -1,
-            },
+            }
+            .into(),
             fixed,
             debug_value: value,
             subtable_state: None,
@@ -1116,7 +1117,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         template: &CompiledHandleTemplate,
         operand_absolute_offset: usize,
     ) -> Result<OperandBinding> {
-        match &template.spec {
+        match template.spec.as_ref() {
             CompiledOperandSpec::SlaTokenField {
                 big_endian,
                 sign_bit,
@@ -1669,7 +1670,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .spec
             .clone();
         let operand_absolute_offset = self.operand_absolute_offset(&spec)?;
-        match &spec {
+        match spec.as_ref() {
             CompiledOperandSpec::SlaTokenField {
                 big_endian,
                 sign_bit,

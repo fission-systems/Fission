@@ -687,7 +687,12 @@ pub struct CompiledConstructorTemplate {
 )]
 pub struct CompiledHandleTemplate {
     pub operand_index: usize,
-    pub spec: CompiledOperandSpec,
+    // `Arc<..>` rather than an owned value: cloned on every decoded operand
+    // (see `decode_operand`'s `RuntimeHandle` construction in walker.rs,
+    // whose `spec` field matches this) -- some variants (e.g.
+    // `SlaPatternExpression`) embed an arbitrarily deep expression tree, so
+    // an owned deep-clone here meant re-copying that tree per operand.
+    pub spec: std::sync::Arc<CompiledOperandSpec>,
     /// Ghidra OperandSymbol.minimumlength, in bytes. Used when building
     /// ConstructState-compatible operand lengths before parent length calculation.
     #[serde(default)]

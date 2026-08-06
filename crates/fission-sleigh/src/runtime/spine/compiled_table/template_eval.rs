@@ -1736,7 +1736,8 @@ mod tests {
                 bit_offset: 0,
                 bit_width: 1,
                 sign_extend: false,
-            },
+            }
+            .into(),
             fixed: RuntimeFixedHandle {
                 space: Some(CompiledSpaceRef {
                     name: space_name.to_string(),

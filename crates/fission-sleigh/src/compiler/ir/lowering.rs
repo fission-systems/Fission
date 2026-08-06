@@ -360,7 +360,7 @@ fn executable_constructor_from_sla_template(
                         .expect("SLA operand minimum lengths must match operand specs");
                     CompiledHandleTemplate {
                         operand_index,
-                        spec,
+                        spec: spec.into(),
                         minimum_length,
                     }
                 })
@@ -764,7 +764,7 @@ impl Collector {
                 .enumerate()
                 .map(|(operand_index, spec)| CompiledHandleTemplate {
                     operand_index,
-                    spec,
+                    spec: spec.into(),
                     minimum_length: 0,
                 })
                 .collect(),

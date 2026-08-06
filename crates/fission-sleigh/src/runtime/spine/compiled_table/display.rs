@@ -1071,7 +1071,8 @@ mod tests {
                 table_name: "test".to_string(),
                 reloffset: 0,
                 offsetbase: -1,
-            },
+            }
+            .into(),
             fixed: RuntimeFixedHandle::default(),
             debug_value: Some(value),
             subtable_state: None,
