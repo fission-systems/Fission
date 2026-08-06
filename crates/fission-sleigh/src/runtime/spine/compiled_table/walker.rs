@@ -48,17 +48,43 @@ impl InstNextShared {
     }
 }
 
+/// One frame of the error-only "sleigh parser path" backtrace (see the
+/// `Err(err) =>` arm in `bind_instruction_with_inst_next` below, the only
+/// reader of `WALK_STACK`). Decode success is the overwhelmingly common
+/// case and this stack is pushed/popped on *every* operand/subtable/
+/// constructor step of *every* decode -- so frames are kept allocation-free
+/// where possible (`Operand` needs none at all) and any unavoidable
+/// formatting is deferred to `Display`, which only ever runs once a decode
+/// has already failed.
+enum WalkFrame {
+    Constructor { source: Box<str>, mnemonic: Box<str> },
+    Operand(usize),
+    Subtable(Box<str>),
+}
+
+impl std::fmt::Display for WalkFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WalkFrame::Constructor { source, mnemonic } => {
+                write!(f, "constructor({source}::{mnemonic})")
+            }
+            WalkFrame::Operand(index) => write!(f, "operand({index})"),
+            WalkFrame::Subtable(name) => write!(f, "subtable({name})"),
+        }
+    }
+}
+
 thread_local! {
     static DECODE_POOL: RefCell<Vec<DecodePool>> = RefCell::new(Vec::new());
-    static WALK_STACK: RefCell<Vec<String>> = RefCell::new(Vec::new());
+    static WALK_STACK: RefCell<Vec<WalkFrame>> = RefCell::new(Vec::new());
 }
 
 pub(super) struct WalkStackGuard;
 
 impl WalkStackGuard {
-    fn new(desc: String) -> Self {
+    fn new(frame: WalkFrame) -> Self {
         WALK_STACK.with(|stack| {
-            stack.borrow_mut().push(desc);
+            stack.borrow_mut().push(frame);
         });
         Self
     }
@@ -133,7 +159,14 @@ fn bind_instruction_with_inst_next<'a>(
             if err_str.contains("sleigh parser path:") {
                 Err(err)
             } else {
-                let backtrace = WALK_STACK.with(|stack| stack.borrow().join(" -> "));
+                let backtrace = WALK_STACK.with(|stack| {
+                    stack
+                        .borrow()
+                        .iter()
+                        .map(|frame| frame.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" -> ")
+                });
                 if backtrace.is_empty() {
                     Err(err)
                 } else {
@@ -579,10 +612,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
     }
 
     fn walk(mut self) -> Result<RuntimeConstructState> {
-        let _guard = WalkStackGuard::new(format!(
-            "constructor({}::{})",
-            self.selection.constructor.source, self.selection.constructor.mnemonic
-        ));
+        let _guard = WalkStackGuard::new(WalkFrame::Constructor {
+            source: self.selection.constructor.source.as_str().into(),
+            mnemonic: self.selection.constructor.mnemonic.as_str().into(),
+        });
 
         for change in self.selection.constructor.context_changes.clone() {
             self.apply_context_change(&change)?;
@@ -948,7 +981,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .get(operand_index)
             .ok_or_else(|| anyhow!("missing handle template {operand_index}"))?
             .clone();
-        let _guard = WalkStackGuard::new(format!("operand({})", operand_index));
+        let _guard = WalkStackGuard::new(WalkFrame::Operand(operand_index));
         if self.owns_inst_next {
             // Active operand is counted via local construct/cursor progress; keep
             // only *later* operands in unbound_min.
@@ -1750,7 +1783,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         offsetbase: Option<i32>,
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
-        let _guard = WalkStackGuard::new(format!("subtable({})", table_name));
+        let _guard = WalkStackGuard::new(WalkFrame::Subtable(table_name.into()));
         let mut sub_ctx = (*self.ctx).clone();
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset

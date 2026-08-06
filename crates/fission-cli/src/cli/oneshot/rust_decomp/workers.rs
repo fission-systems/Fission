@@ -22,10 +22,16 @@ pub(crate) fn resolve_worker_count(total_functions: usize) -> usize {
         }
     }
 
+    // No upper cap beyond the machine's own core count: the queue is a
+    // plain `Arc<Mutex<Receiver>>` each worker only holds briefly to pull
+    // one task off before doing the actual (unlocked) decompile work, so
+    // there's no contention reason to leave cores idle on larger machines
+    // (see `run_worker_fanout_fanin` below).
     let cpu = std::thread::available_parallelism()
         .map(|n| n.get())
-        .unwrap_or(4);
-    min(total_functions, cpu.clamp(1, 8))
+        .unwrap_or(4)
+        .max(1);
+    min(total_functions, cpu)
 }
 
 pub(crate) fn resolve_decomp_stack_size_bytes() -> usize {
