@@ -1992,6 +1992,39 @@ fn rewrite_presentation_condition_form(expr: &mut HirExpr) -> bool {
                 *expr = inner2.as_ref().clone();
                 return true;
             }
+            // De Morgan's: `!(A && B)` → `!A || !B`, `!(A || B)` → `!A && !B`.
+            // Each operand still appears exactly once either way, so this
+            // can't change evaluation count or order.
+            if let HirExpr::Binary {
+                op: op @ (HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr),
+                lhs,
+                rhs,
+                ty,
+            } = inner.as_ref()
+            {
+                let pushed_op = if *op == HirBinaryOp::LogicalAnd {
+                    HirBinaryOp::LogicalOr
+                } else {
+                    HirBinaryOp::LogicalAnd
+                };
+                let new_lhs = HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: lhs.clone(),
+                    ty: NirType::Bool,
+                };
+                let new_rhs = HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: rhs.clone(),
+                    ty: NirType::Bool,
+                };
+                *expr = HirExpr::Binary {
+                    op: pushed_op,
+                    lhs: Box::new(new_lhs),
+                    rhs: Box::new(new_rhs),
+                    ty: ty.clone(),
+                };
+                return true;
+            }
         }
         if let HirExpr::Binary {
             op: HirBinaryOp::Eq,
@@ -2045,6 +2078,102 @@ fn rewrite_presentation_condition_form(expr: &mut HirExpr) -> bool {
             }
         }
     }
+
+    // `(a | b) == 0` → `(a == 0) && (b == 0)`; `(a | b) != 0` → `(a != 0) || (b != 0)`.
+    // A bitwise-flags check reads as boolean logic instead of a mask compare.
+    // `a` and `b` each still appear exactly once, so evaluation count is
+    // unchanged; only reachable once the const-left flip above has already
+    // put the zero constant on the right.
+    if let HirExpr::Binary {
+        op: cmp_op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    {
+        if let (
+            HirExpr::Binary {
+                op: HirBinaryOp::Or,
+                lhs: a,
+                rhs: b,
+                ..
+            },
+            HirExpr::Const(0, _),
+        ) = (lhs.as_ref(), rhs.as_ref())
+        {
+            let new_left = HirExpr::Binary {
+                op: *cmp_op,
+                lhs: a.clone(),
+                rhs: rhs.clone(),
+                ty: NirType::Bool,
+            };
+            let new_right = HirExpr::Binary {
+                op: *cmp_op,
+                lhs: b.clone(),
+                rhs: rhs.clone(),
+                ty: NirType::Bool,
+            };
+            let logic_op = if *cmp_op == HirBinaryOp::Eq {
+                HirBinaryOp::LogicalAnd
+            } else {
+                HirBinaryOp::LogicalOr
+            };
+            *expr = HirExpr::Binary {
+                op: logic_op,
+                lhs: Box::new(new_left),
+                rhs: Box::new(new_right),
+                ty: ty.clone(),
+            };
+            return true;
+        }
+    }
+
+    // `Select(cond, a, b) == a` → `cond`; `Select(cond, a, b) == b` → `!cond`
+    // (and negated for `!=`), restricted to `a`/`b` both being the exact
+    // constant being compared against -- constants have no side effects, so
+    // dropping their (and the select's) evaluation can't change observable
+    // behavior, unlike doing this for arbitrary `a`/`b`.
+    if let HirExpr::Binary {
+        op: cmp_op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+        lhs,
+        rhs,
+        ..
+    } = expr
+    {
+        if let (
+            HirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            },
+            HirExpr::Const(rhs_val, _),
+        ) = (lhs.as_ref(), rhs.as_ref())
+        {
+            let then_matches = matches!(then_expr.as_ref(), HirExpr::Const(v, _) if v == rhs_val);
+            let else_matches = matches!(else_expr.as_ref(), HirExpr::Const(v, _) if v == rhs_val);
+            let negate = match (*cmp_op, then_matches, else_matches) {
+                (HirBinaryOp::Eq, true, _) => Some(false),
+                (HirBinaryOp::Eq, false, true) => Some(true),
+                (HirBinaryOp::Ne, true, _) => Some(true),
+                (HirBinaryOp::Ne, false, true) => Some(false),
+                _ => None,
+            };
+            if let Some(negate) = negate {
+                *expr = if negate {
+                    HirExpr::Unary {
+                        op: HirUnaryOp::Not,
+                        expr: cond.clone(),
+                        ty: NirType::Bool,
+                    }
+                } else {
+                    cond.as_ref().clone()
+                };
+                return true;
+            }
+        }
+    }
+
     false
 }
 
@@ -4702,6 +4831,126 @@ mod tests {
         assert!(
             !code.contains("!(") && !code.contains("== 0"),
             "!(x == 0) should peel toward != form:\n{code}"
+        );
+    }
+
+    #[test]
+    fn condition_rewrite_pushes_demorgan_negation_into_conjunction() {
+        // !(a == 0 && b == 0) -> !(a == 0) || !(b == 0) -> a != 0 || b != 0,
+        // exercising De Morgan's push together with the existing !(x==0)
+        // peel in the same fixed-point pass.
+        let mut expr = HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::LogicalAnd,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Var("a".into())),
+                    rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                    ty: NirType::Bool,
+                }),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Var("b".into())),
+                    rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                    ty: NirType::Bool,
+                }),
+                ty: NirType::Bool,
+            }),
+            ty: NirType::Bool,
+        };
+        while canonicalize_conditions_in_expr(&mut expr) {}
+        assert_eq!(
+            expr,
+            HirExpr::Binary {
+                op: HirBinaryOp::LogicalOr,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("a".into())),
+                    rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                    ty: NirType::Bool,
+                }),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("b".into())),
+                    rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+                    ty: NirType::Bool,
+                }),
+                ty: NirType::Bool,
+            }
+        );
+    }
+
+    #[test]
+    fn condition_rewrite_turns_bitwise_or_zero_check_into_logical_form() {
+        // (a | b) == 0 -> (a == 0) && (b == 0); a flags-mask check reads as
+        // boolean logic instead of a bitwise compare.
+        let mut expr = HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Or,
+                lhs: Box::new(HirExpr::Var("a".into())),
+                rhs: Box::new(HirExpr::Var("b".into())),
+                ty: int_ty(32, false),
+            }),
+            rhs: Box::new(HirExpr::Const(0, int_ty(32, false))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_conditions_in_expr(&mut expr));
+        assert_eq!(
+            expr,
+            HirExpr::Binary {
+                op: HirBinaryOp::LogicalAnd,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Var("a".into())),
+                    rhs: Box::new(HirExpr::Const(0, int_ty(32, false))),
+                    ty: NirType::Bool,
+                }),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Eq,
+                    lhs: Box::new(HirExpr::Var("b".into())),
+                    rhs: Box::new(HirExpr::Const(0, int_ty(32, false))),
+                    ty: NirType::Bool,
+                }),
+                ty: NirType::Bool,
+            }
+        );
+    }
+
+    #[test]
+    fn condition_rewrite_removes_redundant_ite_comparison() {
+        // (cond ? 1 : 0) == 1 -> cond; (cond ? 1 : 0) == 0 -> !cond.
+        let select = |cond: &str| HirExpr::Select {
+            cond: Box::new(HirExpr::Var(cond.into())),
+            then_expr: Box::new(HirExpr::Const(1, int_ty(32, true))),
+            else_expr: Box::new(HirExpr::Const(0, int_ty(32, true))),
+            ty: int_ty(32, true),
+        };
+
+        let mut eq_true = HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(select("cond")),
+            rhs: Box::new(HirExpr::Const(1, int_ty(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_conditions_in_expr(&mut eq_true));
+        assert_eq!(eq_true, HirExpr::Var("cond".into()));
+
+        let mut eq_false = HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs: Box::new(select("cond")),
+            rhs: Box::new(HirExpr::Const(0, int_ty(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_conditions_in_expr(&mut eq_false));
+        assert_eq!(
+            eq_false,
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("cond".into())),
+                ty: NirType::Bool,
+            }
         );
     }
 
