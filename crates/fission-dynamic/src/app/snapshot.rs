@@ -2,15 +2,14 @@
 
 use crate::prelude::*;
 use fission_loader::loader::{LoadedBinary, LoadedBinaryInner};
-use rkyv::Deserialize;
+use rkyv::rancor::Error as RkyvError;
 use std::fs;
 use std::path::Path;
 
 /// Save the loaded binary and analysis state to a snapshot file
 pub fn save_snapshot(binary: &LoadedBinary, path: &Path) -> Result<()> {
     // Serialize the inner data using rkyv
-    // AlignedVec is required for zero-copy deserialization
-    let bytes = rkyv::to_bytes::<_, 1024>(binary.inner())
+    let bytes = rkyv::to_bytes::<RkyvError>(binary.inner())
         .map_err(|e| FissionError::other(format!("Serialization failed: {}", e)))?;
 
     // Write to disk
@@ -24,15 +23,15 @@ pub fn save_snapshot(binary: &LoadedBinary, path: &Path) -> Result<()> {
 pub fn load_snapshot(path: &Path) -> Result<LoadedBinary> {
     let data = fs::read(path).map_err(|e| FissionError::Io(e))?;
 
-    // Validate the archive (now against LoadedBinaryInner)
-    let archived = rkyv::check_archived_root::<LoadedBinaryInner>(&data)
-        .map_err(|e| FissionError::other(format!("Snapshot validation failed: {}", e)))?;
-
-    // Deserialize fully into LoadedBinaryInner (deep copy)
-    let mut deserializer = rkyv::Infallible;
-    let inner: LoadedBinaryInner = archived
-        .deserialize(&mut deserializer)
-        .map_err(|e| FissionError::other(format!("Snapshot deserialize failed: {:?}", e)))?;
+    // Validate the archive and deserialize fully into LoadedBinaryInner
+    // (deep copy) in one step. rkyv 0.7's checked-access path
+    // (rkyv::check_archived_root) is RUSTSEC-2026-0235: shared-pointer
+    // validation keyed already-validated pointees by address only, not
+    // pointer metadata, so a crafted archive could smuggle a
+    // forged-length slice past validation. rkyv 0.8's `from_bytes`
+    // includes the fix (metadata is now part of the validation key).
+    let inner: LoadedBinaryInner = rkyv::from_bytes::<LoadedBinaryInner, RkyvError>(&data)
+        .map_err(|e| FissionError::other(format!("Snapshot deserialize failed: {}", e)))?;
 
     // Wrap in LoadedBinary for Arc-based COW semantics
     let binary = LoadedBinary::from_inner(inner);

@@ -2,7 +2,6 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 /// Information about a function found in the binary
 #[derive(Debug, Clone, Default, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct FunctionInfo {
     /// Function name (may be empty for unnamed functions)
     pub name: String,
@@ -30,7 +29,6 @@ pub struct FunctionInfo {
 
 /// Information about a section in the binary
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct SectionInfo {
     /// Section name
     pub name: String,
@@ -52,7 +50,6 @@ pub struct SectionInfo {
 
 /// Information about a loaded binary (safe to send to plugins)
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct BinaryInfo {
     /// File path
     pub path: String,

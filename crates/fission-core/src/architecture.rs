@@ -24,22 +24,18 @@ const ELF_LOADER_NAME: &str = "Executable and Linking Format (ELF)";
 const MACHO_LOADER_NAME: &str = "Mac OS X Mach-O";
 
 #[derive(Debug, Clone, PartialEq, Eq, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct GhidraLanguageId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct CompilerSpecId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct LanguageCompilerSpecPair {
     pub language_id: GhidraLanguageId,
     pub compiler_spec_id: CompilerSpecId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct BinaryLoadSpec {
     pub format: String,
     pub image_base: u64,
@@ -49,7 +45,6 @@ pub struct BinaryLoadSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct ArchitectureDescriptor {
     pub processor: String,
     pub endian: String,

@@ -445,7 +445,11 @@ pub struct CompiledDecisionLeafEntry {
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
-#[archive(bound(serialize = "__S: rkyv::ser::Serializer + rkyv::ser::ScratchSpace"))]
+#[rkyv(
+    serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator),
+    deserialize_bounds(__D::Error: rkyv::rancor::Source),
+    bytecheck(bounds(__C: rkyv::validation::ArchiveContext)),
+)]
 pub enum CompiledDisjointPattern {
     Instruction(CompiledPatternBlock),
     Context(CompiledPatternBlock),
@@ -453,7 +457,7 @@ pub enum CompiledDisjointPattern {
         context: CompiledPatternBlock,
         instruction: CompiledPatternBlock,
     },
-    Or(#[omit_bounds] Vec<CompiledDisjointPattern>),
+    Or(#[rkyv(omit_bounds)] Vec<CompiledDisjointPattern>),
 }
 
 #[derive(
@@ -727,7 +731,11 @@ pub enum CompiledOperandDecodeStep {
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
-#[archive(bound(serialize = "__S: rkyv::ser::Serializer"))]
+#[rkyv(
+    serialize_bounds(__S: rkyv::ser::Writer),
+    deserialize_bounds(__D::Error: rkyv::rancor::Source),
+    bytecheck(bounds(__C: rkyv::validation::ArchiveContext)),
+)]
 pub enum CompiledPatternExpression {
     Constant(i64),
     InstStart,
@@ -754,43 +762,43 @@ pub enum CompiledPatternExpression {
         index: usize,
     },
     Add(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     Sub(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     Mul(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     Div(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     LeftShift(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     RightShift(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     And(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     Or(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
     Xor(
-        #[omit_bounds] Box<CompiledPatternExpression>,
-        #[omit_bounds] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
+        #[rkyv(omit_bounds)] Box<CompiledPatternExpression>,
     ),
-    Negate(#[omit_bounds] Box<CompiledPatternExpression>),
-    Not(#[omit_bounds] Box<CompiledPatternExpression>),
+    Negate(#[rkyv(omit_bounds)] Box<CompiledPatternExpression>),
+    Not(#[rkyv(omit_bounds)] Box<CompiledPatternExpression>),
 }
 
 #[derive(

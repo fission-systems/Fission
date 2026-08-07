@@ -1,4 +1,3 @@
-// use bytecheck::CheckBytes; removed as it was causing a warning
 use rkyv::{Archive, Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -71,17 +70,17 @@ impl rkyv::Archive for DataBuffer {
     type Archived = ();
     type Resolver = ();
     #[inline]
-    unsafe fn resolve(&self, _pos: usize, _resolver: Self::Resolver, _out: *mut Self::Archived) {}
+    fn resolve(&self, _resolver: Self::Resolver, _out: rkyv::Place<Self::Archived>) {}
 }
 
-impl<S: rkyv::ser::Serializer + ?Sized> rkyv::Serialize<S> for DataBuffer {
+impl<S: rkyv::rancor::Fallible + rkyv::ser::Writer + ?Sized> rkyv::Serialize<S> for DataBuffer {
     #[inline]
     fn serialize(&self, _serializer: &mut S) -> std::result::Result<Self::Resolver, S::Error> {
         Ok(())
     }
 }
 
-impl<D: rkyv::Fallible + ?Sized> rkyv::Deserialize<DataBuffer, D> for () {
+impl<D: rkyv::rancor::Fallible + ?Sized> rkyv::Deserialize<DataBuffer, D> for () {
     #[inline]
     fn deserialize(&self, _deserializer: &mut D) -> std::result::Result<DataBuffer, D::Error> {
         unreachable!("DataBuffer should be deserialized via ArcDataWrapper")
@@ -96,21 +95,16 @@ impl rkyv::with::ArchiveWith<Arc<DataBuffer>> for ArcDataWrapper {
     type Resolver = rkyv::vec::VecResolver;
 
     #[inline]
-    unsafe fn resolve_with(
+    fn resolve_with(
         field: &Arc<DataBuffer>,
-        pos: usize,
         resolver: Self::Resolver,
-        out: *mut Self::Archived,
+        out: rkyv::Place<Self::Archived>,
     ) {
-        // SAFETY: The caller guarantees that out points to valid memory
-        unsafe {
-            let out_vec = &mut *out;
-            rkyv::vec::ArchivedVec::resolve_from_slice(field.as_slice(), pos, resolver, out_vec);
-        }
+        rkyv::vec::ArchivedVec::resolve_from_slice(field.as_slice(), resolver, out);
     }
 }
 
-impl<S: rkyv::ser::Serializer + rkyv::ser::ScratchSpace + ?Sized>
+impl<S: rkyv::rancor::Fallible + rkyv::ser::Allocator + rkyv::ser::Writer + ?Sized>
     rkyv::with::SerializeWith<Arc<DataBuffer>, S> for ArcDataWrapper
 {
     fn serialize_with(
@@ -121,7 +115,7 @@ impl<S: rkyv::ser::Serializer + rkyv::ser::ScratchSpace + ?Sized>
     }
 }
 
-impl<D: rkyv::Fallible + ?Sized>
+impl<D: rkyv::rancor::Fallible + ?Sized>
     rkyv::with::DeserializeWith<rkyv::vec::ArchivedVec<u8>, Arc<DataBuffer>, D> for ArcDataWrapper
 {
     fn deserialize_with(
@@ -144,7 +138,6 @@ pub struct ArcSymbolMapWrapper;
 
 /// Information about an inferred field in a type
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct InferredFieldInfo {
     /// Field name (or enumerator name, for `InferredTypeInfo::kind == "enum"`)
     pub name: String,
@@ -161,7 +154,6 @@ pub struct InferredFieldInfo {
 
 /// Information about an inferred type (class/struct) from metadata
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct InferredTypeInfo {
     /// Type name (demangled if possible)
     pub name: String,
@@ -269,7 +261,6 @@ pub struct FunctionCandidateInfo {
 }
 
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct PdbDebugInfo {
     pub path_hint: Option<String>,
     pub guid_hex: Option<String>,
@@ -278,7 +269,6 @@ pub struct PdbDebugInfo {
 }
 
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct RelocationEntry {
     pub address: u64,
     pub r_type: u32,
@@ -288,7 +278,6 @@ pub struct RelocationEntry {
 }
 
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct RichHeaderRecord {
     pub comp_id: u32,
     pub build_number: u16,
@@ -299,14 +288,13 @@ pub struct RichHeaderRecord {
 /// Inner data structure containing all binary information.
 /// This is wrapped in Arc for O(1) cloning with COW semantics.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
 pub struct LoadedBinaryInner {
     /// Original file path
     pub path: String,
     /// Binary data hash (Blake3) for caching and identification
     pub hash: String,
     /// Raw bytes of the file (COW enabled ArcDataBuffer)
-    #[with(ArcDataWrapper)]
+    #[rkyv(with = ArcDataWrapper)]
     pub data: Arc<DataBuffer>,
     /// Legacy Ghidra language ID projection (e.g., "x86:LE:64:default").
     ///
