@@ -28,9 +28,7 @@ pub fn emit_orphan_target_block(
     match host.lower_block_terminator(block_idx)? {
         LoweredTerminator::Return(expr) => stmts.push(PreHirStmt::Return(expr)),
         LoweredTerminator::Goto(target) => {
-            if host.next_block_address(block_idx) != Some(target) {
-                stmts.push(PreHirStmt::Goto(block_label(target)));
-            }
+            stmts.push(PreHirStmt::Goto(block_label(target)));
         }
         LoweredTerminator::Fallthrough(Some(target)) => {
             if let Some(target_idx) = host.find_block_index_by_address(target)
@@ -38,7 +36,21 @@ pub fn emit_orphan_target_block(
                     host.lower_return_join_expr_for_predecessor(block_idx, target_idx)?
             {
                 stmts.push(PreHirStmt::Return(Some(expr)));
-            } else if host.next_block_address(block_idx) != Some(target) {
+            } else {
+                // Previously suppressed when `target` was the next block in
+                // raw address order (`host.next_block_address(block_idx) ==
+                // Some(target)`), on the assumption that address-adjacent
+                // code would "naturally" appear right after this fragment
+                // in the emitted output. That's only true if `target`'s
+                // block hasn't been emitted anywhere else yet -- but an
+                // orphan repair fragment is, by construction, being
+                // appended standalone after code that may have already
+                // rendered `target` (e.g. a loop header emitted once at the
+                // top of the function, before the loop was recognized as a
+                // loop). Suppressing the goto there drops the only
+                // remaining link to that code, leaving this fragment with
+                // no terminator at all. Always emit it; a redundant goto to
+                // truly-adjacent code is harmless, a missing one isn't.
                 stmts.push(PreHirStmt::Goto(block_label(target)));
             }
         }
