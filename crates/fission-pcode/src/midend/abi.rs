@@ -416,6 +416,47 @@ pub fn infer_entry_register_param_arity(
     }
 
     let mut detected_params: HashSet<usize> = HashSet::default();
+    // A register whose *every* appearance anywhere in the function is as
+    // the value operand of a `Store` (i.e. it's written to memory once and
+    // never read back, as itself or via that memory location) is far more
+    // likely a prologue register-save/stack-alignment-padding spill (e.g.
+    // ARM32's `push {r3, lr}`, padding a lone `push {lr}` out to 8 bytes --
+    // r3 never carries a real argument there) than a genuine incoming
+    // parameter. A real parameter that gets spilled to its home stack slot
+    // still gets read back from that slot somewhere when the function
+    // actually uses it; one that's spilled and never touched again, in any
+    // form, wasn't a parameter reference at all. Tracked function-wide
+    // (not just the entry-block scan below) since the "was it ever read
+    // back" evidence can live anywhere.
+    let mut store_value_only: HashSet<usize> = HashSet::default();
+    let mut seen_any_use: HashSet<usize> = HashSet::default();
+    for block in &pcode.blocks {
+        for op in &block.ops {
+            let store_value_idx = matches!(op.opcode, PcodeOpcode::Store)
+                .then(|| op.inputs.len().checked_sub(1))
+                .flatten();
+            for (i, input) in op.inputs.iter().enumerate() {
+                if input.is_constant || !is_register_varnode(input) {
+                    continue;
+                }
+                let Some((_, Some(param_index))) =
+                    namer.register_name_with_param_owned(input.offset, input.size)
+                else {
+                    continue;
+                };
+                let is_store_value = store_value_idx == Some(i);
+                if is_store_value {
+                    if !seen_any_use.contains(&param_index) {
+                        store_value_only.insert(param_index);
+                    }
+                } else {
+                    store_value_only.remove(&param_index);
+                }
+                seen_any_use.insert(param_index);
+            }
+        }
+    }
+
     let mut visited_active_params: HashMap<u32, HashSet<usize>> = HashMap::default();
     let mut queue = VecDeque::new();
 
@@ -481,5 +522,16 @@ pub fn infer_entry_register_param_arity(
         }
     }
 
-    detected_params.iter().max().map(|&index| index + 1)
+    // Drop indices whose only function-wide evidence is a spill-and-never-
+    // read-again store (see `store_value_only` above) before taking the
+    // max -- an unused *middle* parameter is completely ordinary (real
+    // functions often ignore some of their arguments) and must not be
+    // penalized, but an index whose sole appearance is prologue
+    // padding/register-save noise shouldn't count as parameter evidence at
+    // all.
+    detected_params
+        .iter()
+        .filter(|idx| !store_value_only.contains(idx))
+        .max()
+        .map(|&index| index + 1)
 }
