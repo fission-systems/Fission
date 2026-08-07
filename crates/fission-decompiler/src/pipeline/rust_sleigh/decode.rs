@@ -259,6 +259,37 @@ pub(crate) fn decode_rust_sleigh_pcode(
                         });
                     }
                 }
+
+                // `entry_address` was even, so `normalize_low_bit_code_address`
+                // trusted its bit 0 and assumed the CPU's default (non-Thumb)
+                // code mode -- correct for a real ARM/Thumb-interworking
+                // function pointer, but wrong for a Thumb-only target
+                // (Cortex-M/ARMv7-M) given a bare address with the ABI's
+                // Thumb marker already normalized away (e.g. by an external
+                // caller reporting addresses in stripped form). Only try this
+                // once every other retry has failed, and only when we didn't
+                // already decode in forced low-bit-code mode.
+                if initial_context_override.is_none()
+                    && let Some(forced_override) = lifter.low_bit_code_mode_override()
+                    && let Ok(retry) = lifter.lift_raw_pcode_function_with_context_and_memory_context(
+                        &bytes,
+                        decode_entry_address,
+                        lift_contract,
+                        &memory_context,
+                        Some(forced_override),
+                    )
+                {
+                    let template_source_counts = retry.template_source_counts.clone();
+                    return Ok((
+                        retry.function,
+                        DecodeDiag {
+                            attempts: 2,
+                            stop_reason: "success_after_forced_low_bit_code_mode_retry".into(),
+                            template_source_counts,
+                        },
+                        userops.clone(),
+                    ));
+                }
             }
             Err(DecodeFailure {
                 message: format!(
