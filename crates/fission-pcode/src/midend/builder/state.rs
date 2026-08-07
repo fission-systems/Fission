@@ -81,6 +81,17 @@ pub(crate) struct PreviewBuilder<'a> {
     /// (`K == 0`, the default). See `entry_analysis::infer_entry_stack_
     /// layout` and its use in `resolve_stack_address_inner`.
     pub(crate) rbp_frame_bias: i64,
+    /// Per-op-site cumulative RSP delta (bytes subtracted from entry-rsp)
+    /// for ops within the function's recognized entry-block prologue
+    /// push/sub chain, keyed by `LoweringSite`. Lets
+    /// `resolve_stack_address_inner`'s register-space branch resolve a
+    /// bare RSP register-space varnode per-occurrence instead of returning
+    /// the same static `(StackBase::Rsp, 0)` for every occurrence -- which
+    /// previously collapsed a `push`-chain's distinct store targets onto
+    /// the same stack-slot offset, since p-code doesn't SSA-rename
+    /// registers. See `entry_analysis::infer_entry_stack_layout` and its
+    /// use in `resolve_stack_address_inner`.
+    pub(crate) rsp_prologue_delta_table: HashMap<LoweringSite, i64>,
     pub(crate) linear_exit_cache: BuilderCacheMap<usize, Option<LinearExit>>,
     pub(crate) linear_body_cache: BuilderCacheMap<LinearBodyCacheKey, LinearBodyCachedOutcome>,
     pub(crate) active_linear_body_keys: BuilderCacheSet<LinearBodyCacheKey>,

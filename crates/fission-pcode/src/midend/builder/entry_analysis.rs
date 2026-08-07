@@ -59,10 +59,34 @@ pub(super) fn infer_entry_stack_layout(
     pcode: &PcodeFunction,
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
-) -> (i64, bool, i64) {
+) -> (i64, bool, i64, HashMap<LoweringSite, i64>) {
     let Some(entry) = pcode.blocks.first() else {
-        return (0, false, 0);
+        return (0, false, 0, HashMap::default());
     };
+
+    // Per-op-site cumulative `rsp_delta` (bytes subtracted from entry-rsp,
+    // negative once anything has pushed/subtracted), recorded at the START
+    // of every entry-block op -- i.e. reflecting every *prior* op's effect
+    // but not this op's own. This is the value the bare RSP register-space
+    // varnode actually holds if read as an operand at that exact op (e.g.
+    // a `push reg`'s `Store` half, which reads `rsp` *after* that same
+    // push's own `IntSub` already ran, since the two ops share this loop's
+    // ordinary forward iteration order).
+    //
+    // Exists to fix a real collapse bug: `resolve_stack_address_inner`'s
+    // register-space branch previously returned a single hardcoded
+    // `(StackBase::Rsp, 0)` for *every* occurrence of the bare RSP varnode,
+    // since p-code doesn't SSA-rename registers -- so a `push r14; push
+    // r13; push r12; push rbp; push rbx` sequence (5 distinct `Store`s, all
+    // through the same unchanged `VarnodeKey`) resolved to the exact same
+    // stack-slot offset 5 times, and `ensure_stack_slot_binding` (keyed by
+    // resolved offset) silently reused one local for all 5, losing 4 of the
+    // 5 stores. Consumed by `resolve_stack_address_inner` via
+    // `self.current_lowering_site` -- a lookup miss (any op site outside
+    // the scanned entry-block prologue range, i.e. essentially every access
+    // *after* the prologue) falls back to the prior static `0` behavior
+    // unchanged, so straight-line/simple functions are unaffected.
+    let mut rsp_prologue_delta_table: HashMap<LoweringSite, i64> = HashMap::default();
 
     let mut frame_size = 0_i64;
     let mut frame_pointer_established = false;
@@ -189,7 +213,15 @@ pub(super) fn infer_entry_stack_layout(
     // parameter; with it, only the real home-slot access past the true
     // boundary does.
     let mut pending_rsp_add: Option<(VarnodeKey, i64)> = None;
-    for op in &entry.ops {
+    for (op_idx, op) in entry.ops.iter().enumerate() {
+        rsp_prologue_delta_table.insert(
+            LoweringSite {
+                block_idx: 0,
+                op_idx,
+            },
+            rsp_delta,
+        );
+
         if matches!(op.opcode, PcodeOpcode::Copy)
             && let (Some(output), Some(input)) = (op.output.as_ref(), op.inputs.first())
         {
@@ -321,7 +353,12 @@ pub(super) fn infer_entry_stack_layout(
             break;
         }
     }
-    (frame_size, frame_pointer_established, frame_pointer_bias)
+    (
+        frame_size,
+        frame_pointer_established,
+        frame_pointer_bias,
+        rsp_prologue_delta_table,
+    )
 }
 
 fn parse_signed_asm_immediate(text: &str) -> Option<i64> {
@@ -479,7 +516,7 @@ mod tests {
             op(5, PcodeOpcode::Copy, Some(rbp), vec![lea_temp]),
         ];
 
-        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
+        let (_, established, bias, _) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
         assert!(established);
         let rsp_delta = -(8 + probe_size);
         assert_eq!(bias, rsp_delta + k + 8);
@@ -502,7 +539,7 @@ mod tests {
             ),
             op(1, PcodeOpcode::Copy, Some(rbp), vec![rsp]),
         ];
-        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
+        let (_, established, bias, _) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
         assert!(established);
         assert_eq!(bias, 0);
     }
@@ -519,7 +556,7 @@ mod tests {
         let rsp = reg(0x20, 8);
         let rbp = reg(0x28, 8);
         let ops = vec![op(0, PcodeOpcode::Copy, Some(rbp), vec![rsp])];
-        let (_, established, bias) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
+        let (_, established, bias, _) = infer_entry_stack_layout(&pcode(ops), &x64_options(), None);
         assert!(established);
         assert_eq!(bias, 8);
     }
@@ -599,7 +636,7 @@ mod tests {
             },
         );
 
-        let (_, established, bias) =
+        let (_, established, bias, _) =
             infer_entry_stack_layout(&pcode(ops), &x86_32_options(), Some(&type_context));
         assert!(established);
         // rsp_delta = -4 (push ebp) + (pointer_size(4) - probe_size) =

@@ -453,6 +453,39 @@ impl<'a> PreviewBuilder<'a> {
         self.resolve_stack_address_inner(ptr, &mut HashSet::default())
     }
 
+    /// Resolves what a *bare* RSP/ESP register-space varnode's occurrence at
+    /// `self.current_lowering_site` should map to in `self.locals`'
+    /// steady-state-rsp-relative coordinate system (the same coordinate
+    /// system `resolve_stack_address_from_memory_op`'s asm-text-parsed
+    /// `[rsp+K]` displacements and `rsp_local_display_offset` already use --
+    /// `0` means "current rsp equals the function's final, post-prologue
+    /// steady-state depth").
+    ///
+    /// Outside the function's recognized entry-block prologue (i.e. no
+    /// `rsp_prologue_delta_table` entry for this exact op site -- covers
+    /// every access after the prologue, and any function whose prologue
+    /// didn't fit the recognized push/sub pattern in the first place),
+    /// falls back to the old hardcoded `0`, matching pre-existing behavior
+    /// exactly.
+    ///
+    /// Inside the prologue (e.g. a `push reg`'s `Store` half, which reads
+    /// `rsp` *after* that same push's own `IntSub` already ran), converts
+    /// the table's entry-rsp-relative delta `d` (negative) into the
+    /// steady-state-relative coordinate via `d + stack_frame_size`: the
+    /// steady-state rsp sits at `entry_rsp - stack_frame_size`, so an
+    /// address at `entry_rsp + d` sits `d + stack_frame_size` bytes above
+    /// it. This is what turns a `push r14; push r13; push r12; push rbp;
+    /// push rbx` chain's five `Store`s -- which previously all resolved to
+    /// the identical hardcoded `(StackBase::Rsp, 0)` and got silently
+    /// collapsed onto one `self.locals` entry -- into five distinct,
+    /// correctly-ordered offsets instead.
+    fn rsp_register_space_offset(&self) -> i64 {
+        self.current_lowering_site
+            .and_then(|site| self.rsp_prologue_delta_table.get(&site))
+            .map(|delta| delta + self.stack_frame_size)
+            .unwrap_or(0)
+    }
+
     fn resolve_stack_address_inner(
         &self,
         ptr: &Varnode,
@@ -500,14 +533,16 @@ impl<'a> PreviewBuilder<'a> {
                 },
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => match ptr.offset
                 {
-                    0x20 => Some((StackBase::Rsp, 0)),
+                    0x20 => Some((StackBase::Rsp, self.rsp_register_space_offset())),
                     0x28 => Some((StackBase::Rbp, self.rbp_frame_bias)),
-                    0x10 if !self.options.is_64bit => Some((StackBase::Rsp, 0)),
+                    0x10 if !self.options.is_64bit => {
+                        Some((StackBase::Rsp, self.rsp_register_space_offset()))
+                    }
                     0x14 if !self.options.is_64bit => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
                 },
                 CallingConvention::X86_32 => match ptr.offset {
-                    0x10 => Some((StackBase::Rsp, 0)),
+                    0x10 => Some((StackBase::Rsp, self.rsp_register_space_offset())),
                     0x14 => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
                 },
