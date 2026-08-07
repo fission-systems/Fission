@@ -2126,6 +2126,23 @@ fn generate_elf_header_types(
     let mut types = Vec::new();
     let mut symbols = std::collections::HashMap::new();
 
+    // Every symbol/type this function registers lives at `image_base +
+    // <small header-relative offset>` (0 for the ELF header itself, ~64 for
+    // Program Headers, ...). For a normal non-PIE executable those are large,
+    // effectively unique addresses (e.g. 0x400000+) that never collide with
+    // anything else. For a PIE/shared-object binary, whose *link-time*
+    // image_base is 0, they collapse to tiny integers (0, 64, ...) that are
+    // indistinguishable from ordinary small constants used everywhere else
+    // in the program (loop bounds, buffer sizes, struct offsets). Genuine
+    // self-introspection of a binary's own ELF headers is rare; ordinary
+    // small integer constants are not -- registering these names for a
+    // link-time-zero base does far more harm (every such constant renders
+    // as `&ELF_HEADER`/`&PROGRAM_HEADERS` instead of its real value) than
+    // the feature is worth, so skip it entirely in that case.
+    if image_base == 0 {
+        return (types, symbols);
+    }
+
     // 1. ELF Header
     let ehdr_name = if is_64bit { "Elf64_Ehdr" } else { "Elf32_Ehdr" };
     let ehdr_size = if is_64bit { 64 } else { 52 };
