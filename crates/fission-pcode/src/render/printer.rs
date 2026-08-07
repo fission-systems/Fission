@@ -21,6 +21,56 @@ struct PrintCtx<'a> {
     inline_guard_goto: bool,
     global_names: Option<&'a HashMap<u64, String>>,
     profile: PrintProfile,
+    /// Every label referenced by a `Goto` anywhere in the function body.
+    /// A `switch` case/default's leading `Label` must be preserved (rendered
+    /// as a C label alongside the `case`) when it appears here, since `case`
+    /// values and identifier labels are different namespaces in C -- a
+    /// `goto` cannot target a bare `case N:`. See ADR/#149.
+    goto_targets: HashSet<&'a str>,
+}
+
+/// Collects every label referenced by a `Goto` (excluding the switch
+/// fallthrough sentinel, which is not a real label) anywhere in `stmts`,
+/// recursing into all nested bodies.
+fn collect_goto_targets<'a>(stmts: &'a [HirStmt], out: &mut HashSet<&'a str>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Goto(label) => {
+                if label != crate::render::SWITCH_FALLTHROUGH_SENTINEL {
+                    out.insert(label.as_str());
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                collect_goto_targets(body, out);
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_goto_targets(std::slice::from_ref(&**init), out);
+                }
+                if let Some(update) = update {
+                    collect_goto_targets(std::slice::from_ref(&**update), out);
+                }
+                collect_goto_targets(body, out);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_goto_targets(then_body, out);
+                collect_goto_targets(else_body, out);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_goto_targets(&case.body, out);
+                }
+                collect_goto_targets(default, out);
+            }
+            _ => {}
+        }
+    }
 }
 
 impl<'a> PrintCtx<'a> {
@@ -41,6 +91,8 @@ impl<'a> PrintCtx<'a> {
                 pointer_decl_names.insert(b.name.as_str());
             }
         }
+        let mut goto_targets = HashSet::new();
+        collect_goto_targets(&func.body, &mut goto_targets);
         Self {
             var_types,
             pointer_decl_names,
@@ -48,6 +100,7 @@ impl<'a> PrintCtx<'a> {
             inline_guard_goto: func.body.len() <= 6,
             global_names: None,
             profile,
+            goto_targets,
         }
     }
 
@@ -1401,8 +1454,12 @@ fn print_stmt_with_indent_ctx(
                     out.push_str(&format!("case {}:\n", value));
                 }
                 for (s_idx, s) in case.body.iter().enumerate() {
-                    if s_idx == 0 && matches!(s, HirStmt::Label(_)) {
-                        continue;
+                    if s_idx == 0 {
+                        if let HirStmt::Label(label) = s {
+                            if !ctx.goto_targets.contains(label.as_str()) {
+                                continue;
+                            }
+                        }
                     }
                     if s_idx + 1 == case.body.len() {
                         if let HirStmt::Goto(label) = s {
@@ -1427,8 +1484,12 @@ fn print_stmt_with_indent_ctx(
                 out.push_str(&pad);
                 out.push_str("    default:\n");
                 for (s_idx, s) in default.iter().enumerate() {
-                    if s_idx == 0 && matches!(s, HirStmt::Label(_)) {
-                        continue;
+                    if s_idx == 0 {
+                        if let HirStmt::Label(label) = s {
+                            if !ctx.goto_targets.contains(label.as_str()) {
+                                continue;
+                            }
+                        }
                     }
                     print_stmt_with_indent_ctx(s, indent + 2, depth + 1, ctx, out);
                 }
