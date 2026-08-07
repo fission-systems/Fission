@@ -545,7 +545,16 @@ impl RegisterNamer {
         // prototype can declare both and only one is actually live for any
         // given function.
         if let Some(float_ret_off) = self.float_return_offset {
-            if vn.offset == float_ret_off {
+            // A real scalar float/double return through XMM0 is at most 8
+            // bytes (float=4, double=8) under every ABI this models -- a
+            // full 16-byte write is a whole-vector-register op, not a
+            // scalar return value. Without this, compiler-inserted
+            // register-zeroing epilogues (`-fzero-call-used-regs`-style
+            // `pxor xmm0,xmm0`) that fall through into a function's own
+            // decoded range get misdetected as that function's real return
+            // value, corrupting its inferred return type to a 16-byte
+            // aggregate.
+            if vn.offset == float_ret_off && vn.size <= 8 {
                 return true;
             }
         }
