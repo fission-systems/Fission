@@ -339,11 +339,19 @@ fn is_surface_stable_slot_display_base(
     func: &PreHirFunction,
     inventory: &super::typed_facts::TypedFactInventory,
     base: &PreHirExpr,
-    offset: i64,
+    // Retained for API compatibility with callers that reasoned about the
+    // *promoted slot's own* offset from `base` -- irrelevant to whether
+    // `base` itself is a stable value to hoist an initializer expression
+    // ahead of. A promoted local's initializer is only order-safe if
+    // everything it reads (including `base`, whatever offset it sits at)
+    // is already defined at the top of the function; the offset a
+    // downstream slot happens to sit at doesn't change that. This used to
+    // short-circuit to `true` for any non-zero offset, which let
+    // temp-like bases (SSA values only assigned later in the body, e.g.
+    // `uVar1 = sp;`) through unchecked -- producing a hoisted declaration
+    // whose initializer read an as-yet-undefined variable.
+    _offset: i64,
 ) -> bool {
-    if offset != 0 {
-        return true;
-    }
     match base {
         PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
             if is_cheap_slot_base(base) || slot_surface_type_name(base, func, inventory).is_some() {
@@ -354,22 +362,29 @@ fn is_surface_stable_slot_display_base(
                 .iter()
                 .chain(func.locals.iter())
                 .find(|binding| binding.name == *name)
+                && binding.is_temp_like()
             {
-                return !binding.is_temp_like();
+                return false;
             }
+            // `binding.is_temp_like()` defaults to `false` when a binding's
+            // `origin` is `None` (unclassified at this point in the
+            // pipeline) -- that's not the same as *confirmed* stable, so
+            // still fall back to the name-pattern heuristic rather than
+            // trusting an absence of classification as a green light.
             !looks_like_synthetic_temp_name(name)
         }
-        PreHirExpr::Cast { expr, .. } => {
-            is_surface_stable_slot_display_base(func, inventory, expr, offset)
+        PreHirExpr::Cast { expr, .. } => is_surface_stable_slot_display_base(func, inventory, expr, 0),
+        PreHirExpr::Load { ptr, .. } => is_surface_stable_slot_display_base(func, inventory, ptr, 0),
+        PreHirExpr::PtrOffset { base, .. } => {
+            is_surface_stable_slot_display_base(func, inventory, base, 0)
         }
-        PreHirExpr::PtrOffset {
-            base,
-            offset: base_offset,
-        } => {
-            if *base_offset != 0 {
-                return true;
-            }
-            is_surface_stable_slot_display_base(func, inventory, base, offset)
+        // Pointer arithmetic sometimes surfaces as raw `Binary::Add`/`Sub`
+        // rather than `PtrOffset` (e.g. `uVar1 + 12`, not yet canonicalized
+        // at this point in the pipeline) -- either operand could carry a
+        // temp-like base, so both must check out stable.
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            is_surface_stable_slot_display_base(func, inventory, lhs, 0)
+                && is_surface_stable_slot_display_base(func, inventory, rhs, 0)
         }
         _ => true,
     }
