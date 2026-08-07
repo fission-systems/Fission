@@ -1042,6 +1042,26 @@ pub fn try_lower_multiblock_dowhile(host: &mut impl StructuringHost,
         let start_addr = host.block_target_key(idx);
         let exit_addr = host.block_target_key(exit_idx);
 
+        // If the loop head itself independently branches to the loop's
+        // exit (i.e. it's a `while`-style test, not just a do-while whose
+        // only test is at the latch), defer entirely to `try_lower_while`.
+        // Otherwise `lower_loop_body_subgraph` below re-discovers that same
+        // `while(idx){...}` shape internally (its own reducer pass tries
+        // `try_lower_while` on `idx` too) and this function would wrap the
+        // result in a second, redundant `while(1){...}` shell whose only
+        // `break`s live on the *inner* loop -- the outer shell has no exit
+        // of its own, making anything lowered after it unreachable.
+        if idx != latch_idx
+            && let LoweredTerminator::Cond {
+                true_target,
+                false_target,
+                ..
+            } = host.lower_block_terminator(idx)?
+            && (true_target == exit_addr || false_target == Some(exit_addr))
+        {
+            return Ok(None);
+        }
+
         let LoweredTerminator::Cond {
             cond,
             true_target,
