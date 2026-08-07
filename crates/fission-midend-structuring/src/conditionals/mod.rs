@@ -18,18 +18,31 @@ use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, structuring_diag_enabled};
 use fission_midend_core::ir::{MlilPreviewError};
 use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt};
-use fission_midend_prehir::util::expr_has_side_effecting_call;
 
-/// Side-effect-free assign/expr statements that may sit in condition prefixes.
+/// Simple assign/expr statements that may sit in a while-loop's condition
+/// prefix -- i.e. anything `try_lower_while` knows how to carry into either
+/// the clean `while(cond)` shape (via `try_fold_cond_prefix`'s own,
+/// separate single-use/no-earlier-read safety checks) or the always-safe
+/// `while(1) { prefix; if (!cond) break; body }` guard, which just
+/// re-executes `prefix` verbatim once per iteration -- exactly what the
+/// raw block already did, side effects included. This used to also reject
+/// any prefix containing a side-effecting call (e.g. `while (some_func(x)
+/// != 0)`'s condition-computing call), but a call re-executed once per
+/// loop iteration by either shape is exactly the semantics a real
+/// `while(cond)` loop has -- rejecting it here just meant the loop got no
+/// shape at all (all 9 collapse rules fail, backward continue-edge and
+/// trailing code silently dropped) instead of a merely less-optimized one.
+/// Only the STATEMENT SHAPE matters here; anything not a plain
+/// assign-to-var or bare expression (nested control flow, etc.) still
+/// isn't safe to carry and stays rejected.
 pub fn is_trivial_structuring_stmt(stmt: &PreHirStmt) -> bool {
-    match stmt {
+    matches!(
+        stmt,
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var(_),
-            rhs,
-        } => !expr_has_side_effecting_call(rhs),
-        PreHirStmt::Expr(expr) => !expr_has_side_effecting_call(expr),
-        _ => false,
-    }
+            ..
+        } | PreHirStmt::Expr(_)
+    )
 }
 
 fn forward_join_idx_from_address(
