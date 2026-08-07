@@ -281,26 +281,33 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             let block = &self.pcode.blocks[0];
+            let own_addr = block.start_address;
+            let mut self_referencing = false;
             body.extend(self.lower_block_stmts(block)?);
             match self.lower_block_terminator(0)? {
                 LoweredTerminator::Return(expr) => body.push(PreHirStmt::Return(expr)),
                 LoweredTerminator::Fallthrough(None) => {}
                 LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
+                    self_referencing |= target == own_addr;
                     body.push(PreHirStmt::Goto(block_label(target)))
                 }
                 LoweredTerminator::Cond {
                     cond,
                     true_target,
                     false_target,
-                } => body.push(PreHirStmt::If {
-                    cond,
-                    then_body: vec![PreHirStmt::Goto(block_label(true_target))],
-                    else_body: false_target
-                        .map(block_label)
-                        .map(PreHirStmt::Goto)
-                        .into_iter()
-                        .collect(),
-                }),
+                } => {
+                    self_referencing |=
+                        true_target == own_addr || false_target == Some(own_addr);
+                    body.push(PreHirStmt::If {
+                        cond,
+                        then_body: vec![PreHirStmt::Goto(block_label(true_target))],
+                        else_body: false_target
+                            .map(block_label)
+                            .map(PreHirStmt::Goto)
+                            .into_iter()
+                            .collect(),
+                    })
+                }
                 LoweredTerminator::Unsupported {
                     evidence,
                     target_expr,
@@ -324,6 +331,8 @@ impl<'a> PreviewBuilder<'a> {
                     min_val,
                     proof,
                 } => {
+                    self_referencing |=
+                        targets.contains(&own_addr) || default_target == Some(own_addr);
                     let emit_ready =
                         crate::midend::structuring::EmitReadyDecision::from_dispatcher_proof(
                             proof.as_ref(),
@@ -367,6 +376,15 @@ impl<'a> PreviewBuilder<'a> {
                         });
                     }
                 }
+            }
+            // A single-block function's own block never gets an explicit
+            // `Label` -- normal execution just falls into it. But a branch
+            // back to `own_addr` is a genuine self-loop (there's no other
+            // block it could target), and the `Goto`/`If`/`Switch` arms
+            // above already emitted a reference to that address assuming
+            // one exists. Backfill it so the goto isn't dangling.
+            if self_referencing {
+                body.insert(0, PreHirStmt::Label(block_label(own_addr)));
             }
             if preview_builder_diag_enabled() {
                 eprintln!("[DIAG] build_hir single_block_done: stmts={}", body.len());
