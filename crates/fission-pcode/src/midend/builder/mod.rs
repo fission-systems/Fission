@@ -270,6 +270,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         self.run_incremental_heritage()?;
+        self.prime_call_result_bindings();
 
         let mut body = Vec::new();
         if self.pcode.blocks.len() == 1 {

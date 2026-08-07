@@ -432,6 +432,67 @@ impl<'a> PreviewBuilder<'a> {
         name
     }
 
+    /// Registers every observed call's result binding in one whole-function,
+    /// program-order forward pass, before any expression lowering begins.
+    ///
+    /// Expression lowering resolves a register's value on demand and
+    /// reentrantly (`lower_varnode_inner` -> `lookup_def_site` -> possibly
+    /// back into lowering an earlier op) -- so which call's result binding
+    /// exists in `call_result_bindings` at any given moment depends on
+    /// visitation order, not program order. A register defined as `Copy dst
+    /// <- <call-return-register>` right after a call reads that call's
+    /// result via `live_call_result_binding_for_return_register`, which
+    /// only succeeds if `ensure_call_result_binding` already ran for that
+    /// specific call; `lookup_def_site`'s reaching-definition search can't
+    /// see `Call`/`CallInd` ops as definitions at all (they carry no
+    /// `.output` varnode), so a lazy miss doesn't retry -- it silently
+    /// falls through to whatever definition dominates the read, which can
+    /// be a stale pre-call value. Two reads of the identical call result at
+    /// different points in the lowering process could therefore resolve to
+    /// two different values depending purely on visitation order.
+    ///
+    /// Mirrors Ghidra's Heritage pass (`heritage.cc`'s `guardCalls`),
+    /// which materializes every call's effect on the return register into
+    /// the SSA graph in one synchronous, whole-function sweep before any
+    /// read gets resolved -- eliminating this class of bug by construction
+    /// rather than by fixing individual read sites. `ensure_call_result_binding`
+    /// is idempotent (keyed by `LoweringSite`, short-circuits on a cache
+    /// hit), so calling it here ahead of the normal per-block lowering pass
+    /// changes nothing about *when* a binding is first requested from the
+    /// caller's perspective -- only guarantees it already exists.
+    pub(in crate::midend::builder) fn prime_call_result_bindings(&mut self) {
+        for block_idx in 0..self.pcode.blocks.len() {
+            let op_count = self.pcode.blocks[block_idx].ops.len();
+            for op_idx in 0..op_count {
+                let block = &self.pcode.blocks[block_idx];
+                let op = &block.ops[op_idx];
+                if !matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd) {
+                    continue;
+                }
+                if op.output.is_some() {
+                    continue;
+                }
+                if self.call_is_return_target_artifact(block, op_idx)
+                    || self.call_is_terminal_branchind_artifact(block, op_idx)
+                    || self.callother_is_same_instruction_call_marker(block, op_idx)
+                    || self.callother_is_guarded_trap_marker(block, op_idx)
+                {
+                    continue;
+                }
+                if !self.call_result_is_observed(block, op_idx) {
+                    continue;
+                }
+                let resolved_block_idx = self.lowering_block_index(block);
+                let op_owned = op.clone();
+                let site = LoweringSite {
+                    block_idx: resolved_block_idx,
+                    op_idx,
+                };
+                self.ensure_call_result_binding(site, &op_owned);
+            }
+        }
+    }
+
     pub(in crate::midend) fn lower_block_stmts(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
