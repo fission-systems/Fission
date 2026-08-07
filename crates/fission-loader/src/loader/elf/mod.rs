@@ -2124,24 +2124,15 @@ fn generate_elf_header_types(
 ) {
     use crate::loader::types::{InferredFieldInfo, InferredTypeInfo};
     let mut types = Vec::new();
-    let mut symbols = std::collections::HashMap::new();
-
-    // Every symbol/type this function registers lives at `image_base +
-    // <small header-relative offset>` (0 for the ELF header itself, ~64 for
-    // Program Headers, ...). For a normal non-PIE executable those are large,
-    // effectively unique addresses (e.g. 0x400000+) that never collide with
-    // anything else. For a PIE/shared-object binary, whose *link-time*
-    // image_base is 0, they collapse to tiny integers (0, 64, ...) that are
-    // indistinguishable from ordinary small constants used everywhere else
-    // in the program (loop bounds, buffer sizes, struct offsets). Genuine
-    // self-introspection of a binary's own ELF headers is rare; ordinary
-    // small integer constants are not -- registering these names for a
-    // link-time-zero base does far more harm (every such constant renders
-    // as `&ELF_HEADER`/`&PROGRAM_HEADERS` instead of its real value) than
-    // the feature is worth, so skip it entirely in that case.
-    if image_base == 0 {
-        return (types, symbols);
-    }
+    // Struct layouts (below) are address-scoped and only surface via
+    // explicit type-at-address lookups, so they're safe to generate
+    // regardless of image_base. Symbol *names* used to be registered here
+    // too, but that fed the constant-pointer-canonicalization pass and
+    // caused unrelated computed addresses throughout the binary to render
+    // as `&ELF_HEADER [+ offset]` -- see the comment at the first
+    // (removed) `symbols.insert` call site below for details. This map is
+    // kept only for call-site signature compatibility.
+    let symbols = std::collections::HashMap::new();
 
     // 1. ELF Header
     let ehdr_name = if is_64bit { "Elf64_Ehdr" } else { "Elf32_Ehdr" };
@@ -2329,7 +2320,17 @@ fn generate_elf_header_types(
         size: ehdr_size,
         metadata_address: image_base,
     });
-    symbols.insert(image_base, "ELF_HEADER".to_string());
+    // Deliberately not registered into `symbols`: this map feeds the
+    // constant-pointer-canonicalization pass, which rewrites any raw
+    // address constant into `&SYMBOL_NAME [+ offset]`. `image_base` is the
+    // base every other address in the binary is naturally computed
+    // relative to (e.g. ADRP-style page-then-offset address construction),
+    // so registering a name here causes unrelated computed addresses --
+    // most commonly a plain function pointer -- to render as
+    // `&ELF_HEADER + <large offset>` instead of the real symbol they
+    // actually point to. Genuine ELF-header self-introspection is rare
+    // enough that this isn't worth the collateral damage; the struct type
+    // above is still available for explicit type-at-address lookups.
 
     // 2. Program Headers
     if phoff != 0 && phnum > 0 {
@@ -2447,7 +2448,6 @@ fn generate_elf_header_types(
             size: phdr_size * phnum as u32,
             metadata_address: phdr_va,
         });
-        symbols.insert(phdr_va, "PROGRAM_HEADERS".to_string());
     }
 
     // 3. Section Headers
@@ -2590,7 +2590,6 @@ fn generate_elf_header_types(
             size: shdr_size * shnum as u32,
             metadata_address: shdr_va,
         });
-        symbols.insert(shdr_va, "SECTION_HEADERS".to_string());
     }
 
     (types, symbols)
