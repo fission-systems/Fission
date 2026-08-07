@@ -85,7 +85,10 @@ fn instruction_cbranch_exits_to_fallthrough(ops: &[PcodeOp], fallthrough: u64) -
     let Some(last) = ops.last() else {
         return false;
     };
-    if !matches!(last.opcode, PcodeOpcode::Return | PcodeOpcode::BranchInd) {
+    if !matches!(
+        last.opcode,
+        PcodeOpcode::Return | PcodeOpcode::BranchInd | PcodeOpcode::Branch
+    ) {
         return false;
     }
     ops[..ops.len() - 1]
@@ -797,6 +800,14 @@ impl RuntimeSleighFrontend {
                     if let Some(target) = direct_target {
                         enqueue_internal_target(&mut queue, entry_address, bytes.len(), target);
                     }
+                    if cbranch_exits_to_fallthrough {
+                        enqueue_internal_target(
+                            &mut queue,
+                            entry_address,
+                            bytes.len(),
+                            fallthrough,
+                        );
+                    }
                 }
                 Some(PcodeOpcode::CBranch) => {
                     if let Some(target) = direct_target {
@@ -884,6 +895,12 @@ impl RuntimeSleighFrontend {
                             if internal_byte_offset(entry_address, bytes.len(), target).is_some() {
                                 reach_queue.push_back(target);
                             }
+                        }
+                        if cbranch_exits_to_fallthrough
+                            && internal_byte_offset(entry_address, bytes.len(), fallthrough)
+                                .is_some()
+                        {
+                            reach_queue.push_back(fallthrough);
                         }
                     }
                     Some(PcodeOpcode::CBranch) => {
