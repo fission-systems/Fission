@@ -112,6 +112,101 @@ fn stmt_contains_rhs_var(stmt: &PreHirStmt, target: &str) -> bool {
     }
 }
 
+/// True if every appearance of `target` as a read anywhere in `stmts` is a
+/// bare, direct store of the whole register straight to memory (`*ptr =
+/// target;`, with `target` as nothing more than the stored value), and it's
+/// never read in any other form. That's the ARM32 `push {rN, lr}` prologue
+/// idiom -- an alignment-padding register spilled once and never read back,
+/// as itself or through the memory it was spilled to -- which shouldn't
+/// count as evidence of a genuine incoming argument the way a real
+/// parameter (later read back from its home slot, or used directly) would.
+fn only_used_as_bare_store_value(stmts: &[PreHirStmt], target: &str) -> bool {
+    let mut found_other_use = false;
+    let mut found_store_use = false;
+    walk_rhs_var_uses(stmts, target, &mut found_other_use, &mut found_store_use);
+    found_store_use && !found_other_use
+}
+
+fn walk_rhs_var_uses(
+    stmts: &[PreHirStmt],
+    target: &str,
+    found_other: &mut bool,
+    found_store: &mut bool,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                if lvalue_address_contains_var(lhs, target) {
+                    *found_other = true;
+                }
+                if matches!(lhs, PreHirLValue::Deref { .. })
+                    && matches!(rhs, PreHirExpr::Var(name) if name == target)
+                {
+                    *found_store = true;
+                } else if expr_contains_var(rhs, target) {
+                    *found_other = true;
+                }
+            }
+            PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => {
+                if expr_contains_var(e, target) {
+                    *found_other = true;
+                }
+            }
+            PreHirStmt::VaStart { va_list, .. } => {
+                if expr_contains_var(va_list, target) {
+                    *found_other = true;
+                }
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
+                walk_rhs_var_uses(body, target, found_other, found_store);
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                if expr_contains_var(cond, target) {
+                    *found_other = true;
+                }
+                walk_rhs_var_uses(then_body, target, found_other, found_store);
+                walk_rhs_var_uses(else_body, target, found_other, found_store);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                if expr_contains_var(expr, target) {
+                    *found_other = true;
+                }
+                for case in cases {
+                    walk_rhs_var_uses(&case.body, target, found_other, found_store);
+                }
+                walk_rhs_var_uses(default, target, found_other, found_store);
+            }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+}
+
+fn lvalue_address_contains_var(lvalue: &PreHirLValue, target: &str) -> bool {
+    match lvalue {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_contains_var(ptr, target),
+        PreHirLValue::Index { base, index, .. } => {
+            expr_contains_var(base, target) || expr_contains_var(index, target)
+        }
+        PreHirLValue::FieldAccess { base, .. } => expr_contains_var(base, target),
+    }
+}
+
 fn expr_contains_var(expr: &PreHirExpr, target: &str) -> bool {
     match expr {
         PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => name == target,
@@ -262,6 +357,9 @@ fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
                 .iter()
                 .any(|stmt| stmt_contains_rhs_var(stmt, &hw))
             {
+                continue;
+            }
+            if only_used_as_bare_store_value(&func.body, &hw) {
                 continue;
             }
             ensure_param_binding(func, slot, param_ty_for_abi(func));
