@@ -2073,12 +2073,15 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
+        const VARNODE_REDIRECT_DEPTH_CAP: u32 = 64;
         if !visiting.insert(key.clone()) {
             if let Some((site, op)) = def_site
                 && Some(site) != self.current_lowering_site
+                && self.varnode_redirect_depth < VARNODE_REDIRECT_DEPTH_CAP
             {
                 let mut prior_visiting = visiting.clone();
-                return self
+                self.varnode_redirect_depth += 1;
+                let result = self
                     .with_lowering_site(site, |this| this.lower_def_op(op, &mut prior_visiting))
                     .map(|expr| self.project_alias_def_expr(vn, op, expr))
                     .map_err(|err| {
@@ -2097,6 +2100,8 @@ impl<'a> PreviewBuilder<'a> {
                         }
                         classified
                     });
+                self.varnode_redirect_depth -= 1;
+                return result;
             }
             let cycle_name = if is_unique_space_id(vn.space_id) {
                 crate::arch::x86::unique_x86_register_name(vn.offset, vn.size).map_or_else(

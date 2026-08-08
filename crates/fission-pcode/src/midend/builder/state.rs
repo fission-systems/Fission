@@ -148,4 +148,19 @@ pub(crate) struct PreviewBuilder<'a> {
     /// (which don't hold a `&host` reference) can share a live handle. See
     /// PROJECT.md.
     pub(crate) structuring_total_work_units: std::rc::Rc<std::cell::Cell<u64>>,
+    /// Hard cap on `lower_varnode_inner`'s "re-enter via a different lowering
+    /// site" redirect (`expr/lower_expr.rs`). That redirect clones `visiting`
+    /// rather than sharing it, on purpose (revisiting a key through a
+    /// genuinely different site can be legitimate, not a cycle) -- but that
+    /// means the clone resets `visiting`'s own cycle detection for the new
+    /// call, so a pcode shape where the def-site keeps differing on each
+    /// re-entry (observed on a real loop-heavy string-compare function,
+    /// register reuse across iterations since pcode doesn't SSA-rename
+    /// registers) recurses with no bound `visiting` alone can catch,
+    /// overflowing the stack. This counts nesting through that specific
+    /// path; past the cap, `lower_varnode_inner` falls back to the same
+    /// synthetic `tmp_*` placeholder the immediate-cycle case already uses,
+    /// same as `depth > 8` guards a different recursive walk in the same
+    /// file.
+    pub(crate) varnode_redirect_depth: u32,
 }
