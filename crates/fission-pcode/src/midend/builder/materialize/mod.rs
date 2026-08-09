@@ -3811,44 +3811,54 @@ impl<'a> PreviewBuilder<'a> {
         if !is_materializable_output_opcode(op.opcode) {
             return Ok(None);
         }
-        let rhs = match self.lower_def_op(op, &mut HashSet::default()) {
-            Ok(rhs) => rhs,
-            Err(err)
-                if matches!(
-                    err,
-                    MlilPreviewError::LoweringFailed
-                        | MlilPreviewError::UnsupportedExprVarnodeLowering
-                        | MlilPreviewError::UnsupportedExprAddressMaterialization
-                        | MlilPreviewError::UnsupportedExprIndirectValueSource
-                        | MlilPreviewError::UnsupportedExprPieceShape
-                        | MlilPreviewError::UnsupportedExprPtrArithmetic
-                        | MlilPreviewError::UnsupportedExprMemoryBackedVarnode
-                        | MlilPreviewError::UnsupportedExprMultiequal
-                ) =>
-            {
-                self.debug_lowering_error(
-                    "materialize_output_skip",
-                    block_addr,
-                    u64::from(op.seq_num),
-                    op.opcode,
-                    &err,
-                );
-                return Ok(None);
-            }
-            Err(err) => {
-                self.debug_lowering_error(
-                    "materialize_output",
-                    block_addr,
-                    u64::from(op.seq_num),
-                    op.opcode,
-                    &err,
-                );
-                return Err(err);
-            }
-        };
-        let rhs = self.rewrite_block_entry_accumulator_rhs_with_live_gpr(block_addr, op, rhs);
-        let _ = output;
-        Ok(Some(rhs))
+        let active_key = MaterializedVarnodeKey::new(output, op);
+        if !self.active_materialized_rhs_keys.insert(active_key.clone()) {
+            return Ok(None);
+        }
+
+        let result = (|| {
+            let rhs = match self.lower_def_op(op, &mut HashSet::default()) {
+                Ok(rhs) => rhs,
+                Err(err)
+                    if matches!(
+                        err,
+                        MlilPreviewError::LoweringFailed
+                            | MlilPreviewError::UnsupportedExprVarnodeLowering
+                            | MlilPreviewError::UnsupportedExprAddressMaterialization
+                            | MlilPreviewError::UnsupportedExprIndirectValueSource
+                            | MlilPreviewError::UnsupportedExprPieceShape
+                            | MlilPreviewError::UnsupportedExprPtrArithmetic
+                            | MlilPreviewError::UnsupportedExprMemoryBackedVarnode
+                            | MlilPreviewError::UnsupportedExprMultiequal
+                    ) =>
+                {
+                    self.debug_lowering_error(
+                        "materialize_output_skip",
+                        block_addr,
+                        u64::from(op.seq_num),
+                        op.opcode,
+                        &err,
+                    );
+                    return Ok(None);
+                }
+                Err(err) => {
+                    self.debug_lowering_error(
+                        "materialize_output",
+                        block_addr,
+                        u64::from(op.seq_num),
+                        op.opcode,
+                        &err,
+                    );
+                    return Err(err);
+                }
+            };
+            let rhs = self.rewrite_block_entry_accumulator_rhs_with_live_gpr(block_addr, op, rhs);
+            Ok(Some(rhs))
+        })();
+
+        let removed = self.active_materialized_rhs_keys.remove(&active_key);
+        debug_assert!(removed, "active materialized RHS key must remain balanced");
+        result
     }
 
     fn output_replacement_is_complete(

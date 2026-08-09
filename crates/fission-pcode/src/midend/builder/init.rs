@@ -150,6 +150,7 @@ impl<'a> PreviewBuilder<'a> {
             used_param_local_names: HashSet::default(),
             temp_next_id: 0,
             materialized_vns: HashMap::default(),
+            active_materialized_rhs_keys: BuilderCacheSet::default(),
             load_address_bindings: HashSet::default(),
             load_value_bindings: HashSet::default(),
             explicit_merge_bindings: HashMap::default(),

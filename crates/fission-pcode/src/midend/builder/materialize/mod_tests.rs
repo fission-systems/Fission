@@ -16,6 +16,46 @@ fn register(space_id: u64, offset: u64, size: u32) -> Varnode {
 }
 
 #[test]
+fn materialized_rhs_reentry_through_self_predecessor_fails_closed() {
+    let eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+    let seed = op(1, PcodeOpcode::Copy, Some(eax.clone()), vec![constant(0)]);
+    let update = op(
+        2,
+        PcodeOpcode::IntAdd,
+        Some(eax.clone()),
+        vec![eax, constant(1)],
+    );
+    let pcode = pcode_function(vec![
+        block_at(0x1000, 0, vec![seed]),
+        block_at(0x1010, 1, vec![update.clone()]),
+    ]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    // The join's loop/back-edge predecessor is itself. Recovering that
+    // predecessor definition therefore reaches the same unmaterialized
+    // output def-site that started this RHS-recovery attempt.
+    builder.predecessors[1] = vec![0, 1];
+
+    let lowered = builder
+        .with_lowering_site(
+            LoweringSite {
+                block_idx: 1,
+                op_idx: 0,
+            },
+            |builder| {
+                builder.try_lower_materialized_output_rhs(pcode.blocks[1].start_address, &update)
+            },
+        )
+        .expect("cyclic predecessor recovery should fail closed");
+
+    assert!(lowered.is_some(), "outer RHS recovery should remain usable");
+    assert!(
+        builder.active_materialized_rhs_keys.is_empty(),
+        "active def-site markers must be balanced after recovery"
+    );
+}
+
+#[test]
 fn call_result_observation_accepts_partial_return_register_reads() {
     let ret_eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
     let ebx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0c, 4);

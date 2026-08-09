@@ -65,6 +65,13 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) used_param_local_names: HashSet<String>,
     pub(crate) temp_next_id: u32,
     pub(crate) materialized_vns: HashMap<MaterializedVarnodeKey, String>,
+    /// Def-sites currently being expanded by
+    /// `try_lower_materialized_output_rhs`. Predecessor-value recovery can
+    /// route from a join back through a loop predecessor to the same
+    /// unmaterialized definition; that is a cyclic expression graph, so the
+    /// nested attempt must fail closed instead of recursively expanding the
+    /// same def-site until the thread stack is exhausted.
+    pub(crate) active_materialized_rhs_keys: BuilderCacheSet<MaterializedVarnodeKey>,
     pub(crate) load_address_bindings: HashSet<String>,
     pub(crate) load_value_bindings: HashSet<String>,
     pub(crate) explicit_merge_bindings: HashMap<(usize, VarnodeKey), String>,
