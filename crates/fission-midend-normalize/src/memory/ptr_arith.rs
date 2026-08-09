@@ -1229,33 +1229,12 @@ fn recover_in_expr(expr: &mut PreHirExpr, binding_types: &HashMap<String, NirTyp
                 changed |= recover_in_expr(arg, binding_types);
             }
         }
-        PreHirExpr::PtrOffset { base, offset } => {
-            // Fix residual `PtrOffset(+k)` where k is a field *index* mis-scaled
-            // as a sub-element byte offset (Pair/KV `.value` as +1 → +4).
-            if *offset > 0 {
-                if let Some((_, ptr_ty, _)) = typed_pointer_base(base, binding_types) {
-                    if let Some(elem_ty) = pointee_ty(&ptr_ty) {
-                        let scale = match elem_ty {
-                            NirType::Int { .. } | NirType::Float { .. } => {
-                                type_byte_size(elem_ty).filter(|&sz| sz > 1)
-                            }
-                            NirType::Aggregate { fields, .. } => fields
-                                .iter()
-                                .filter_map(|f| type_byte_size(&f.ty))
-                                .find(|&sz| sz > 1)
-                                .or(Some(4)),
-                            _ => None,
-                        };
-                        if let Some(scale) = scale {
-                            let scale_i = i64::try_from(scale).unwrap_or(0);
-                            if scale_i > 0 && *offset < scale_i {
-                                *offset = offset.saturating_mul(scale_i);
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-            }
+        PreHirExpr::PtrOffset { base, .. } => {
+            // `PtrOffset.offset` is already a byte offset. Pointee refinement
+            // can change the base type after this node was formed, but cannot
+            // safely recover whether an earlier scalar was an element count.
+            // Rescaling here therefore corrupts proven byte advances whenever
+            // the new pointee is wider than the offset.
             changed |= recover_in_expr(base, binding_types);
         }
         PreHirExpr::FieldAccess { base, .. } => {
@@ -1944,6 +1923,34 @@ mod tests {
         } else {
             panic!("expected assign");
         }
+    }
+
+    /// `PtrOffset` carries bytes, so later pointee refinement cannot reinterpret
+    /// a small offset as an element count (`+4` must not become `+32` for u64*).
+    #[test]
+    fn ptr_offset_byte_unit_survives_later_pointee_refinement() {
+        let p_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 64,
+            signed: false,
+        }));
+        let body = vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("result".to_owned()),
+            rhs: PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("p".to_owned())),
+                offset: 4,
+            },
+        }];
+        let mut func = make_func(vec![make_binding_with_ty("p", p_ty)], body);
+
+        super::apply_ptr_arith_recovery_pass(&mut func);
+
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::PtrOffset { offset: 4, .. },
+                ..
+            }
+        ));
     }
 
     /// Add(Var("p"), Const(4)) where p: Ptr(uint32) → Add(Var("p"), Const(1)).
