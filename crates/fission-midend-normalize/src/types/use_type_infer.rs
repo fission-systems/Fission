@@ -50,6 +50,8 @@ enum UseConstraint {
 struct BindingUseRole {
     address_use: bool,
     scalar_use: bool,
+    pointer_value_definition: bool,
+    non_pointer_value_definition: bool,
 }
 
 #[derive(Default)]
@@ -98,6 +100,14 @@ fn collect_binding_use_roles(stmts: &[PreHirStmt], out: &mut HashMap<String, Bin
 fn collect_binding_use_roles_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, BindingUseRole>) {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
+            if let PreHirLValue::Var(name) = lhs {
+                let role = out.entry(name.clone()).or_default();
+                if matches!(expr_type(rhs), NirType::Ptr(_)) {
+                    role.pointer_value_definition = true;
+                } else {
+                    role.non_pointer_value_definition = true;
+                }
+            }
             collect_binding_use_roles_lvalue(lhs, out);
             collect_binding_use_roles_expr(rhs, out);
         }
@@ -2288,8 +2298,12 @@ fn restore_scalar_only_pointer_locals(
         let scalar_evidence = role.is_some_and(|role| role.scalar_use)
             || has_exact_scalar_constraint(constraints.get(&binding.name));
         let address_use = role.is_some_and(|role| role.address_use);
+        let exclusively_pointer_defined = role.is_some_and(|role| {
+            role.pointer_value_definition && !role.non_pointer_value_definition
+        });
         if scalar_evidence
             && !address_use
+            && !exclusively_pointer_defined
             && !pointer_compare_peers.contains_key(&binding.name)
             && !transitive_address_locals.contains_key(&binding.name)
         {
@@ -2826,6 +2840,65 @@ mod tests {
         assert!(super::apply_use_driven_type_infer_pass(&mut func));
         let x = func.locals.iter().find(|local| local.name == "x").unwrap();
         assert_eq!(x.ty, u64_ty);
+        assert!(!super::apply_use_driven_type_infer_pass(&mut func));
+    }
+
+    #[test]
+    fn pointer_defined_local_with_scalar_address_arithmetic_stays_pointer() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let byte_ptr_ty = NirType::Ptr(Box::new(u8_ty));
+        let body = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cursor_base".to_owned()),
+                rhs: PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("input".to_owned())),
+                    offset: 4,
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("end".to_owned()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("cursor_base".to_owned())),
+                    rhs: Box::new(PreHirExpr::Var("span".to_owned())),
+                    ty: u64_ty.clone(),
+                },
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_typed_binding(
+                    "cursor_base",
+                    byte_ptr_ty.clone(),
+                    NirBindingOrigin::TempPreserved,
+                ),
+                make_typed_binding("span", u64_ty.clone(), NirBindingOrigin::TempPreserved),
+                make_typed_binding("end", u64_ty, NirBindingOrigin::TempPreserved),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.params = vec![make_typed_binding(
+            "input",
+            byte_ptr_ty.clone(),
+            NirBindingOrigin::ParamIndex(0),
+        )];
+        func.is_64bit = true;
+
+        super::apply_use_driven_type_infer_pass(&mut func);
+        let cursor_base = func
+            .locals
+            .iter()
+            .find(|local| local.name == "cursor_base")
+            .unwrap();
+        assert!(matches!(cursor_base.ty, NirType::Ptr(_)));
         assert!(!super::apply_use_driven_type_infer_pass(&mut func));
     }
 
