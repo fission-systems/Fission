@@ -107,6 +107,14 @@ impl<'a> PreviewBuilder<'a> {
         let output_ty = type_from_size(output.size, output_signed);
         let byte_offset =
             const_offset(&op.inputs[1]).ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
+        if let Some(lane) =
+            self.lower_register_subpiece_lane(&op.inputs[0], output, byte_offset, visiting)?
+        {
+            return Ok(PreHirExpr::Cast {
+                ty: output_ty,
+                expr: Box::new(lane),
+            });
+        }
         let shifted = if byte_offset == 0 {
             base
         } else {
@@ -135,6 +143,87 @@ impl<'a> PreviewBuilder<'a> {
             ty: output_ty,
             expr: Box::new(shifted),
         })
+    }
+
+    fn lower_register_subpiece_lane(
+        &mut self,
+        wide: &Varnode,
+        output: &Varnode,
+        byte_offset: i64,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
+        if !is_register_space_id(wide.space_id) || wide.size <= output.size || byte_offset < 0 {
+            return Ok(None);
+        }
+        let byte_offset =
+            u64::try_from(byte_offset).map_err(|_| MlilPreviewError::UnsupportedExprPieceShape)?;
+        let output_size = u64::from(output.size);
+        let wide_size = u64::from(wide.size);
+        let Some(lane_end_from_lsb) = byte_offset.checked_add(output_size) else {
+            return Ok(None);
+        };
+        if lane_end_from_lsb > wide_size {
+            return Ok(None);
+        }
+        let lane_storage_offset = if self.options.is_big_endian {
+            wide_size - lane_end_from_lsb
+        } else {
+            byte_offset
+        };
+        let requested = Varnode {
+            space_id: wide.space_id,
+            offset: wide.offset.saturating_add(lane_storage_offset),
+            size: output.size,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let Some(scope) = self.current_lowering_site else {
+            return Ok(None);
+        };
+        let Some(block) = self.pcode.blocks.get(scope.block_idx) else {
+            return Ok(None);
+        };
+        let requested_start = requested.offset;
+        let requested_end = requested_start.saturating_add(output_size);
+        let Some((def_idx, def)) = block
+            .ops
+            .iter()
+            .enumerate()
+            .take(scope.op_idx.min(block.ops.len()))
+            .rev()
+            .find(|(_, candidate)| {
+                candidate.output.as_ref().is_some_and(|candidate_output| {
+                    if candidate_output.is_constant
+                        || candidate_output.space_id != requested.space_id
+                    {
+                        return false;
+                    }
+                    let candidate_start = candidate_output.offset;
+                    let candidate_end =
+                        candidate_start.saturating_add(u64::from(candidate_output.size));
+                    candidate_start < requested_end && requested_start < candidate_end
+                })
+            })
+            .map(|(idx, def)| (idx, def.clone()))
+        else {
+            return Ok(None);
+        };
+        let def_output = def
+            .output
+            .as_ref()
+            .ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
+        let def_site = LoweringSite {
+            block_idx: scope.block_idx,
+            op_idx: def_idx,
+        };
+
+        if VarnodeKey::from(def_output) == VarnodeKey::from(&requested) {
+            let expr =
+                self.with_lowering_site(def_site, |this| this.lower_def_op(&def, visiting))?;
+            return Ok(Some(expr));
+        }
+
+        self.lower_covering_passthrough_register_lane(&requested, def_site, &def, visiting)
     }
 
     fn extract_subpiece_origin(&self, vn: &Varnode) -> Option<SubpieceOrigin> {

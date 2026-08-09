@@ -681,6 +681,85 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    pub(in crate::midend) fn lower_covering_passthrough_register_lane(
+        &mut self,
+        requested: &Varnode,
+        def_site: LoweringSite,
+        def: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
+        if requested.is_constant
+            || !is_register_space_id(requested.space_id)
+            || !matches!(
+                def.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            )
+        {
+            return Ok(None);
+        }
+        let Some(output) = def.output.as_ref() else {
+            return Ok(None);
+        };
+        let requested_key = VarnodeKey::from(requested);
+        let output_key = VarnodeKey::from(output);
+        if output.size < 16
+            || output.size <= requested.size
+            || !Self::register_key_covers(&output_key, &requested_key)
+        {
+            return Ok(None);
+        }
+        let Some(input) = def.inputs.first() else {
+            return Ok(None);
+        };
+        let output_end = output.offset.saturating_add(u64::from(output.size));
+        let requested_end = requested.offset.saturating_add(u64::from(requested.size));
+        let relative_lsb_offset = if self.options.is_big_endian {
+            output_end.saturating_sub(requested_end)
+        } else {
+            requested.offset.saturating_sub(output.offset)
+        };
+        let requested_size = u64::from(requested.size);
+        let input_size = u64::from(input.size);
+        let Some(input_lane_end) = relative_lsb_offset.checked_add(requested_size) else {
+            return Ok(None);
+        };
+        if input_lane_end > input_size {
+            return Ok(None);
+        }
+        if input.is_constant {
+            let shift = relative_lsb_offset.saturating_mul(8);
+            if shift >= 64 {
+                return Ok(None);
+            }
+            let bits = requested.size.saturating_mul(8);
+            let mask = if bits >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << bits) - 1
+            };
+            let value = ((input.constant_val as u64) >> shift) & mask;
+            return Ok(Some(PreHirExpr::Const(
+                value as i64,
+                type_from_size(requested.size, false),
+            )));
+        }
+        let input_storage_offset = if self.options.is_big_endian {
+            input_size - input_lane_end
+        } else {
+            relative_lsb_offset
+        };
+        let input_lane = Varnode {
+            space_id: input.space_id,
+            offset: input.offset.saturating_add(input_storage_offset),
+            size: requested.size,
+            is_constant: false,
+            constant_val: 0,
+        };
+        self.with_lowering_site(def_site, |this| {
+            this.lower_varnode(&input_lane, visiting).map(Some)
+        })
+    }
+
     fn projection_shift_bytes(&self, output: &Varnode, requested: &Varnode) -> u64 {
         if self.options.is_big_endian {
             let output_end = output.offset.saturating_add(u64::from(output.size));
@@ -1908,6 +1987,12 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let def_site = self.lookup_def_site(vn);
+        if let Some((site, def)) = def_site.map(|(site, def)| (site, def.clone()))
+            && let Some(expr) =
+                self.lower_covering_passthrough_register_lane(vn, site, &def, visiting)?
+        {
+            return Ok(expr);
+        }
         if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
             return Ok(PreHirExpr::Var(name));
         }

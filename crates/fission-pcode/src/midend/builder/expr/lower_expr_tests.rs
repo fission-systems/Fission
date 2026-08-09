@@ -75,6 +75,84 @@ fn test_options() -> MlilPreviewOptions {
 }
 
 #[test]
+fn wide_register_subpiece_projects_covering_passthrough_input_lane() {
+    let mut source = varnode(0x9000);
+    source.size = 8;
+    let wide = register(0x1200, 16);
+    let lane = register(0x10, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(source.clone()),
+                vec![constant_sized(0x5566_7788, 8)],
+            ),
+            op(1, PcodeOpcode::IntZExt, Some(wide.clone()), vec![source]),
+            op(
+                2,
+                PcodeOpcode::SubPiece,
+                Some(lane.clone()),
+                vec![wide, constant_sized(0, 4)],
+            ),
+            op(3, PcodeOpcode::Return, None, vec![lane]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "wide_passthrough_lane", 0x1000, &test_options())
+        .expect("render wide passthrough lane");
+
+    assert!(
+        code.contains("return 1432778632;"),
+        "expected the low scalar lane, not an aggregate cast:\n{code}"
+    );
+    assert!(
+        !code.contains("fission_agg16"),
+        "unexpected aggregate:\n{code}"
+    );
+}
+
+#[test]
+fn wide_register_subpiece_projects_exact_partial_lane_definition() {
+    let wide = register(0x1200, 16);
+    let written_lane = register(0x1204, 4);
+    let result = register(0x10, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(written_lane),
+                vec![constant_sized(7, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::SubPiece,
+                Some(result.clone()),
+                vec![wide, constant_sized(4, 4)],
+            ),
+            op(2, PcodeOpcode::Return, None, vec![result]),
+        ],
+    )]);
+
+    let code = render_mlil_preview(&pcode, "wide_partial_lane", 0x1000, &test_options())
+        .expect("render exact partial lane");
+
+    assert!(
+        code.contains("return 7;"),
+        "expected the exact prior lane definition:\n{code}"
+    );
+    assert!(
+        !code.contains("fission_agg16"),
+        "unexpected aggregate:\n{code}"
+    );
+}
+
+#[test]
 fn diamond_join_lowers_branch_local_register_defs_as_select() {
     let cond = varnode(0x80);
     let rax = register(0, 8);

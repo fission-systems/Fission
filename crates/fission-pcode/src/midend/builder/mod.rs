@@ -672,7 +672,11 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn with_lowering_site<T>(&mut self, site: LoweringSite, f: impl FnOnce(&mut Self) -> T) -> T {
+    pub(in crate::midend) fn with_lowering_site<T>(
+        &mut self,
+        site: LoweringSite,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let prev = self.current_lowering_site;
         self.lowering_site_depth += 1;
         self.current_lowering_site = Some(site);
