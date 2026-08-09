@@ -408,10 +408,32 @@ pub fn shared_exit_for_indices(host: &mut impl StructuringHost,
         Ok(shared)
     }
 
-pub fn linear_exit(host: &mut impl StructuringHost, 
+pub fn linear_exit(host: &mut impl StructuringHost,
         start_idx: usize,
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        linear_exit_with_budget(host, start_idx, None)
+        // Callers of this no-argument convenience wrapper (the
+        // `try_lower_short_circuit_*` family) don't thread an
+        // `IfLoweringBudget` through their own signatures, which otherwise
+        // left this entry point's recursion bounded only by
+        // `MAX_LINEAR_STRUCTURING_DEPTH` -- and `linear_exit_from`'s `Cond`
+        // arm clones `visited` and explores both branches independently, so
+        // depth alone permits up to ~2^depth total work for a CFG with many
+        // sequential conditionals. Building a real budget here (reusing the
+        // host's shared work counter, same as `try_lower_while` and friends
+        // in `loops.rs`) caps it like every other entry point already is,
+        // without changing the call chain's signatures. Found via a
+        // multi-minute hang decompiling iproute2's real-world
+        // `print_linkinfo` (159 blocks) while validating Fission against
+        // held-out code outside its own 8-file synthetic test corpus.
+        let block_addr = host.block_start_address(start_idx);
+        let mut budget = IfLoweringBudget::new(
+            host.options(),
+            start_idx,
+            block_addr,
+            "linear_exit_standalone",
+            host.structuring_total_work_counter(),
+        );
+        linear_exit_with_budget(host, start_idx, Some(&mut budget))
     }
 
 pub fn linear_exit_with_budget(host: &mut impl StructuringHost, 

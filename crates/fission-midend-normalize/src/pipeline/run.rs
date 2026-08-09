@@ -9,11 +9,11 @@ use super::super::arith::{
     apply_ignore_nan_pass, apply_or_compare_pass, apply_subfloat_flow_pass,
     apply_three_way_compare_pass, canonicalize_condition_expr, canonicalize_flag_intrinsics,
     canonicalize_integer_expr, canonicalize_sub_xor_zero_compare, cleanup_arithmetic_wrappers,
-    collapse_zero_offset_cast,
-    merge_consecutive_shifts, normalize_boolean_logic, recognize_compiler_runtime_division,
-    recognize_concat_zext_or, recognize_dumpty_hump_cast, recognize_dumpty_hump_late,
-    recognize_hi_lo_extract, recognize_humpty_dumpty_or, recognize_magic_number_division,
-    recognize_mod_div_power_of_two, recognize_wide_integer_recombine, simplify_collect_mul_terms,
+    collapse_zero_offset_cast, merge_consecutive_shifts, normalize_boolean_logic,
+    recognize_compiler_runtime_division, recognize_concat_zext_or, recognize_dumpty_hump_cast,
+    recognize_dumpty_hump_late, recognize_hi_lo_extract, recognize_humpty_dumpty_or,
+    recognize_magic_number_division, recognize_mod_div_power_of_two,
+    recognize_wide_integer_recombine, simplify_collect_mul_terms,
     simplify_distribute_common_factor, simplify_double_add, simplify_factor_common_mul,
     simplify_negated_const, simplify_nested_adds_subs, simplify_subpiece_chain,
 };
@@ -21,8 +21,8 @@ use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
     apply_condexe_folding_pass, apply_deindirect_pass, apply_expand_load_pass,
     apply_iblock_phi_elimination, apply_subvar_trim_pass, collapse_loop_exit_alias_returns,
-    rewrite_found_path_break_to_return, rewrite_orphan_loop_gotos_to_continue,
     prune_unreachable_after_terminal, recover_guarded_loop_tail_accumulator_returns,
+    rewrite_found_path_break_to_return, rewrite_orphan_loop_gotos_to_continue,
 };
 use super::super::cleanup::{
     apply_switch_norm_pass, canonicalize_minmax_conditional_returns, cast_elision_pass,
@@ -67,12 +67,12 @@ use super::super::types::{
     apply_type_inference_pass, apply_use_driven_type_infer_pass, apply_variadic_stack_region_pass,
 };
 use crate::prelude::*;
+use fission_midend_core::wave_stats;
 use fission_midend_prehir::action_pipeline::{
     EARLY_CLEANUP_BLOCK_BLOCK_LIMIT, EARLY_CLEANUP_BLOCK_STMT_LIMIT, PassBudget,
     TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS,
 };
 use fission_midend_prehir::vsa::{apply_jump_resolver_pass, jump_resolver_candidate_count};
-use fission_midend_core::wave_stats;
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
@@ -185,7 +185,9 @@ fn contains_call_expr(expr: &PreHirExpr) -> bool {
         | PreHirExpr::AggregateCopy { src: expr, .. }
         | PreHirExpr::FieldAccess { base: expr, .. } => contains_call_expr(expr),
         PreHirExpr::Binary { lhs, rhs, .. } => contains_call_expr(lhs) || contains_call_expr(rhs),
-        PreHirExpr::Index { base, index, .. } => contains_call_expr(base) || contains_call_expr(index),
+        PreHirExpr::Index { base, index, .. } => {
+            contains_call_expr(base) || contains_call_expr(index)
+        }
         PreHirExpr::Select {
             cond,
             then_expr,
@@ -214,7 +216,9 @@ fn contains_call_lvalue(lhs: &PreHirLValue) -> bool {
 fn contains_call_stmt(stmt: &PreHirStmt) -> bool {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => contains_call_lvalue(lhs) || contains_call_expr(rhs),
-        PreHirStmt::VaStart { va_list, .. } | PreHirStmt::Expr(va_list) => contains_call_expr(va_list),
+        PreHirStmt::VaStart { va_list, .. } | PreHirStmt::Expr(va_list) => {
+            contains_call_expr(va_list)
+        }
         PreHirStmt::Block(stmts)
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. } => contains_call_stmts(stmts),
@@ -565,7 +569,9 @@ fn stmt_has_memory_surface_interest(stmt: &PreHirStmt) -> bool {
         PreHirStmt::Assign { lhs, rhs } => {
             lvalue_has_memory_surface_interest(lhs) || expr_has_memory_surface_interest(rhs)
         }
-        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_has_memory_surface_interest(expr),
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+            expr_has_memory_surface_interest(expr)
+        }
         PreHirStmt::If {
             cond,
             then_body,
@@ -1112,7 +1118,12 @@ pub fn run_cleanup_family_passes(
     changed
 }
 
-pub fn run_pass_logged<F>(func: &mut PreHirFunction, pass_name: &str, perf: bool, pass_fn: F) -> bool
+pub fn run_pass_logged<F>(
+    func: &mut PreHirFunction,
+    pass_name: &str,
+    perf: bool,
+    pass_fn: F,
+) -> bool
 where
     F: FnOnce(&mut PreHirFunction) -> bool,
 {
@@ -1199,7 +1210,9 @@ fn collect_initializer_fingerprints(bindings: &[PreHirBinding]) -> Vec<(String, 
 pub fn body_has_loopish_shapes(stmts: &[PreHirStmt]) -> bool {
     for stmt in stmts {
         match stmt {
-            PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => return true,
+            PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => {
+                return true;
+            }
             PreHirStmt::Block(body) => {
                 if body_has_loopish_shapes(body) {
                     return true;
@@ -1335,7 +1348,9 @@ fn body_needs_stmt_fold_cleanup(stmts: &[PreHirStmt]) -> bool {
                 lhs: PreHirLValue::Var(name),
                 ..
             } if looks_like_trivial_temp_name(name) => return true,
-            PreHirStmt::Return(Some(PreHirExpr::Var(name))) if looks_like_trivial_temp_name(name) => {
+            PreHirStmt::Return(Some(PreHirExpr::Var(name)))
+                if looks_like_trivial_temp_name(name) =>
+            {
                 return true;
             }
             PreHirStmt::If {
@@ -1625,17 +1640,17 @@ fn cleanup_stmt_list_with_options_and_preserved(
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                cleanup_stmt_list_with_options_and_preserved(
-                    body,
-                    func_name,
-                    depth + 1,
-                    options,
-                    preserved_temps,
-                    global_refs,
-                    defined_labels,
-                )
-            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => cleanup_stmt_list_with_options_and_preserved(
+                body,
+                func_name,
+                depth + 1,
+                options,
+                preserved_temps,
+                global_refs,
+                defined_labels,
+            ),
             PreHirStmt::For {
                 init, update, body, ..
             } => {
@@ -1788,7 +1803,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("collapse_adjacent_pure_copy_into_if");
         }
-        if prune_unreachable_after_terminal(stmts) {
+        if prune_unreachable_after_terminal(stmts, global_refs) {
             changed = true;
             last_changed_pass = Some("prune_unreachable_after_terminal");
         }

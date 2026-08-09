@@ -6,9 +6,23 @@ use crate::prelude::{
 };
 use fission_midend_prehir::util::label_cleanup::cleanup_redundant_labels;
 
-pub fn prune_unreachable_after_terminal(stmts: &mut Vec<PreHirStmt>) -> bool {
+/// `global_refs`, when given, is the whole-function referenced-label set
+/// (as opposed to `stmts`-local `collect_referenced_labels`, which only sees
+/// `Goto`s inside this nested body). A label whose sole reference is a
+/// `Goto` from a *different* scope -- e.g. the target of a `switch` case
+/// elsewhere in the function -- is not dead just because it looks
+/// unreferenced from here; without `global_refs` this pruned a label that
+/// was still a live cross-scope jump target, leaving the other scope's
+/// `Goto` dangling with no matching label anywhere in the rendered output.
+pub fn prune_unreachable_after_terminal(
+    stmts: &mut Vec<PreHirStmt>,
+    global_refs: Option<&HashSet<String>>,
+) -> bool {
     let mut changed = false;
     let mut referenced_labels = collect_referenced_labels(stmts);
+    if let Some(refs) = global_refs {
+        referenced_labels.extend(refs.iter().cloned());
+    }
     PROTECTED_LSDA_LABELS.with(|protected| {
         referenced_labels.extend(protected.borrow().iter().cloned());
     });
@@ -143,7 +157,9 @@ pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<PreHirStmt>) ->
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 changed |= simplify_empty_and_constant_ifs_recursive(body);
             }
             PreHirStmt::For {

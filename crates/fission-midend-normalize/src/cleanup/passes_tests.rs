@@ -83,7 +83,10 @@ fn collapse_trivial_assign_returns_skips_preserved_temp() {
         &["uVar0"].into_iter().collect::<HashSet<_>>(),
     ));
     assert!(matches!(stmts[0], PreHirStmt::Assign { .. }));
-    assert!(matches!(stmts[1], PreHirStmt::Return(Some(PreHirExpr::Var(_)))));
+    assert!(matches!(
+        stmts[1],
+        PreHirStmt::Return(Some(PreHirExpr::Var(_)))
+    ));
 }
 
 #[test]
@@ -219,7 +222,9 @@ fn eliminate_redundant_var_assigns_removes_exact_self_assign() {
     assert!(eliminate_redundant_var_assigns(&mut stmts));
     assert_eq!(
         stmts,
-        vec![PreHirStmt::Return(Some(PreHirExpr::Var("xVar29".to_string())))]
+        vec![PreHirStmt::Return(Some(PreHirExpr::Var(
+            "xVar29".to_string()
+        )))]
     );
 }
 
@@ -736,7 +741,10 @@ fn eliminate_dead_temp_assigns_removes_unused_reg_flag_artifact() {
             lhs: PreHirLValue::Var("reg".to_string()),
             rhs: PreHirExpr::Call {
                 target: "__sborrow".to_string(),
-                args: vec![PreHirExpr::Var("rsp".to_string()), PreHirExpr::Const(16, int(64))],
+                args: vec![
+                    PreHirExpr::Var("rsp".to_string()),
+                    PreHirExpr::Const(16, int(64)),
+                ],
                 ty: NirType::Bool,
             },
         },
@@ -757,7 +765,10 @@ fn eliminate_dead_temp_assigns_keeps_used_reg_flag_artifact() {
             lhs: PreHirLValue::Var("reg".to_string()),
             rhs: PreHirExpr::Call {
                 target: "__sborrow".to_string(),
-                args: vec![PreHirExpr::Var("rsp".to_string()), PreHirExpr::Const(16, int(64))],
+                args: vec![
+                    PreHirExpr::Var("rsp".to_string()),
+                    PreHirExpr::Const(16, int(64)),
+                ],
                 ty: NirType::Bool,
             },
         },
@@ -795,7 +806,7 @@ fn prune_unreachable_after_return_stops_at_label_boundary() {
         PreHirStmt::Return(None),
     ];
 
-    assert!(prune_unreachable_after_terminal(&mut stmts));
+    assert!(prune_unreachable_after_terminal(&mut stmts, None));
     assert_eq!(
         stmts,
         vec![
@@ -820,7 +831,7 @@ fn prune_unreachable_after_terminal_keeps_protected_lsda_landing_pad() {
     crate::pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
         protected.borrow_mut().insert("landing_pad".to_string());
     });
-    let changed = prune_unreachable_after_terminal(&mut stmts);
+    let changed = prune_unreachable_after_terminal(&mut stmts, None);
     crate::pipeline::PROTECTED_LSDA_LABELS.with(|protected| {
         protected.borrow_mut().clear();
     });
@@ -828,6 +839,34 @@ fn prune_unreachable_after_terminal_keeps_protected_lsda_landing_pad() {
     assert!(!changed);
     assert_eq!(stmts.len(), 3);
     assert_eq!(stmts[1], PreHirStmt::Label("landing_pad".to_string()));
+}
+
+#[test]
+fn prune_unreachable_after_terminal_keeps_label_referenced_only_from_outer_scope() {
+    // The `Goto` targeting "block_8d88" lives in a sibling scope, not in
+    // `stmts` itself -- e.g. a switch case elsewhere in the same function.
+    // `stmts`-local `collect_referenced_labels` alone can't see it, so
+    // without `global_refs` this pass treated the label as dead code after
+    // the preceding `Goto` and deleted it, leaving the other scope's `Goto`
+    // dangling with no matching label anywhere in the rendered function.
+    // Reproduces the real bug traced in bin_039.elf (DecBench sample set).
+    let mut global_refs = HashSet::default();
+    global_refs.insert("block_8d88".to_string());
+
+    let mut stmts = vec![
+        PreHirStmt::Goto("block_8779".to_string()),
+        PreHirStmt::Label("block_8d88".to_string()),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("dead".to_string()),
+            rhs: PreHirExpr::Const(1, int(32)),
+        },
+    ];
+
+    let changed = prune_unreachable_after_terminal(&mut stmts, Some(&global_refs));
+
+    assert!(!changed);
+    assert_eq!(stmts.len(), 3);
+    assert_eq!(stmts[1], PreHirStmt::Label("block_8d88".to_string()));
 }
 
 #[test]
