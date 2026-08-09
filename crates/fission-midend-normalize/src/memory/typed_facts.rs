@@ -1,7 +1,8 @@
-use crate::prelude::*;
 use super::partition::{
     MemoryAccessKind, MemoryEscapeClass, collect_partitioned_memory_accesses, type_byte_size,
 };
+use crate::analysis::defuse::DefinitionDependencyMap;
+use crate::prelude::*;
 use fission_midend_core::wave_stats::{
     add_object_root_fact_promotions, add_surface_fact_promotions, add_typed_fact_conflicts,
     add_typed_fact_evidences,
@@ -224,6 +225,57 @@ pub(super) fn should_infer_aggregate(accesses: &BTreeMap<u32, TypedAccessFacts>)
     accesses.keys().any(|offset| *offset != 0)
 }
 
+/// Convert a direct C pointer-element add back to the byte offset used by
+/// object-layout facts. `PtrOffset` is already byte-based, while a surviving
+/// `Binary(Add/Sub)` on a concrete `T *` is an element count (`p + 2` means
+/// `2 * sizeof(T)`).
+fn object_layout_byte_offset(
+    access: &super::partition::PartitionedMemoryAccess,
+    binding: &PreHirBinding,
+) -> Option<u32> {
+    if access.const_offset < 0 {
+        return None;
+    }
+
+    fn strip_casts(expr: &PreHirExpr) -> &PreHirExpr {
+        match expr {
+            PreHirExpr::Cast { expr, .. } => strip_casts(expr),
+            _ => expr,
+        }
+    }
+
+    let direct_element_offset = match strip_casts(&access.ptr) {
+        PreHirExpr::Binary { op, lhs, rhs, .. } if matches!(lhs.as_ref(), PreHirExpr::Var(name) if name == &binding.name) =>
+        {
+            let PreHirExpr::Const(value, _) = rhs.as_ref() else {
+                return Some(access.const_offset as u32);
+            };
+            match op {
+                PreHirBinaryOp::Add => Some(*value),
+                PreHirBinaryOp::Sub => value.checked_neg(),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+
+    let Some(element_offset) = direct_element_offset else {
+        return Some(access.const_offset as u32);
+    };
+    if element_offset != access.const_offset || element_offset < 0 {
+        return Some(access.const_offset as u32);
+    }
+    let NirType::Ptr(pointee) = &binding.ty else {
+        return Some(access.const_offset as u32);
+    };
+    let Some(element_size) = type_byte_size(pointee).filter(|size| *size > 1) else {
+        return Some(access.const_offset as u32);
+    };
+    element_offset
+        .checked_mul(i64::from(element_size))
+        .and_then(|offset| u32::try_from(offset).ok())
+}
+
 pub(super) fn collect_typed_fact_inventory(
     func: &PreHirFunction,
     record_stats: bool,
@@ -241,62 +293,74 @@ pub(super) fn collect_typed_fact_inventory(
         return TypedFactInventory::default();
     }
 
+    let dependencies = DefinitionDependencyMap::build(&func.body);
+    let tracked_roots = tracked.keys().cloned().collect::<crate::HashSet<_>>();
     let mut inventory = TypedFactInventory::default();
 
     for access in collect_partitioned_memory_accesses(&func.body) {
         let PreHirExpr::Var(name) = &access.base else {
             continue;
         };
-        let Some(binding) = tracked.get(name.as_str()) else {
+        if !tracked.contains_key(name.as_str()) {
+            continue;
+        }
+        let Some(access_binding) = tracked.get(name.as_str()) else {
             continue;
         };
-        if access.const_offset < 0 {
+        let Some(byte_offset) = object_layout_byte_offset(&access, access_binding) else {
             continue;
+        };
+        let mut identity_roots = dependencies
+            .identity_roots_reaching(name, &tracked_roots)
+            .into_iter()
+            .collect::<Vec<_>>();
+        if identity_roots.is_empty() {
+            identity_roots.push(name.clone());
         }
-        let key = name.clone();
-        let entry = inventory
-            .objects
-            .entry(key.clone())
-            .or_insert_with(|| TypedObjectFacts {
-                object: ObjectFact {
-                    root: object_root_id(binding),
-                    storage_class: infer_storage_class(binding),
-                    escaped: false,
-                    interval_set: Vec::new(),
-                    type_hint: binding.surface_type_name.clone(),
-                },
-                accesses: BTreeMap::new(),
-                shape: TypedObjectShape {
-                    fields: Vec::new(),
-                    array_runs: Vec::new(),
-                    opaque_ranges: Vec::new(),
-                    confidence: 0,
-                },
-                resolved_struct_name: None,
+        identity_roots.sort_unstable();
+
+        for key in identity_roots {
+            let Some(binding) = tracked.get(key.as_str()) else {
+                continue;
+            };
+            let entry = inventory
+                .objects
+                .entry(key.clone())
+                .or_insert_with(|| TypedObjectFacts {
+                    object: ObjectFact {
+                        root: object_root_id(binding),
+                        storage_class: infer_storage_class(binding),
+                        escaped: false,
+                        interval_set: Vec::new(),
+                        type_hint: binding.surface_type_name.clone(),
+                    },
+                    accesses: BTreeMap::new(),
+                    shape: TypedObjectShape {
+                        fields: Vec::new(),
+                        array_runs: Vec::new(),
+                        opaque_ranges: Vec::new(),
+                        confidence: 0,
+                    },
+                    resolved_struct_name: None,
+                });
+            let facts = entry.accesses.entry(byte_offset).or_default();
+            facts.ty = merge_field_ty(&facts.ty, &access.access_ty);
+            match access.kind {
+                MemoryAccessKind::Load => facts.loads += 1,
+                MemoryAccessKind::Store => facts.stores += 1,
+            }
+            let interval_end =
+                byte_offset.saturating_add(type_byte_size(&access.access_ty).unwrap_or(1).max(1));
+            entry.object.interval_set.push((byte_offset, interval_end));
+            let escape = access.partition_key().escape_class != MemoryEscapeClass::NonEscaping;
+            entry.object.escaped |= escape;
+            inventory.store.evidences.push(FactEvidence {
+                source: FactEvidenceSource::Partition,
+                confidence: if escape { 96 } else { 160 },
+                kind: FactEvidenceKind::ObjectRoot,
+                subject: format!("{key}@0x{byte_offset:x}"),
             });
-        let facts = entry
-            .accesses
-            .entry(access.const_offset as u32)
-            .or_default();
-        facts.ty = merge_field_ty(&facts.ty, &access.access_ty);
-        match access.kind {
-            MemoryAccessKind::Load => facts.loads += 1,
-            MemoryAccessKind::Store => facts.stores += 1,
         }
-        let interval_end = (access.const_offset as u32)
-            .saturating_add(type_byte_size(&access.access_ty).unwrap_or(1).max(1));
-        entry
-            .object
-            .interval_set
-            .push((access.const_offset as u32, interval_end));
-        let escape = access.partition_key().escape_class != MemoryEscapeClass::NonEscaping;
-        entry.object.escaped |= escape;
-        inventory.store.evidences.push(FactEvidence {
-            source: FactEvidenceSource::Partition,
-            confidence: if escape { 96 } else { 160 },
-            kind: FactEvidenceKind::ObjectRoot,
-            subject: format!("{key}@0x{:x}", access.const_offset),
-        });
     }
 
     let mut typed_fact_conflicts = 0usize;
@@ -448,7 +512,7 @@ pub(super) fn collect_typed_fact_inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     #[test]
     fn typed_fact_inventory_keeps_escaped_root_coarse() {

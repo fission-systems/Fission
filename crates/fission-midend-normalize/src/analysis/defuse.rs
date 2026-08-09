@@ -11,13 +11,13 @@
 ///   variable whose use count is zero in the whole function body and whose
 ///   RHS has no observable side effects.
 use super::super::cleanup::{expr_has_side_effects, prune_unused_temp_bindings};
-use crate::prelude::*;
 use crate::analysis::expr_key::pure_expr_key;
 use crate::pipeline::normalize_expr;
-use fission_midend_core::wave_stats;
-use fission_midend_core::next_temp_name;
-use fission_midend_prehir::util::expr_type;
+use crate::prelude::*;
 use crate::{HashMap, HashSet};
+use fission_midend_core::next_temp_name;
+use fission_midend_core::wave_stats;
+use fission_midend_prehir::util::expr_type;
 
 const WIDE_DEAD_ASSIGNMENT_RERUN_STMT_LIMIT: usize = 220;
 const WIDE_DEAD_ASSIGNMENT_RERUN_LOCAL_LIMIT: usize = 160;
@@ -185,6 +185,7 @@ impl DefUseMap {
 pub struct DefinitionDependencyMap {
     dependencies: HashMap<String, HashSet<String>>,
     address_dependencies: HashMap<String, HashSet<String>>,
+    identity_dependencies: HashMap<String, HashSet<String>>,
 }
 
 /// Proof that a dependency node has a path to one of a fixed set of roots.
@@ -252,6 +253,7 @@ impl DefinitionDependencyMap {
         let mut map = Self {
             dependencies: HashMap::default(),
             address_dependencies: HashMap::default(),
+            identity_dependencies: HashMap::default(),
         };
         map.collect_stmts(stmts);
         map
@@ -264,22 +266,26 @@ impl DefinitionDependencyMap {
         reached
     }
 
-    pub fn address_roots_reaching(
-        &self,
-        name: &str,
-        roots: &HashSet<String>,
-    ) -> HashSet<String> {
+    pub fn address_roots_reaching(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
         self.address_nodes_reaching_roots(name, roots)
             .into_iter()
             .filter(|candidate| roots.contains(candidate))
             .collect()
     }
 
-    pub fn nodes_reaching_roots(
-        &self,
-        name: &str,
-        roots: &HashSet<String>,
-    ) -> HashSet<String> {
+    /// Return tracked bindings connected through pointer-identity-preserving
+    /// definitions only. Unlike address provenance, this deliberately stops
+    /// at pointer arithmetic so a field offset collected through `p + k`
+    /// cannot be incorrectly re-based onto `p` as offset zero.
+    pub fn identity_roots_reaching(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
+        RootReachabilityProof::build(&self.identity_dependencies, roots)
+            .nodes_reaching_from(name)
+            .into_iter()
+            .filter(|candidate| roots.contains(candidate))
+            .collect()
+    }
+
+    pub fn nodes_reaching_roots(&self, name: &str, roots: &HashSet<String>) -> HashSet<String> {
         RootReachabilityProof::build(&self.dependencies, roots).nodes_reaching_from(name)
     }
 
@@ -341,6 +347,9 @@ impl DefinitionDependencyMap {
                 let address_dependencies =
                     self.address_dependencies.entry(name.clone()).or_default();
                 collect_address_provenance_vars(rhs, address_dependencies);
+                let identity_dependencies =
+                    self.identity_dependencies.entry(name.clone()).or_default();
+                collect_identity_provenance_vars(rhs, identity_dependencies);
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::Expr(_)
@@ -407,6 +416,36 @@ fn collect_address_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>)
             collect_address_provenance_vars(else_expr, out);
         }
         PreHirExpr::Load { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::FieldAccess { .. }
+        | PreHirExpr::AggregateCopy { .. }
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::Const(_, _) => {}
+    }
+}
+
+/// Collect definitions that preserve the exact pointer value. Casts and a
+/// branch-select preserve identity; pointer arithmetic, loads, and calls do
+/// not. This is intentionally narrower than address provenance.
+fn collect_identity_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
+    match expr {
+        PreHirExpr::Var(name) => {
+            out.insert(name.clone());
+        }
+        PreHirExpr::Cast { expr, .. } => collect_identity_provenance_vars(expr, out),
+        PreHirExpr::Select {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_identity_provenance_vars(then_expr, out);
+            collect_identity_provenance_vars(else_expr, out);
+        }
+        PreHirExpr::Unary { .. }
+        | PreHirExpr::PtrOffset { .. }
+        | PreHirExpr::Binary { .. }
+        | PreHirExpr::Load { .. }
         | PreHirExpr::Call { .. }
         | PreHirExpr::Index { .. }
         | PreHirExpr::FieldAccess { .. }
@@ -494,13 +533,21 @@ fn collect_address_contributors_stmts(
                 body,
             } => {
                 if let Some(init) = init {
-                    collect_address_contributors_stmts(proof, std::slice::from_ref(init.as_ref()), out);
+                    collect_address_contributors_stmts(
+                        proof,
+                        std::slice::from_ref(init.as_ref()),
+                        out,
+                    );
                 }
                 if let Some(cond) = cond {
                     collect_address_contributors_expr(proof, cond, out);
                 }
                 if let Some(update) = update {
-                    collect_address_contributors_stmts(proof, std::slice::from_ref(update.as_ref()), out);
+                    collect_address_contributors_stmts(
+                        proof,
+                        std::slice::from_ref(update.as_ref()),
+                        out,
+                    );
                 }
                 collect_address_contributors_stmts(proof, body, out);
             }
@@ -1124,10 +1171,7 @@ fn remove_dead_in_stmt_nested(
     }
 }
 
-fn collect_temp_like_assignment_names(
-    stmts: &[PreHirStmt],
-    names: &mut crate::HashSet<String>,
-) {
+fn collect_temp_like_assignment_names(stmts: &[PreHirStmt], names: &mut crate::HashSet<String>) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign {
@@ -1138,7 +1182,9 @@ fn collect_temp_like_assignment_names(
                     names.insert(name.clone());
                 }
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 collect_temp_like_assignment_names(body, names);
             }
             PreHirStmt::For {
@@ -1289,7 +1335,7 @@ fn count_any_mention_in_stmt(stmt: &PreHirStmt, name: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
     use std::sync::{Mutex, MutexGuard};
 
     /// Process-wide env is shared across parallel tests; serialize mutations that toggle admission.
@@ -1402,11 +1448,15 @@ mod tests {
             },
         ];
         let dependencies = DefinitionDependencyMap::build(&body);
-        let roots = ["base_param".to_string(), "limit_param".to_string()].into_iter().collect::<HashSet<_>>();
+        let roots = ["base_param".to_string(), "limit_param".to_string()]
+            .into_iter()
+            .collect::<HashSet<_>>();
 
         assert_eq!(
             dependencies.roots_reaching("cursor", &roots),
-            ["base_param".to_string()].into_iter().collect::<HashSet<_>>()
+            ["base_param".to_string()]
+                .into_iter()
+                .collect::<HashSet<_>>()
         );
         let contributors = dependencies.address_contributors(&body, &roots);
         assert!(contributors.contains_key("cursor"));
@@ -1448,7 +1498,9 @@ mod tests {
             },
         ];
         let dependencies = DefinitionDependencyMap::build(&body);
-        let roots = ["buffer_param".to_string()].into_iter().collect::<HashSet<_>>();
+        let roots = ["buffer_param".to_string()]
+            .into_iter()
+            .collect::<HashSet<_>>();
 
         assert_eq!(
             dependencies.nodes_reaching_roots("cursor", &roots),
@@ -1456,7 +1508,54 @@ mod tests {
                 "buffer_param".to_string(),
                 "cursor".to_string(),
                 "cursor_word".to_string(),
-            ].into_iter().collect::<HashSet<_>>()
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>()
+        );
+    }
+
+    #[test]
+    fn identity_roots_follow_copies_but_stop_at_pointer_offsets() {
+        let pointer_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let body = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("cursor".into()),
+                rhs: PreHirExpr::Var("head".into()),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("copy".into()),
+                rhs: PreHirExpr::Cast {
+                    expr: Box::new(PreHirExpr::Var("cursor".into())),
+                    ty: pointer_ty.clone(),
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("advanced".into()),
+                rhs: PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("copy".into())),
+                    offset: 8,
+                },
+            },
+        ];
+        let dependencies = DefinitionDependencyMap::build(&body);
+        let roots = ["head", "cursor", "copy", "advanced"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+
+        assert_eq!(
+            dependencies.identity_roots_reaching("copy", &roots),
+            ["copy", "cursor", "head"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<HashSet<_>>()
+        );
+        assert_eq!(
+            dependencies.identity_roots_reaching("advanced", &roots),
+            ["advanced".to_string()].into_iter().collect::<HashSet<_>>()
         );
     }
 
@@ -1501,7 +1600,9 @@ mod tests {
             },
         ];
         let dependencies = DefinitionDependencyMap::build(&body);
-        let roots = ["base_param".to_string()].into_iter().collect::<HashSet<_>>();
+        let roots = ["base_param".to_string()]
+            .into_iter()
+            .collect::<HashSet<_>>();
         let contributors = dependencies.address_contributors(&body, &roots);
 
         assert!(contributors.contains_key("base_param"));
@@ -1784,13 +1885,19 @@ fn collect_repeated_pure_exprs(
     }
 }
 
-fn replace_matching_pure_expr(expr: &PreHirExpr, needle: &PreHirExpr, replacement: &PreHirExpr) -> PreHirExpr {
+fn replace_matching_pure_expr(
+    expr: &PreHirExpr,
+    needle: &PreHirExpr,
+    replacement: &PreHirExpr,
+) -> PreHirExpr {
     if pure_expr_key(expr) == pure_expr_key(needle) {
         return replacement.clone();
     }
 
     match expr {
-        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => expr.clone(),
+        PreHirExpr::Const(_, _) | PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) => {
+            expr.clone()
+        }
         PreHirExpr::Cast { ty, expr: inner } => PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(replace_matching_pure_expr(inner, needle, replacement)),

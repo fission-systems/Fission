@@ -1,3 +1,4 @@
+use crate::HashMap;
 /// Pointer arithmetic HIR recovery pass.
 ///
 /// After use-driven type propagation (`use_type_infer.rs`) has marked pointer
@@ -48,7 +49,6 @@
 /// Reference: Ghidra `RulePtrArith` (ruleaction.cc:6496),
 ///            RetDec `DerefToArrayIndexOptimizer`.
 use crate::prelude::*;
-use crate::HashMap;
 
 /// Build a map from variable name → NirType for all locals and params.
 fn build_binding_type_map(func: &PreHirFunction) -> HashMap<String, NirType> {
@@ -171,7 +171,9 @@ fn cast_pointer_operands_for_integer_arith(
     let PreHirExpr::Binary { op, lhs, rhs, ty } = expr else {
         return None;
     };
-    if !matches!(ty, NirType::Int { .. }) || !matches!(op, PreHirBinaryOp::Add | PreHirBinaryOp::Sub) {
+    if !matches!(ty, NirType::Int { .. })
+        || !matches!(op, PreHirBinaryOp::Add | PreHirBinaryOp::Sub)
+    {
         return None;
     }
     let new_lhs = cast_pointer_operand_to_uint(lhs, binding_types);
@@ -1101,14 +1103,27 @@ fn try_recover_field_access(
     }
     let (base_expr, offset) = match current_ptr {
         PreHirExpr::PtrOffset { base, offset } => (base.as_ref().clone(), *offset),
-        PreHirExpr::Binary { op, lhs, rhs, .. } => {
+        PreHirExpr::Binary { op, lhs, rhs, ty } => {
             let PreHirExpr::Const(raw_offset, _) = rhs.as_ref() else {
                 return None;
             };
-            let offset = match op {
+            let element_offset = match op {
                 PreHirBinaryOp::Add => *raw_offset,
                 PreHirBinaryOp::Sub => raw_offset.checked_neg()?,
                 _ => return None,
+            };
+            // A surviving Binary operation on a concrete `T *` is C pointer
+            // arithmetic, so its constant is an element count. Field layouts
+            // use byte offsets. Preserve the expression's own pointer type as
+            // the unit witness even when the binding has just been promoted
+            // to `Ptr(Aggregate)` by object-shape recovery.
+            let offset = match ty {
+                NirType::Ptr(pointee) => type_byte_size(pointee)
+                    .filter(|size| *size > 1)
+                    .and_then(|size| i64::try_from(size).ok())
+                    .and_then(|size| element_offset.checked_mul(size))
+                    .unwrap_or(element_offset),
+                _ => element_offset,
             };
             (lhs.as_ref().clone(), offset)
         }
@@ -1319,7 +1334,10 @@ fn is_zero_index(index: &PreHirExpr) -> bool {
     matches!(index, PreHirExpr::Const(0, _))
 }
 
-fn collect_pointer_assignment_types(stmts: &[PreHirStmt], out: &mut HashMap<String, Option<NirType>>) {
+fn collect_pointer_assignment_types(
+    stmts: &[PreHirStmt],
+    out: &mut HashMap<String, Option<NirType>>,
+) {
     for stmt in stmts {
         collect_pointer_assignment_types_stmt(stmt, out);
     }
@@ -1353,7 +1371,9 @@ fn collect_pointer_assignment_types_stmt(
             lhs: PreHirLValue::Var(name),
             rhs,
         } => record_pointer_assignment(out, name, expr_type(rhs)),
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => {
             collect_pointer_assignment_types(body, out);
         }
         PreHirStmt::If {
@@ -2590,6 +2610,60 @@ mod tests {
         } else {
             panic!("expected assignment");
         }
+    }
+
+    #[test]
+    fn aggregate_field_access_scales_surviving_typed_pointer_element_offset() {
+        let agg_ty = NirType::Aggregate {
+            size: 16,
+            fields: vec![fission_midend_core::StructField {
+                offset: 8,
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+                name: "field_8".to_owned(),
+            }],
+        };
+        let original_int_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: true,
+        }));
+        let body = vec![PreHirStmt::Expr(PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Cast {
+                expr: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("p".to_owned())),
+                    rhs: Box::new(PreHirExpr::Const(
+                        2,
+                        NirType::Int {
+                            bits: 64,
+                            signed: true,
+                        },
+                    )),
+                    ty: original_int_ptr,
+                }),
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                })),
+            }),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        })];
+        let mut func = make_func(
+            vec![make_binding_with_ty("p", NirType::Ptr(Box::new(agg_ty)))],
+            body,
+        );
+
+        assert!(super::apply_ptr_arith_recovery_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Expr(PreHirExpr::FieldAccess { field_name, offset, .. })
+                if field_name == "field_8" && *offset == 8
+        ));
     }
 
     #[test]

@@ -1,3 +1,9 @@
+use super::partition::type_byte_size;
+use super::typed_facts::{
+    TypedAccessFacts, collect_typed_fact_inventory,
+    inferred_aggregate_size as inferred_size_from_facts,
+    should_infer_aggregate as should_infer_aggregate_from_facts,
+};
 /// Aggregate field layout recovery pass.
 ///
 /// After pointer-arithmetic recovery (`ptr_arith.rs`) has converted raw
@@ -28,29 +34,40 @@
 ///
 /// This pass is architecture-agnostic and has no binary-specific thresholds.
 use crate::prelude::*;
-use super::partition::type_byte_size;
-use super::typed_facts::{
-    TypedAccessFacts, collect_typed_fact_inventory,
-    inferred_aggregate_size as inferred_size_from_facts,
-    should_infer_aggregate as should_infer_aggregate_from_facts,
-};
+use crate::{HashMap, HashSet};
 use fission_midend_core::wave_stats::{
     add_object_root_recoveries, add_object_shape_recoveries, add_surface_binding_promotions,
     add_typed_object_shape_refinements,
 };
-use crate::{HashMap, HashSet};
 
-fn can_upgrade_binding_to_aggregate(binding: &PreHirBinding) -> bool {
-    matches!(
-        &binding.ty,
-        NirType::Ptr(inner)
-            if matches!(
-                inner.as_ref(),
-                NirType::Unknown
-                    | NirType::Aggregate { .. }
-                    | NirType::Int { bits: 8 | 16, .. }
-            )
-    )
+fn can_upgrade_binding_to_aggregate(
+    binding: &PreHirBinding,
+    accesses: &std::collections::BTreeMap<u32, TypedAccessFacts>,
+) -> bool {
+    let NirType::Ptr(inner) = &binding.ty else {
+        return false;
+    };
+    if matches!(
+        inner.as_ref(),
+        NirType::Unknown | NirType::Aggregate { .. } | NirType::Int { bits: 8 | 16, .. }
+    ) {
+        return true;
+    }
+    // A homogeneous scalar array can expose several constant offsets and
+    // must remain `T *`. Distinct access widths at those offsets cannot be
+    // explained by that homogeneous pointee, however, and are strong record
+    // evidence (for example a 32-bit value followed by a pointer-width link).
+    // This lets prior scalar inference yield to stronger object-shape facts
+    // without turning ordinary `int[2]`-style accesses into structures.
+    if !matches!(inner.as_ref(), NirType::Int { .. }) {
+        return false;
+    }
+    let widths = accesses
+        .values()
+        .filter_map(|facts| type_byte_size(&facts.ty))
+        .filter(|width| *width > 0)
+        .collect::<std::collections::BTreeSet<_>>();
+    widths.len() >= 2
 }
 
 fn infer_storage_class(binding: &PreHirBinding) -> StorageClass {
@@ -112,7 +129,7 @@ pub fn apply_aggregate_fields_pass(func: &mut PreHirFunction) -> bool {
         let Some(facts) = inventory.objects.get(&binding.name) else {
             continue;
         };
-        if !can_upgrade_binding_to_aggregate(binding)
+        if !can_upgrade_binding_to_aggregate(binding, &facts.accesses)
             || !should_infer_aggregate_from_facts(&facts.accesses)
         {
             continue;
@@ -428,7 +445,10 @@ fn alias_ptr_offset(alias: &AggregateAlias, offset: i64) -> PreHirExpr {
     }
 }
 
-fn rewrite_alias_stmts(stmts: &mut [PreHirStmt], aliases: &HashMap<String, AggregateAlias>) -> bool {
+fn rewrite_alias_stmts(
+    stmts: &mut [PreHirStmt],
+    aliases: &HashMap<String, AggregateAlias>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
@@ -572,7 +592,7 @@ fn rewrite_alias_expr(expr: &mut PreHirExpr, aliases: &HashMap<String, Aggregate
 #[cfg(test)]
 mod tests {
     use super::*;
-// prelude via parent
+    // prelude via parent
 
     fn ptr_unknown() -> NirType {
         NirType::Ptr(Box::new(NirType::Unknown))
@@ -692,6 +712,49 @@ mod tests {
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].offset, 4);
         assert_eq!(fields[1].offset, 8);
+    }
+
+    #[test]
+    fn aggregate_fields_keeps_homogeneous_u32_pointer_array_like() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "homogeneous_scalar_offsets".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![PreHirBinding {
+                name: "values".to_string(),
+                ty: NirType::Ptr(Box::new(u32_ty.clone())),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("values".to_string())),
+                    ty: u32_ty.clone(),
+                }),
+                PreHirStmt::Expr(PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("values".to_string())),
+                        offset: 4,
+                    }),
+                    ty: u32_ty.clone(),
+                }),
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(!apply_aggregate_fields_pass(&mut func));
+        assert_eq!(func.params[0].ty, NirType::Ptr(Box::new(u32_ty)));
     }
 
     #[test]

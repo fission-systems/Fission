@@ -845,7 +845,16 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
         if self.options.is_64bit {
-            if !self.is_pure_return_join_block(return_idx) {
+            // A shared x64 RET may contain epilogue/return-target mechanics
+            // while leaving the primary return register untouched. Accept
+            // that non-pure join only for an edge whose predecessor itself
+            // defines the ABI return register; this preserves direct
+            // value-bearing loop exits without opening arbitrary impure loop
+            // exits as returns.
+            if !self.is_pure_return_join_block(return_idx)
+                && (!self.is_epilogue_style_return_join_block(return_idx)
+                    || !self.block_has_primary_return_def_before_terminator(pred_idx))
+            {
                 return Ok(None);
             }
         } else if !self.is_pure_return_join_block(return_idx)

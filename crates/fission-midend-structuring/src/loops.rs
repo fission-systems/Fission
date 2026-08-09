@@ -1332,6 +1332,21 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
     // explicit break/continue context, enabling multi-exit loops.
     // -----------------------------------------------------------------------
 
+    fn lower_loop_exit_stmt(
+        host: &mut impl StructuringHost,
+        pred_idx: usize,
+        target: u64,
+    ) -> Result<PreHirStmt, MlilPreviewError> {
+        let return_expr = host
+            .find_block_index_by_address(target)
+            .map(|target_idx| host.lower_return_join_expr_for_predecessor(pred_idx, target_idx))
+            .transpose()?
+            .flatten();
+        Ok(return_expr
+            .map(|expr| PreHirStmt::Return(Some(expr)))
+            .unwrap_or(PreHirStmt::Break))
+    }
+
     /// Lower all blocks in `body_set` (the loop body excluding the head) into a HIR statement
     /// sequence, treating jumps to `break_idx` as `Break` and jumps to `head_idx` as `Continue`.
     ///
@@ -1521,8 +1536,11 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                 }
                 LoweredTerminator::Goto(target) | LoweredTerminator::Fallthrough(Some(target)) => {
                     if break_addrs.contains(&target) {
-                        result_stmts.push(PreHirStmt::Break);
-                        host.bump_loop_multi_exit_break();
+                        let exit_stmt = lower_loop_exit_stmt(host, idx, target)?;
+                        if matches!(exit_stmt, PreHirStmt::Break) {
+                            host.bump_loop_multi_exit_break();
+                        }
+                        result_stmts.push(exit_stmt);
                     } else if target == head_addr {
                         result_stmts.push(PreHirStmt::Continue);
                     } else if host.next_block_address(idx) != Some(target) {
@@ -1550,35 +1568,53 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                     let false_is_continue = false_target == Some(head_addr);
 
                     if true_is_break && false_is_continue {
+                        let exit_stmt = lower_loop_exit_stmt(host, idx, true_target)?;
+                        let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![PreHirStmt::Break],
+                            then_body: vec![exit_stmt],
                             else_body: vec![PreHirStmt::Continue],
                         });
-                        host.bump_loop_multi_exit_break();
+                        if is_break {
+                            host.bump_loop_multi_exit_break();
+                        }
                     } else if false_is_break && true_is_continue {
+                        let false_target = false_target.expect("false break target");
+                        let exit_stmt = lower_loop_exit_stmt(host, idx, false_target)?;
+                        let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![PreHirStmt::Break],
+                            then_body: vec![exit_stmt],
                             else_body: vec![PreHirStmt::Continue],
                         });
-                        host.bump_loop_multi_exit_break();
+                        if is_break {
+                            host.bump_loop_multi_exit_break();
+                        }
                     } else if true_is_break && !false_is_break {
                         // `if (cond) break;` then continue with false arm
+                        let exit_stmt = lower_loop_exit_stmt(host, idx, true_target)?;
+                        let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![PreHirStmt::Break],
+                            then_body: vec![exit_stmt],
                             else_body: Vec::new(),
                         });
-                        host.bump_loop_multi_exit_break();
+                        if is_break {
+                            host.bump_loop_multi_exit_break();
+                        }
                     } else if false_is_break && !true_is_break {
                         // `if (!cond) break;` then continue with true arm
+                        let false_target = false_target.expect("false break target");
+                        let exit_stmt = lower_loop_exit_stmt(host, idx, false_target)?;
+                        let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![PreHirStmt::Break],
+                            then_body: vec![exit_stmt],
                             else_body: Vec::new(),
                         });
-                        host.bump_loop_multi_exit_break();
+                        if is_break {
+                            host.bump_loop_multi_exit_break();
+                        }
                     } else if true_is_continue && !false_is_continue {
                         result_stmts.push(PreHirStmt::If {
                             cond,

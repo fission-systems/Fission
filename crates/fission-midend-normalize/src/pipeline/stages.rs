@@ -48,10 +48,10 @@ use super::run::{
     jump_resolver_admission, memory_fact_prefilter_allows_full, run_cleanup_block,
     run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
 };
-use fission_midend_prehir::action_pipeline::PassBudget;
-use fission_midend_prehir::PreHirFunction;
-use fission_midend_prehir::vsa::apply_jump_resolver_pass;
 use fission_midend_core::wave_stats;
+use fission_midend_prehir::PreHirFunction;
+use fission_midend_prehir::action_pipeline::PassBudget;
+use fission_midend_prehir::vsa::apply_jump_resolver_pass;
 use std::time::Instant;
 use tracing::debug_span;
 
@@ -246,7 +246,6 @@ pub(super) fn defuse_after_gvn_and_prune(func: &mut PreHirFunction) -> bool {
     changed
 }
 
-
 pub fn run_stage_type_early(func: &mut PreHirFunction, diag: bool, perf: bool) {
     apply_type_signature_fixed_point(func, diag, perf);
 }
@@ -369,8 +368,12 @@ pub fn run_stage_heritage_value_recovery(func: &mut PreHirFunction, diag: bool, 
 }
 
 pub fn run_stage_memory_recovery(func: &mut PreHirFunction, diag: bool, perf: bool) {
-    let has_loopish_control = body_has_loopish_shapes(&func.body);
-    let memory_fact_prefilter = memory_fact_prefilter_allows_full(func) && !has_loopish_control;
+    // Aggregate/type facts are collected by a bounded recursive AST walk and
+    // remain valid inside structured loops. Keep the separate loop admission
+    // on expensive stack-slot surfacing in `run_stage_heritage_value_recovery`,
+    // but do not suppress object-shape recovery merely because a pointer is
+    // traversed in a While/DoWhile/For body.
+    let memory_fact_prefilter = memory_fact_prefilter_allows_full(func);
     if run_pass_logged(
         func,
         "ptr_arith_recovery",
@@ -763,4 +766,104 @@ pub fn run_stage_cleanup(func: &mut PreHirFunction, diag: bool, perf: bool) {
         perf,
         rescue_undeclared_bindings,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prelude::*;
+
+    fn int(bits: u32) -> NirType {
+        NirType::Int {
+            bits,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn memory_recovery_admits_aggregate_facts_inside_structured_loop() {
+        let mut func = PreHirFunction {
+            name: "loop_object_shape".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![PreHirBinding {
+                name: "head".to_string(),
+                ty: NirType::Ptr(Box::new(int(8))),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                PreHirBinding {
+                    name: "cursor".to_string(),
+                    ty: NirType::Ptr(Box::new(int(32))),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "next".to_string(),
+                    ty: NirType::Ptr(Box::new(int(32))),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("cursor".to_string()),
+                    rhs: PreHirExpr::Var("head".to_string()),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Var("cursor".to_string()),
+                    body: vec![
+                        PreHirStmt::Expr(PreHirExpr::Load {
+                            ptr: Box::new(PreHirExpr::Var("cursor".to_string())),
+                            ty: int(32),
+                        }),
+                        PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("next".to_string()),
+                            rhs: PreHirExpr::Var("cursor".to_string()),
+                        },
+                        PreHirStmt::Expr(PreHirExpr::Load {
+                            ptr: Box::new(PreHirExpr::Cast {
+                                expr: Box::new(PreHirExpr::Binary {
+                                    op: PreHirBinaryOp::Add,
+                                    lhs: Box::new(PreHirExpr::Var("next".to_string())),
+                                    rhs: Box::new(PreHirExpr::Const(2, int(64))),
+                                    ty: NirType::Ptr(Box::new(int(32))),
+                                }),
+                                ty: NirType::Ptr(Box::new(int(64))),
+                            }),
+                            ty: int(64),
+                        }),
+                        PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("cursor".to_string()),
+                            rhs: PreHirExpr::Var("next".to_string()),
+                        },
+                    ],
+                },
+            ],
+            calling_convention: Default::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        run_stage_memory_recovery(&mut func, false, false);
+
+        let NirType::Ptr(inner) = &func.params[0].ty else {
+            panic!("expected pointer parameter");
+        };
+        let NirType::Aggregate { size, fields } = inner.as_ref() else {
+            panic!("loop memory facts should recover an aggregate");
+        };
+        assert_eq!(*size, 16);
+        assert_eq!(
+            fields.iter().map(|field| field.offset).collect::<Vec<_>>(),
+            vec![0, 8]
+        );
+    }
 }

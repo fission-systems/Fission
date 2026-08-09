@@ -1327,3 +1327,171 @@ fn x64_stack_target_ret_recovers_live_primary_return_from_pred_def() {
     );
     let _ = rax; // silence if unused under some recovery paths
 }
+
+/// A natural loop can have both a direct value-bearing edge to a shared RET
+/// and a sibling exit that assigns a sentinel first. The direct edge must not
+/// be collapsed to `break` and then inherit the sentinel return.
+#[test]
+fn x64_loop_direct_epilogue_return_exit_keeps_predecessor_value() {
+    let eax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rsp = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let ret_addr = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x990,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let match_cond = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x400,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let continue_cond = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x401,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let constant = |value, size| Varnode::constant(value, size);
+    let pcode = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1400_1000,
+                successors: vec![1, 3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1400_1000,
+                        output: Some(eax.clone()),
+                        inputs: vec![constant(7, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1400_1004,
+                        output: None,
+                        inputs: vec![constant(0x1400_1030, 8), match_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1400_1010,
+                successors: vec![0, 2],
+                ops: vec![PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1400_1010,
+                    output: None,
+                    inputs: vec![constant(0x1400_1000, 8), continue_cond],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1400_1020,
+                successors: vec![3],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1400_1020,
+                        output: Some(eax),
+                        inputs: vec![constant(-1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x1400_1024,
+                        output: None,
+                        inputs: vec![constant(0x1400_1030, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x1400_1030,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 5,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1400_1030,
+                        output: Some(rsp.clone()),
+                        inputs: vec![rsp.clone(), constant(8, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x1400_1034,
+                        output: Some(ret_addr.clone()),
+                        inputs: vec![constant(0, 8), rsp],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 7,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1400_1038,
+                        output: None,
+                        inputs: vec![ret_addr],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let options = preview_options_with_cspec(MlilPreviewOptions {
+        pe_x64_only: false,
+        is_64bit: true,
+        is_big_endian: false,
+        pointer_size: 8,
+        format: "ELF64".to_string(),
+        image_base: 0x1400_0000,
+        sections: vec![(0x1400_1000, 0x1400_2000)],
+        region_linearize_structuring: false,
+        force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        global_names: Default::default(),
+        global_sizes: Default::default(),
+        relocation_names: Default::default(),
+        calling_convention: CallingConvention::SystemVAmd64,
+        ..Default::default()
+    });
+
+    let code =
+        render_mlil_preview(&pcode, "loop_search", 0x1400_1000, &options).expect("preview render");
+    assert!(
+        code.contains("return 7;"),
+        "direct return value lost:\n{code}"
+    );
+    assert!(
+        code.contains("return 4294967295;")
+            || code.contains("return -1;")
+            || code.contains("return 0xffffffff;"),
+        "sentinel exit lost:\n{code}"
+    );
+}
