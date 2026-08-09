@@ -1,6 +1,6 @@
 use super::{
     ArchitectureDescriptor, BinaryLoadSpec, FunctionInfo, LoadedBinary, LoadedBinaryBuilder,
-    LoadedBinaryInner, PdbDebugInfo, SectionInfo,
+    LoadedBinaryInner, LoaderSymbolInfo, PdbDebugInfo, SectionInfo,
 };
 use crate::loader::strings::scan_ascii_strings_from_sections;
 use crate::prelude::*;
@@ -25,6 +25,7 @@ impl LoadedBinaryBuilder {
             iat_symbols: std::collections::HashMap::new(),
             global_symbols: std::collections::HashMap::new(),
             global_symbol_sizes: std::collections::HashMap::new(),
+            loader_symbols: Vec::new(),
             relocation_symbols: std::collections::HashMap::new(),
             pdb_debug_info: None,
             relocations: Vec::new(),
@@ -129,6 +130,14 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    pub fn add_loader_symbols(
+        mut self,
+        symbols: impl IntoIterator<Item = LoaderSymbolInfo>,
+    ) -> Self {
+        self.loader_symbols.extend(symbols);
+        self
+    }
+
     pub fn add_relocation_symbols(
         mut self,
         symbols: std::collections::HashMap<u64, String>,
@@ -212,6 +221,23 @@ impl LoadedBinaryBuilder {
             global_symbols.insert(addr, demangled);
         }
 
+        let mut loader_symbols = self.loader_symbols;
+        for symbol in &mut loader_symbols {
+            symbol.name = crate::loader::demangle::demangle(&symbol.name);
+        }
+        loader_symbols.sort_by(|left, right| {
+            left.address
+                .cmp(&right.address)
+                .then_with(|| left.kind.cmp(&right.kind))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        loader_symbols.dedup_by(|left, right| {
+            left.address == right.address
+                && left.kind == right.kind
+                && left.name == right.name
+                && left.origin == right.origin
+        });
+
         let mut relocation_symbols = std::collections::HashMap::new();
         for (addr, name) in self.relocation_symbols {
             let demangled = crate::loader::demangle::demangle(&name);
@@ -240,6 +266,7 @@ impl LoadedBinaryBuilder {
             iat_symbols,
             global_symbols,
             global_symbol_sizes: self.global_symbol_sizes,
+            loader_symbols,
             relocation_symbols,
             function_addr_index,
             function_name_index,

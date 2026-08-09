@@ -245,6 +245,88 @@ pub(super) fn parse_coff_cfg_label_leaders(
     Ok(leaders)
 }
 
+pub(super) fn parse_coff_loader_symbols(
+    loader: &PeLoaderImpl<'_>,
+    symbol_table_offset: u32,
+    symbol_count: u32,
+) -> Result<Vec<crate::loader::types::LoaderSymbolInfo>> {
+    use crate::loader::types::{LoaderSymbolInfo, LoaderSymbolKind};
+
+    let symbols_offset = u64::from(symbol_table_offset);
+    let symbols_end = symbols_offset.saturating_add(u64::from(symbol_count) * 18);
+    if symbols_end > loader.data.len() as u64 {
+        return Ok(Vec::new());
+    }
+
+    let string_table_offset = symbols_end;
+    let mut symbols = Vec::new();
+    let mut i = 0;
+    while i < symbol_count {
+        let symbol_pos = symbols_offset + u64::from(i) * 18;
+        let symbol = match loader.read_coff_symbol(symbol_pos) {
+            Ok(symbol) => symbol,
+            Err(_) => break,
+        };
+        let aux_count = symbol.number_of_aux_symbols;
+        i += 1;
+
+        let has_symbol_storage = matches!(
+            symbol.storage_class,
+            storage_class::C_EXT | storage_class::C_STAT | storage_class::C_LABEL
+        );
+        let is_function = (symbol.symbol_type >> 4) == symbol_type::DT_FCN;
+        if !has_symbol_storage || is_function || symbol.section_number <= 0 {
+            i += u32::from(aux_count);
+            continue;
+        }
+
+        let section_idx = (symbol.section_number - 1) as usize;
+        let Some(section) = loader.sections.get(section_idx) else {
+            i += u32::from(aux_count);
+            continue;
+        };
+        let name = match &symbol.name {
+            SymbolName::ShortName(name) => name.clone(),
+            SymbolName::LongName(offset) => {
+                let string_offset = string_table_offset + u64::from(*offset);
+                if string_offset >= loader.data.len() as u64 {
+                    i += u32::from(aux_count);
+                    continue;
+                }
+                loader.read_string_at(string_offset)
+            }
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            i += u32::from(aux_count);
+            continue;
+        }
+
+        symbols.push(LoaderSymbolInfo {
+            address: section.virtual_address + u64::from(symbol.value),
+            name: name.to_string(),
+            kind: if section.is_executable {
+                LoaderSymbolKind::CodeLabel
+            } else {
+                LoaderSymbolKind::Data
+            },
+            origin: "pe-coff-symbol-table".to_string(),
+        });
+        i += u32::from(aux_count);
+    }
+
+    symbols.sort_by(|left, right| {
+        left.address
+            .cmp(&right.address)
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    symbols.dedup_by(|left, right| {
+        left.address == right.address && left.kind == right.kind && left.name == right.name
+    });
+    Ok(symbols)
+}
+
 pub(super) fn parse_coff_data_symbols(
     loader: &PeLoaderImpl<'_>,
     symbol_table_offset: u32,
@@ -371,6 +453,7 @@ fn normalize_global_symbol_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loader::types::LoaderSymbolKind;
 
     fn symbol_table(name: &str, value: u32, symbol_type: u16) -> Vec<u8> {
         let mut data = vec![0u8; 22];
@@ -432,5 +515,43 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn defined_static_symbol_is_preserved_as_typed_loader_data() {
+        let mut data = symbol_table("local", 0x28, 0);
+        data[16] = storage_class::C_STAT;
+        let mut section = executable_section();
+        section.is_executable = false;
+        section.is_writable = true;
+        let sections = [section];
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        let symbols = parse_coff_loader_symbols(&loader, 0, 1).unwrap();
+
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].address, 0x401028);
+        assert_eq!(symbols[0].name, "local");
+        assert_eq!(symbols[0].kind, LoaderSymbolKind::Data);
+    }
+
+    #[test]
+    fn undefined_symbol_is_not_mapped_into_the_image() {
+        let mut data = symbol_table("external", 0, 0);
+        data[12..14].copy_from_slice(&0i16.to_le_bytes());
+        let sections = [executable_section()];
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        assert!(parse_coff_loader_symbols(&loader, 0, 1).unwrap().is_empty());
     }
 }

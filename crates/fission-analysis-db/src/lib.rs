@@ -4,7 +4,7 @@
 //! into a deterministic snapshot with stable table IDs and explicit
 //! provenance. It intentionally contains no binary parser or NIR pass.
 
-use fission_loader::{FunctionInfo, LoadedBinary};
+use fission_loader::{FunctionInfo, LoadedBinary, LoaderSymbolKind};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -138,6 +138,7 @@ pub enum SymbolKind {
     Import,
     Export,
     Function,
+    Label,
     Data,
     RelocationTarget,
 }
@@ -499,6 +500,20 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
             ),
         );
     }
+    for symbol in &binary.loader_symbols {
+        let kind = match symbol.kind {
+            LoaderSymbolKind::CodeLabel => SymbolKind::Label,
+            LoaderSymbolKind::Data => SymbolKind::Data,
+        };
+        rows.insert(
+            (symbol.address, kind, symbol.name.clone()),
+            (
+                binary.global_symbol_sizes.get(&symbol.address).copied(),
+                binary.symbol_versions.get(&symbol.address).cloned(),
+                FactSource::SymbolTable,
+            ),
+        );
+    }
     rows.into_iter()
         .enumerate()
         .map(
@@ -620,8 +635,8 @@ fn confidence_for_source(source: FactSource) -> FactConfidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_loader::SectionInfo;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, RelocationEntry};
+    use fission_loader::{LoaderSymbolInfo, LoaderSymbolKind, SectionInfo};
 
     fn fixture(reverse: bool) -> LoadedBinary {
         let functions = vec![
@@ -832,6 +847,42 @@ mod tests {
                 .iter()
                 .any(|symbol| { symbol.address == 0x3010 && symbol.kind == SymbolKind::Import })
         );
+    }
+
+    #[test]
+    fn typed_loader_code_labels_remain_labels_in_the_snapshot() {
+        let binary = LoadedBinaryBuilder::new("labels.exe".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("PE")
+            .image_base(0x1000)
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x1000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_loader_symbols([LoaderSymbolInfo {
+                address: 0x1020,
+                name: ".l_start".into(),
+                kind: LoaderSymbolKind::CodeLabel,
+                origin: "pe-coff-symbol-table".into(),
+            }])
+            .build()
+            .expect("fixture should build");
+
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let label = snapshot
+            .symbols
+            .iter()
+            .find(|symbol| symbol.address == 0x1020)
+            .expect("loader label should reach the canonical symbol table");
+        assert_eq!(label.name, ".l_start");
+        assert_eq!(label.kind, SymbolKind::Label);
+        assert_eq!(label.provenance.source, FactSource::SymbolTable);
     }
 
     #[test]

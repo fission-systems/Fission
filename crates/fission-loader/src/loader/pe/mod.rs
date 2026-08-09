@@ -180,6 +180,7 @@ impl PeLoader {
         let mut function_candidates = Vec::new();
         let mut iat_symbols = std::collections::HashMap::new();
         let mut global_symbols = std::collections::HashMap::new();
+        let mut loader_symbols = Vec::new();
 
         // Parse Exports
         // DataDirectory[0] is Export Table
@@ -290,6 +291,14 @@ impl PeLoader {
                 image_base,
             ) {
                 global_symbols = coff_data_symbols;
+            }
+
+            if let Ok(coff_symbols) = coff::parse_coff_loader_symbols(
+                &loader,
+                file_header.pointer_to_symbol_table,
+                file_header.number_of_symbols,
+            ) {
+                loader_symbols = coff_symbols;
             }
 
             if let Ok(leaders) = loader.parse_coff_cfg_label_leaders(
@@ -483,6 +492,7 @@ impl PeLoader {
             .add_functions(functions_info)
             .add_iat_symbols(iat_symbols)
             .add_global_symbols(global_symbols)
+            .add_loader_symbols(loader_symbols)
             .add_inferred_types(header_types)
             .add_relocations(relocations)
             .add_relocation_symbols(relocation_symbols)

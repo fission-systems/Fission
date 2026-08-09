@@ -166,7 +166,10 @@ impl FactStore {
             if !symbol.name.trim().is_empty() {
                 let provenance = match symbol.kind {
                     SymbolKind::Import | SymbolKind::Export => FactProvenance::ImportExport,
-                    SymbolKind::Function | SymbolKind::Data | SymbolKind::RelocationTarget => {
+                    SymbolKind::Function
+                    | SymbolKind::Label
+                    | SymbolKind::Data
+                    | SymbolKind::RelocationTarget => {
                         FactProvenance::BinarySymbol
                     }
                 };

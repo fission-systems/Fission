@@ -260,6 +260,24 @@ pub struct FunctionCandidateInfo {
     pub source_section: Option<String>,
 }
 
+/// A named symbol recovered directly from a binary format's symbol table.
+///
+/// Function symbols continue to use [`FunctionInfo`]. This inventory preserves
+/// non-function labels without misclassifying executable labels as global data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Archive, Deserialize, Serialize)]
+pub enum LoaderSymbolKind {
+    CodeLabel,
+    Data,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Archive, Deserialize, Serialize)]
+pub struct LoaderSymbolInfo {
+    pub address: u64,
+    pub name: String,
+    pub kind: LoaderSymbolKind,
+    pub origin: String,
+}
+
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 pub struct PdbDebugInfo {
     pub path_hint: Option<String>,
@@ -322,6 +340,8 @@ pub struct LoadedBinaryInner {
     pub global_symbols: std::collections::HashMap<u64, String>,
     /// Global data symbol byte sizes when object metadata provides them.
     pub global_symbol_sizes: std::collections::HashMap<u64, u64>,
+    /// Non-function symbols recovered from binary-format symbol tables.
+    pub loader_symbols: Vec<LoaderSymbolInfo>,
     /// Relocation use-site mapping (instruction/data address -> referenced symbol name).
     pub relocation_symbols: std::collections::HashMap<u64, String>,
     /// Index of functions by address for O(1) lookup
@@ -539,6 +559,7 @@ pub struct LoadedBinaryBuilder {
     iat_symbols: std::collections::HashMap<u64, String>,
     global_symbols: std::collections::HashMap<u64, String>,
     global_symbol_sizes: std::collections::HashMap<u64, u64>,
+    loader_symbols: Vec<LoaderSymbolInfo>,
     relocation_symbols: std::collections::HashMap<u64, String>,
     pdb_debug_info: Option<PdbDebugInfo>,
     relocations: Vec<RelocationEntry>,
