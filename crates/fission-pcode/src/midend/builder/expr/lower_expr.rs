@@ -1,4 +1,5 @@
 use super::*;
+use fission_midend_core::ir::{SsaUseSite, SsaValueDefinition};
 
 const CALL_TARGET_CONST_FOLD_BUDGET: usize = 16;
 const CALL_TARGET_DESCRIPTOR_RECOVERY_BUDGET: usize = 16;
@@ -1955,6 +1956,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let key = VarnodeKey::from(vn);
+        if let Some(expr) = self.try_lower_scalar_ssa_piece_reassembly(vn, &key, visiting)? {
+            return Ok(expr);
+        }
         if let Some(site) = self.current_lowering_site {
             if !self.has_prior_local_def_for_varnode(vn, site) {
                 if let Some(name) = self
@@ -2246,6 +2250,165 @@ impl<'a> PreviewBuilder<'a> {
         };
         visiting.remove(&key);
         result
+    }
+
+    /// Reconstruct a scalar register read whose reaching value is split across
+    /// multiple exact partial-register definitions.
+    ///
+    /// Scalar Heritage has already partitioned overlapping storage and proven
+    /// the reaching definition for every disjoint byte range. Consuming that
+    /// cover here avoids the lossy exact-key fallback, which can otherwise pick
+    /// only the latest overlapping lane for a wider read. Entry and phi values,
+    /// incomplete covers, non-register storage, and values wider than the scalar
+    /// expression model deliberately stay on the existing lowering paths.
+    fn try_lower_scalar_ssa_piece_reassembly(
+        &mut self,
+        vn: &Varnode,
+        key: &VarnodeKey,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
+        if !is_register_space_id(vn.space_id) || vn.size < 2 || vn.size > 8 {
+            return Ok(None);
+        }
+        let Some(use_site) = self.current_lowering_site else {
+            return Ok(None);
+        };
+        let Some(op) = self
+            .pcode
+            .blocks
+            .get(use_site.block_idx)
+            .and_then(|block| block.ops.get(use_site.op_idx))
+        else {
+            return Ok(None);
+        };
+        let Some(input_idx) = op
+            .inputs
+            .iter()
+            .position(|input| VarnodeKey::from(input) == *key)
+        else {
+            return Ok(None);
+        };
+        let Ok(block) = u32::try_from(use_site.block_idx) else {
+            return Ok(None);
+        };
+        let Ok(op_idx) = u32::try_from(use_site.op_idx) else {
+            return Ok(None);
+        };
+        let Ok(input) = u32::try_from(input_idx) else {
+            return Ok(None);
+        };
+        let Some(pieces) = self
+            .scalar_ssa
+            .operation_inputs
+            .get(&SsaUseSite {
+                block,
+                op: op_idx,
+                input,
+            })
+            .filter(|pieces| pieces.len() >= 2)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+
+        let mut expected_byte_offset = 0u32;
+        let mut plan = Vec::with_capacity(pieces.len());
+        for piece in pieces {
+            let Some(value) = self.scalar_ssa.value(piece.value) else {
+                return Ok(None);
+            };
+            if piece.byte_offset != expected_byte_offset
+                || value.storage.space_id != vn.space_id
+                || value.storage.offset != vn.offset.saturating_add(u64::from(piece.byte_offset))
+                || value.storage.size == 0
+            {
+                return Ok(None);
+            }
+            let SsaValueDefinition::Operation(def_site) = value.definition else {
+                return Ok(None);
+            };
+            let Some(def_op) = self
+                .pcode
+                .blocks
+                .get(def_site.block as usize)
+                .and_then(|block| block.ops.get(def_site.op as usize))
+                .cloned()
+            else {
+                return Ok(None);
+            };
+            if !def_op.output.as_ref().is_some_and(|output| {
+                !output.is_constant
+                    && output.space_id == value.storage.space_id
+                    && output.offset == value.storage.offset
+                    && output.size == value.storage.size
+            }) {
+                return Ok(None);
+            }
+            expected_byte_offset = expected_byte_offset.saturating_add(value.storage.size);
+            plan.push((piece.byte_offset, value.storage.size, def_site, def_op));
+        }
+        if expected_byte_offset != vn.size || !visiting.insert(key.clone()) {
+            return Ok(None);
+        }
+
+        let result_ty = type_from_size(vn.size, false);
+        let mut combined = None;
+        for (byte_offset, piece_size, def_site, def_op) in plan {
+            let piece_expr = match self.with_lowering_site(
+                LoweringSite {
+                    block_idx: def_site.block as usize,
+                    op_idx: def_site.op as usize,
+                },
+                |this| this.lower_def_op(&def_op, visiting),
+            ) {
+                Ok(expr) => expr,
+                Err(_) => {
+                    visiting.remove(key);
+                    return Ok(None);
+                }
+            };
+            let narrowed = PreHirExpr::Cast {
+                ty: type_from_size(piece_size, false),
+                expr: Box::new(piece_expr),
+            };
+            let widened = PreHirExpr::Cast {
+                ty: result_ty.clone(),
+                expr: Box::new(narrowed),
+            };
+            let shift_bytes = if self.options.is_big_endian {
+                vn.size
+                    .saturating_sub(byte_offset.saturating_add(piece_size))
+            } else {
+                byte_offset
+            };
+            let positioned = if shift_bytes == 0 {
+                widened
+            } else {
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shl,
+                    lhs: Box::new(widened),
+                    rhs: Box::new(PreHirExpr::Const(
+                        i64::from(shift_bytes) * 8,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: result_ty.clone(),
+                }
+            };
+            combined = Some(match combined {
+                None => positioned,
+                Some(lhs) => PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(positioned),
+                    ty: result_ty.clone(),
+                },
+            });
+        }
+        visiting.remove(key);
+        Ok(combined)
     }
 
     fn current_store_value_read_at_join(&self, vn: &Varnode) -> bool {
