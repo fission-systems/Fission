@@ -606,6 +606,18 @@ fn merge_structuring_hints(
             .entry(*offset)
             .or_insert_with(|| type_name.clone());
     }
+    for (offset, name) in &incoming.register_local_names {
+        current
+            .register_local_names
+            .entry(*offset)
+            .or_insert_with(|| name.clone());
+    }
+    for (offset, type_name) in &incoming.register_local_type_names {
+        current
+            .register_local_type_names
+            .entry(*offset)
+            .or_insert_with(|| type_name.clone());
+    }
     if current.return_type_name.is_none() {
         current
             .return_type_name

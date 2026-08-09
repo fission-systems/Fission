@@ -43,6 +43,7 @@ fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
         stack_local_type_names: HashMap::new(),
         return_type_name: Some(matched_sig.return_type.clone()),
         register_local_names: HashMap::new(),
+        register_local_type_names: HashMap::new(),
     })
 }
 
@@ -69,6 +70,7 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
         stack_local_type_names: HashMap::new(),
         return_type_name,
         register_local_names: HashMap::new(),
+        register_local_type_names: HashMap::new(),
     })
 }
 
@@ -1052,23 +1054,48 @@ fn build_nir_function_hints(
 /// Returns an empty map on any missing piece (no load spec, no `.dwarf` file
 /// for this architecture, no register-resident locals) -- best-effort, same
 /// posture as the rest of this file's debug-info handling.
-fn register_local_names_from_debug_function(
+fn record_unambiguous_register_type_hint(
+    types: &mut HashMap<u64, String>,
+    conflicts: &mut HashSet<u64>,
+    offset: u64,
+    type_name: &str,
+) {
+    let type_name = type_name.trim();
+    if type_name.is_empty() || conflicts.contains(&offset) {
+        return;
+    }
+    match types.get(&offset) {
+        None => {
+            types.insert(offset, type_name.to_string());
+        }
+        Some(existing) if existing == type_name => {}
+        Some(_) => {
+            types.remove(&offset);
+            conflicts.insert(offset);
+        }
+    }
+}
+
+fn register_local_hints_from_debug_function(
     debug: &fission_loader::loader::types::DwarfFunctionInfo,
     binary: &LoadedBinary,
-) -> HashMap<u64, String> {
-    let mut result = HashMap::new();
+) -> (HashMap<u64, String>, HashMap<u64, String>) {
+    let mut names = HashMap::new();
+    let mut types = HashMap::new();
+    let mut type_conflicts = HashSet::new();
     let register_locals = debug
         .local_vars
         .iter()
         .filter(|local| {
-            !local.name.trim().is_empty() && matches!(local.location, DwarfLocation::Register(_))
+            matches!(local.location, DwarfLocation::Register(_))
+                && (!local.name.trim().is_empty() || !local.type_name.trim().is_empty())
         })
         .collect::<Vec<_>>();
     if register_locals.is_empty() {
-        return result;
+        return (names, types);
     }
     let Some(load_spec) = binary.load_spec() else {
-        return result;
+        return (names, types);
     };
     let language_id = load_spec.pair.language_id.as_str();
     let compiler_spec_id = load_spec.pair.compiler_spec_id.as_str();
@@ -1079,11 +1106,10 @@ fn register_local_names_from_debug_function(
         language_id,
         compiler_spec_id,
     ) else {
-        return result;
+        return (names, types);
     };
-    let Some(model) = fission_pcode::midend::cspec::register_model_for_language(language_id)
-    else {
-        return result;
+    let Some(model) = fission_pcode::midend::cspec::register_model_for_language(language_id) else {
+        return (names, types);
     };
 
     for local in register_locals {
@@ -1102,11 +1128,19 @@ fn register_local_names_from_debug_function(
         let Some((offset, _size)) = model.lookup_name(ghidra_name) else {
             continue;
         };
-        result
-            .entry(offset)
-            .or_insert_with(|| local.name.trim().to_string());
+        let name = local.name.trim();
+        if !name.is_empty() {
+            names.entry(offset).or_insert_with(|| name.to_string());
+        }
+
+        record_unambiguous_register_type_hint(
+            &mut types,
+            &mut type_conflicts,
+            offset,
+            &local.type_name,
+        );
     }
-    result
+    (names, types)
 }
 
 fn nir_hints_from_debug_function(
@@ -1154,7 +1188,8 @@ fn nir_hints_from_debug_function(
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned);
-    let register_local_names = register_local_names_from_debug_function(debug, binary);
+    let (register_local_names, register_local_type_names) =
+        register_local_hints_from_debug_function(debug, binary);
 
     if param_names.is_empty()
         && param_type_names.is_empty()
@@ -1162,6 +1197,7 @@ fn nir_hints_from_debug_function(
         && stack_local_type_names.is_empty()
         && return_type_name.is_none()
         && register_local_names.is_empty()
+        && register_local_type_names.is_empty()
     {
         None
     } else {
@@ -1172,6 +1208,7 @@ fn nir_hints_from_debug_function(
             stack_local_type_names,
             return_type_name,
             register_local_names,
+            register_local_type_names,
         })
     }
 }
@@ -1224,6 +1261,12 @@ fn merge_nir_function_hints(
             .entry(reg_name.clone())
             .or_insert_with(|| var_name.clone());
     }
+    for (reg_name, type_name) in &structural.register_local_type_names {
+        merged
+            .register_local_type_names
+            .entry(*reg_name)
+            .or_insert_with(|| type_name.clone());
+    }
 
     (!nir_function_hints_are_empty(&merged)).then_some(merged)
 }
@@ -1235,6 +1278,7 @@ fn nir_function_hints_are_empty(hints: &NirFunctionHints) -> bool {
         && hints.stack_local_type_names.is_empty()
         && hints.return_type_name.is_none()
         && hints.register_local_names.is_empty()
+        && hints.register_local_type_names.is_empty()
 }
 
 pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
@@ -1325,7 +1369,8 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 mod tests {
     use super::{
         build_nir_call_param_rules, merge_nir_function_hints, record_interprocedural_arity_facts,
-        resolve_nir_struct_name, summarize_preview_callee_effects,
+        record_unambiguous_register_type_hint, resolve_nir_struct_name,
+        summarize_preview_callee_effects,
     };
     use crate::{
         CallEdgeKind, CallTargetProvenance, CallTargetRef, NirTypeContext, PcodeBasicBlock,
@@ -1333,7 +1378,7 @@ mod tests {
     };
     use fission_signatures::win_types::WindowsStructures;
     use fission_static::analysis::decomp::facts::FactStore;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     fn type_context_with_call_target(addr: u64, name: &str) -> NirTypeContext {
         let mut ctx = NirTypeContext::default();
@@ -1407,12 +1452,17 @@ mod tests {
         let debug = crate::NirFunctionHints {
             param_names: vec!["debug_name".into()],
             param_type_names: HashMap::from([(0, "int".into())]),
+            register_local_type_names: HashMap::from([(0x20, "long".into())]),
             return_type_name: Some("int".into()),
             ..Default::default()
         };
         let structural = crate::NirFunctionHints {
             param_names: vec!["structural_name".into(), "second".into()],
             param_type_names: HashMap::from([(0, "uint32_t".into()), (1, "char *".into())]),
+            register_local_type_names: HashMap::from([
+                (0x20, "unsigned long".into()),
+                (0x28, "size_t".into()),
+            ]),
             return_type_name: Some("uint32_t".into()),
             ..Default::default()
         };
@@ -1421,7 +1471,27 @@ mod tests {
         assert_eq!(merged.param_names, ["debug_name", "second"]);
         assert_eq!(merged.param_type_names[&0], "int");
         assert_eq!(merged.param_type_names[&1], "char *");
+        assert_eq!(merged.register_local_type_names[&0x20], "long");
+        assert_eq!(merged.register_local_type_names[&0x28], "size_t");
         assert_eq!(merged.return_type_name.as_deref(), Some("int"));
+    }
+
+    #[test]
+    fn conflicting_register_local_types_are_rejected_for_the_whole_offset() {
+        let mut types = HashMap::new();
+        let mut conflicts = HashSet::new();
+
+        record_unambiguous_register_type_hint(&mut types, &mut conflicts, 0x20, "int");
+        record_unambiguous_register_type_hint(&mut types, &mut conflicts, 0x20, "int");
+        assert_eq!(types.get(&0x20).map(String::as_str), Some("int"));
+
+        record_unambiguous_register_type_hint(&mut types, &mut conflicts, 0x20, "char *");
+        record_unambiguous_register_type_hint(&mut types, &mut conflicts, 0x20, "int");
+        assert!(!types.contains_key(&0x20));
+        assert!(conflicts.contains(&0x20));
+
+        record_unambiguous_register_type_hint(&mut types, &mut conflicts, 0x28, "size_t");
+        assert_eq!(types.get(&0x28).map(String::as_str), Some("size_t"));
     }
 
     // -------------------------------------------------------------------------

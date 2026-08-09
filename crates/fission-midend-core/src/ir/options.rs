@@ -336,6 +336,12 @@ pub struct NirFunctionHints {
     /// to apply when the matching binding is written at most once in the
     /// function body (see `apply_function_name_hints`'s use of this field).
     pub register_local_names: HashMap<u64, String>,
+    /// Declared DWARF/PDB types for register-resident locals, keyed by the
+    /// same SLEIGH register offset as [`Self::register_local_names`]. Context
+    /// assembly only admits an entry when every debug local mapped to that
+    /// offset agrees on one nonempty type; conflicting register reuse stays
+    /// untyped instead of leaking one scope's declaration into another.
+    pub register_local_type_names: HashMap<u64, String>,
 }
 
 /// One field of a struct/union/class type known from debug info (DWARF or

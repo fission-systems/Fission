@@ -156,7 +156,7 @@ fn apply_function_name_hints(
         stats.explicit_local_name_hits += 1;
     }
 
-    if !hints.register_local_names.is_empty() {
+    if !hints.register_local_names.is_empty() || !hints.register_local_type_names.is_empty() {
         // A register has no stable per-function identity the way a stack
         // slot's address does -- it gets reused for unrelated values
         // constantly, which is why `register_local_names` only ever contains
@@ -187,6 +187,17 @@ fn apply_function_name_hints(
             else {
                 continue;
             };
+
+            if binding.surface_type_name.is_none()
+                && let Some(type_name) = hints.register_local_type_names.get(register_offset)
+            {
+                let type_name = type_name.trim();
+                if !type_name.is_empty() {
+                    binding.surface_type_name = Some(type_name.to_string());
+                    stats.explicit_local_type_hits += 1;
+                }
+            }
+
             let Some(new_name) = hints.register_local_names.get(register_offset) else {
                 continue;
             };

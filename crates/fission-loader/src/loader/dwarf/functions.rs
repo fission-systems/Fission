@@ -30,6 +30,35 @@ impl FuncBuilder {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocationListEntryKind {
+    Register(u64),
+    ConstantValue,
+    Other,
+}
+
+/// Select the one register that carries a variable after an optional
+/// constant-valued prefix. Optimized code commonly keeps a local as a DWARF
+/// stack-value constant until its first update, then materializes it in one
+/// register. That is one variable identity, not register reuse. Constants
+/// after materialization, a non-constant computed location, or two distinct
+/// registers remain ambiguous and are rejected.
+fn register_after_leading_constants(entries: &[LocationListEntryKind]) -> Option<u64> {
+    let mut agreed_register = None;
+    for entry in entries {
+        match *entry {
+            LocationListEntryKind::ConstantValue if agreed_register.is_none() => {}
+            LocationListEntryKind::Register(register) => match agreed_register {
+                None => agreed_register = Some(register),
+                Some(previous) if previous == register => {}
+                Some(_) => return None,
+            },
+            LocationListEntryKind::ConstantValue | LocationListEntryKind::Other => return None,
+        }
+    }
+    agreed_register
+}
+
 /// Function extraction methods for DwarfAnalyzer
 impl<'a> super::analyzer::DwarfAnalyzer<'a> {
     /// Extract all function information from DWARF
@@ -292,15 +321,14 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
     /// declared scope) and a location list (`LocListsRef` / `DebugLocListsIndex`
     /// — location varies across PC ranges, the common shape real compilers
     /// emit for locals even when the underlying storage never actually
-    /// changes). For a location list we only report `DwarfLocation::Register`
-    /// when *every* range resolves to the exact same register: real compilers
-    /// routinely split ranges for reasons that have nothing to do with the
-    /// variable moving (e.g. an `entry_value`-computed range appended after
-    /// the raw register range once the register might get reused for
-    /// something else) -- picking the first entry's register there would call
-    /// a reused scratch register the variable's permanent home. Any
-    /// disagreement across ranges, or any non-register range, falls back to
-    /// `Unknown` -- a missed rename, never a wrong one.
+    /// changes). For a location list we report `DwarfLocation::Register` when
+    /// every range resolves to the exact same register, or when a prefix of
+    /// pure constant stack-values is followed by ranges in one register. The
+    /// latter is the canonical optimized induction-local shape: the variable
+    /// is constant until its first update, then gains physical storage. A
+    /// constant after materialization, an `entry_value`/computed location, or
+    /// disagreement between registers remains `Unknown` -- a missed rename,
+    /// never a wrong one.
     pub(super) fn extract_location(
         &self,
         entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
@@ -317,10 +345,8 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         }
     }
 
-    /// Resolve a location-list attribute to a single register, only when
-    /// every entry agrees on the same DWARF register number. See
-    /// `extract_location` for why disagreement (or any non-register entry)
-    /// must fall back to `Unknown` rather than guess.
+    /// Resolve a location-list attribute to a single register under the
+    /// agreement/leading-constant contract documented on `extract_location`.
     fn parse_location_list(
         &self,
         attr: gimli::AttributeValue<EndianSlice<'a, RunTimeEndian>>,
@@ -331,30 +357,46 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             return Ok(DwarfLocation::Unknown);
         };
 
-        let mut agreed_register: Option<u64> = None;
-        let mut saw_entry = false;
+        let mut entries = Vec::new();
         while let Some(list_entry) = iter.next()? {
-            saw_entry = true;
-            let parsed = self.parse_location_expr(list_entry.data, unit)?;
-            let DwarfLocation::Register(reg_str) = parsed else {
-                return Ok(DwarfLocation::Unknown);
-            };
-            let Some(reg_num) = reg_str
-                .strip_prefix("reg")
-                .and_then(|n| n.parse::<u64>().ok())
-            else {
-                return Ok(DwarfLocation::Unknown);
-            };
-            match agreed_register {
-                None => agreed_register = Some(reg_num),
-                Some(prev) if prev == reg_num => {}
-                Some(_) => return Ok(DwarfLocation::Unknown),
-            }
+            entries.push(self.classify_location_list_expr(list_entry.data, unit)?);
         }
 
-        match (saw_entry, agreed_register) {
-            (true, Some(reg_num)) => Ok(DwarfLocation::Register(format!("reg{reg_num}"))),
-            _ => Ok(DwarfLocation::Unknown),
+        Ok(register_after_leading_constants(&entries)
+            .map(|register| DwarfLocation::Register(format!("reg{register}")))
+            .unwrap_or(DwarfLocation::Unknown))
+    }
+
+    fn classify_location_list_expr(
+        &self,
+        expr: gimli::Expression<EndianSlice<'a, RunTimeEndian>>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+    ) -> Result<LocationListEntryKind, gimli::Error> {
+        let mut ops = expr.operations(unit.encoding());
+        let first = ops.next()?;
+        let second = ops.next()?;
+        let third = ops.next()?;
+
+        match (first, second, third) {
+            (Some(gimli::Operation::Register { register }), None, None) => {
+                Ok(LocationListEntryKind::Register(u64::from(register.0)))
+            }
+            (
+                Some(gimli::Operation::RegisterOffset { register, .. }),
+                Some(gimli::Operation::StackValue),
+                None,
+            ) if !matches!(register.0, 6 | 7 | 29 | 31) => {
+                Ok(LocationListEntryKind::Register(u64::from(register.0)))
+            }
+            (
+                Some(
+                    gimli::Operation::UnsignedConstant { .. }
+                    | gimli::Operation::SignedConstant { .. },
+                ),
+                Some(gimli::Operation::StackValue),
+                None,
+            ) => Ok(LocationListEntryKind::ConstantValue),
+            _ => Ok(LocationListEntryKind::Other),
         }
     }
 
@@ -387,5 +429,38 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         } else {
             Ok(DwarfLocation::Unknown)
         }
+    }
+}
+
+#[cfg(test)]
+mod location_list_tests {
+    use super::{LocationListEntryKind as Entry, register_after_leading_constants};
+
+    #[test]
+    fn accepts_constant_prefix_followed_by_one_register() {
+        assert_eq!(
+            register_after_leading_constants(&[
+                Entry::ConstantValue,
+                Entry::Register(2),
+                Entry::Register(2),
+            ]),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn rejects_register_reuse_and_nonleading_constants() {
+        assert_eq!(
+            register_after_leading_constants(&[Entry::Register(2), Entry::Register(3)]),
+            None
+        );
+        assert_eq!(
+            register_after_leading_constants(&[Entry::Register(2), Entry::ConstantValue]),
+            None
+        );
+        assert_eq!(
+            register_after_leading_constants(&[Entry::ConstantValue, Entry::Other]),
+            None
+        );
     }
 }
