@@ -1137,6 +1137,7 @@ mod tests {
             rich_header_records: None,
             symbol_versions: HashMap::new(),
             cfg_label_leaders: Vec::new(),
+            loader_symbols: Vec::new(),
         };
         let binary = LoadedBinary::from_inner(inner);
         let store = FactStore::from_binary(&binary);
