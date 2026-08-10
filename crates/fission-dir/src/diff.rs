@@ -218,8 +218,8 @@ mod tests {
         prehir_func(vec![
             PreHirStmt::If {
                 cond: prehir_a_gt_b(),
-                then_body: vec![PreHirStmt::Goto("L_then".to_string())],
-                else_body: vec![],
+                then_body: vec![PreHirStmt::Goto("L_then".to_string())].into(),
+                else_body: vec![].into(),
             },
             PreHirStmt::Return(Some(prehir_var("b"))),
             PreHirStmt::Label("L_then".to_string()),
@@ -363,7 +363,7 @@ mod tests {
                             ty: i32_ty(),
                         },
                     },
-                ],
+                ].into(),
             },
             PreHirStmt::Return(Some(prehir_var("acc"))),
         ];
