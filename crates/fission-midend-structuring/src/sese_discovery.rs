@@ -199,10 +199,17 @@ pub fn sese_structure_region(
 
     let mut child_map = HashMap::default();
     for child in &region.children {
-        if let Some(body) = results.get(&(child.entry, child.exit)) {
+        // `results` entries are write-once-read-once: this loop, in the
+        // child's immediate (and only) parent, is the sole consumer --
+        // `structure_cfg_via_sese`'s own top-level read only ever takes the
+        // root entry. `remove` takes ownership instead of cloning the whole
+        // recursively-nested PreHirStmt body, which profiling showed was a
+        // second (smaller) instance of the same clone-heavy pattern already
+        // fixed in `lower_linear_body_cached`.
+        if let Some(body) = results.remove(&(child.entry, child.exit)) {
             let proof =
                 RegionProof::structured(RegionKind::Sequence, child.entry, child.exit, None);
-            child_map.insert(child.entry, (body.clone(), child.exit, proof));
+            child_map.insert(child.entry, (body, child.exit, proof));
         }
     }
 
