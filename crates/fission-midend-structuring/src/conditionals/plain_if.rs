@@ -162,7 +162,7 @@ pub fn try_lower_if(
 
         let stmt = PreHirStmt::If {
             cond: candidate.cond,
-            then_body: body,
+            then_body: std::rc::Rc::unwrap_or_clone(body),
             else_body: Vec::new(),
         };
         if candidate.cond_prefix.is_empty() {

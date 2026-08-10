@@ -759,7 +759,7 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
             }
             let continue_label = block_label(host.block_target_key(idx));
             let break_label = block_label(host.block_target_key(exit_idx));
-            let mut body = body;
+            let mut body = std::rc::Rc::unwrap_or_clone(body);
             let mut stats = LoopControlRewriteStats::default();
             rewrite_loop_control_gotos_in_stmts(
                 &mut body,

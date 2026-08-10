@@ -105,7 +105,7 @@ pub fn try_lower_short_circuit_and(
 
         let stmt = PreHirStmt::If {
             cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalAnd)),
-            then_body,
+            then_body: std::rc::Rc::unwrap_or_clone(then_body),
             else_body: Vec::new(),
         };
 
@@ -207,8 +207,8 @@ pub fn try_lower_short_circuit_and_else(
 
         let stmt = PreHirStmt::If {
             cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalAnd)),
-            then_body,
-            else_body,
+            then_body: std::rc::Rc::unwrap_or_clone(then_body),
+            else_body: std::rc::Rc::unwrap_or_clone(else_body),
         };
 
         if first_prefix.is_empty() {
@@ -289,7 +289,7 @@ pub fn try_lower_short_circuit_or(
 
                 let stmt = PreHirStmt::If {
                     cond: conds[0].clone(),
-                    then_body,
+                    then_body: std::rc::Rc::unwrap_or_clone(then_body),
                     else_body: Vec::new(),
                 };
 
@@ -326,7 +326,7 @@ pub fn try_lower_short_circuit_or(
             host.bump_condition_fold_or(conds.len() - 1);
             let stmt = PreHirStmt::If {
                 cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalOr)),
-                then_body,
+                then_body: std::rc::Rc::unwrap_or_clone(then_body),
                 else_body: Vec::new(),
             };
 

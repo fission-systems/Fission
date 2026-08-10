@@ -150,10 +150,11 @@ pub fn try_recover_region_linearized_body(
             }
         }
     }
-    let Some((mut body, skip_to)) = lowered else {
+    let Some((body, skip_to)) = lowered else {
         host.bump_region_linearize_rejected_body_lowering_failed();
         return Ok(None);
     };
+    let mut body = std::rc::Rc::unwrap_or_clone(body);
     if skip_to <= start_idx {
         host.bump_region_linearize_rejected_non_advancing();
         return Ok(None);
@@ -188,9 +189,10 @@ pub fn build_linear_sese_child_fallback(
     } else {
         LinearExit::Join(exit)
     };
-    let Some((mut body, _skip)) = host.lower_linear_body(entry, exit_spec)? else {
+    let Some((body, _skip)) = host.lower_linear_body(entry, exit_spec)? else {
         return Err(MlilPreviewError::UnsupportedCfgRegionShape);
     };
+    let mut body = std::rc::Rc::unwrap_or_clone(body);
     let targeted = host.collect_jump_targets()?;
     let block_key = host.block_target_key(entry);
     let entry_label = block_label(block_key);

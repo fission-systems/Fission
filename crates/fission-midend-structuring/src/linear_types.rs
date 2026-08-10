@@ -177,13 +177,18 @@ pub enum LinearBodyRejectReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearBodyLoweringOutcome {
-    Lowered((Vec<fission_midend_prehir::PreHirStmt>, usize)),
+    /// `Rc`, not an owned `Vec`: this body is cloned on every cache hit
+    /// (`lower_linear_body_cached`) and every cache store -- an `Rc` clone
+    /// there is a refcount bump instead of a full recursive `PreHirStmt`
+    /// tree clone, which profiling showed was over half of total
+    /// structuring CPU time on real, structuring-heavy functions.
+    Lowered((Rc<Vec<fission_midend_prehir::PreHirStmt>>, usize)),
     Rejected(LinearBodyRejectReason),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearBodyCachedOutcome {
-    Lowered((Vec<fission_midend_prehir::PreHirStmt>, usize)),
+    Lowered((Rc<Vec<fission_midend_prehir::PreHirStmt>>, usize)),
     Rejected(LinearBodyRejectReason),
 }
 

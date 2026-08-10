@@ -100,13 +100,13 @@ pub trait StructuringHost {
         &mut self,
         start_idx: usize,
         exit: LinearExit,
-    ) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError>;
+    ) -> Result<Option<(std::rc::Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError>;
     fn lower_linear_body_with_budget(
         &mut self,
         start_idx: usize,
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError>;
+    ) -> Result<Option<(std::rc::Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError>;
     fn linear_exit(
         &mut self,
         idx: usize,

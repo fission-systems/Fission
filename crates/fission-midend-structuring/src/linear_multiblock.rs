@@ -119,7 +119,7 @@ pub fn lower_structured_switch_terminator(
         max_skip = max_skip.max(skip_to);
         cases.push(PreHirSwitchCase {
             values: vec![value],
-            body: case_body,
+            body: std::rc::Rc::unwrap_or_clone(case_body),
         });
     }
     crate::helpers::merge_equivalent_switch_cases(&mut cases);
@@ -129,7 +129,7 @@ pub fn lower_structured_switch_terminator(
             return Ok(None);
         };
         max_skip = max_skip.max(default_skip);
-        default_body
+        std::rc::Rc::unwrap_or_clone(default_body)
     } else {
         Vec::new()
     };

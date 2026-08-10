@@ -19,6 +19,7 @@ use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 use fission_midend_prehir::util::negate_expr;
 use crate::HashMap;
 use crate::HashSet;
+use std::rc::Rc;
 
 pub fn has_linear_body_cache(host: &impl StructuringHost, start_idx: usize, exit: LinearExit) -> bool {
         host.linear_body_cache_get(&LinearBodyCacheKey {
@@ -28,18 +29,18 @@ pub fn has_linear_body_cache(host: &impl StructuringHost, start_idx: usize, exit
         }).is_some()
     }
 
-pub fn lower_linear_body(host: &mut impl StructuringHost, 
+pub fn lower_linear_body(host: &mut impl StructuringHost,
         start_idx: usize,
         exit: LinearExit,
-    ) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError> {
         lower_linear_body_with_budget(host, start_idx, exit, None)
     }
 
-pub fn lower_linear_body_with_budget(host: &mut impl StructuringHost, 
+pub fn lower_linear_body_with_budget(host: &mut impl StructuringHost,
         start_idx: usize,
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError> {
         let mut auto_budget = None;
         let budget_ref = if let Some(b) = budget {
             b
@@ -162,7 +163,7 @@ pub fn lower_linear_body_with_depth_detailed(host: &mut impl StructuringHost,
 
         if let LinearExit::Join(join_idx) = exit {
             if start_idx == join_idx {
-                return Ok(LinearBodyLoweringOutcome::Lowered((Vec::new(), start_idx)));
+                return Ok(LinearBodyLoweringOutcome::Lowered((Rc::new(Vec::new()), start_idx)));
             }
         }
 
@@ -222,14 +223,14 @@ pub fn lower_linear_body_with_depth_detailed(host: &mut impl StructuringHost,
                 };
                 body.extend(host.lower_block_stmts(idx)?);
                 body.push(tail_stmt);
-                return Ok(LinearBodyLoweringOutcome::Lowered((body, skip_to)));
+                return Ok(LinearBodyLoweringOutcome::Lowered((Rc::new(body), skip_to)));
             }
 
             body.extend(host.lower_block_stmts(idx)?);
             match terminator {
                 LoweredTerminator::Return(expr) => {
                     body.push(PreHirStmt::Return(expr));
-                    return Ok(LinearBodyLoweringOutcome::Lowered((body, idx + 1)));
+                    return Ok(LinearBodyLoweringOutcome::Lowered((Rc::new(body), idx + 1)));
                 }
                 LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
                     let Some(next_idx) = host.find_block_index_by_address(target) else {
@@ -243,18 +244,18 @@ pub fn lower_linear_body_with_depth_detailed(host: &mut impl StructuringHost,
                         {
                             body.push(PreHirStmt::Return(Some(expr)));
                         }
-                        return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
+                        return Ok(LinearBodyLoweringOutcome::Lowered((Rc::new(body), next_idx)));
                     }
                     if host.active_switch_targets().contains(&next_idx) {
                         body.push(PreHirStmt::Goto(block_label(target)));
-                        return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
+                        return Ok(LinearBodyLoweringOutcome::Lowered((Rc::new(body), next_idx)));
                     }
                     if body.is_empty()
                         && host.is_trivial_forwarding_block(idx, next_idx)
                         && linear_exit_with_budget(host, next_idx, budget.as_deref_mut())?
                             == Some(exit)
                     {
-                        return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
+                        return Ok(LinearBodyLoweringOutcome::Lowered((Rc::new(body), next_idx)));
                     }
                     let can_inline = if region_recovery {
                         can_inline_linear_successor_for_region(host, idx, next_idx, &visited, exit)
@@ -276,7 +277,7 @@ pub fn lower_linear_body_with_depth_detailed(host: &mut impl StructuringHost,
                         ));
                     }
                     return Ok(LinearBodyLoweringOutcome::Lowered((
-                        body,
+                        Rc::new(body),
                         host.block_count(),
                     )));
                 }
@@ -317,7 +318,7 @@ pub fn lower_linear_body_with_depth_detailed(host: &mut impl StructuringHost,
                         }
                     };
                     body.push(tail_stmt);
-                    return Ok(LinearBodyLoweringOutcome::Lowered((body, skip_to)));
+                    return Ok(LinearBodyLoweringOutcome::Lowered((Rc::new(body), skip_to)));
                 }
                 _ => {
                     return Ok(LinearBodyLoweringOutcome::Rejected(
@@ -674,7 +675,7 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                 return Ok(ConditionalTailLoweringResult::Lowered((
                     PreHirStmt::If {
                         cond: negate_expr(cond.clone()),
-                        then_body: false_body,
+                        then_body: Rc::unwrap_or_clone(false_body),
                         else_body: Vec::new(),
                     },
                     skip_to,
@@ -695,7 +696,7 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                 return Ok(ConditionalTailLoweringResult::Lowered((
                     PreHirStmt::If {
                         cond: cond.clone(),
-                        then_body: true_body,
+                        then_body: Rc::unwrap_or_clone(true_body),
                         else_body: Vec::new(),
                     },
                     skip_to,
@@ -763,10 +764,10 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                                 )) => {
                                     let mut block_stmts = vec![PreHirStmt::If {
                                         cond: cond.clone(),
-                                        then_body,
-                                        else_body,
+                                        then_body: Rc::unwrap_or_clone(then_body),
+                                        else_body: Rc::unwrap_or_clone(else_body),
                                     }];
-                                    block_stmts.extend(shared_tail_body);
+                                    block_stmts.extend(Rc::unwrap_or_clone(shared_tail_body));
                                     return Ok(ConditionalTailLoweringResult::Lowered((
                                         PreHirStmt::Block(block_stmts),
                                         shared_skip.max(then_skip.max(else_skip)),
@@ -818,8 +819,8 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                 ) => Ok(ConditionalTailLoweringResult::Lowered((
                     PreHirStmt::If {
                         cond,
-                        then_body,
-                        else_body,
+                        then_body: Rc::unwrap_or_clone(then_body),
+                        else_body: Rc::unwrap_or_clone(else_body),
                     },
                     then_skip.max(else_skip),
                 ))),

@@ -74,10 +74,11 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
         let mut cases = Vec::new();
         let mut max_skip = 0usize;
         for (value, case_idx) in parsed.cases {
-            let Some((mut case_body, skip_to)) = host.lower_linear_body(case_idx, exit)? else {
+            let Some((case_body, skip_to)) = host.lower_linear_body(case_idx, exit)? else {
                  *host.active_switch_targets_mut() = old_targets;
                 return Ok(None);
             };
+            let mut case_body = std::rc::Rc::unwrap_or_clone(case_body);
             max_skip = max_skip.max(skip_to).max(case_idx + 1);
             if !case_body.iter().any(|s| matches!(s, PreHirStmt::Label(_))) {
                 let target_addr = host.block_start_address(case_idx);
@@ -93,12 +94,13 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
         }
         merge_equivalent_switch_cases(&mut cases);
         let ft_count = detect_and_patch_case_fallthrough(&mut cases);
-        let Some((mut default_body, default_skip)) =
+        let Some((default_body, default_skip)) =
             host.lower_linear_body(parsed.default_idx, exit)?
         else {
              *host.active_switch_targets_mut() = old_targets;
             return Ok(None);
         };
+        let mut default_body = std::rc::Rc::unwrap_or_clone(default_body);
         if !default_body.iter().any(|s| matches!(s, PreHirStmt::Label(_))) {
             let target_addr = host.block_start_address(parsed.default_idx);
             default_body.insert(
@@ -217,7 +219,7 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
             max_skip = max_skip.max(skip_to).max(case_idx + 1);
             cases.push(PreHirSwitchCase {
                 values: vec![value],
-                body: case_body,
+                body: std::rc::Rc::unwrap_or_clone(case_body),
             });
         }
         if !success || cases.len() < 2 {
@@ -238,7 +240,7 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
                 return Ok(None);
             };
             max_skip = max_skip.max(skip_to).max(default_idx + 1);
-            default_body
+            std::rc::Rc::unwrap_or_clone(default_body)
         } else {
             Vec::new()
         };

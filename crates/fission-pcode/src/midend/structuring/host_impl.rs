@@ -143,7 +143,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         &mut self,
         start_idx: usize,
         exit: LinearExit,
-    ) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(std::rc::Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError> {
         fission_midend_structuring::lower_linear_body(self, start_idx, exit)
     }
     fn lower_linear_body_with_budget(
@@ -151,7 +151,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         start_idx: usize,
         exit: LinearExit,
         budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<(Vec<PreHirStmt>, usize)>, MlilPreviewError> {
+    ) -> Result<Option<(std::rc::Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError> {
         fission_midend_structuring::lower_linear_body_with_budget(self, start_idx, exit, budget)
     }
     fn linear_exit(&mut self, idx: usize) -> Result<Option<LinearExit>, MlilPreviewError> {
