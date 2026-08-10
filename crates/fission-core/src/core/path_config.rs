@@ -371,6 +371,25 @@ impl PathConfig {
         })
     }
 
+    /// JSON file under the Rust typeinfo corpus (e.g. `rust_structures.json`,
+    /// extracted from `rust-common.gdt` via `scripts/gdt_extract_structs.py`).
+    pub fn get_rust_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.signatures_base.as_ref().and_then(|base| {
+            let path = base.join("typeinfo").join("rust").join(filename);
+            path.exists().then_some(path)
+        }).or_else(|| {
+            self.workspace_root.as_ref().and_then(|root| {
+                let path = root
+                    .join("utils")
+                    .join("signatures")
+                    .join("typeinfo")
+                    .join("rust")
+                    .join(filename);
+                path.exists().then_some(path)
+            })
+        })
+    }
+
     /// Detect It Easy `.sg` mirror root (`detect-it-easy/`), if present.
     ///
     /// Resolution uses resolved DIE paths and workspace layout only — no cwd upward walks.

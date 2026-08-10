@@ -66,6 +66,14 @@ fn try_read_typeinfo_json(filename: &str) -> Result<String, WinTypesError> {
     })
 }
 
+/// Rust struct layouts (`typeinfo/rust/rust_structures.json`) are an optional
+/// supplement to the Windows corpus, not every environment ships them, so
+/// unlike [`try_read_typeinfo_json`] a missing file is not an error here.
+fn try_read_rust_typeinfo_json(filename: &str) -> Option<String> {
+    let path = resources().rust_typeinfo_json_path(filename)?;
+    fs::read_to_string(&path).ok()
+}
+
 // ============================================================================
 // Windows Base Types (for annotation purposes)
 // ============================================================================
@@ -225,6 +233,41 @@ impl WindowsStructures {
                 fields,
             };
             structures.insert(item.name, def);
+        }
+
+        if let Some(rust_json) = try_read_rust_typeinfo_json("rust_structures.json") {
+            match serde_json::from_str::<Vec<JsonStructDef>>(&rust_json) {
+                Ok(rust_items) => {
+                    for item in rust_items {
+                        let fields = item
+                            .fields
+                            .into_iter()
+                            .map(|f| FieldDef {
+                                name: f.name,
+                                type_name: f.type_name,
+                                offset_32: f.offset_32,
+                                offset_64: f.offset_64,
+                                size_32: f.size_32,
+                                size_64: f.size_64,
+                            })
+                            .collect();
+                        structures.insert(
+                            item.name.clone(),
+                            StructDef {
+                                name: item.name,
+                                size_32: item.size_32,
+                                size_64: item.size_64,
+                                fields,
+                            },
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "fission-signatures win_types: failed to parse rust_structures.json, skipping: {e}"
+                    );
+                }
+            }
         }
 
         Ok(Self {

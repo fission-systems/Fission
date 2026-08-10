@@ -83,4 +83,9 @@ impl ResourceProvider {
     pub fn win32_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
         self.paths.get_win32_typeinfo_json_path(filename)
     }
+
+    #[must_use]
+    pub fn rust_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.paths.get_rust_typeinfo_json_path(filename)
+    }
 }
