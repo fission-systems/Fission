@@ -229,8 +229,8 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
                     },
                     rhs: PreHirExpr::Var("local_3c".to_string()),
                 },
-            ],
-            else_body: vec![],
+            ].into(),
+            else_body: vec![].into(),
         }],
         ..Default::default()
     };

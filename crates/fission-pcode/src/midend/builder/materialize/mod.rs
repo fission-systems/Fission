@@ -612,8 +612,8 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     body.push(PreHirStmt::If {
                         cond: inverted_cond,
-                        then_body: nested_body,
-                        else_body: Vec::new(),
+                        then_body: nested_body.into(),
+                        else_body: Vec::new().into(),
                     });
                     op_idx = target_op_idx;
                     continue;

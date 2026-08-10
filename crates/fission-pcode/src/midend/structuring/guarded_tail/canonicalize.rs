@@ -135,13 +135,13 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(None),
         ];
@@ -168,13 +168,13 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: cond.clone(),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond,
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(None),
         ];
@@ -190,14 +190,14 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
-            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Block(Vec::new().into()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(None),
         ];
@@ -213,13 +213,13 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c1".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c2".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
         ];
 
@@ -234,13 +234,13 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L1".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L1".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L2".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L2".to_string())].into(),
+                else_body: Vec::new().into(),
             },
         ];
 
@@ -255,8 +255,8 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("x".to_string()),
@@ -270,8 +270,8 @@ mod tests {
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("L".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                else_body: Vec::new().into(),
             },
         ];
 
@@ -289,15 +289,15 @@ mod tests {
                 body: vec![
                     PreHirStmt::If {
                         cond: PreHirExpr::Var("c".to_string()),
-                        then_body: vec![PreHirStmt::Goto("L".to_string())],
-                        else_body: Vec::new(),
+                        then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                        else_body: Vec::new().into(),
                     },
                     PreHirStmt::If {
                         cond: PreHirExpr::Var("c".to_string()),
-                        then_body: vec![PreHirStmt::Goto("L".to_string())],
-                        else_body: Vec::new(),
+                        then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+                        else_body: Vec::new().into(),
                     },
-                ],
+                ].into(),
             },
             PreHirStmt::Return(None),
         ];
@@ -359,8 +359,8 @@ mod tests {
             PreHirStmt::Goto("Lret".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("Lret".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("Lret".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("Lret".to_string()),
             PreHirStmt::Return(None),
@@ -420,7 +420,7 @@ mod tests {
             PreHirStmt::Label("Lret".to_string()),
             PreHirStmt::While {
                 cond: PreHirExpr::Var("loop_c".to_string()),
-                body: vec![PreHirStmt::Break],
+                body: vec![PreHirStmt::Break].into(),
             },
             PreHirStmt::Return(None),
         ];
@@ -438,14 +438,14 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Goto("Lret".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("Lret".to_string()),
             PreHirStmt::Return(None),
@@ -470,16 +470,16 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
-            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Block(Vec::new().into()),
             PreHirStmt::Goto("Lret".to_string()),
-            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Block(Vec::new().into()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("Lret".to_string()),
             PreHirStmt::Return(None),
@@ -504,8 +504,8 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Expr(PreHirExpr::Call {
                 target: "FUN_0x140001000".to_string(),
@@ -514,8 +514,8 @@ mod tests {
             }),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
         ];
         let full_body = body.clone();
@@ -532,14 +532,14 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Goto("Lret".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("Lret".to_string()),
             PreHirStmt::Return(None),
@@ -560,14 +560,14 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("mid".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("A".to_string()),
             PreHirStmt::Return(None),
@@ -586,19 +586,19 @@ mod tests {
         let mut body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Goto("Lloop".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("c".to_string()),
-                then_body: vec![PreHirStmt::Goto("A".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("A".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("Lloop".to_string()),
             PreHirStmt::While {
                 cond: PreHirExpr::Var("loop_c".to_string()),
-                body: vec![PreHirStmt::Break],
+                body: vec![PreHirStmt::Break].into(),
             },
             PreHirStmt::Return(None),
         ];
@@ -644,7 +644,7 @@ mod tests {
             PreHirStmt::Return(None),
             PreHirStmt::Label("Lafter".to_string()),
             PreHirStmt::Goto("L".to_string()),
-            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Block(Vec::new().into()),
             PreHirStmt::Goto("Lhop".to_string()),
             PreHirStmt::Label("Lhop".to_string()),
             PreHirStmt::Return(None),

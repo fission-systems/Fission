@@ -1511,8 +1511,8 @@ impl<'a> PreviewBuilder<'a> {
         Ok(Some(vec![
             PreHirStmt::If {
                 cond,
-                then_body: vec![PreHirStmt::Return(Some(default_expr))],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Return(Some(default_expr))].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(alt_expr)),
         ]))
@@ -1597,10 +1597,10 @@ impl<'a> PreviewBuilder<'a> {
         Ok(Some(vec![
             PreHirStmt::If {
                 cond: return_cond,
-                then_body: vec![PreHirStmt::Return(None)],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Return(None)].into(),
+                else_body: Vec::new().into(),
             },
-            PreHirStmt::Block(tail_body),
+            PreHirStmt::Block(tail_body.into()),
         ]))
     }
 

@@ -383,8 +383,8 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Unary {
@@ -392,8 +392,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("join".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Goto("join".to_string()),
             PreHirStmt::Label("join".to_string()),
@@ -414,8 +414,8 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("outer".to_string()),
-                then_body: vec![PreHirStmt::Goto("join".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Unary {
@@ -423,8 +423,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("join".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Goto("join".to_string()),
             PreHirStmt::Label("join".to_string()),

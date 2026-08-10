@@ -42,14 +42,14 @@ fn structuring_promotes_single_entry_guarded_tail_region() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::If {
             cond: PreHirExpr::Var("flag".to_string()),
-            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -72,11 +72,11 @@ fn structuring_promotes_single_entry_guarded_tail_region() {
                     PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
                     PreHirStmt::If {
                         cond: PreHirExpr::Var("flag".to_string()),
-                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
-                        else_body: Vec::new(),
+                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+                        else_body: Vec::new().into(),
                     },
-                ],
-                else_body: Vec::new(),
+                ].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ],
@@ -91,8 +91,8 @@ fn structuring_promotes_terminal_single_entry_guarded_tail_region() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -109,8 +109,8 @@ fn structuring_promotes_terminal_single_entry_guarded_tail_region() {
                 expr: Box::new(PreHirExpr::Var("reg".to_string())),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("middle".to_string()))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("middle".to_string()))].into(),
+            else_body: Vec::new().into(),
         },]
     );
 }
@@ -120,8 +120,8 @@ fn structuring_promotes_guarded_tail_when_only_deleted_alias_chain_references_jo
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -145,8 +145,8 @@ fn structuring_promotes_guarded_tail_when_only_deleted_alias_chain_references_jo
                     expr: Box::new(PreHirExpr::Var("reg".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("middle".to_string()))],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("middle".to_string()))].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         ]
@@ -158,8 +158,8 @@ fn structuring_guarded_tail_rejects_local_forward_label_branch_under_hard_cutove
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
@@ -167,8 +167,8 @@ fn structuring_guarded_tail_rejects_local_forward_label_branch_under_hard_cutove
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("tmp".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_taken".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_taken".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("fallthrough".to_string())),
         PreHirStmt::Goto("block_tail".to_string()),
@@ -179,8 +179,8 @@ fn structuring_guarded_tail_rejects_local_forward_label_branch_under_hard_cutove
                 expr: Box::new(PreHirExpr::Var("tmp".to_string())),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("taken".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -209,8 +209,8 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
@@ -218,8 +218,8 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("tmp".to_string()),
-            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
@@ -317,8 +317,8 @@ fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
@@ -326,8 +326,8 @@ fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("tmp".to_string()),
-            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
@@ -373,8 +373,8 @@ fn structuring_guarded_tail_execute_rewrite_survives_forwarding_tail_label_chain
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
@@ -382,8 +382,8 @@ fn structuring_guarded_tail_execute_rewrite_survives_forwarding_tail_label_chain
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("tmp".to_string()),
-            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Goto("block_ret".to_string()),
@@ -411,23 +411,23 @@ fn structuring_guarded_tail_execute_rewrite_survives_padded_middle_depth() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Block(vec![
             PreHirStmt::Expr(PreHirExpr::Var("middle_a".to_string())),
             PreHirStmt::Block(vec![PreHirStmt::Expr(PreHirExpr::Var(
                 "middle_b".to_string(),
-            ))]),
-        ]),
+            ))].into()),
+        ].into()),
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
             rhs: PreHirExpr::Var("probe".to_string()),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("tmp".to_string()),
-            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_string()))),
@@ -449,8 +449,8 @@ fn structuring_guarded_tail_rejects_export_without_dominating_else_source() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
@@ -473,8 +473,8 @@ fn structuring_candidate_discovery_counts_internal_label_gate_rejection() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_inner".to_string()),
@@ -498,13 +498,13 @@ fn structuring_candidate_discovery_allows_rewritable_middle_join_ref_after_gate_
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("inner".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -529,13 +529,13 @@ fn structuring_guarded_tail_promotes_rewritable_middle_join_ref_after_gate_align
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("inner".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -556,8 +556,8 @@ fn structuring_candidate_discovery_relaxes_trailing_middle_goto_to_join_label() 
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_tail".to_string()),
@@ -576,8 +576,8 @@ fn structuring_candidate_discovery_join_glue_middle_elides_all_goto_refs() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Goto("block_tail".to_string()),
         PreHirStmt::Label("glue".to_string()),
@@ -599,21 +599,21 @@ fn structuring_candidate_discovery_counts_owner_conflict_gate_rejection() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         PreHirStmt::If {
             cond: PreHirExpr::Var("other_a".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("other_b".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
     ];
 
@@ -631,8 +631,8 @@ fn structuring_candidate_discovery_rejects_same_owner_forward_refs_under_hard_cu
         PreHirStmt::Goto("block_tail".to_string()),
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -655,8 +655,8 @@ fn structuring_guarded_tail_rejects_forward_external_refs_that_need_join_label()
         PreHirStmt::Goto("block_tail".to_string()),
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -681,8 +681,8 @@ fn structuring_guarded_tail_rejects_replacement_reads_after_follow_redefinition(
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp".to_string()),
@@ -717,8 +717,8 @@ fn structuring_candidate_discovery_allows_single_forward_external_ref_when_elida
         PreHirStmt::Goto("block_tail".to_string()),
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -743,8 +743,8 @@ fn structuring_candidate_discovery_keeps_post_label_external_ref_rejected() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -763,8 +763,8 @@ fn structuring_guarded_tail_promotion_keeps_post_label_external_ref_rejected() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -789,8 +789,8 @@ fn structuring_terminal_guarded_tail_promotion_keeps_direct_shape_subtypes_zero(
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -815,8 +815,8 @@ fn structuring_candidate_discovery_allows_leading_label_before_payload() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_leading".to_string()),
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
@@ -838,8 +838,8 @@ fn structuring_candidate_discovery_counts_missing_target_as_noncanonical_shape()
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -861,8 +861,8 @@ fn structuring_candidate_discovery_skips_backward_target_without_nonterminal_fai
         PreHirStmt::Expr(PreHirExpr::Var("seed".to_string())),
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -880,8 +880,8 @@ fn structuring_candidate_discovery_terminalizes_nonterminal_join_label_forwarder
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
@@ -904,8 +904,8 @@ fn structuring_candidate_discovery_terminalizes_multihop_nonterminal_join_forwar
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_tail".to_string()),
@@ -928,8 +928,8 @@ fn structuring_candidate_discovery_canonicalizes_safe_interleaved_alias_stub() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_alias".to_string()),
@@ -953,8 +953,8 @@ fn structuring_candidate_discovery_canonicalizes_interleaved_join_stub_with_mult
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_alias".to_string()),
@@ -978,8 +978,8 @@ fn structuring_candidate_discovery_counts_nested_tail_escape() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_mid".to_string()),
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
@@ -1004,8 +1004,8 @@ fn structuring_candidate_discovery_allows_tail_terminal_return_after_payload() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret_mid".to_string()))),
@@ -1025,8 +1025,8 @@ fn structuring_candidate_discovery_allows_tail_terminal_goto_after_payload() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_exit".to_string()),
@@ -1045,8 +1045,8 @@ fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_gap() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_exit_1".to_string()),
@@ -1080,8 +1080,8 @@ fn structuring_candidate_discovery_allows_terminal_tail_chain_with_pure_return_h
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_exit".to_string()),
@@ -1117,8 +1117,8 @@ fn structuring_candidate_discovery_keeps_ambiguous_terminal_tail_target_rejected
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_exit".to_string()),
@@ -1151,8 +1151,8 @@ fn structuring_candidate_discovery_keeps_side_effectful_terminal_tail_rejected()
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_exit".to_string()),
@@ -1192,8 +1192,8 @@ fn structuring_candidate_discovery_keeps_terminal_tail_reentry_rejected() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_exit".to_string()),
@@ -1222,15 +1222,15 @@ fn structuring_candidate_discovery_keeps_terminal_tail_loop_crossing_rejected() 
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_exit".to_string()),
         PreHirStmt::Label("block_exit".to_string()),
         PreHirStmt::While {
             cond: PreHirExpr::Var("loop_c".to_string()),
-            body: vec![PreHirStmt::Break],
+            body: vec![PreHirStmt::Break].into(),
         },
         PreHirStmt::Goto("block_ret".to_string()),
         PreHirStmt::Label("block_ret".to_string()),
@@ -1257,8 +1257,8 @@ fn structuring_candidate_discovery_rejects_goto_to_return_only_tail_label_under_
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_ret".to_string()),
@@ -1288,8 +1288,8 @@ fn structuring_candidate_discovery_counts_interleaved_referenced_label_use() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_mid".to_string()),
@@ -1321,21 +1321,21 @@ fn structuring_candidate_discovery_counts_interleaved_join_use_with_nontrivial_s
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Block(vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("inner".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("block_alias".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::Label("block_join".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
-        ]),
+        ].into()),
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
@@ -1359,15 +1359,15 @@ fn structuring_candidate_discovery_keeps_interleaved_join_use_with_side_effectfu
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Block(vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("inner".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("block_alias".to_string()),
             PreHirStmt::Assign {
@@ -1376,7 +1376,7 @@ fn structuring_candidate_discovery_keeps_interleaved_join_use_with_side_effectfu
             },
             PreHirStmt::Label("block_join".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("after_join".to_string())),
-        ]),
+        ].into()),
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];
@@ -1398,8 +1398,8 @@ fn structuring_candidate_discovery_counts_nested_after_label_alias_not_fallthrou
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1407,8 +1407,8 @@ fn structuring_candidate_discovery_counts_nested_after_label_alias_not_fallthrou
         PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
         PreHirStmt::If {
             cond: PreHirExpr::Var("late".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_tail".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1432,8 +1432,8 @@ fn structuring_candidate_discovery_canonicalizes_local_fallthrough_alias_label()
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1457,13 +1457,13 @@ fn structuring_candidate_discovery_canonicalizes_alias_forward_chain() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid_1".to_string()),
         PreHirStmt::Label("block_mid_1".to_string()),
-        PreHirStmt::Block(vec![]),
+        PreHirStmt::Block(vec![].into()),
         PreHirStmt::Goto("block_mid_2".to_string()),
         PreHirStmt::Label("block_mid_2".to_string()),
         PreHirStmt::Expr(PreHirExpr::Var("more".to_string())),
@@ -1485,8 +1485,8 @@ fn structuring_candidate_discovery_canonicalizes_pure_multi_goto_alias_chain() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1524,8 +1524,8 @@ fn structuring_candidate_discovery_canonicalizes_local_nonfallthrough_alias() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1550,8 +1550,8 @@ fn structuring_candidate_discovery_canonicalizes_safe_top_level_after_label_alia
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1579,8 +1579,8 @@ fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_top_l
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_alias".to_string()),
@@ -1619,8 +1619,8 @@ fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_neste
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_alias".to_string()),
@@ -1635,8 +1635,8 @@ fn structuring_candidate_discovery_keeps_forward_alias_chain_with_external_neste
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         PreHirStmt::If {
             cond: PreHirExpr::Var("late".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
+            else_body: Vec::new().into(),
         },
     ];
 
@@ -1654,8 +1654,8 @@ fn structuring_candidate_discovery_canonicalizes_pure_value_top_level_after_labe
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1691,8 +1691,8 @@ fn structuring_candidate_discovery_canonicalizes_pure_assign_top_level_after_lab
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1727,8 +1727,8 @@ fn structuring_candidate_discovery_keeps_side_effectful_top_level_after_label_al
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1765,14 +1765,14 @@ fn structuring_candidate_discovery_counts_join_external_ref_inside_nested_if() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::If {
             cond: PreHirExpr::Var("other".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Goto("block_mid".to_string()),
         PreHirStmt::Label("block_mid".to_string()),
@@ -1810,8 +1810,8 @@ fn structuring_candidate_discovery_counts_true_nonlocal_alias_ref() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -1827,8 +1827,8 @@ fn structuring_candidate_discovery_counts_true_nonlocal_alias_ref() {
         0,
         PreHirStmt::If {
             cond: PreHirExpr::Var("outer".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())].into(),
+            else_body: Vec::new().into(),
         },
     );
 
@@ -1858,8 +1858,8 @@ fn structuring_candidate_discovery_counts_external_before_alias_nonlocal_ref() {
         PreHirStmt::Goto("block_mid".to_string()),
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_mid".to_string()),
@@ -1885,8 +1885,8 @@ fn structuring_candidate_discovery_counts_post_segment_alias_nonlocal_ref() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_inner".to_string()),
@@ -1895,8 +1895,8 @@ fn structuring_candidate_discovery_counts_post_segment_alias_nonlocal_ref() {
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
         PreHirStmt::If {
             cond: PreHirExpr::Var("late".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_inner".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_inner".to_string())].into(),
+            else_body: Vec::new().into(),
         },
     ];
 
@@ -1918,8 +1918,8 @@ fn structuring_candidate_discovery_rewrites_safe_external_alias_ref() {
         PreHirStmt::Goto("block_mid".to_string()),
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_mid".to_string()),
@@ -1941,14 +1941,14 @@ fn structuring_candidate_discovery_internalizes_same_guard_family_nested_before_
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::If {
             cond: PreHirExpr::Var("cond".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Goto("block_mid".to_string()),
         PreHirStmt::Label("block_mid".to_string()),
@@ -1958,8 +1958,8 @@ fn structuring_candidate_discovery_internalizes_same_guard_family_nested_before_
                 expr: Box::new(PreHirExpr::Var("cond".to_string())),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Goto("block_tail".to_string()),
         PreHirStmt::Label("block_tail".to_string()),
@@ -1984,8 +1984,8 @@ fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_mid".to_string()),
@@ -1997,8 +1997,8 @@ fn structuring_candidate_discovery_counts_nested_before_alias_ref_gate_rejection
         0,
         PreHirStmt::If {
             cond: PreHirExpr::Var("outer".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())].into(),
+            else_body: Vec::new().into(),
         },
     );
 
@@ -2016,8 +2016,8 @@ fn structuring_candidate_discovery_counts_alias_multiple_internal_predecessors()
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Goto("block_mid".to_string()),
         PreHirStmt::Expr(PreHirExpr::Var("skip_1".to_string())),
@@ -2048,8 +2048,8 @@ fn structuring_candidate_discovery_counts_alias_body_not_trivial() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -2076,8 +2076,8 @@ fn structuring_candidate_discovery_accepts_alias_body_with_pure_value_exprs() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -2112,14 +2112,14 @@ fn structuring_candidate_discovery_counts_alias_nonlocal_ref() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::If {
             cond: PreHirExpr::Var("other".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_mid".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Goto("block_mid".to_string()),
         PreHirStmt::Expr(PreHirExpr::Var("skip".to_string())),
@@ -2155,8 +2155,8 @@ fn structuring_candidate_discovery_counts_alias_payload_crossing_join() {
     let body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Goto("block_mid".to_string()),
@@ -2185,15 +2185,15 @@ fn structuring_candidate_discovery_counts_alias_payload_crossing_join() {
 #[test]
 fn structuring_candidate_discovery_counts_ambiguous_follow_witness_rejection() {
     let body = vec![
-        PreHirStmt::Block(vec![PreHirStmt::Goto("block_after".to_string())]),
+        PreHirStmt::Block(vec![PreHirStmt::Goto("block_after".to_string())].into()),
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
         PreHirStmt::Label("block_tail".to_string()),
-        PreHirStmt::Block(Vec::new()),
+        PreHirStmt::Block(Vec::new().into()),
         PreHirStmt::Label("block_after".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
     ];

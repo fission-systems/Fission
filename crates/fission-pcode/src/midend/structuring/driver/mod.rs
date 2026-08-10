@@ -266,14 +266,14 @@ mod tests {
             cases: vec![
                 PreHirSwitchCase {
                     values: vec![0],
-                    body: vec![PreHirStmt::Goto("case_0".to_string())],
+                    body: vec![PreHirStmt::Goto("case_0".to_string())].into(),
                 },
                 PreHirSwitchCase {
                     values: vec![1],
-                    body: vec![PreHirStmt::Goto("case_1".to_string())],
+                    body: vec![PreHirStmt::Goto("case_1".to_string())].into(),
                 },
             ],
-            default: vec![PreHirStmt::Goto("default".to_string())],
+            default: vec![PreHirStmt::Goto("default".to_string())].into(),
         };
         assert!(PreviewBuilder::switch_stmt_has_scaffold_only_arms(&stmt));
     }
@@ -284,9 +284,9 @@ mod tests {
             expr: const_expr(0),
             cases: vec![PreHirSwitchCase {
                 values: vec![0],
-                body: vec![PreHirStmt::Expr(const_expr(1))],
+                body: vec![PreHirStmt::Expr(const_expr(1))].into(),
             }],
-            default: vec![],
+            default: vec![].into(),
         };
         assert!(!PreviewBuilder::switch_stmt_has_scaffold_only_arms(&stmt));
     }
@@ -334,8 +334,8 @@ mod tests {
                 usize::MAX,
                 PreHirStmt::If {
                     cond: const_expr(1),
-                    then_body: vec![],
-                    else_body: vec![],
+                    then_body: vec![].into(),
+                    else_body: vec![].into(),
                 },
                 skip_to,
                 RegionProof::structured(RegionKind::Conditional, 0, skip_to, Some("cond".into())),
