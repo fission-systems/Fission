@@ -113,6 +113,22 @@ fn stmt_list_has_side_effects(stmts: &[PreHirStmt]) -> bool {
     stmts.iter().any(stmt_has_side_effects)
 }
 
+/// Whether `branch` defines a label some `Goto` elsewhere in the function
+/// still targets. GCC loop-rotation emits `if (precheck) { while (1) { L:
+/// ... } }` where the real entry is an unconditional `goto L` from a
+/// different scope, landing straight past this guard -- once constant
+/// propagation reduces `precheck` to a literal, discarding the branch that
+/// contains `L` would erase it out from under that goto, even though
+/// nothing in `branch` itself makes the discard obviously unsafe (no side
+/// effects visible from here). `goto_targets` is the whole-function
+/// referenced-label set collected once in `apply_sccp_pass`, so this sees
+/// cross-scope references a purely local scan would miss.
+fn branch_defines_goto_target(branch: &[PreHirStmt], goto_targets: &HashSet<String>) -> bool {
+    super::super::cleanup::utils::collect_defined_labels(branch)
+        .iter()
+        .any(|label| goto_targets.contains(label))
+}
+
 fn stmt_has_side_effects(stmt: &PreHirStmt) -> bool {
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => lvalue_has_side_effects(lhs) || expr_has_side_effects(rhs),
@@ -479,12 +495,18 @@ fn sccp_stmt(
                 changed |= sccp_subst_expr(cond, &pre);
                 changed |= fold_expr_hir(cond);
                 match eval_truth(cond, &pre) {
-                    Some(true) if !stmt_list_has_side_effects(else_body) => {
+                    Some(true)
+                        if !stmt_list_has_side_effects(else_body)
+                            && !branch_defines_goto_target(else_body, goto_targets) =>
+                    {
                         *stmt = PreHirStmt::Block(std::mem::take(then_body));
                         changed = true;
                         continue;
                     }
-                    Some(false) if !stmt_list_has_side_effects(then_body) => {
+                    Some(false)
+                        if !stmt_list_has_side_effects(then_body)
+                            && !branch_defines_goto_target(then_body, goto_targets) =>
+                    {
                         *stmt = PreHirStmt::Block(std::mem::take(else_body));
                         changed = true;
                         continue;

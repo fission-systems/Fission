@@ -68,10 +68,108 @@ pub(crate) fn check_hir_presentation_invariants(
         });
     }
 
+    // A `Goto` surviving presentation with no matching `Label` anywhere in the
+    // tree renders as a jump to nowhere -- always a regression regardless of
+    // what the pre-polish tree looked like (unlike the "only flag increases"
+    // checks above, there's no such thing as an acceptable dangling goto).
+    let mut goto_targets = HashSet::new();
+    collect_goto_targets_in_stmts(&after.body, &mut goto_targets);
+    let mut defined_labels = HashSet::new();
+    collect_label_defs_in_stmts(&after.body, &mut defined_labels);
+    let dangling: Vec<&String> = goto_targets.difference(&defined_labels).collect();
+    if !dangling.is_empty() {
+        violations.push(PresentationViolation {
+            code: "dangling_goto",
+            detail: format!("goto target(s) with no matching label after polish: {dangling:?}"),
+        });
+    }
+
     if violations.is_empty() {
         Ok(())
     } else {
         Err(violations)
+    }
+}
+
+fn collect_goto_targets_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for s in stmts {
+        collect_goto_targets_in_stmt(s, out);
+    }
+}
+
+fn collect_goto_targets_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Goto(label) => {
+            out.insert(label.clone());
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_goto_targets_in_stmts(body, out);
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_goto_targets_in_stmts(then_body, out);
+            collect_goto_targets_in_stmts(else_body, out);
+        }
+        HirStmt::For { init, update, body, .. } => {
+            if let Some(i) = init {
+                collect_goto_targets_in_stmt(i, out);
+            }
+            if let Some(u) = update {
+                collect_goto_targets_in_stmt(u, out);
+            }
+            collect_goto_targets_in_stmts(body, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_goto_targets_in_stmts(&case.body, out);
+            }
+            collect_goto_targets_in_stmts(default, out);
+        }
+        _ => {}
+    }
+}
+
+fn collect_label_defs_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for s in stmts {
+        collect_label_defs_in_stmt(s, out);
+    }
+}
+
+fn collect_label_defs_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Label(label) => {
+            out.insert(label.clone());
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_label_defs_in_stmts(body, out);
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_label_defs_in_stmts(then_body, out);
+            collect_label_defs_in_stmts(else_body, out);
+        }
+        HirStmt::For { init, update, body, .. } => {
+            if let Some(i) = init {
+                collect_label_defs_in_stmt(i, out);
+            }
+            if let Some(u) = update {
+                collect_label_defs_in_stmt(u, out);
+            }
+            collect_label_defs_in_stmts(body, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_label_defs_in_stmts(&case.body, out);
+            }
+            collect_label_defs_in_stmts(default, out);
+        }
+        _ => {}
     }
 }
 
