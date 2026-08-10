@@ -99,8 +99,93 @@ pub fn emit_orphan_target_block(
     Ok(stmts)
 }
 
+/// Recursively search `stmts` for the first position where a contiguous run
+/// matching `needle` already occurs, and insert `Label(label)` right before
+/// it in place. Returns `true` on success (search stops at the first hit,
+/// matching this module's existing first-match idiom).
+///
+/// `needle` must be non-empty; an empty needle would match everywhere and
+/// isn't a meaningful "does this content already exist" question.
+fn try_insert_label_before_existing_occurrence(
+    stmts: &mut Vec<PreHirStmt>,
+    needle: &[PreHirStmt],
+    label: &str,
+) -> bool {
+    debug_assert!(!needle.is_empty());
+    if stmts.len() >= needle.len() {
+        for i in 0..=stmts.len() - needle.len() {
+            if stmts[i..i + needle.len()] == *needle {
+                stmts.insert(i, PreHirStmt::Label(label.to_string()));
+                return true;
+            }
+        }
+    }
+    for stmt in stmts.iter_mut() {
+        let found = match stmt {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => try_insert_label_before_existing_occurrence(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                needle,
+                label,
+            ),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                try_insert_label_before_existing_occurrence(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    needle,
+                    label,
+                ) || try_insert_label_before_existing_occurrence(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    needle,
+                    label,
+                )
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                let mut found = false;
+                for case in cases.iter_mut() {
+                    if try_insert_label_before_existing_occurrence(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        needle,
+                        label,
+                    ) {
+                        found = true;
+                        break;
+                    }
+                }
+                found
+                    || try_insert_label_before_existing_occurrence(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                        needle,
+                        label,
+                    )
+            }
+            _ => false,
+        };
+        if found {
+            return true;
+        }
+    }
+    false
+}
+
 /// Keep structured SESE output and localize orphan goto targets by appending
 /// missing block labels/bodies instead of rebuilding the whole function.
+///
+/// Before re-materializing a target block from scratch, first checks whether
+/// its body is *already* present somewhere in `body` sans label: some
+/// structuring rules absorb a block into a larger linear sequence's own
+/// statements without giving it an individually addressable label, and if a
+/// goto from a different, unrelated branch of the function also needs to
+/// reach that same block, the naive repair (always re-lower a fresh copy
+/// from p-code and append it) duplicated real side-effecting code -- calls,
+/// stores -- that should execute exactly once per run, not once per
+/// reference. Inserting the missing label at the existing occurrence instead
+/// keeps both the goto and the original single-copy semantics intact.
 pub fn try_repair_orphan_gotos(
     host: &mut impl StructuringHost,
     body: Vec<PreHirStmt>,
@@ -121,6 +206,22 @@ pub fn try_repair_orphan_gotos(
         for label in orphans {
             let block_idx = find_block_index_by_label(host, &label)?;
             let fragment = emit_orphan_target_block(host, block_idx).ok()?;
+            // `fragment` is `[Label, ...body_stmts, terminator]`. The body
+            // stmts are a pure function of the block's own p-code (unlike
+            // the terminator, which can vary by predecessor via
+            // `lower_return_join_expr_for_predecessor`), so they're the
+            // reliable part to match against already-emitted content.
+            let core: &[PreHirStmt] = if fragment.len() > 2 {
+                &fragment[1..fragment.len() - 1]
+            } else {
+                &[]
+            };
+            if !core.is_empty()
+                && try_insert_label_before_existing_occurrence(&mut body, core, &label)
+            {
+                repaired_any = true;
+                continue;
+            }
             body.extend(fragment);
             repaired_any = true;
         }

@@ -108,9 +108,27 @@ struct TypeFlowSolver {
     queued: HashSet<String>,
     address_nodes: HashSet<String>,
     definition_counts: HashMap<String, usize>,
+    self_referential: HashSet<String>,
 }
 
 impl TypeFlowSolver {
+    /// Whether refining `name`'s fact *backward* from a use elsewhere (as
+    /// opposed to forward, from `name`'s own declared/seeded type) is safe.
+    /// `definition_counts <= 1` alone only rules out a name textually
+    /// assigned at more than one AST site -- it does *not* catch a
+    /// loop-carried cursor like `p = p->next`, which has exactly one
+    /// `Assign` node (so `definition_counts` sees "1") but still represents
+    /// a genuinely different value on every iteration. `self_referential`
+    /// (an assignment whose RHS mentions its own LHS name) is the other half
+    /// of that same "not really single-valued" signal: wrapping such a name
+    /// one more `Ptr(...)` layer around its own prior fact every solver
+    /// round never converges, identical in kind to the multi-def case this
+    /// guard already handles.
+    fn safe_for_backward_refine(&self, name: &str) -> bool {
+        self.definition_counts.get(name).copied().unwrap_or(0) <= 1
+            && !self.self_referential.contains(name)
+    }
+
     fn from_function(func: &PreHirFunction) -> Self {
         let mut solver = Self {
             pointer_bits: if func.is_64bit { 64 } else { 32 },
@@ -121,6 +139,7 @@ impl TypeFlowSolver {
             queued: HashSet::default(),
             address_nodes: HashSet::default(),
             definition_counts: HashMap::default(),
+            self_referential: HashSet::default(),
         };
         for binding in func.params.iter().chain(func.locals.iter()) {
             let locked = binding.surface_type_name.is_some();
@@ -140,6 +159,7 @@ impl TypeFlowSolver {
         }
         collect_edges(&func.body, &mut solver.edges);
         collect_definition_counts(&func.body, &mut solver.definition_counts);
+        collect_self_referential_bindings(&func.body, &mut solver.self_referential);
         for (edge_index, edge) in solver.edges.iter().enumerate() {
             match edge {
                 TypeFlowEdge::Load { pointer, .. }
@@ -205,7 +225,9 @@ impl TypeFlowSolver {
             locked: false,
         };
         self.refine(value, storage_value);
-        self.refine(pointer, storage_pointer);
+        if self.safe_for_backward_refine(pointer) {
+            self.refine(pointer, storage_pointer);
+        }
     }
 
     fn propagate_edge(&mut self, edge: &TypeFlowEdge) {
@@ -219,7 +241,7 @@ impl TypeFlowSolver {
                 // pointer copy would corrupt the source parameter. Single-def
                 // names retain the bidirectional equality used for spill and
                 // alias chains.
-                if self.definition_counts.get(lhs).copied().unwrap_or(0) <= 1 {
+                if self.safe_for_backward_refine(lhs) {
                     self.refine(
                         lhs,
                         TypeFact {
@@ -241,7 +263,7 @@ impl TypeFlowSolver {
                     // time and never converging (see the Store-edge comment
                     // below for the same failure mode from the other
                     // direction).
-                    if self.definition_counts.get(rhs).copied().unwrap_or(0) <= 1 {
+                    if self.safe_for_backward_refine(rhs) {
                         self.refine(
                             rhs,
                             TypeFact {
@@ -289,6 +311,7 @@ impl TypeFlowSolver {
                 // prior type", which never converges: each solver pass adds
                 // one more `Ptr(...)` layer around the same node forever.
                 if pointer != value
+                    && self.safe_for_backward_refine(pointer)
                     && value_fact.ty != NirType::Unknown
                     && type_bits(&value_fact.ty, self.pointer_bits)
                         == type_bits(access_ty, self.pointer_bits)
@@ -304,6 +327,9 @@ impl TypeFlowSolver {
                 }
             }
             TypeFlowEdge::PointerAccess { pointer, access_ty } => {
+                if !self.safe_for_backward_refine(pointer) {
+                    return;
+                }
                 self.refine(
                     pointer,
                     TypeFact {
@@ -648,6 +674,89 @@ fn collect_definition_counts(stmts: &[PreHirStmt], counts: &mut HashMap<String, 
             }
             _ => {}
         }
+    }
+}
+
+/// Names assigned from an expression that (recursively) reads their own
+/// current value -- `p = p->next`, `x = *(x + 8)`, `n = f(n)` -- the
+/// loop-carried-cursor idiom. `collect_definition_counts` sees exactly one
+/// `Assign` node for these (the statement is textually written once, even
+/// though it executes with a new value on every loop iteration it's
+/// embedded in), so def-count alone can't distinguish this from a genuinely
+/// single-valued binding. Treated the same as a multi-def name by every
+/// backward-refine guard in this module.
+fn collect_self_referential_bindings(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs,
+            } if expr_mentions_var(rhs, name) => {
+                out.insert(name.clone());
+            }
+            _ => {}
+        }
+        match stmt {
+            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+                collect_self_referential_bindings(body, out)
+            }
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    collect_self_referential_bindings(std::slice::from_ref(init.as_ref()), out);
+                }
+                if let Some(update) = update {
+                    collect_self_referential_bindings(std::slice::from_ref(update.as_ref()), out);
+                }
+                collect_self_referential_bindings(body, out);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_self_referential_bindings(then_body, out);
+                collect_self_referential_bindings(else_body, out);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_self_referential_bindings(&case.body, out);
+                }
+                collect_self_referential_bindings(default, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn expr_mentions_var(expr: &PreHirExpr, name: &str) -> bool {
+    match expr {
+        PreHirExpr::Var(v) => v == name,
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => expr_mentions_var(expr, name),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            expr_mentions_var(lhs, name) || expr_mentions_var(rhs, name)
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            expr_mentions_var(base, name) || expr_mentions_var(index, name)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_mentions_var(cond, name)
+                || expr_mentions_var(then_expr, name)
+                || expr_mentions_var(else_expr, name)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_mentions_var(arg, name)),
     }
 }
 
