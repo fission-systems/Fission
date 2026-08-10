@@ -170,4 +170,14 @@ pub(crate) struct PreviewBuilder<'a> {
     /// same as `depth > 8` guards a different recursive walk in the same
     /// file.
     pub(crate) varnode_redirect_depth: u32,
+    /// Hard cap on `try_lower_diamond_select_for_varnode`'s recursion
+    /// (`expr/lower_expr.rs`). Its own `visiting` insert only blocks a
+    /// varnode from recursing into itself; a long real-world function with
+    /// many sequential two-predecessor if-diamonds each touching a
+    /// different varnode (observed on `bash`'s option-parsing code, ~9GB
+    /// RSS growth within minutes) chains through distinct keys with no
+    /// bound on total depth. Past the cap, the function returns `Ok(None)`
+    /// (its normal "not a diamond select" outcome) so callers fall back to
+    /// `lower_varnode_inner`'s other resolution paths.
+    pub(crate) diamond_select_depth: u32,
 }

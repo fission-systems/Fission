@@ -2533,13 +2533,20 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
 
+        const DIAMOND_SELECT_DEPTH_CAP: u32 = 64;
+        if self.diamond_select_depth >= DIAMOND_SELECT_DEPTH_CAP {
+            return Ok(None);
+        }
+
         visiting.insert(key.clone());
+        self.diamond_select_depth += 1;
         let true_res = self.lower_predecessor_incoming_value(true_succ_idx, vn, visiting);
         let false_res = if true_res.is_ok() {
             self.lower_predecessor_incoming_value(false_succ_idx, vn, visiting)
         } else {
             Err(MlilPreviewError::LoweringFailed)
         };
+        self.diamond_select_depth -= 1;
         visiting.remove(&key);
 
         let Some(true_expr) = true_res? else {

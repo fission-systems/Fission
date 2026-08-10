@@ -192,6 +192,7 @@ impl<'a> PreviewBuilder<'a> {
             loop_carried_proof_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             structuring_total_work_units: std::rc::Rc::new(std::cell::Cell::new(0)),
             varnode_redirect_depth: 0,
+            diamond_select_depth: 0,
         };
         b
     }
