@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn region_node_owns_proven_members() {
         let proof = RegionProof::structured(RegionKind::Loop, 2, 6, None);
-        let node = StructureNode::region(0, PreHirStmt::Block(vec![]), 6, proof);
+        let node = StructureNode::region(0, PreHirStmt::Block(vec![].into()), 6, proof);
 
         assert_eq!(node.ownership.iter().collect::<Vec<_>>(), vec![2, 3, 4, 5]);
         assert!(node.ownership.contains(4));

@@ -93,8 +93,7 @@ pub fn detect_and_patch_case_fallthrough(cases: &mut Vec<PreHirSwitchCase>) -> u
         let Some(ref next_label) = next_labels[i + 1] else {
             continue;
         };
-        let last_stmt = cases[i]
-            .body
+        let last_stmt = std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut cases[i].body)
             .iter_mut()
             .rev()
             .find(|s| !matches!(s, PreHirStmt::Label(_)));

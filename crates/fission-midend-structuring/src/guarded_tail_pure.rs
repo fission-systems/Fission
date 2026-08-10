@@ -106,18 +106,18 @@ pub fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement: &PreH
             }
             PreHirStmt::Expr(expr) => replace_var_in_expr(expr, name, replacement),
             PreHirStmt::Block(stmts) => {
-                for stmt in stmts {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
             PreHirStmt::While { cond, body } => {
                 replace_var_in_expr(cond, name, replacement);
-                for stmt in body {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
             PreHirStmt::DoWhile { body, cond } => {
-                for stmt in body {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
                 replace_var_in_expr(cond, name, replacement);
@@ -129,11 +129,11 @@ pub fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement: &PreH
             } => {
                 replace_var_in_expr(expr, name, replacement);
                 for case in cases {
-                    for stmt in &mut case.body {
+                    for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body) {
                         replace_var_in_stmt(stmt, name, replacement);
                     }
                 }
-                for stmt in default {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
@@ -143,10 +143,10 @@ pub fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement: &PreH
                 else_body,
             } => {
                 replace_var_in_expr(cond, name, replacement);
-                for stmt in then_body {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
-                for stmt in else_body {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
@@ -165,7 +165,7 @@ pub fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement: &PreH
                 if let Some(update_stmt) = update {
                     replace_var_in_stmt(update_stmt, name, replacement);
                 }
-                for stmt in body {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }

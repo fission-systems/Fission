@@ -99,15 +99,15 @@ pub fn try_lower_if_else(
     };
     let stmt = PreHirStmt::If {
         cond,
-        then_body: std::rc::Rc::unwrap_or_clone(then_body),
-        else_body: std::rc::Rc::unwrap_or_clone(else_body),
+        then_body,
+        else_body,
     };
     if cond_prefix.is_empty() {
         Ok(Some((stmt, skip_to)))
     } else {
         let mut wrapped = cond_prefix;
         wrapped.push(stmt);
-        Ok(Some((PreHirStmt::Block(wrapped), skip_to)))
+        Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)))
     }
 }
 
@@ -161,16 +161,16 @@ pub fn try_reduce_if_else_with_follow(
     }
 
     let (then_body, _) = match host.lower_linear_body(then_idx, exit)? {
-        Some((body, skip)) => (std::rc::Rc::unwrap_or_clone(body), skip),
+        Some((body, skip)) => (body, skip),
         None => match try_lower_return_chain_arm(host, then_idx, follow_idx)? {
-            Some(result) => result,
+            Some((body, skip)) => (std::rc::Rc::new(body), skip),
             None => return Ok(None),
         },
     };
     let (else_body, _) = match host.lower_linear_body(else_idx, exit)? {
-        Some((body, skip)) => (std::rc::Rc::unwrap_or_clone(body), skip),
+        Some((body, skip)) => (body, skip),
         None => match try_lower_return_chain_arm(host, else_idx, follow_idx)? {
-            Some(result) => result,
+            Some((body, skip)) => (std::rc::Rc::new(body), skip),
             None => return Ok(None),
         },
     };
@@ -185,6 +185,6 @@ pub fn try_reduce_if_else_with_follow(
     } else {
         let mut wrapped = cond_prefix;
         wrapped.push(stmt);
-        Ok(Some((PreHirStmt::Block(wrapped), follow_idx)))
+        Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), follow_idx)))
     }
 }

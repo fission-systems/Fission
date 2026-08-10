@@ -33,7 +33,7 @@ pub fn prehir_stmt_to_hir_stmt(stmt: PreHirStmt) -> HirStmt {
             va_list: prehir_expr_to_hir_expr(va_list),
             last_named_param,
         },
-        PreHirStmt::Block(stmts) => HirStmt::Block(prehir_stmts_to_hir_stmts(stmts)),
+        PreHirStmt::Block(stmts) => HirStmt::Block(prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(stmts))),
         PreHirStmt::Switch {
             expr,
             cases,
@@ -44,10 +44,10 @@ pub fn prehir_stmt_to_hir_stmt(stmt: PreHirStmt) -> HirStmt {
                 .into_iter()
                 .map(|c| HirSwitchCase {
                     values: c.values,
-                    body: prehir_stmts_to_hir_stmts(c.body),
+                    body: prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(c.body)),
                 })
                 .collect(),
-            default: prehir_stmts_to_hir_stmts(default),
+            default: prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(default)),
         },
         PreHirStmt::If {
             cond,
@@ -55,15 +55,15 @@ pub fn prehir_stmt_to_hir_stmt(stmt: PreHirStmt) -> HirStmt {
             else_body,
         } => HirStmt::If {
             cond: prehir_expr_to_hir_expr(cond),
-            then_body: prehir_stmts_to_hir_stmts(then_body),
-            else_body: prehir_stmts_to_hir_stmts(else_body),
+            then_body: prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(then_body)),
+            else_body: prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(else_body)),
         },
         PreHirStmt::While { cond, body } => HirStmt::While {
             cond: prehir_expr_to_hir_expr(cond),
-            body: prehir_stmts_to_hir_stmts(body),
+            body: prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(body)),
         },
         PreHirStmt::DoWhile { body, cond } => HirStmt::DoWhile {
-            body: prehir_stmts_to_hir_stmts(body),
+            body: prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(body)),
             cond: prehir_expr_to_hir_expr(cond),
         },
         PreHirStmt::For {
@@ -75,7 +75,7 @@ pub fn prehir_stmt_to_hir_stmt(stmt: PreHirStmt) -> HirStmt {
             init: init.map(|s| Box::new(prehir_stmt_to_hir_stmt(*s))),
             cond: cond.map(prehir_expr_to_hir_expr),
             update: update.map(|s| Box::new(prehir_stmt_to_hir_stmt(*s))),
-            body: prehir_stmts_to_hir_stmts(body),
+            body: prehir_stmts_to_hir_stmts(std::rc::Rc::unwrap_or_clone(body)),
         },
         PreHirStmt::Label(l) => HirStmt::Label(l),
         PreHirStmt::Goto(l) => HirStmt::Goto(l),
@@ -240,7 +240,7 @@ pub fn hir_stmt_to_prehir_stmt(stmt: HirStmt) -> PreHirStmt {
             va_list: hir_expr_to_prehir_expr(va_list),
             last_named_param,
         },
-        HirStmt::Block(stmts) => PreHirStmt::Block(hir_stmts_to_prehir_stmts(stmts)),
+        HirStmt::Block(stmts) => PreHirStmt::Block(std::rc::Rc::new(hir_stmts_to_prehir_stmts(stmts))),
         HirStmt::Switch {
             expr,
             cases,
@@ -251,10 +251,10 @@ pub fn hir_stmt_to_prehir_stmt(stmt: HirStmt) -> PreHirStmt {
                 .into_iter()
                 .map(|c| PreHirSwitchCase {
                     values: c.values,
-                    body: hir_stmts_to_prehir_stmts(c.body),
+                    body: std::rc::Rc::new(hir_stmts_to_prehir_stmts(c.body)),
                 })
                 .collect(),
-            default: hir_stmts_to_prehir_stmts(default),
+            default: std::rc::Rc::new(hir_stmts_to_prehir_stmts(default)),
         },
         HirStmt::If {
             cond,
@@ -262,15 +262,15 @@ pub fn hir_stmt_to_prehir_stmt(stmt: HirStmt) -> PreHirStmt {
             else_body,
         } => PreHirStmt::If {
             cond: hir_expr_to_prehir_expr(cond),
-            then_body: hir_stmts_to_prehir_stmts(then_body),
-            else_body: hir_stmts_to_prehir_stmts(else_body),
+            then_body: std::rc::Rc::new(hir_stmts_to_prehir_stmts(then_body)),
+            else_body: std::rc::Rc::new(hir_stmts_to_prehir_stmts(else_body)),
         },
         HirStmt::While { cond, body } => PreHirStmt::While {
             cond: hir_expr_to_prehir_expr(cond),
-            body: hir_stmts_to_prehir_stmts(body),
+            body: std::rc::Rc::new(hir_stmts_to_prehir_stmts(body)),
         },
         HirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
-            body: hir_stmts_to_prehir_stmts(body),
+            body: std::rc::Rc::new(hir_stmts_to_prehir_stmts(body)),
             cond: hir_expr_to_prehir_expr(cond),
         },
         HirStmt::For {
@@ -282,7 +282,7 @@ pub fn hir_stmt_to_prehir_stmt(stmt: HirStmt) -> PreHirStmt {
             init: init.map(|s| Box::new(hir_stmt_to_prehir_stmt(*s))),
             cond: cond.map(hir_expr_to_prehir_expr),
             update: update.map(|s| Box::new(hir_stmt_to_prehir_stmt(*s))),
-            body: hir_stmts_to_prehir_stmts(body),
+            body: std::rc::Rc::new(hir_stmts_to_prehir_stmts(body)),
         },
         HirStmt::Label(l) => PreHirStmt::Label(l),
         HirStmt::Goto(l) => PreHirStmt::Goto(l),

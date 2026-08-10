@@ -141,8 +141,8 @@ fn cond_goto_inversion(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<PreHir
                                     *changed = true;
                                     out.push(PreHirStmt::If {
                                         cond: inverted_cond,
-                                        then_body: rest_body,
-                                        else_body: Vec::new(),
+                                        then_body: std::rc::Rc::new(rest_body),
+                                        else_body: std::rc::Rc::new(Vec::new()),
                                     });
                                     break; // rest_body is now inside the if, stop iteration
                                 }
@@ -214,8 +214,8 @@ fn guard_clause_promotion(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<Pre
                                 *changed = true;
                                 out.push(PreHirStmt::If {
                                     cond: cond.clone(),
-                                    then_body: tail,
-                                    else_body: Vec::new(),
+                                    then_body: std::rc::Rc::new(tail),
+                                    else_body: std::rc::Rc::new(Vec::new()),
                                 });
                                 // Emit the main body between the if and the label,
                                 // skipping the label and tail.

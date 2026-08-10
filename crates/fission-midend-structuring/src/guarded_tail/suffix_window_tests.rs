@@ -14,8 +14,8 @@ mod tests {
     fn test_if_goto(label: &str) -> PreHirStmt {
         PreHirStmt::If {
             cond: PreHirExpr::Var("cond".to_string()),
-            then_body: vec![PreHirStmt::Goto(label.to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto(label.to_string())].into(),
+            else_body: std::rc::Rc::new(Vec::new()),
         }
     }
 
@@ -171,7 +171,7 @@ mod tests {
             test_if_goto("join0"),
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::Label("join0".to_string()),
-            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Block(std::rc::Rc::new(Vec::new())),
             PreHirStmt::Goto("sink".to_string()),
             PreHirStmt::Label("sink".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -252,8 +252,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("nested".to_string()),
-                then_body: vec![PreHirStmt::Goto("sink".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("sink".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("sink".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -288,7 +288,7 @@ mod tests {
             test_if_goto("join0"),
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::Label("join0".to_string()),
-            PreHirStmt::Block(Vec::new()),
+            PreHirStmt::Block(std::rc::Rc::new(Vec::new())),
             PreHirStmt::Goto("sink".to_string()),
             PreHirStmt::Label("sink".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -387,8 +387,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("nested".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -426,8 +426,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Goto("terminal".to_string()),
             PreHirStmt::Label("terminal".to_string()),
@@ -460,8 +460,8 @@ mod tests {
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("other_cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
@@ -470,8 +470,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Goto("terminal".to_string()),
             PreHirStmt::Label("terminal".to_string()),
@@ -502,14 +502,14 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("body".to_string())),
@@ -542,14 +542,14 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("other".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("body".to_string())),
@@ -584,8 +584,8 @@ mod tests {
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("body".to_string())),
@@ -619,8 +619,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("next".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("next".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Unary {
@@ -628,8 +628,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("next".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("after".to_string())),
@@ -653,8 +653,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("other".to_string()),
-                then_body: vec![PreHirStmt::Goto("next".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("next".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Unary {
@@ -662,8 +662,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("next".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("after".to_string())),
@@ -691,8 +691,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("next".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("after".to_string())),
@@ -720,14 +720,14 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -742,8 +742,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: Vec::new(),
-                else_body: vec![PreHirStmt::Goto("terminal".to_string())],
+                then_body: std::rc::Rc::new(Vec::new()),
+                else_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
             },
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
@@ -752,8 +752,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -768,14 +768,14 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("other".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -797,8 +797,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("next".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("next".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Unary {
@@ -806,8 +806,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("next".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("after".to_string())),
@@ -831,8 +831,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: vec![PreHirStmt::Expr(PreHirExpr::Var("payload".to_string()))],
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: vec![PreHirStmt::Expr(PreHirExpr::Var("payload".to_string()))].into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Unary {
@@ -840,8 +840,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -870,8 +870,8 @@ mod tests {
                         ty: NirType::Unknown,
                     }),
                     PreHirStmt::Goto("terminal".to_string()),
-                ],
-                else_body: Vec::new(),
+                ].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Unary {
@@ -879,8 +879,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1150,8 +1150,8 @@ mod tests {
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("loaded".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1202,8 +1202,8 @@ mod tests {
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("loaded".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1270,8 +1270,8 @@ mod tests {
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("loaded".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1342,8 +1342,8 @@ mod tests {
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("count".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1406,8 +1406,8 @@ mod tests {
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("count".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1447,8 +1447,8 @@ mod tests {
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("count".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
             PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -1581,8 +1581,8 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Goto("terminal".to_string()),
@@ -1603,7 +1603,7 @@ mod tests {
         let body = vec![
             PreHirStmt::While {
                 cond: PreHirExpr::Var("cond".to_string()),
-                body: vec![PreHirStmt::Goto("join0".to_string())],
+                body: vec![PreHirStmt::Goto("join0".to_string())].into(),
             },
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Goto("terminal".to_string()),
@@ -1640,8 +1640,8 @@ mod tests {
             PreHirStmt::Goto("terminal".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("terminal".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("terminal".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("next".to_string()),
             PreHirStmt::Label("terminal".to_string()),
@@ -1713,8 +1713,8 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("other".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("other".to_string())].into(),
+                else_body: std::rc::Rc::new(Vec::new()),
             },
             PreHirStmt::Label("terminal".to_string()),
         ];
@@ -1788,7 +1788,7 @@ mod tests {
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::While {
                 cond: PreHirExpr::Var("cond".to_string()),
-                body: vec![],
+                body: vec![].into(),
             },
             PreHirStmt::Label("terminal".to_string()),
         ];
