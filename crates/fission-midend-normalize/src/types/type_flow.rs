@@ -227,13 +227,29 @@ impl TypeFlowSolver {
                             ..rhs_fact.clone()
                         },
                     );
-                    self.refine(
-                        rhs,
-                        TypeFact {
-                            locked: false,
-                            ..lhs_fact
-                        },
-                    );
+                    // The backward direction (informing `rhs`'s fact from
+                    // `lhs`'s) is the actually-dangerous half: it treats
+                    // every one of `rhs`'s OWN definitions as sharing
+                    // `lhs`'s single-use-site type. Requiring `rhs` to also
+                    // be single-def guards this specifically -- gating the
+                    // whole block on `lhs` alone (as before) still let a
+                    // multi-def `rhs` (e.g. a hardware register name reused
+                    // across several unrelated pointer-returning calls, all
+                    // coalesced into one PreHIR binding) feed a downstream
+                    // alias's type back onto itself every solver pass,
+                    // wrapping one more `Ptr(...)` layer around it each
+                    // time and never converging (see the Store-edge comment
+                    // below for the same failure mode from the other
+                    // direction).
+                    if self.definition_counts.get(rhs).copied().unwrap_or(0) <= 1 {
+                        self.refine(
+                            rhs,
+                            TypeFact {
+                                locked: false,
+                                ..lhs_fact
+                            },
+                        );
+                    }
                 }
             }
             TypeFlowEdge::Load {
