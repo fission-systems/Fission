@@ -1667,7 +1667,7 @@ mod tests {
             sla_register_space_index: 0,
             sla_uniqbase: 0,
             sla_uniqmask: u64::MAX,
-            userops: std::collections::BTreeMap::new(),
+            userops: std::sync::Arc::new(std::collections::BTreeMap::new()),
         }
     }
 

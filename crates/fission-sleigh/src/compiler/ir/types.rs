@@ -51,9 +51,16 @@ pub struct CompiledFrontend {
     /// Ghidra unique allocation mask (`ATTR_UNIQMASK`); used with instruction PC for temp bases.
     #[serde(default = "default_sla_uniqmask")]
     pub sla_uniqmask: u64,
-    /// User-defined p-code operations (`<userop_head>` index -> name)
+    /// User-defined p-code operations (`<userop_head>` index -> name).
+    /// `Arc`, not a bare map: this is the whole SLA spec's userop table
+    /// (unchanged for the lifetime of a compiled frontend), cloned into
+    /// `RuntimeExecutionDetails` on EVERY instruction lift -- an `Arc`
+    /// clone there is a refcount bump instead of a full `BTreeMap` deep
+    /// copy per instruction, which profiling showed dominating whole-
+    /// binary analyses (e.g. `no_return_functions_for`) that lift every
+    /// function.
     #[serde(default)]
-    pub userops: BTreeMap<u32, String>,
+    pub userops: std::sync::Arc<BTreeMap<u32, String>>,
 }
 
 fn default_sla_uniqmask() -> u64 {
@@ -1065,7 +1072,7 @@ mod tests {
             sla_register_space_index: 0,
             sla_uniqbase: 0,
             sla_uniqmask: default_sla_uniqmask(),
-            userops: BTreeMap::new(),
+            userops: std::sync::Arc::new(BTreeMap::new()),
         }
     }
 

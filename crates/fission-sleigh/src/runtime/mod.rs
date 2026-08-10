@@ -165,8 +165,9 @@ pub struct RuntimeExecutionDetails {
     pub pending_context_commits: Vec<(u64, u32, u32, u32)>,
     /// User-defined P-Code operation table: userop_id → name.
     /// Populated from the compiled frontend's `.sla` `<userop_head>` table.
+    /// `Arc`, matching `CompiledFrontend::userops` -- see its doc comment.
     #[serde(default)]
-    pub userops: std::collections::BTreeMap<u32, String>,
+    pub userops: std::sync::Arc<std::collections::BTreeMap<u32, String>>,
 }
 
 #[derive(Debug, Clone)]

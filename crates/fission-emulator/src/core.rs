@@ -228,15 +228,15 @@ impl Emulator {
             BTreeMap::new()
         };
         if let Some(cf) = sleigh_arc.compiled_frontend() {
-            for (id, name) in &cf.userops {
+            for (id, name) in cf.userops.iter() {
                 userop_map.entry(*id).or_insert_with(|| name.clone());
             }
         }
         {
             let probe_bytes = vec![0u8; 16];
             if let Ok((_, _, details)) = sleigh_arc.decode_and_lift_with_details(&probe_bytes, pc) {
-                for (id, name) in details.userops {
-                    userop_map.entry(id).or_insert(name);
+                for (id, name) in details.userops.iter() {
+                    userop_map.entry(*id).or_insert_with(|| name.clone());
                 }
             }
         }
@@ -752,7 +752,7 @@ impl Emulator {
                 .decode_and_lift_with_details(&bytes_vec, cur)
                 .map_err(|e| anyhow::anyhow!("Decode/lift failed at 0x{:X}: {:#}", cur, e))?;
 
-            for (id, name) in &details.userops {
+            for (id, name) in details.userops.iter() {
                 self.userop_map.entry(*id).or_insert_with(|| name.clone());
             }
 
