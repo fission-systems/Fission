@@ -479,11 +479,85 @@ impl<'a> PreviewBuilder<'a> {
     /// the identical hardcoded `(StackBase::Rsp, 0)` and got silently
     /// collapsed onto one `self.locals` entry -- into five distinct,
     /// correctly-ordered offsets instead.
-    fn rsp_register_space_offset(&self) -> i64 {
-        self.current_lowering_site
-            .and_then(|site| self.rsp_prologue_delta_table.get(&site))
-            .map(|delta| delta + self.stack_frame_size)
-            .unwrap_or(0)
+    /// `None` when a bare RSP read can't be trusted to sit at the function's
+    /// single post-prologue steady-state depth -- specifically, when the
+    /// current op's own block (anything but the recognized entry-block
+    /// prologue at index 0) *itself* writes to RSP. Ordinary functions never
+    /// trip this (a normal epilogue's `add rsp, N` has no further
+    /// rsp-relative access after it in the same block to resolve), but an
+    /// inlined stack-probe loop -- GCC/Linux's `lea r11,[rsp-N]; loop: sub
+    /// rsp,0x1000; or [rsp],0; cmp rsp,r11; jnz loop` for a >1-page frame --
+    /// repeats `sub rsp` on every iteration, so treating a bare RSP read
+    /// inside that same block as "still at steady state" silently aliased
+    /// the probe's `or [rsp],0` touch onto whatever real local happens to
+    /// sit at offset 0, and (since nothing here modeled the loop condition's
+    /// own `rsp` read either) rendered the whole loop as an empty,
+    /// meaningless `while (rsp != r11) {}` -- confirmed on a real
+    /// GCC-compiled >16KB-local fixture. `None` here makes the caller treat
+    /// the access as an ordinary (non-stack-slot) pointer dereference
+    /// instead, same as Ghidra's own spacebase heuristic silently declining
+    /// to fire when RSP's SSA value isn't provably a prologue-constant
+    /// offset (falls back to raw pointer arithmetic on a normal local
+    /// rather than fabricating a wrong stack-slot name).
+    fn rsp_register_space_offset(&self) -> Option<i64> {
+        if let Some(site) = self.current_lowering_site {
+            if let Some(delta) = self.rsp_prologue_delta_table.get(&site) {
+                return Some(delta + self.stack_frame_size);
+            }
+            if site.block_idx != 0 && self.block_writes_rsp_register(site.block_idx) {
+                return None;
+            }
+        }
+        Some(0)
+    }
+
+    /// Whether p-code block `block_idx` (assumed not to be the recognized
+    /// entry-block prologue, index 0) both branches back to itself and
+    /// contains a direct arithmetic op (`IntAdd`/`IntSub`/`PtrAdd`/`PtrSub`)
+    /// writing the bare RSP/ESP register-space varnode for the current
+    /// calling convention -- the self-loop requirement is what excludes
+    /// ordinary `Call`/`CallInd` ops' own implicit rsp bookkeeping in most
+    /// cases, but a self-looping block that itself *contains a call* (any
+    /// loop calling a function) still has that same implicit per-call rsp
+    /// arithmetic, so those are excluded outright too: a real inlined
+    /// stack-probe loop is pure register/memory arithmetic with no call in
+    /// it at all. Scoped to x86/x86-64 (the only conventions
+    /// `rsp_register_space_offset` ever calls this for) since that's the
+    /// only ISA where this steady-state coordinate system applies at all.
+    pub(in crate::midend::builder) fn block_writes_rsp_register(&self, block_idx: usize) -> bool {
+        let rsp_offset = match self.options.calling_convention {
+            CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => {
+                if self.options.is_64bit {
+                    0x20
+                } else {
+                    0x10
+                }
+            }
+            CallingConvention::X86_32 => 0x10,
+            _ => return false,
+        };
+        let Some(block) = self.pcode.blocks.get(block_idx) else {
+            return false;
+        };
+        if !block.successors.contains(&block.index)
+            || block.ops.iter().any(|op| {
+                matches!(
+                    op.opcode,
+                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                )
+            })
+        {
+            return false;
+        }
+        block.ops.iter().any(|op| {
+            matches!(
+                op.opcode,
+                PcodeOpcode::IntAdd | PcodeOpcode::IntSub | PcodeOpcode::PtrAdd | PcodeOpcode::PtrSub
+            ) && op
+                .output
+                .as_ref()
+                .is_some_and(|out| is_register_space_id(out.space_id) && out.offset == rsp_offset)
+        })
     }
 
     fn resolve_stack_address_inner(
@@ -533,16 +607,20 @@ impl<'a> PreviewBuilder<'a> {
                 },
                 CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64 => match ptr.offset
                 {
-                    0x20 => Some((StackBase::Rsp, self.rsp_register_space_offset())),
+                    0x20 => self
+                        .rsp_register_space_offset()
+                        .map(|off| (StackBase::Rsp, off)),
                     0x28 => Some((StackBase::Rbp, self.rbp_frame_bias)),
-                    0x10 if !self.options.is_64bit => {
-                        Some((StackBase::Rsp, self.rsp_register_space_offset()))
-                    }
+                    0x10 if !self.options.is_64bit => self
+                        .rsp_register_space_offset()
+                        .map(|off| (StackBase::Rsp, off)),
                     0x14 if !self.options.is_64bit => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
                 },
                 CallingConvention::X86_32 => match ptr.offset {
-                    0x10 => Some((StackBase::Rsp, self.rsp_register_space_offset())),
+                    0x10 => self
+                        .rsp_register_space_offset()
+                        .map(|off| (StackBase::Rsp, off)),
                     0x14 => Some((StackBase::Rbp, self.rbp_frame_bias)),
                     _ => None,
                 },

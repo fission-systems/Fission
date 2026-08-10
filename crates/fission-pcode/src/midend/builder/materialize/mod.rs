@@ -835,7 +835,23 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
-        if self.output_is_stack_pointer_register(output) {
+        // Ordinary `sub/add rsp, N` prologue/epilogue adjustments are always
+        // invisible bookkeeping (their effect is fully captured by the
+        // stack-slot addressing model elsewhere), so this stays suppressed
+        // by default. The one exception -- see `block_writes_rsp_register`
+        // in stack_slots.rs for the full rationale and false-positive
+        // history (calls' own implicit rsp bookkeeping) -- is a call-free,
+        // self-looping block's own direct arithmetic write to rsp: GCC/
+        // Linux's inlined stack-probe loop for a >1-page frame (`sub
+        // rsp,0x1000; or [rsp],0; cmp rsp,r11; jnz`) re-adjusts rsp on
+        // every iteration, so a later bare read of rsp (the loop's own exit
+        // condition) needs a real, visible value to compare against --
+        // suppressing it here left `while (rsp != r11)` with nothing in its
+        // body ever able to make that true. Confirmed on a real
+        // GCC-compiled >16KB-local fixture.
+        if self.output_is_stack_pointer_register(output)
+            && !self.block_writes_rsp_register(self.lowering_block_index(block))
+        {
             return Ok(None);
         }
         // Stack-adjust flag soup (`sub rsp, N` sets ZF/CF/…): never program
