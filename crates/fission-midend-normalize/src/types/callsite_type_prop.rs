@@ -387,7 +387,7 @@ fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<Strin
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= rewrite_call_targets_stmts(body, rewrites);
+                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rewrites);
             }
             PreHirStmt::Switch {
                 expr,
@@ -396,9 +396,9 @@ fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<Strin
             } => {
                 changed |= rewrite_call_targets_expr(expr, rewrites);
                 for case in cases {
-                    changed |= rewrite_call_targets_stmts(&mut case.body, rewrites);
+                    changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), rewrites);
                 }
-                changed |= rewrite_call_targets_stmts(default, rewrites);
+                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), rewrites);
             }
             PreHirStmt::If {
                 cond,
@@ -406,8 +406,8 @@ fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<Strin
                 else_body,
             } => {
                 changed |= rewrite_call_targets_expr(cond, rewrites);
-                changed |= rewrite_call_targets_stmts(then_body, rewrites);
-                changed |= rewrite_call_targets_stmts(else_body, rewrites);
+                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), rewrites);
+                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), rewrites);
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -1049,7 +1049,7 @@ fn prune_known_api_call_args_stmts(
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                pruned += prune_known_api_call_args_stmts(body, summaries);
+                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), summaries);
             }
             PreHirStmt::Switch {
                 expr,
@@ -1058,9 +1058,9 @@ fn prune_known_api_call_args_stmts(
             } => {
                 pruned += prune_known_api_call_args_expr(expr, summaries);
                 for case in cases {
-                    pruned += prune_known_api_call_args_stmts(&mut case.body, summaries);
+                    pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), summaries);
                 }
-                pruned += prune_known_api_call_args_stmts(default, summaries);
+                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), summaries);
             }
             PreHirStmt::If {
                 cond,
@@ -1068,8 +1068,8 @@ fn prune_known_api_call_args_stmts(
                 else_body,
             } => {
                 pruned += prune_known_api_call_args_expr(cond, summaries);
-                pruned += prune_known_api_call_args_stmts(then_body, summaries);
-                pruned += prune_known_api_call_args_stmts(else_body, summaries);
+                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), summaries);
+                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), summaries);
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -1144,7 +1144,7 @@ fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: 
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                pruned += prune_self_call_args_stmts(body, func_name, arity);
+                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), func_name, arity);
             }
             PreHirStmt::Switch {
                 expr,
@@ -1153,9 +1153,9 @@ fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: 
             } => {
                 pruned += prune_self_call_args_expr(expr, func_name, arity);
                 for case in cases {
-                    pruned += prune_self_call_args_stmts(&mut case.body, func_name, arity);
+                    pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), func_name, arity);
                 }
-                pruned += prune_self_call_args_stmts(default, func_name, arity);
+                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), func_name, arity);
             }
             PreHirStmt::If {
                 cond,
@@ -1163,8 +1163,8 @@ fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: 
                 else_body,
             } => {
                 pruned += prune_self_call_args_expr(cond, func_name, arity);
-                pruned += prune_self_call_args_stmts(then_body, func_name, arity);
-                pruned += prune_self_call_args_stmts(else_body, func_name, arity);
+                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), func_name, arity);
+                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), func_name, arity);
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)

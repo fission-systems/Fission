@@ -235,10 +235,10 @@ mod tests {
                 assign("cf", lt("value", "limit")),
                 PreHirStmt::If {
                     cond: var("cf"),
-                    then_body: Vec::new(),
-                    else_body: Vec::new(),
+                    then_body: Vec::new().into(),
+                    else_body: Vec::new().into(),
                 },
-            ],
+            ].into(),
         };
 
         let transfer = LivenessTransfer::for_stmt(&stmt);
@@ -252,11 +252,11 @@ mod tests {
             body: vec![
                 PreHirStmt::If {
                     cond: var("cf"),
-                    then_body: Vec::new(),
-                    else_body: Vec::new(),
+                    then_body: Vec::new().into(),
+                    else_body: Vec::new().into(),
                 },
                 assign("cf", lt("value", "limit")),
-            ],
+            ].into(),
         };
 
         let transfer = LivenessTransfer::for_stmt(&stmt);

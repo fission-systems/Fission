@@ -50,7 +50,7 @@ pub fn recover_guarded_loop_tail_accumulator_returns(stmts: &mut Vec<PreHirStmt>
             [
                 PreHirStmt::While {
                     cond: replacement.cond,
-                    body: replacement.body,
+                    body: replacement.body.into(),
                 },
                 PreHirStmt::Return(Some(PreHirExpr::Var(replacement.accumulator))),
             ],
@@ -139,7 +139,7 @@ fn recover_guarded_loop_tail_accumulator_returns_in_stmt(stmt: &mut PreHirStmt) 
         PreHirStmt::Block(stmts)
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. } => {
-            recover_guarded_loop_tail_accumulator_returns(stmts)
+            recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts))
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -148,29 +148,29 @@ fn recover_guarded_loop_tail_accumulator_returns_in_stmt(stmt: &mut PreHirStmt) 
             if let Some(init) = init
                 && let PreHirStmt::Block(stmts) = init.as_mut()
             {
-                changed |= recover_guarded_loop_tail_accumulator_returns(stmts);
+                changed |= recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts));
             }
             if let Some(update) = update
                 && let PreHirStmt::Block(stmts) = update.as_mut()
             {
-                changed |= recover_guarded_loop_tail_accumulator_returns(stmts);
+                changed |= recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts));
             }
-            changed | recover_guarded_loop_tail_accumulator_returns(body)
+            changed | recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
         }
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            recover_guarded_loop_tail_accumulator_returns(then_body)
-                | recover_guarded_loop_tail_accumulator_returns(else_body)
+            recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body))
+                | recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body))
         }
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
-                changed |= recover_guarded_loop_tail_accumulator_returns(&mut case.body);
+                changed |= recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
             }
-            changed | recover_guarded_loop_tail_accumulator_returns(default)
+            changed | recover_guarded_loop_tail_accumulator_returns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default))
         }
         _ => false,
     }
@@ -351,7 +351,7 @@ fn remove_loop_exit_alias_assignment(stmt: &mut PreHirStmt, alias: &str, source:
     }) else {
         return false;
     };
-    body.remove(idx);
+    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).remove(idx);
     true
 }
 
@@ -483,24 +483,24 @@ pub fn normalize_dowhile_decrement_condition(stmts: &mut Vec<PreHirStmt>) -> boo
                     changed = true;
                 }
                 // Recurse into nested statements.
-                changed |= normalize_dowhile_decrement_condition(body);
+                changed |= normalize_dowhile_decrement_condition(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::While { body, .. } | PreHirStmt::For { body, .. } | PreHirStmt::Block(body) => {
-                changed |= normalize_dowhile_decrement_condition(body);
+                changed |= normalize_dowhile_decrement_condition(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= normalize_dowhile_decrement_condition(then_body);
-                changed |= normalize_dowhile_decrement_condition(else_body);
+                changed |= normalize_dowhile_decrement_condition(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |= normalize_dowhile_decrement_condition(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= normalize_dowhile_decrement_condition(&mut case.body);
+                    changed |= normalize_dowhile_decrement_condition(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= normalize_dowhile_decrement_condition(default);
+                changed |= normalize_dowhile_decrement_condition(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -581,11 +581,11 @@ fn inline_loop_condition_trailing_temps_in_stmts(
     for stmt in stmts {
         match stmt {
             PreHirStmt::DoWhile { body, cond } => {
-                changed |= inline_trailing_temps_into_condition(body, cond, read_counts);
-                changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+                changed |= inline_trailing_temps_into_condition(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), cond, read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), read_counts);
             }
             PreHirStmt::While { body, .. } | PreHirStmt::Block(body) => {
-                changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), read_counts);
             }
             PreHirStmt::For {
                 init, update, body, ..
@@ -593,29 +593,29 @@ fn inline_loop_condition_trailing_temps_in_stmts(
                 if let Some(init) = init
                     && let PreHirStmt::Block(body) = init.as_mut()
                 {
-                    changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+                    changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), read_counts);
                 }
                 if let Some(update) = update
                     && let PreHirStmt::Block(body) = update.as_mut()
                 {
-                    changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+                    changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), read_counts);
                 }
-                changed |= inline_loop_condition_trailing_temps_in_stmts(body, read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), read_counts);
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= inline_loop_condition_trailing_temps_in_stmts(then_body, read_counts);
-                changed |= inline_loop_condition_trailing_temps_in_stmts(else_body, read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), read_counts);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |=
-                        inline_loop_condition_trailing_temps_in_stmts(&mut case.body, read_counts);
+                        inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), read_counts);
                 }
-                changed |= inline_loop_condition_trailing_temps_in_stmts(default, read_counts);
+                changed |= inline_loop_condition_trailing_temps_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), read_counts);
             }
             _ => {}
         }
@@ -864,8 +864,8 @@ pub fn canonicalize_minmax_conditional_returns(stmts: &mut Vec<PreHirStmt>) -> b
                 rhs: Box::new(rhs_expr.clone()),
                 ty: cond_ty,
             },
-            then_body: vec![PreHirStmt::Return(Some(lhs_expr))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Return(Some(lhs_expr))].into(),
+            else_body: Vec::new().into(),
         };
         stmts[idx + 1] = PreHirStmt::Return(Some(rhs_expr));
         changed = true;
@@ -909,8 +909,8 @@ pub fn conditional_select_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
                         ..
                     } = &mut stmts[idx]
                     {
-                        changed |= conditional_select_pass(then_body);
-                        changed |= conditional_select_pass(else_body);
+                        changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                        changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
                     }
                 }
             } else {
@@ -921,28 +921,28 @@ pub fn conditional_select_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
                 PreHirStmt::While { body, .. }
                 | PreHirStmt::DoWhile { body, .. }
                 | PreHirStmt::Block(body) => {
-                    changed |= conditional_select_pass(body);
+                    changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
                 PreHirStmt::For {
                     init, update, body, ..
                 } => {
                     if let Some(init) = init {
                         if let PreHirStmt::Block(b) = init.as_mut() {
-                            changed |= conditional_select_pass(b);
+                            changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
                         }
                     }
                     if let Some(update) = update {
                         if let PreHirStmt::Block(b) = update.as_mut() {
-                            changed |= conditional_select_pass(b);
+                            changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
                         }
                     }
-                    changed |= conditional_select_pass(body);
+                    changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
                 PreHirStmt::Switch { cases, default, .. } => {
                     for case in cases {
-                        changed |= conditional_select_pass(&mut case.body);
+                        changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                     }
-                    changed |= conditional_select_pass(default);
+                    changed |= conditional_select_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
                 }
                 _ => {}
             }
@@ -1067,7 +1067,7 @@ fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut PreHirStmt) -> bool {
     match stmt {
         PreHirStmt::Block(body)
         | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => rewrite_found_path_break_to_return(body),
+        | PreHirStmt::DoWhile { body, .. } => rewrite_found_path_break_to_return(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
         PreHirStmt::For {
             init, update, body, ..
         } => {
@@ -1078,22 +1078,22 @@ fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut PreHirStmt) -> bool {
             if let Some(update) = update {
                 changed |= rewrite_found_path_break_to_return_in_stmt(update);
             }
-            changed | rewrite_found_path_break_to_return(body)
+            changed | rewrite_found_path_break_to_return(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
         }
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            rewrite_found_path_break_to_return(then_body)
-                | rewrite_found_path_break_to_return(else_body)
+            rewrite_found_path_break_to_return(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body))
+                | rewrite_found_path_break_to_return(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body))
         }
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
-                changed |= rewrite_found_path_break_to_return(&mut case.body);
+                changed |= rewrite_found_path_break_to_return(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
             }
-            changed | rewrite_found_path_break_to_return(default)
+            changed | rewrite_found_path_break_to_return(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default))
         }
         _ => false,
     }
@@ -1103,7 +1103,7 @@ fn rewrite_found_breaks_in_stmt(stmt: &mut PreHirStmt) -> bool {
     match stmt {
         PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
-        | PreHirStmt::For { body, .. } => rewrite_found_breaks_in_body(body),
+        | PreHirStmt::For { body, .. } => rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
         _ => false,
     }
 }
@@ -1118,20 +1118,20 @@ fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= rewrite_found_breaks_in_body(then_body);
-                changed |= rewrite_found_breaks_in_body(else_body);
+                changed |= rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |= rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Block(inner)
             | PreHirStmt::While { body: inner, .. }
             | PreHirStmt::DoWhile { body: inner, .. }
             | PreHirStmt::For { body: inner, .. } => {
-                changed |= rewrite_found_breaks_in_body(inner);
+                changed |= rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= rewrite_found_breaks_in_body(&mut case.body);
+                    changed |= rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= rewrite_found_breaks_in_body(default);
+                changed |= rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -1235,7 +1235,7 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 let idx = detect_bound_break_loop_index(body);
                 changed |= rewrite_orphan_loop_gotos_to_continue_rec(
-                    body,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     defined,
                     true,
                     idx.as_deref().or(loop_index),
@@ -1257,11 +1257,11 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
                     );
                 }
                 changed |=
-                    rewrite_orphan_loop_gotos_to_continue_rec(body, defined, true, idx_ref);
+                    rewrite_orphan_loop_gotos_to_continue_rec(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defined, true, idx_ref);
             }
             PreHirStmt::Block(body) => {
                 changed |= rewrite_orphan_loop_gotos_to_continue_rec(
-                    body, defined, in_loop, loop_index,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defined, in_loop, loop_index,
                 );
             }
             PreHirStmt::If {
@@ -1270,23 +1270,23 @@ fn rewrite_orphan_loop_gotos_to_continue_rec(
                 ..
             } => {
                 changed |= rewrite_orphan_loop_gotos_to_continue_rec(
-                    then_body, defined, in_loop, loop_index,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), defined, in_loop, loop_index,
                 );
                 changed |= rewrite_orphan_loop_gotos_to_continue_rec(
-                    else_body, defined, in_loop, loop_index,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), defined, in_loop, loop_index,
                 );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
                     changed |= rewrite_orphan_loop_gotos_to_continue_rec(
-                        &mut case.body,
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         defined,
                         in_loop,
                         loop_index,
                     );
                 }
                 changed |= rewrite_orphan_loop_gotos_to_continue_rec(
-                    default, defined, in_loop, loop_index,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), defined, in_loop, loop_index,
                 );
             }
             _ => {}
@@ -1303,7 +1303,7 @@ fn rewrite_orphan_loop_gotos_to_continue_in_stmt(
 ) -> bool {
     match stmt {
         PreHirStmt::Block(body) => {
-            rewrite_orphan_loop_gotos_to_continue_rec(body, defined, in_loop, loop_index)
+            rewrite_orphan_loop_gotos_to_continue_rec(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defined, in_loop, loop_index)
         }
         PreHirStmt::Goto(label) if in_loop && !defined.contains(label) => {
             *stmt = orphan_loop_continue_stmt(loop_index);
@@ -1335,7 +1335,7 @@ fn orphan_loop_continue_stmt(loop_index: Option<&str>) -> PreHirStmt {
                 },
             },
             PreHirStmt::Continue,
-        ])
+        ].into())
     } else {
         PreHirStmt::Continue
     }

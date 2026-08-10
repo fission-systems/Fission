@@ -34,7 +34,7 @@ fn strip_redundant_casts_in_stmt(stmt: &mut PreHirStmt, type_map: &HashMap<Strin
             changed |= strip_redundant_casts_in_expr(expr, type_map);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= strip_redundant_casts_in_stmts(body, type_map);
+            changed |= strip_redundant_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map);
         }
         PreHirStmt::For {
             init,
@@ -51,7 +51,7 @@ fn strip_redundant_casts_in_stmt(stmt: &mut PreHirStmt, type_map: &HashMap<Strin
             if let Some(u) = update {
                 changed |= strip_redundant_casts_in_stmt(u, type_map);
             }
-            changed |= strip_redundant_casts_in_stmts(body, type_map);
+            changed |= strip_redundant_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map);
         }
         PreHirStmt::If {
             cond,
@@ -59,8 +59,8 @@ fn strip_redundant_casts_in_stmt(stmt: &mut PreHirStmt, type_map: &HashMap<Strin
             else_body,
         } => {
             changed |= strip_redundant_casts_in_expr(cond, type_map);
-            changed |= strip_redundant_casts_in_stmts(then_body, type_map);
-            changed |= strip_redundant_casts_in_stmts(else_body, type_map);
+            changed |= strip_redundant_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), type_map);
+            changed |= strip_redundant_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), type_map);
         }
         PreHirStmt::Switch {
             expr,
@@ -69,9 +69,9 @@ fn strip_redundant_casts_in_stmt(stmt: &mut PreHirStmt, type_map: &HashMap<Strin
         } => {
             changed |= strip_redundant_casts_in_expr(expr, type_map);
             for case in cases {
-                changed |= strip_redundant_casts_in_stmts(&mut case.body, type_map);
+                changed |= strip_redundant_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), type_map);
             }
-            changed |= strip_redundant_casts_in_stmts(default, type_map);
+            changed |= strip_redundant_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), type_map);
         }
         _ => {}
     }
@@ -416,17 +416,17 @@ fn elide_casts_in_stmt(
                 *changed = true;
             }
         }
-        PreHirStmt::Block(stmts) => elide_casts_in_stmts(stmts, binding_types, return_type, changed),
+        PreHirStmt::Block(stmts) => elide_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), binding_types, return_type, changed),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            elide_casts_in_stmts(then_body, binding_types, return_type, changed);
-            elide_casts_in_stmts(else_body, binding_types, return_type, changed);
+            elide_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), binding_types, return_type, changed);
+            elide_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), binding_types, return_type, changed);
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            elide_casts_in_stmts(body, binding_types, return_type, changed)
+            elide_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types, return_type, changed)
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -437,13 +437,13 @@ fn elide_casts_in_stmt(
             if let Some(u) = update {
                 elide_casts_in_stmt(u, binding_types, return_type, changed);
             }
-            elide_casts_in_stmts(body, binding_types, return_type, changed);
+            elide_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types, return_type, changed);
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                elide_casts_in_stmts(&mut case.body, binding_types, return_type, changed);
+                elide_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), binding_types, return_type, changed);
             }
-            elide_casts_in_stmts(default, binding_types, return_type, changed);
+            elide_casts_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), binding_types, return_type, changed);
         }
         _ => {}
     }

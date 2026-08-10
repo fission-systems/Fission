@@ -262,7 +262,7 @@ fn visit_stmt(stmt: &mut PreHirStmt) -> bool {
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for s in body {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= visit_stmt(s);
             }
         }
@@ -272,10 +272,10 @@ fn visit_stmt(stmt: &mut PreHirStmt) -> bool {
             else_body,
         } => {
             changed |= visit_expr(cond);
-            for s in then_body {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body) {
                 changed |= visit_stmt(s);
             }
-            for s in else_body {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body) {
                 changed |= visit_stmt(s);
             }
         }
@@ -286,11 +286,11 @@ fn visit_stmt(stmt: &mut PreHirStmt) -> bool {
         } => {
             changed |= visit_expr(expr);
             for case in cases {
-                for s in &mut case.body {
+                for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body) {
                     changed |= visit_stmt(s);
                 }
             }
-            for s in default {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default) {
                 changed |= visit_stmt(s);
             }
         }

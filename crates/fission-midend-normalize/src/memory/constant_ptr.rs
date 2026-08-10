@@ -46,7 +46,7 @@ fn process_stmt(stmt: &mut PreHirStmt, context: &GlobalSymbolContext, changed: &
             process_expr(va_list, context, changed);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            process_statement_list(body, context, changed);
+            process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), context, changed);
         }
         PreHirStmt::If {
             cond,
@@ -54,8 +54,8 @@ fn process_stmt(stmt: &mut PreHirStmt, context: &GlobalSymbolContext, changed: &
             else_body,
         } => {
             process_expr(cond, context, changed);
-            process_statement_list(then_body, context, changed);
-            process_statement_list(else_body, context, changed);
+            process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), context, changed);
+            process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), context, changed);
         }
         PreHirStmt::Switch {
             expr,
@@ -64,9 +64,9 @@ fn process_stmt(stmt: &mut PreHirStmt, context: &GlobalSymbolContext, changed: &
         } => {
             process_expr(expr, context, changed);
             for case in cases {
-                process_statement_list(&mut case.body, context, changed);
+                process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), context, changed);
             }
-            process_statement_list(default, context, changed);
+            process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), context, changed);
         }
         PreHirStmt::For {
             init,
@@ -83,7 +83,7 @@ fn process_stmt(stmt: &mut PreHirStmt, context: &GlobalSymbolContext, changed: &
             if let Some(update) = update {
                 process_stmt(update, context, changed);
             }
-            process_statement_list(body, context, changed);
+            process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), context, changed);
         }
         PreHirStmt::Return(None)
         | PreHirStmt::Label(_)

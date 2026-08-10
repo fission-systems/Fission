@@ -113,7 +113,11 @@ pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<PreHirStmt>) -> bool {
 
                 if let Some(trueish) = constant {
                     changed = true;
-                    rewritten.extend(if trueish { then_body } else { else_body });
+                    rewritten.extend(std::rc::Rc::unwrap_or_clone(if trueish {
+                        then_body
+                    } else {
+                        else_body
+                    }));
                     continue;
                 }
 
@@ -130,7 +134,7 @@ pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<PreHirStmt>) -> bool {
                     rewritten.push(PreHirStmt::If {
                         cond: negate_expr(cond),
                         then_body: else_body,
-                        else_body: Vec::new(),
+                        else_body: Vec::new().into(),
                     });
                     continue;
                 }
@@ -160,7 +164,7 @@ pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<PreHirStmt>) ->
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. } => {
-                changed |= simplify_empty_and_constant_ifs_recursive(body);
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::For {
                 init, update, body, ..
@@ -168,28 +172,28 @@ pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<PreHirStmt>) ->
                 if let Some(init) = init.as_mut()
                     && let PreHirStmt::Block(body) = init.as_mut()
                 {
-                    changed |= simplify_empty_and_constant_ifs_recursive(body);
+                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
                 if let Some(update) = update.as_mut()
                     && let PreHirStmt::Block(body) = update.as_mut()
                 {
-                    changed |= simplify_empty_and_constant_ifs_recursive(body);
+                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
-                changed |= simplify_empty_and_constant_ifs_recursive(body);
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= simplify_empty_and_constant_ifs_recursive(then_body);
-                changed |= simplify_empty_and_constant_ifs_recursive(else_body);
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= simplify_empty_and_constant_ifs_recursive(&mut case.body);
+                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= simplify_empty_and_constant_ifs_recursive(default);
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::VaStart { .. }
@@ -276,16 +280,16 @@ pub fn simplify_fallthrough_edges(stmts: &mut Vec<PreHirStmt>) -> bool {
                         changed = true;
                         rewritten.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![PreHirStmt::Goto(else_target.to_string())],
-                            else_body: Vec::new(),
+                            then_body: vec![PreHirStmt::Goto(else_target.to_string())].into(),
+                            else_body: Vec::new().into(),
                         });
                     }
                     (Some(next), Some(then_target), Some(else_target)) if else_target == next => {
                         changed = true;
                         rewritten.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![PreHirStmt::Goto(then_target.to_string())],
-                            else_body: Vec::new(),
+                            then_body: vec![PreHirStmt::Goto(then_target.to_string())].into(),
+                            else_body: Vec::new().into(),
                         });
                     }
                     _ => rewritten.push(PreHirStmt::If {
@@ -348,8 +352,8 @@ pub fn fuse_single_predecessor_boundaries(stmts: &mut Vec<PreHirStmt>) -> bool {
             } if matches_single_goto(then_body, &label_name) && else_body.is_empty() => {
                 Some(PreHirStmt::If {
                     cond: negate_expr(cond.clone()),
-                    then_body: fused_segment.clone(),
-                    else_body: Vec::new(),
+                    then_body: fused_segment.clone().into(),
+                    else_body: Vec::new().into(),
                 })
             }
             PreHirStmt::If {
@@ -359,8 +363,8 @@ pub fn fuse_single_predecessor_boundaries(stmts: &mut Vec<PreHirStmt>) -> bool {
             } if then_body.is_empty() && matches_single_goto(else_body, &label_name) => {
                 Some(PreHirStmt::If {
                     cond: cond.clone(),
-                    then_body: fused_segment.clone(),
-                    else_body: Vec::new(),
+                    then_body: fused_segment.clone().into(),
+                    else_body: Vec::new().into(),
                 })
             }
             _ => None,
@@ -477,8 +481,8 @@ pub fn promote_guarded_jump_target_tail(stmts: &mut Vec<PreHirStmt>) -> bool {
         );
         stmts[idx] = PreHirStmt::If {
             cond: combined_cond,
-            then_body: body_segment,
-            else_body: Vec::new(),
+            then_body: body_segment.into(),
+            else_body: Vec::new().into(),
         };
         stmts.drain(idx + 1..=join_idx);
         changed = true;
@@ -521,8 +525,8 @@ pub fn collapse_common_exit_guard_chain(stmts: &mut Vec<PreHirStmt>) -> bool {
         let exit_cond = simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalOr));
         stmts[idx] = PreHirStmt::If {
             cond: negate_expr(exit_cond),
-            then_body: guarded_body,
-            else_body: Vec::new(),
+            then_body: guarded_body.into(),
+            else_body: Vec::new().into(),
         };
         stmts.drain(idx + 1..exit_idx);
         changed = true;
@@ -630,26 +634,26 @@ pub fn single_pred_label_inline(stmts: &mut Vec<PreHirStmt>) -> bool {
 
 fn single_pred_label_inline_in_stmt(stmt: &mut PreHirStmt) -> bool {
     match stmt {
-        PreHirStmt::Block(body) => single_pred_label_inline(body),
+        PreHirStmt::Block(body) => single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            let a = single_pred_label_inline(then_body);
-            let b = single_pred_label_inline(else_body);
+            let a = single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+            let b = single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             a || b
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            single_pred_label_inline(body)
+            single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
         }
-        PreHirStmt::For { body, .. } => single_pred_label_inline(body),
+        PreHirStmt::For { body, .. } => single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases.iter_mut() {
-                changed |= single_pred_label_inline(&mut case.body);
+                changed |= single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
             }
-            changed |= single_pred_label_inline(default);
+            changed |= single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             changed
         }
         _ => false,
@@ -790,12 +794,12 @@ fn hoist_goto_target_from_guarded_infinite_loop(
     else {
         unreachable!("position matched by guarded_infinite_loop_entry_label above");
     };
-    let while_stmt = then_body
+    let while_stmt = std::rc::Rc::unwrap_or_clone(then_body)
         .into_iter()
         .next()
         .filter(|s| matches!(s, PreHirStmt::While { .. }))
         .or_else(|| {
-            else_body
+            std::rc::Rc::unwrap_or_clone(else_body)
                 .into_iter()
                 .next()
                 .filter(|s| matches!(s, PreHirStmt::While { .. }))

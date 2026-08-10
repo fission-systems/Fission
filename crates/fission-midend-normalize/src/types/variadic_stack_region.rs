@@ -103,20 +103,20 @@ fn recover_in_stmt(
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. }
         | PreHirStmt::For { body: stmts, .. } => {
-            recover_in_stmts(stmts, home_slots, last_named_param, folds, va_starts)
+            recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), home_slots, last_named_param, folds, va_starts)
         }
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
                 changed |= recover_in_stmts(
-                    &mut case.body,
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     home_slots,
                     last_named_param,
                     folds,
                     va_starts,
                 );
             }
-            changed |= recover_in_stmts(default, home_slots, last_named_param, folds, va_starts);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), home_slots, last_named_param, folds, va_starts);
             changed
         }
         PreHirStmt::If {
@@ -124,8 +124,8 @@ fn recover_in_stmt(
             else_body,
             ..
         } => {
-            recover_in_stmts(then_body, home_slots, last_named_param, folds, va_starts)
-                | recover_in_stmts(else_body, home_slots, last_named_param, folds, va_starts)
+            recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), home_slots, last_named_param, folds, va_starts)
+                | recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), home_slots, last_named_param, folds, va_starts)
         }
         PreHirStmt::Label(_)
         | PreHirStmt::Goto(_)

@@ -349,7 +349,7 @@ fn promote_direct_param_register_reads(func: &mut PreHirFunction) -> usize {
         let param_name = format!("param_{}", slot + 1);
         let mut promoted = false;
         for hw in hw_names {
-            if stmt_assigns_var(&PreHirStmt::Block(func.body.clone()), &hw) {
+            if stmt_assigns_var(&PreHirStmt::Block(func.body.clone().into()), &hw) {
                 continue;
             }
             if !func
@@ -475,15 +475,15 @@ fn collect_var_names_in_stmt(stmt: &PreHirStmt, vars: &mut HashSet<String>) {
             else_body,
         } => {
             collect_var_names_in_expr(cond, vars);
-            for s in then_body {
+            for s in then_body.iter() {
                 collect_var_names_in_stmt(s, vars);
             }
-            for s in else_body {
+            for s in else_body.iter() {
                 collect_var_names_in_stmt(s, vars);
             }
         }
         PreHirStmt::Block(stmts) => {
-            for s in stmts {
+            for s in stmts.iter() {
                 collect_var_names_in_stmt(s, vars);
             }
         }
@@ -551,22 +551,22 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
             true
         }
         PreHirStmt::Block(stmts) => {
-            remove_redundant_param_hw_copies(stmts, abi);
+            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), abi);
             true
         }
         PreHirStmt::While { body: stmts, .. } | PreHirStmt::DoWhile { body: stmts, .. } => {
-            remove_redundant_param_hw_copies(stmts, abi);
+            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), abi);
             true
         }
         PreHirStmt::For { body: stmts, .. } => {
-            remove_redundant_param_hw_copies(stmts, abi);
+            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), abi);
             true
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for c in cases.iter_mut() {
-                remove_redundant_param_hw_copies(&mut c.body, abi);
+                remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut c.body), abi);
             }
-            remove_redundant_param_hw_copies(default, abi);
+            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), abi);
             true
         }
         PreHirStmt::If {
@@ -574,8 +574,8 @@ fn remove_redundant_param_hw_copies(body: &mut Vec<PreHirStmt>, abi: CallingConv
             else_body,
             ..
         } => {
-            remove_redundant_param_hw_copies(then_body, abi);
-            remove_redundant_param_hw_copies(else_body, abi);
+            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), abi);
+            remove_redundant_param_hw_copies(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), abi);
             true
         }
         _ => true,

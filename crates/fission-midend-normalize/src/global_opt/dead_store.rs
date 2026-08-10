@@ -230,14 +230,14 @@ fn recurse_remove(stmt: &mut PreHirStmt, paths: &[&StmtPath], depth: usize) {
             else_body,
             ..
         } => {
-            remove_at_branch(then_body, paths, depth, 0);
-            remove_at_branch(else_body, paths, depth, 1);
+            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), paths, depth, 0);
+            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), paths, depth, 1);
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            remove_at_branch(body, paths, depth, 0);
+            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), paths, depth, 0);
         }
         PreHirStmt::For { body, .. } => {
-            remove_at_branch(body, paths, depth, 1);
+            remove_at_branch(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), paths, depth, 1);
         }
         PreHirStmt::Block(stmts) => {
             let top: crate::HashSet<usize> = paths
@@ -250,7 +250,7 @@ fn recurse_remove(stmt: &mut PreHirStmt, paths: &[&StmtPath], depth: usize) {
                 let mut original_idx = 0;
                 while i < stmts.len() {
                     if top.contains(&original_idx) {
-                        stmts.remove(i);
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts).remove(i);
                     } else {
                         i += 1;
                     }

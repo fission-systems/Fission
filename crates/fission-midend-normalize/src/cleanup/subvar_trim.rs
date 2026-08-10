@@ -118,7 +118,7 @@ fn simplify_stmt(
             changed |= simplify_expr(expr, assignments, defuse, local_types);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= simplify_stmts(body, assignments, defuse, local_types);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), assignments, defuse, local_types);
         }
         PreHirStmt::For {
             init,
@@ -135,7 +135,7 @@ fn simplify_stmt(
             if let Some(u) = update {
                 changed |= simplify_stmt(u.as_mut(), assignments, defuse, local_types);
             }
-            changed |= simplify_stmts(body, assignments, defuse, local_types);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), assignments, defuse, local_types);
         }
         PreHirStmt::If {
             cond,
@@ -143,8 +143,8 @@ fn simplify_stmt(
             else_body,
         } => {
             changed |= simplify_expr(cond, assignments, defuse, local_types);
-            changed |= simplify_stmts(then_body, assignments, defuse, local_types);
-            changed |= simplify_stmts(else_body, assignments, defuse, local_types);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), assignments, defuse, local_types);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), assignments, defuse, local_types);
         }
         PreHirStmt::Switch {
             expr,
@@ -153,9 +153,9 @@ fn simplify_stmt(
         } => {
             changed |= simplify_expr(expr, assignments, defuse, local_types);
             for case in cases {
-                changed |= simplify_stmts(&mut case.body, assignments, defuse, local_types);
+                changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), assignments, defuse, local_types);
             }
-            changed |= simplify_stmts(default, assignments, defuse, local_types);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), assignments, defuse, local_types);
         }
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list, assignments, defuse, local_types);

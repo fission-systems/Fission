@@ -28,7 +28,7 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
         // Nested structures first (independent scopes).
         match &mut stmts[i] {
             PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= collapse_cdq_signed_mod_in_stmts(body);
+                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 // Conservative: control transfer may clobber linear live set.
                 live.clear();
                 continue;
@@ -38,8 +38,8 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= collapse_cdq_signed_mod_in_stmts(then_body);
-                changed |= collapse_cdq_signed_mod_in_stmts(else_body);
+                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
                 live.clear();
                 continue;
             }
@@ -48,23 +48,23 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
             } => {
                 if let Some(init_stmt) = init {
                     if let PreHirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= collapse_cdq_signed_mod_in_stmts(b);
+                        changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
                     }
                 }
                 if let Some(upd) = update {
                     if let PreHirStmt::Block(b) = upd.as_mut() {
-                        changed |= collapse_cdq_signed_mod_in_stmts(b);
+                        changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b));
                     }
                 }
-                changed |= collapse_cdq_signed_mod_in_stmts(body);
+                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 live.clear();
                 continue;
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= collapse_cdq_signed_mod_in_stmts(&mut case.body);
+                    changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= collapse_cdq_signed_mod_in_stmts(default);
+                changed |= collapse_cdq_signed_mod_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
                 live.clear();
                 continue;
             }

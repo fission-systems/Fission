@@ -428,7 +428,7 @@ fn visit_stmt(
             changed |= substitute_expr(expr, env);
         }
         PreHirStmt::Block(body) => {
-            changed |= visit_stmts(body, env, ranges, binding_types);
+            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), env, ranges, binding_types);
         }
         PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
             changed |= substitute_expr(cond, env);
@@ -441,7 +441,7 @@ fn visit_stmt(
                 loop_env.remove(v);
                 loop_ranges.remove(v);
             }
-            changed |= visit_stmts(body, &mut loop_env, &mut loop_ranges, binding_types);
+            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut loop_env, &mut loop_ranges, binding_types);
             // Facts about variables the loop writes do not survive the loop.
             for v in &written {
                 env.remove(v);
@@ -478,7 +478,7 @@ fn visit_stmt(
             if let Some(u) = update {
                 changed |= visit_stmt(u.as_mut(), &mut loop_env, &mut loop_ranges, binding_types);
             }
-            changed |= visit_stmts(body, &mut loop_env, &mut loop_ranges, binding_types);
+            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut loop_env, &mut loop_ranges, binding_types);
             for v in &written {
                 env.remove(v);
                 ranges.remove(v);
@@ -515,8 +515,8 @@ fn visit_stmt(
                 }
             }
 
-            changed |= visit_stmts(then_body, &mut then_env, &mut then_ranges, binding_types);
-            changed |= visit_stmts(else_body, &mut else_env, &mut else_ranges, binding_types);
+            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut then_env, &mut then_ranges, binding_types);
+            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut else_env, &mut else_ranges, binding_types);
 
             // Post-if state: facts about variables written in either arm no
             // longer hold on the joined path.
@@ -554,9 +554,9 @@ fn visit_stmt(
                         }
                     }
                 }
-                changed |= visit_stmts(&mut case.body, &mut case_env, &mut case_ranges, binding_types);
+                changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut case_env, &mut case_ranges, binding_types);
             }
-            changed |= visit_stmts(default, env, ranges, binding_types);
+            changed |= visit_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), env, ranges, binding_types);
             let mut written = HashSet::default();
             for case in cases.iter() {
                 collect_written_vars(&case.body, &mut written);

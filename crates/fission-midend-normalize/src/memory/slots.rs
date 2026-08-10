@@ -209,7 +209,7 @@ fn collect_single_var_aliases(stmts: &[PreHirStmt]) -> HashMap<String, PreHirExp
                 }
             }
             PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                for nested in body {
+                for nested in body.iter() {
                     visit_stmt(nested, counts, defs);
                 }
             }
@@ -218,10 +218,10 @@ fn collect_single_var_aliases(stmts: &[PreHirStmt]) -> HashMap<String, PreHirExp
                 else_body,
                 ..
             } => {
-                for nested in then_body {
+                for nested in then_body.iter() {
                     visit_stmt(nested, counts, defs);
                 }
-                for nested in else_body {
+                for nested in else_body.iter() {
                     visit_stmt(nested, counts, defs);
                 }
             }
@@ -234,17 +234,17 @@ fn collect_single_var_aliases(stmts: &[PreHirStmt]) -> HashMap<String, PreHirExp
                 if let Some(update) = update.as_deref() {
                     visit_stmt(update, counts, defs);
                 }
-                for nested in body {
+                for nested in body.iter() {
                     visit_stmt(nested, counts, defs);
                 }
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    for nested in &case.body {
+                    for nested in case.body.iter() {
                         visit_stmt(nested, counts, defs);
                     }
                 }
-                for nested in default {
+                for nested in default.iter() {
                     visit_stmt(nested, counts, defs);
                 }
             }
@@ -482,7 +482,7 @@ fn rewrite_memory_slot_stmts(
             | PreHirStmt::While { body: stmts, .. }
             | PreHirStmt::DoWhile { body: stmts, .. }
             | PreHirStmt::For { body: stmts, .. } => {
-                changed |= rewrite_memory_slot_stmts(stmts, aliases);
+                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), aliases);
             }
             PreHirStmt::Switch {
                 expr,
@@ -491,9 +491,9 @@ fn rewrite_memory_slot_stmts(
             } => {
                 changed |= rewrite_memory_slot_expr(expr, aliases);
                 for case in cases {
-                    changed |= rewrite_memory_slot_stmts(&mut case.body, aliases);
+                    changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), aliases);
                 }
-                changed |= rewrite_memory_slot_stmts(default, aliases);
+                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), aliases);
             }
             PreHirStmt::If {
                 cond,
@@ -501,8 +501,8 @@ fn rewrite_memory_slot_stmts(
                 else_body,
             } => {
                 changed |= rewrite_memory_slot_expr(cond, aliases);
-                changed |= rewrite_memory_slot_stmts(then_body, aliases);
-                changed |= rewrite_memory_slot_stmts(else_body, aliases);
+                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), aliases);
+                changed |= rewrite_memory_slot_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), aliases);
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)

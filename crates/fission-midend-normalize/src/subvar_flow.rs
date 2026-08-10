@@ -972,14 +972,14 @@ fn rewrite_stmt(stmt: &mut PreHirStmt, varmap: &HashMap<String, ReplaceVar>) {
             rewrite_expr(va_list, varmap);
         }
         PreHirStmt::Block(body) => {
-            rewrite_stmts(body, varmap);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), varmap);
         }
         PreHirStmt::While { cond, body } => {
             rewrite_expr(cond, varmap);
-            rewrite_stmts(body, varmap);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), varmap);
         }
         PreHirStmt::DoWhile { body, cond } => {
-            rewrite_stmts(body, varmap);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), varmap);
             rewrite_expr(cond, varmap);
         }
         PreHirStmt::For {
@@ -997,7 +997,7 @@ fn rewrite_stmt(stmt: &mut PreHirStmt, varmap: &HashMap<String, ReplaceVar>) {
             if let Some(u) = update {
                 rewrite_stmt(u.as_mut(), varmap);
             }
-            rewrite_stmts(body, varmap);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), varmap);
         }
         PreHirStmt::If {
             cond,
@@ -1005,8 +1005,8 @@ fn rewrite_stmt(stmt: &mut PreHirStmt, varmap: &HashMap<String, ReplaceVar>) {
             else_body,
         } => {
             rewrite_expr(cond, varmap);
-            rewrite_stmts(then_body, varmap);
-            rewrite_stmts(else_body, varmap);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), varmap);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), varmap);
         }
         PreHirStmt::Switch {
             expr,
@@ -1015,9 +1015,9 @@ fn rewrite_stmt(stmt: &mut PreHirStmt, varmap: &HashMap<String, ReplaceVar>) {
         } => {
             rewrite_expr(expr, varmap);
             for case in cases {
-                rewrite_stmts(&mut case.body, varmap);
+                rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), varmap);
             }
-            rewrite_stmts(default, varmap);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), varmap);
         }
         _ => {}
     }

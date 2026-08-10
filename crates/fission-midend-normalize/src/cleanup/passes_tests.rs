@@ -36,9 +36,9 @@ fn temp_binding(name: &str, bits: u32) -> PreHirBinding {
 fn recursive_empty_if_cleanup_prunes_nested_pure_empty_guard() {
     let mut stmts = vec![PreHirStmt::Block(vec![PreHirStmt::If {
         cond: PreHirExpr::Var("xVar12".to_string()),
-        then_body: Vec::new(),
-        else_body: Vec::new(),
-    }])];
+        then_body: Vec::new().into(),
+        else_body: Vec::new().into(),
+    }].into())];
 
     assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts));
     assert!(stmts.is_empty());
@@ -52,8 +52,8 @@ fn recursive_empty_if_cleanup_preserves_side_effectful_empty_guard() {
             args: Vec::new(),
             ty: NirType::Bool,
         },
-        then_body: Vec::new(),
-        else_body: Vec::new(),
+        then_body: Vec::new().into(),
+        else_body: Vec::new().into(),
     }];
 
     assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts));
@@ -116,7 +116,7 @@ fn collapse_loop_exit_alias_return_rewrites_do_while_exit_copy() {
                         ty: int(64),
                     },
                 },
-            ],
+            ].into(),
             cond: PreHirExpr::Var("keep_going".to_string()),
         },
         PreHirStmt::Return(Some(PreHirExpr::Var("exit_sum".to_string()))),
@@ -152,7 +152,7 @@ fn collapse_loop_exit_alias_return_rejects_rhs_mutated_after_copy() {
                     lhs: PreHirLValue::Var("sum".to_string()),
                     rhs: PreHirExpr::Const(0, int(32)),
                 },
-            ],
+            ].into(),
             cond: PreHirExpr::Var("keep_going".to_string()),
         },
         PreHirStmt::Return(Some(PreHirExpr::Var("exit_sum".to_string()))),
@@ -243,7 +243,7 @@ fn eliminate_redundant_var_assigns_recurses_into_nested_block() {
             rhs: PreHirExpr::Var("uVar1".to_string()),
         },
         PreHirStmt::Return(Some(PreHirExpr::Var("uVar1".to_string()))),
-    ])];
+    ].into())];
 
     assert!(eliminate_redundant_var_assigns(&mut stmts));
     match &stmts[0] {
@@ -338,8 +338,8 @@ fn collapse_common_exit_guard_chain_wraps_body_and_preserves_exit_label() {
                 rhs: Box::new(PreHirExpr::Const(0, int(32))),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Goto("exit".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("exit".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Binary {
@@ -348,8 +348,8 @@ fn collapse_common_exit_guard_chain_wraps_body_and_preserves_exit_label() {
                 rhs: Box::new(PreHirExpr::Const(0, int(32))),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Goto("exit".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("exit".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("loop".to_string()),
         PreHirStmt::Assign {
@@ -393,13 +393,13 @@ fn collapse_common_exit_guard_chain_rejects_mixed_targets() {
     let original = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("a".to_string()),
-            then_body: vec![PreHirStmt::Goto("exit_a".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("exit_a".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("b".to_string()),
-            then_body: vec![PreHirStmt::Goto("exit_b".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("exit_b".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("x".to_string()),
@@ -426,8 +426,8 @@ fn collapse_loop_exit_alias_return_rewrites_guarded_for_exit_copy() {
                 rhs: Box::new(PreHirExpr::Const(0, int(32))),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Goto("exit_zero".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("exit_zero".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("sum".to_string()),
@@ -470,7 +470,7 @@ fn collapse_loop_exit_alias_return_rewrites_guarded_for_exit_copy() {
                     lhs: PreHirLValue::Var("exit_sum".to_string()),
                     rhs: PreHirExpr::Var("sum".to_string()),
                 },
-            ],
+            ].into(),
         },
         PreHirStmt::Return(Some(PreHirExpr::Var("exit_sum".to_string()))),
         PreHirStmt::Label("exit_zero".to_string()),
@@ -506,7 +506,7 @@ fn collapse_loop_exit_alias_return_rejects_non_alias_expression() {
                     rhs: Box::new(PreHirExpr::Var("value".to_string())),
                     ty: int(32),
                 },
-            }],
+            }].into(),
             cond: PreHirExpr::Var("keep_going".to_string()),
         },
         PreHirStmt::Return(Some(PreHirExpr::Var("exit_sum".to_string()))),
@@ -527,16 +527,16 @@ fn rewrite_orphan_loop_gotos_to_continue_rewrites_missing_label() {
                     rhs: Box::new(PreHirExpr::Var("i".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Break],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Break].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("miss".to_string()),
-                then_body: vec![PreHirStmt::Goto("missing_continue".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("missing_continue".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("v".to_string()))),
-        ],
+        ].into(),
     }];
     let defined: HashSet<String> = collect_defined_labels(&stmts).into_iter().collect();
     assert!(rewrite_orphan_loop_gotos_to_continue(
@@ -578,20 +578,20 @@ fn rewrite_found_path_break_to_return_promotes_match_path() {
             body: vec![
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("done".to_string()),
-                    then_body: vec![PreHirStmt::Break],
-                    else_body: Vec::new(),
+                    then_body: vec![PreHirStmt::Break].into(),
+                    else_body: Vec::new().into(),
                 },
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("miss".to_string()),
-                    then_body: vec![PreHirStmt::Continue],
-                    else_body: Vec::new(),
+                    then_body: vec![PreHirStmt::Continue].into(),
+                    else_body: Vec::new().into(),
                 },
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("result".to_string()),
                     rhs: PreHirExpr::Var("value".to_string()),
                 },
                 PreHirStmt::Break,
-            ],
+            ].into(),
         },
         PreHirStmt::Return(Some(PreHirExpr::Const(-1, int(32)))),
     ];
@@ -629,8 +629,8 @@ fn recover_guarded_loop_tail_accumulator_return_rewrites_stale_temp_return() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("value".to_string()),
-            then_body: vec![PreHirStmt::Goto("loop_body".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("loop_body".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Return(Some(PreHirExpr::Var("bit".to_string()))),
         PreHirStmt::Label("loop_body".to_string()),
@@ -687,8 +687,8 @@ fn recover_guarded_loop_tail_accumulator_return_rejects_without_cond_update() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("value".to_string()),
-            then_body: vec![PreHirStmt::Goto("loop_body".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("loop_body".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Return(Some(PreHirExpr::Var("bit".to_string()))),
         PreHirStmt::Label("loop_body".to_string()),
@@ -774,8 +774,8 @@ fn eliminate_dead_temp_assigns_keeps_used_reg_flag_artifact() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(1, int(32))))],
-            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(0, int(32))))],
+            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(1, int(32))))].into(),
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(0, int(32))))].into(),
         },
     ];
 
@@ -941,7 +941,7 @@ fn single_pred_label_inline_keeps_dead_zone_with_externally_referenced_nested_la
                     lhs: PreHirLValue::Var("x".to_string()),
                     rhs: PreHirExpr::Const(1, int(32)),
                 },
-            ],
+            ].into(),
         },
         PreHirStmt::Label("a".to_string()),
         PreHirStmt::Goto("inner".to_string()),
@@ -1065,8 +1065,8 @@ fn inline_single_use_temps_does_not_cross_label_boundary() {
         PreHirStmt::Label("loop_head".to_string()),
         PreHirStmt::If {
             cond: PreHirExpr::Var("xVar0".to_string()),
-            then_body: vec![PreHirStmt::Goto("loop_head".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("loop_head".to_string())].into(),
+            else_body: Vec::new().into(),
         },
     ];
 
@@ -1174,8 +1174,8 @@ fn inline_pure_copy_into_multi_use_predicate() {
                 }),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Break],
-            else_body: vec![],
+            then_body: vec![PreHirStmt::Break].into(),
+            else_body: vec![].into(),
         },
     ];
     assert!(
@@ -1299,8 +1299,8 @@ fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("xVar0".to_string()),
-            then_body: Vec::new(),
-            else_body: Vec::new(),
+            then_body: Vec::new().into(),
+            else_body: Vec::new().into(),
         },
     ];
 
@@ -1350,7 +1350,7 @@ fn inline_loop_condition_trailing_temps_substitutes_condition_chain() {
                         ty: NirType::Bool,
                     },
                 },
-            ],
+            ].into(),
             cond: PreHirExpr::Unary {
                 op: PreHirUnaryOp::Not,
                 expr: Box::new(PreHirExpr::Var("xVar39".to_string())),
@@ -1401,8 +1401,8 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("xVar0".to_string()),
-            then_body: Vec::new(),
-            else_body: Vec::new(),
+            then_body: Vec::new().into(),
+            else_body: Vec::new().into(),
         },
     ];
 
@@ -1426,11 +1426,11 @@ fn switch_norm_folds_range_check_guard() {
                 expr: PreHirExpr::Var("x".to_string()),
                 cases: vec![PreHirSwitchCase {
                     values: vec![1],
-                    body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(10, int(32))))],
+                    body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(10, int(32))))].into(),
                 }],
-                default: Vec::new(),
-            }],
-            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(20, int(32))))],
+                default: Vec::new().into(),
+            }].into(),
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(20, int(32))))].into(),
         }],
         params: Vec::new(),
         locals: Vec::new(),
@@ -1554,16 +1554,16 @@ fn condexe_folding_merges_sequential_siblings() {
                 then_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("x".to_string()),
                     rhs: PreHirExpr::Const(1, int(32)),
-                }],
-                else_body: Vec::new(),
+                }].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("a".to_string()),
                 then_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("y".to_string()),
                     rhs: PreHirExpr::Const(2, int(32)),
-                }],
-                else_body: Vec::new(),
+                }].into(),
+                else_body: Vec::new().into(),
             },
         ],
         params: Vec::new(),
@@ -1606,10 +1606,10 @@ fn condexe_folding_merges_nested_ifs() {
                 then_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("x".to_string()),
                     rhs: PreHirExpr::Const(1, int(32)),
-                }],
-                else_body: Vec::new(),
-            }],
-            else_body: Vec::new(),
+                }].into(),
+                else_body: Vec::new().into(),
+            }].into(),
+            else_body: Vec::new().into(),
         }],
         params: Vec::new(),
         locals: Vec::new(),
@@ -1655,16 +1655,16 @@ fn condexe_folding_preserves_safety_on_assignment() {
                 then_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("a".to_string()),
                     rhs: PreHirExpr::Const(0, int(32)),
-                }],
-                else_body: Vec::new(),
+                }].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::If {
                 cond: PreHirExpr::Var("a".to_string()),
                 then_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("x".to_string()),
                     rhs: PreHirExpr::Const(1, int(32)),
-                }],
-                else_body: Vec::new(),
+                }].into(),
+                else_body: Vec::new().into(),
             },
         ],
         params: Vec::new(),
@@ -2035,8 +2035,8 @@ fn fuse_if_goto_allows_returns_in_segment() {
     let mut stmts = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("c".to_string()),
-            then_body: vec![PreHirStmt::Goto("L".to_string())],
-            else_body: vec![],
+            then_body: vec![PreHirStmt::Goto("L".to_string())].into(),
+            else_body: vec![].into(),
         },
         PreHirStmt::Return(Some(PreHirExpr::Const(1, int(32)))),
         PreHirStmt::Label("L".to_string()),

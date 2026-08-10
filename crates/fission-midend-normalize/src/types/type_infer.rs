@@ -546,10 +546,10 @@ fn rewrite_scalar_zero_alias_stmt(
             true
         }
         PreHirStmt::Block(stmts) | PreHirStmt::While { body: stmts, .. } => {
-            rewrite_scalar_zero_alias_stmts(stmts, binding_types, zero_aliases)
+            rewrite_scalar_zero_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), binding_types, zero_aliases)
         }
         PreHirStmt::DoWhile { body, .. } => {
-            rewrite_scalar_zero_alias_stmts(body, binding_types, zero_aliases)
+            rewrite_scalar_zero_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types, zero_aliases)
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -561,23 +561,23 @@ fn rewrite_scalar_zero_alias_stmt(
             if let Some(update) = update {
                 changed |= rewrite_scalar_zero_alias_stmt(update, binding_types, zero_aliases);
             }
-            changed | rewrite_scalar_zero_alias_stmts(body, binding_types, zero_aliases)
+            changed | rewrite_scalar_zero_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types, zero_aliases)
         }
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            rewrite_scalar_zero_alias_stmts(then_body, binding_types, zero_aliases)
-                | rewrite_scalar_zero_alias_stmts(else_body, binding_types, zero_aliases)
+            rewrite_scalar_zero_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), binding_types, zero_aliases)
+                | rewrite_scalar_zero_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), binding_types, zero_aliases)
         }
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
                 changed |=
-                    rewrite_scalar_zero_alias_stmts(&mut case.body, binding_types, zero_aliases);
+                    rewrite_scalar_zero_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), binding_types, zero_aliases);
             }
-            changed | rewrite_scalar_zero_alias_stmts(default, binding_types, zero_aliases)
+            changed | rewrite_scalar_zero_alias_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), binding_types, zero_aliases)
         }
         _ => false,
     }
@@ -2669,21 +2669,21 @@ fn strip_zero_extended_return_casts_stmt(stmt: &mut PreHirStmt, narrowed_ty: &Ni
         PreHirStmt::Block(stmts)
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. }
-        | PreHirStmt::For { body: stmts, .. } => strip_zero_extended_return_casts(stmts, narrowed_ty),
+        | PreHirStmt::For { body: stmts, .. } => strip_zero_extended_return_casts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), narrowed_ty),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            strip_zero_extended_return_casts(then_body, narrowed_ty)
-                | strip_zero_extended_return_casts(else_body, narrowed_ty)
+            strip_zero_extended_return_casts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), narrowed_ty)
+                | strip_zero_extended_return_casts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), narrowed_ty)
         }
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases {
-                changed |= strip_zero_extended_return_casts(&mut case.body, narrowed_ty);
+                changed |= strip_zero_extended_return_casts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), narrowed_ty);
             }
-            changed | strip_zero_extended_return_casts(default, narrowed_ty)
+            changed | strip_zero_extended_return_casts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), narrowed_ty)
         }
         _ => false,
     }
@@ -2953,7 +2953,7 @@ fn rewrite_i32_compatible_constants_in_stmt(stmt: &mut PreHirStmt, narrowed_ty: 
         PreHirStmt::Return(Some(expr)) => rewrite_i32_compatible_constants_in_expr(expr, narrowed_ty),
         PreHirStmt::Expr(expr) => rewrite_i32_compatible_constants_in_expr(expr, narrowed_ty),
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            rewrite_i32_compatible_constants_in_body(body, narrowed_ty)
+            rewrite_i32_compatible_constants_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), narrowed_ty)
         }
         PreHirStmt::If {
             then_body,
@@ -2962,8 +2962,8 @@ fn rewrite_i32_compatible_constants_in_stmt(stmt: &mut PreHirStmt, narrowed_ty: 
             ..
         } => {
             rewrite_i32_compatible_constants_in_expr(cond, narrowed_ty)
-                | rewrite_i32_compatible_constants_in_body(then_body, narrowed_ty)
-                | rewrite_i32_compatible_constants_in_body(else_body, narrowed_ty)
+                | rewrite_i32_compatible_constants_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), narrowed_ty)
+                | rewrite_i32_compatible_constants_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), narrowed_ty)
         }
         PreHirStmt::Switch {
             expr,
@@ -2973,9 +2973,9 @@ fn rewrite_i32_compatible_constants_in_stmt(stmt: &mut PreHirStmt, narrowed_ty: 
         } => {
             let mut changed = rewrite_i32_compatible_constants_in_expr(expr, narrowed_ty);
             for case in cases {
-                changed |= rewrite_i32_compatible_constants_in_body(&mut case.body, narrowed_ty);
+                changed |= rewrite_i32_compatible_constants_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), narrowed_ty);
             }
-            changed | rewrite_i32_compatible_constants_in_body(default, narrowed_ty)
+            changed | rewrite_i32_compatible_constants_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), narrowed_ty)
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -2987,7 +2987,7 @@ fn rewrite_i32_compatible_constants_in_stmt(stmt: &mut PreHirStmt, narrowed_ty: 
             if let Some(u) = update {
                 changed |= rewrite_i32_compatible_constants_in_stmt(u, narrowed_ty);
             }
-            changed | rewrite_i32_compatible_constants_in_body(body, narrowed_ty)
+            changed | rewrite_i32_compatible_constants_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), narrowed_ty)
         }
         _ => false,
     }
@@ -3704,7 +3704,7 @@ mod tests {
                 rhs: PreHirExpr::Const(0, u32_ty.clone()),
             },
             PreHirStmt::DoWhile {
-                body: Vec::new(),
+                body: Vec::new().into(),
                 cond: PreHirExpr::Binary {
                     op: PreHirBinaryOp::Ne,
                     lhs: Box::new(PreHirExpr::Var("end_word".to_string())),
@@ -3856,8 +3856,8 @@ mod tests {
                     rhs: Box::new(PreHirExpr::Var("limit".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: Vec::new(),
-                else_body: Vec::new(),
+                then_body: Vec::new().into(),
+                else_body: Vec::new().into(),
             },
         ];
         let mut limit = make_binding("limit");
@@ -3906,8 +3906,8 @@ mod tests {
                     then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Cast {
                         ty: u64_ty.clone(),
                         expr: Box::new(PreHirExpr::Var("param_2".to_owned())),
-                    }))],
-                    else_body: vec![],
+                    }))].into(),
+                    else_body: vec![].into(),
                 },
                 PreHirStmt::Return(Some(PreHirExpr::Var("param_1".to_owned()))),
             ],
@@ -4038,8 +4038,8 @@ mod tests {
             body: vec![
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".to_owned()),
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("param_1".to_owned())))],
-                    else_body: vec![],
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("param_1".to_owned())))].into(),
+                    else_body: vec![].into(),
                 },
                 PreHirStmt::Return(Some(PreHirExpr::Var("tmp".to_owned()))),
             ],
@@ -4093,8 +4093,8 @@ mod tests {
                 make_assign("rdi", PreHirExpr::Var("param_1".to_owned())),
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".to_owned()),
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("rdi".to_owned())))],
-                    else_body: vec![],
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("rdi".to_owned())))].into(),
+                    else_body: vec![].into(),
                 },
                 make_assign("ret32", PreHirExpr::Var("wide_acc".to_owned())),
                 make_assign("ret64", PreHirExpr::Var("ret32".to_owned())),
@@ -4150,8 +4150,8 @@ mod tests {
                 make_assign("rdi", PreHirExpr::Var("param_1".to_owned())),
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".to_owned()),
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("rdi".to_owned())))],
-                    else_body: vec![],
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("rdi".to_owned())))].into(),
+                    else_body: vec![].into(),
                 },
                 make_assign("ret32", PreHirExpr::Var("wide_acc".to_owned())),
                 make_assign("ret64", PreHirExpr::Var("ret32".to_owned())),
@@ -4210,16 +4210,16 @@ mod tests {
                     then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
                         4294967295, // 0xFFFFFFFF = -1 as u32
                         u64_ty.clone(),
-                    )))],
-                    else_body: vec![],
+                    )))].into(),
+                    else_body: vec![].into(),
                 },
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("c2".to_owned()),
                     then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
                         4294967294, // 0xFFFFFFFE = -2 as u32
                         u64_ty.clone(),
-                    )))],
-                    else_body: vec![],
+                    )))].into(),
+                    else_body: vec![].into(),
                 },
                 // Simulate: return (ulonglong)(uint)(int)(param_1 + param_2)
                 // The outer u64 ZExt cast is what the decompiler produces for x86-64.
@@ -4313,8 +4313,8 @@ mod tests {
                 ),
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".into()),
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("uVar2".into())))],
-                    else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(1, i32_ty.clone())))],
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("uVar2".into())))].into(),
+                    else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(1, i32_ty.clone())))].into(),
                 },
             ],
             ..Default::default()
@@ -4472,16 +4472,16 @@ mod tests {
                     then_body: vec![make_assign(
                         "xVar39",
                         PreHirExpr::Const(2147483647, u64_ty.clone()),
-                    )],
-                    else_body: vec![],
+                    )].into(),
+                    else_body: vec![].into(),
                 },
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("overflow_neg".into()),
                     then_body: vec![make_assign(
                         "xVar39",
                         PreHirExpr::Const(2147483648u64 as i64, u64_ty.clone()),
-                    )],
-                    else_body: vec![],
+                    )].into(),
+                    else_body: vec![].into(),
                 },
                 make_assign("xVar39", PreHirExpr::Var("local_4".into())),
                 PreHirStmt::Return(Some(PreHirExpr::Var("xVar39".into()))),
@@ -4544,8 +4544,8 @@ mod tests {
                     rhs: Box::new(PreHirExpr::Var("edx".into())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![],
-                else_body: vec![],
+                then_body: vec![].into(),
+                else_body: vec![].into(),
             },
             make_assign(
                 "byte",
@@ -4856,8 +4856,8 @@ mod tests {
                     rhs: Box::new(PreHirExpr::Var("count".into())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![],
-                else_body: vec![],
+                then_body: vec![].into(),
+                else_body: vec![].into(),
             },
             make_assign(
                 "value",

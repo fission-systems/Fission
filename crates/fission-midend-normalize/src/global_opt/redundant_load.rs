@@ -86,10 +86,10 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
             rewrite_loads_in_expr(cond, cache, &mut changed);
             let mut tc = LoadCache::default();
             let mut ec = LoadCache::default();
-            if rle_stmts(then_body, &mut tc) {
+            if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut tc) {
                 changed = true;
             }
-            if rle_stmts(else_body, &mut ec) {
+            if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut ec) {
                 changed = true;
             }
             cache.clear();
@@ -97,7 +97,7 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
         PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
             rewrite_loads_in_expr(cond, cache, &mut changed);
             let mut inner = LoadCache::default();
-            if rle_stmts(body, &mut inner) {
+            if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner) {
                 changed = true;
             }
             cache.clear();
@@ -117,7 +117,7 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
                 rewrite_loads_in_expr(e, cache, &mut changed);
             }
             let mut inner = LoadCache::default();
-            if rle_stmts(body, &mut inner) {
+            if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner) {
                 changed = true;
             }
             if let Some(s) = update {
@@ -135,18 +135,18 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
             rewrite_loads_in_expr(expr, cache, &mut changed);
             for case in cases.iter_mut() {
                 let mut c = LoadCache::default();
-                if rle_stmts(&mut case.body, &mut c) {
+                if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut c) {
                     changed = true;
                 }
             }
             let mut d = LoadCache::default();
-            if rle_stmts(default, &mut d) {
+            if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), &mut d) {
                 changed = true;
             }
             cache.clear();
         }
         PreHirStmt::Block(body) => {
-            if rle_stmts(body, cache) {
+            if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), cache) {
                 changed = true;
             }
         }

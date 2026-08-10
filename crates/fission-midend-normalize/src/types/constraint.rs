@@ -375,14 +375,14 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
                 update_ast_expr(expr, var_types);
             }
             PreHirStmt::Block(body) => {
-                update_ast_types(body, var_types);
+                update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), var_types);
             }
             PreHirStmt::While { cond, body } => {
                 update_ast_expr(cond, var_types);
-                update_ast_types(body, var_types);
+                update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), var_types);
             }
             PreHirStmt::DoWhile { body, cond } => {
-                update_ast_types(body, var_types);
+                update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), var_types);
                 update_ast_expr(cond, var_types);
             }
             PreHirStmt::For {
@@ -400,7 +400,7 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
                 if let Some(update_stmt) = update {
                     update_ast_types(std::slice::from_mut(update_stmt.as_mut()), var_types);
                 }
-                update_ast_types(body, var_types);
+                update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), var_types);
             }
             PreHirStmt::If {
                 cond,
@@ -408,8 +408,8 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
                 else_body,
             } => {
                 update_ast_expr(cond, var_types);
-                update_ast_types(then_body, var_types);
-                update_ast_types(else_body, var_types);
+                update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), var_types);
+                update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), var_types);
             }
             PreHirStmt::Switch {
                 expr,
@@ -418,9 +418,9 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
             } => {
                 update_ast_expr(expr, var_types);
                 for case in cases {
-                    update_ast_types(&mut case.body, var_types);
+                    update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), var_types);
                 }
-                update_ast_types(default, var_types);
+                update_ast_types(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), var_types);
             }
             _ => {}
         }

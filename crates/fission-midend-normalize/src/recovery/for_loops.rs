@@ -11,21 +11,21 @@ pub fn apply_for_loop_folding(stmts: &mut Vec<PreHirStmt>) -> bool {
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= apply_for_loop_folding(body);
+                changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= apply_for_loop_folding(then_body);
-                changed |= apply_for_loop_folding(else_body);
+                changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= apply_for_loop_folding(&mut case.body);
+                    changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= apply_for_loop_folding(default);
+                changed |= apply_for_loop_folding(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -51,7 +51,7 @@ pub fn apply_for_loop_folding(stmts: &mut Vec<PreHirStmt>) -> bool {
                 init: inits.pop(),
                 cond: Some(cond),
                 update: update.map(Box::new),
-                body,
+                body: body.into(),
             });
             changed = true;
         } else {
@@ -76,7 +76,7 @@ fn try_collapse_while_to_for_algorithmic(
     let stmt = &stmts[idx];
 
     let (cond, mut body) = match stmt {
-        PreHirStmt::While { cond, body } => (cond.clone(), body.clone()),
+        PreHirStmt::While { cond, body } => (cond.clone(), (**body).clone()),
         _ => return None,
     };
 

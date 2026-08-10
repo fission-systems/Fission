@@ -59,7 +59,7 @@ impl DefUseMap {
             | PreHirStmt::Label(_)
             | PreHirStmt::Goto(_) => {}
             PreHirStmt::Block(stmts) => {
-                for s in stmts {
+                for s in stmts.iter() {
                     self.count_stmt(s);
                 }
             }
@@ -69,21 +69,21 @@ impl DefUseMap {
                 else_body,
             } => {
                 self.count_expr(cond);
-                for s in then_body {
+                for s in then_body.iter() {
                     self.count_stmt(s);
                 }
-                for s in else_body {
+                for s in else_body.iter() {
                     self.count_stmt(s);
                 }
             }
             PreHirStmt::While { cond, body } => {
                 self.count_expr(cond);
-                for s in body {
+                for s in body.iter() {
                     self.count_stmt(s);
                 }
             }
             PreHirStmt::DoWhile { body, cond } => {
-                for s in body {
+                for s in body.iter() {
                     self.count_stmt(s);
                 }
                 self.count_expr(cond);
@@ -103,7 +103,7 @@ impl DefUseMap {
                 if let Some(u) = update {
                     self.count_stmt(u);
                 }
-                for s in body {
+                for s in body.iter() {
                     self.count_stmt(s);
                 }
             }
@@ -114,11 +114,11 @@ impl DefUseMap {
             } => {
                 self.count_expr(expr);
                 for case in cases {
-                    for s in &case.body {
+                    for s in case.body.iter() {
                         self.count_stmt(s);
                     }
                 }
-                for s in default {
+                for s in default.iter() {
                     self.count_stmt(s);
                 }
             }
@@ -698,22 +698,22 @@ fn fold_stmt(stmt: &mut PreHirStmt) -> bool {
         | PreHirStmt::Continue
         | PreHirStmt::Label(_)
         | PreHirStmt::Goto(_) => {}
-        PreHirStmt::Block(stmts) => changed |= constant_folding_pass(stmts),
+        PreHirStmt::Block(stmts) => changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts)),
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
             changed |= fold_expr(cond);
-            changed |= constant_folding_pass(then_body);
-            changed |= constant_folding_pass(else_body);
+            changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+            changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
         }
         PreHirStmt::While { cond, body } => {
             changed |= fold_expr(cond);
-            changed |= constant_folding_pass(body);
+            changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::DoWhile { body, cond } => {
-            changed |= constant_folding_pass(body);
+            changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             changed |= fold_expr(cond);
         }
         PreHirStmt::For {
@@ -731,7 +731,7 @@ fn fold_stmt(stmt: &mut PreHirStmt) -> bool {
             if let Some(u) = update {
                 changed |= fold_stmt(u);
             }
-            changed |= constant_folding_pass(body);
+            changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::Switch {
             expr,
@@ -740,9 +740,9 @@ fn fold_stmt(stmt: &mut PreHirStmt) -> bool {
         } => {
             changed |= fold_expr(expr);
             for case in cases.iter_mut() {
-                changed |= constant_folding_pass(&mut case.body);
+                changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
             }
-            changed |= constant_folding_pass(default);
+            changed |= constant_folding_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
         }
     }
     changed
@@ -1138,17 +1138,17 @@ fn remove_dead_in_stmt_nested(
     changed: &mut bool,
 ) {
     match stmt {
-        PreHirStmt::Block(stmts) => remove_dead_in_stmts(stmts, map, temp_names, changed),
+        PreHirStmt::Block(stmts) => remove_dead_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), map, temp_names, changed),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            remove_dead_in_stmts(then_body, map, temp_names, changed);
-            remove_dead_in_stmts(else_body, map, temp_names, changed);
+            remove_dead_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), map, temp_names, changed);
+            remove_dead_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), map, temp_names, changed);
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            remove_dead_in_stmts(body, map, temp_names, changed);
+            remove_dead_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), map, temp_names, changed);
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -1159,13 +1159,13 @@ fn remove_dead_in_stmt_nested(
             if let Some(u) = update {
                 remove_dead_in_stmt_nested(u, map, temp_names, changed);
             }
-            remove_dead_in_stmts(body, map, temp_names, changed);
+            remove_dead_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), map, temp_names, changed);
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
-                remove_dead_in_stmts(&mut case.body, map, temp_names, changed);
+                remove_dead_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), map, temp_names, changed);
             }
-            remove_dead_in_stmts(default, map, temp_names, changed);
+            remove_dead_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), map, temp_names, changed);
         }
         _ => {}
     }
@@ -1700,15 +1700,15 @@ fn stabilize_repeated_pure_exprs_in_stmts(
     for mut stmt in stmts.drain(..) {
         match &mut stmt {
             PreHirStmt::Block(body) => {
-                changed += stabilize_repeated_pure_exprs_in_stmts(body, locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals, next_temp_id);
             }
             PreHirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                changed += stabilize_repeated_pure_exprs_in_stmts(then_body, locals, next_temp_id);
-                changed += stabilize_repeated_pure_exprs_in_stmts(else_body, locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), locals, next_temp_id);
                 if let Some((temp_stmt, stabilized_cond)) =
                     stabilize_expr_with_temp(cond, locals, next_temp_id)
                 {
@@ -1724,12 +1724,12 @@ fn stabilize_repeated_pure_exprs_in_stmts(
             } => {
                 for case in cases.iter_mut() {
                     changed += stabilize_repeated_pure_exprs_in_stmts(
-                        &mut case.body,
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         locals,
                         next_temp_id,
                     );
                 }
-                changed += stabilize_repeated_pure_exprs_in_stmts(default, locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), locals, next_temp_id);
                 if let Some((temp_stmt, stabilized_expr)) =
                     stabilize_expr_with_temp(expr, locals, next_temp_id)
                 {
@@ -1748,7 +1748,7 @@ fn stabilize_repeated_pure_exprs_in_stmts(
                 }
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed += stabilize_repeated_pure_exprs_in_stmts(body, locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals, next_temp_id);
             }
             PreHirStmt::For {
                 init, update, body, ..
@@ -1769,7 +1769,7 @@ fn stabilize_repeated_pure_exprs_in_stmts(
                         *update = Box::new(updated);
                     }
                 }
-                changed += stabilize_repeated_pure_exprs_in_stmts(body, locals, next_temp_id);
+                changed += stabilize_repeated_pure_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals, next_temp_id);
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::VaStart { .. }

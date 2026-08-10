@@ -842,7 +842,7 @@ mod tests {
                             lhs: PreHirLValue::Var("cursor".to_string()),
                             rhs: PreHirExpr::Var("next".to_string()),
                         },
-                    ],
+                    ].into(),
                 },
             ],
             calling_convention: Default::default(),

@@ -121,7 +121,7 @@ fn rewrite_recombine_exprs(stmts: &mut [PreHirStmt], defs: &HashMap<String, PreH
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= rewrite_recombine_exprs(body, defs);
+                changed |= rewrite_recombine_exprs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defs);
             }
             PreHirStmt::Switch {
                 expr,
@@ -130,9 +130,9 @@ fn rewrite_recombine_exprs(stmts: &mut [PreHirStmt], defs: &HashMap<String, PreH
             } => {
                 changed |= rewrite_expr(expr, defs);
                 for case in cases {
-                    changed |= rewrite_recombine_exprs(&mut case.body, defs);
+                    changed |= rewrite_recombine_exprs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), defs);
                 }
-                changed |= rewrite_recombine_exprs(default, defs);
+                changed |= rewrite_recombine_exprs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), defs);
             }
             PreHirStmt::If {
                 cond,
@@ -140,8 +140,8 @@ fn rewrite_recombine_exprs(stmts: &mut [PreHirStmt], defs: &HashMap<String, PreH
                 else_body,
             } => {
                 changed |= rewrite_expr(cond, defs);
-                changed |= rewrite_recombine_exprs(then_body, defs);
-                changed |= rewrite_recombine_exprs(else_body, defs);
+                changed |= rewrite_recombine_exprs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), defs);
+                changed |= rewrite_recombine_exprs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), defs);
             }
             _ => {}
         }
@@ -755,21 +755,21 @@ fn collapse_contiguous_mem_ops(stmts: &mut Vec<PreHirStmt>, locals: &mut Vec<Pre
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= collapse_contiguous_mem_ops(body, locals);
+                changed |= collapse_contiguous_mem_ops(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), locals);
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= collapse_contiguous_mem_ops(then_body, locals);
-                changed |= collapse_contiguous_mem_ops(else_body, locals);
+                changed |= collapse_contiguous_mem_ops(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), locals);
+                changed |= collapse_contiguous_mem_ops(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), locals);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= collapse_contiguous_mem_ops(&mut case.body, locals);
+                    changed |= collapse_contiguous_mem_ops(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), locals);
                 }
-                changed |= collapse_contiguous_mem_ops(default, locals);
+                changed |= collapse_contiguous_mem_ops(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), locals);
             }
             _ => {}
         }

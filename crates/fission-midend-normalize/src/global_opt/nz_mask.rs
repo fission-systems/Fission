@@ -184,7 +184,7 @@ fn collect_assignments_in_stmt(
         PreHirStmt::Block(stmts)
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. } => {
-            for s in stmts {
+            for s in stmts.iter() {
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
         }
@@ -193,10 +193,10 @@ fn collect_assignments_in_stmt(
             else_body,
             ..
         } => {
-            for s in then_body {
+            for s in then_body.iter() {
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
-            for s in else_body {
+            for s in else_body.iter() {
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
         }
@@ -209,17 +209,17 @@ fn collect_assignments_in_stmt(
             if let Some(u) = update {
                 changed |= collect_assignments_in_stmt(u, var_masks, type_map);
             }
-            for s in body {
+            for s in body.iter() {
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for s in &case.body {
+                for s in case.body.iter() {
                     changed |= collect_assignments_in_stmt(s, var_masks, type_map);
                 }
             }
-            for s in default {
+            for s in default.iter() {
                 changed |= collect_assignments_in_stmt(s, var_masks, type_map);
             }
         }
@@ -356,7 +356,7 @@ fn simplify_stmt(
             changed |= simplify_expr(va_list, nz_masks, type_map);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= simplify_stmts(body, nz_masks, type_map);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), nz_masks, type_map);
         }
         PreHirStmt::For {
             init,
@@ -373,7 +373,7 @@ fn simplify_stmt(
             if let Some(u) = update {
                 changed |= simplify_stmt(u, nz_masks, type_map);
             }
-            changed |= simplify_stmts(body, nz_masks, type_map);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), nz_masks, type_map);
         }
         PreHirStmt::If {
             cond,
@@ -381,8 +381,8 @@ fn simplify_stmt(
             else_body,
         } => {
             changed |= simplify_expr(cond, nz_masks, type_map);
-            changed |= simplify_stmts(then_body, nz_masks, type_map);
-            changed |= simplify_stmts(else_body, nz_masks, type_map);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), nz_masks, type_map);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), nz_masks, type_map);
         }
         PreHirStmt::Switch {
             expr,
@@ -391,9 +391,9 @@ fn simplify_stmt(
         } => {
             changed |= simplify_expr(expr, nz_masks, type_map);
             for case in cases {
-                changed |= simplify_stmts(&mut case.body, nz_masks, type_map);
+                changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), nz_masks, type_map);
             }
-            changed |= simplify_stmts(default, nz_masks, type_map);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), nz_masks, type_map);
         }
         _ => {}
     }

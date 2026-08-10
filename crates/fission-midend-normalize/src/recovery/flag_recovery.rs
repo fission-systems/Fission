@@ -393,15 +393,15 @@ fn recover_in_stmts(stmts: &mut Vec<PreHirStmt>, defs: &HashMap<String, PreHirEx
                 else_body,
             } => {
                 recover_in_cond(cond, defs, changed);
-                recover_in_stmts(then_body, defs, changed);
-                recover_in_stmts(else_body, defs, changed);
+                recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), defs, changed);
+                recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), defs, changed);
             }
             PreHirStmt::While { cond, body } => {
                 recover_in_cond(cond, defs, changed);
-                recover_in_stmts(body, defs, changed);
+                recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defs, changed);
             }
             PreHirStmt::DoWhile { body, cond } => {
-                recover_in_stmts(body, defs, changed);
+                recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defs, changed);
                 recover_in_cond(cond, defs, changed);
             }
             PreHirStmt::For {
@@ -420,14 +420,14 @@ fn recover_in_stmts(stmts: &mut Vec<PreHirStmt>, defs: &HashMap<String, PreHirEx
                 if let Some(u) = update {
                     recover_in_stmts_box(u, defs, changed);
                 }
-                recover_in_stmts(body, defs, changed);
+                recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defs, changed);
             }
-            PreHirStmt::Block(body) => recover_in_stmts(body, defs, changed),
+            PreHirStmt::Block(body) => recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), defs, changed),
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    recover_in_stmts(&mut case.body, defs, changed);
+                    recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), defs, changed);
                 }
-                recover_in_stmts(default, defs, changed);
+                recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), defs, changed);
             }
             _ => {}
         }
@@ -485,7 +485,7 @@ fn recover_in_stmts_with_reaching_defs(
             PreHirStmt::VaStart { va_list, .. } => recover_flag_value_use(va_list, defs, changed),
             PreHirStmt::Block(body) => {
                 let mut nested_defs = defs.clone();
-                recover_in_stmts_with_reaching_defs(body, &mut nested_defs, changed);
+                recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut nested_defs, changed);
             }
             PreHirStmt::If {
                 cond,
@@ -494,18 +494,18 @@ fn recover_in_stmts_with_reaching_defs(
             } => {
                 recover_in_cond(cond, defs, changed);
                 let mut then_defs = defs.clone();
-                recover_in_stmts_with_reaching_defs(then_body, &mut then_defs, changed);
+                recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut then_defs, changed);
                 let mut else_defs = defs.clone();
-                recover_in_stmts_with_reaching_defs(else_body, &mut else_defs, changed);
+                recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut else_defs, changed);
             }
             PreHirStmt::While { cond, body } => {
                 recover_in_cond(cond, defs, changed);
                 let mut body_defs = defs.clone();
-                recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
+                recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut body_defs, changed);
             }
             PreHirStmt::DoWhile { body, cond } => {
                 let mut body_defs = defs.clone();
-                recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
+                recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut body_defs, changed);
                 recover_in_cond(cond, &body_defs, changed);
             }
             PreHirStmt::For {
@@ -522,7 +522,7 @@ fn recover_in_stmts_with_reaching_defs(
                     recover_in_cond(cond, &loop_defs, changed);
                 }
                 let mut body_defs = loop_defs.clone();
-                recover_in_stmts_with_reaching_defs(body, &mut body_defs, changed);
+                recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut body_defs, changed);
                 if let Some(update) = update {
                     recover_in_stmts_box_with_reaching_defs(update, &mut body_defs, changed);
                 }
@@ -535,10 +535,10 @@ fn recover_in_stmts_with_reaching_defs(
                 recover_flag_value_use(expr, defs, changed);
                 for case in cases {
                     let mut case_defs = defs.clone();
-                    recover_in_stmts_with_reaching_defs(&mut case.body, &mut case_defs, changed);
+                    recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut case_defs, changed);
                 }
                 let mut default_defs = defs.clone();
-                recover_in_stmts_with_reaching_defs(default, &mut default_defs, changed);
+                recover_in_stmts_with_reaching_defs(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), &mut default_defs, changed);
             }
             PreHirStmt::Return(expr) => {
                 if let Some(expr) = expr {
@@ -580,7 +580,7 @@ fn collect_goto_targets(stmt: &PreHirStmt, targets: &mut HashSet<String>) {
             targets.insert(label.clone());
         }
         PreHirStmt::Block(body) => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_goto_targets(stmt, targets);
             }
         }
@@ -589,12 +589,12 @@ fn collect_goto_targets(stmt: &PreHirStmt, targets: &mut HashSet<String>) {
             else_body,
             ..
         } => {
-            for stmt in then_body.iter().chain(else_body) {
+            for stmt in then_body.iter().chain(else_body.iter()) {
                 collect_goto_targets(stmt, targets);
             }
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_goto_targets(stmt, targets);
             }
         }
@@ -604,7 +604,7 @@ fn collect_goto_targets(stmt: &PreHirStmt, targets: &mut HashSet<String>) {
             if let Some(init) = init {
                 collect_goto_targets(init, targets);
             }
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_goto_targets(stmt, targets);
             }
             if let Some(update) = update {
@@ -613,11 +613,11 @@ fn collect_goto_targets(stmt: &PreHirStmt, targets: &mut HashSet<String>) {
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_goto_targets(stmt, targets);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_goto_targets(stmt, targets);
             }
         }
@@ -785,24 +785,24 @@ fn remove_globally_unused_flags(
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) => remove_globally_unused_flags(body, uses, changed),
+            PreHirStmt::Block(body) => remove_globally_unused_flags(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), uses, changed),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                remove_globally_unused_flags(then_body, uses, changed);
-                remove_globally_unused_flags(else_body, uses, changed);
+                remove_globally_unused_flags(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), uses, changed);
+                remove_globally_unused_flags(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), uses, changed);
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                remove_globally_unused_flags(body, uses, changed);
+                remove_globally_unused_flags(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), uses, changed);
             }
-            PreHirStmt::For { body, .. } => remove_globally_unused_flags(body, uses, changed),
+            PreHirStmt::For { body, .. } => remove_globally_unused_flags(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), uses, changed),
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    remove_globally_unused_flags(&mut case.body, uses, changed);
+                    remove_globally_unused_flags(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), uses, changed);
                 }
-                remove_globally_unused_flags(default, uses, changed);
+                remove_globally_unused_flags(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), uses, changed);
             }
             _ => {}
         }
@@ -956,20 +956,20 @@ fn remove_dead_sites_recursive(
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
-            PreHirStmt::Block(body) => remove_dead_sites_recursive(body, dead_sites, changed),
+            PreHirStmt::Block(body) => remove_dead_sites_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), dead_sites, changed),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                remove_dead_sites_recursive(then_body, dead_sites, changed);
-                remove_dead_sites_recursive(else_body, dead_sites, changed);
+                remove_dead_sites_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), dead_sites, changed);
+                remove_dead_sites_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), dead_sites, changed);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    remove_dead_sites_recursive(&mut case.body, dead_sites, changed);
+                    remove_dead_sites_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), dead_sites, changed);
                 }
-                remove_dead_sites_recursive(default, dead_sites, changed);
+                remove_dead_sites_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), dead_sites, changed);
             }
             _ => {}
         }
@@ -1166,8 +1166,8 @@ mod tests {
                 assign("zf", eq(var("row"), var("limit"))),
                 PreHirStmt::If {
                     cond: not(var("zf")),
-                    then_body: Vec::new(),
-                    else_body: Vec::new(),
+                    then_body: Vec::new().into(),
+                    else_body: Vec::new().into(),
                 },
             ],
             ..PreHirFunction::default()
@@ -1188,8 +1188,8 @@ mod tests {
                 PreHirStmt::Label("join".to_string()),
                 PreHirStmt::If {
                     cond: not(var("zf")),
-                    then_body: Vec::new(),
-                    else_body: Vec::new(),
+                    then_body: Vec::new().into(),
+                    else_body: Vec::new().into(),
                 },
                 assign("zf", eq(var("later_row"), var("later_limit"))),
             ],
@@ -1238,10 +1238,10 @@ mod tests {
                         assign("cf", live_rhs.clone()),
                         PreHirStmt::If {
                             cond: var("cf"),
-                            then_body: Vec::new(),
-                            else_body: Vec::new(),
+                            then_body: Vec::new().into(),
+                            else_body: Vec::new().into(),
                         },
-                    ],
+                    ].into(),
                 },
             ],
             ..PreHirFunction::default()
@@ -1294,10 +1294,10 @@ mod tests {
                     assign("zf", eq(var("live_a"), var("live_b"))),
                     PreHirStmt::If {
                         cond: var("zf"),
-                        then_body: Vec::new(),
-                        else_body: Vec::new(),
+                        then_body: Vec::new().into(),
+                        else_body: Vec::new().into(),
                     },
-                ]),
+                ].into()),
                 PreHirStmt::Return(None),
             ],
             ..PreHirFunction::default()
@@ -1313,8 +1313,8 @@ mod tests {
             body: vec![
                 PreHirStmt::If {
                     cond: var("selector"),
-                    then_body: vec![assign("cf", eq(var("left"), var("limit")))],
-                    else_body: vec![assign("cf", eq(var("right"), var("limit")))],
+                    then_body: vec![assign("cf", eq(var("left"), var("limit")))].into(),
+                    else_body: vec![assign("cf", eq(var("right"), var("limit")))].into(),
                 },
                 PreHirStmt::Return(Some(var("cf"))),
             ],
@@ -1331,8 +1331,8 @@ mod tests {
             body: vec![
                 PreHirStmt::If {
                     cond: var("selector"),
-                    then_body: vec![PreHirStmt::Goto("left_path".to_string())],
-                    else_body: vec![PreHirStmt::Goto("right_path".to_string())],
+                    then_body: vec![PreHirStmt::Goto("left_path".to_string())].into(),
+                    else_body: vec![PreHirStmt::Goto("right_path".to_string())].into(),
                 },
                 PreHirStmt::Label("left_path".to_string()),
                 assign("cf", eq(var("left"), var("limit"))),
