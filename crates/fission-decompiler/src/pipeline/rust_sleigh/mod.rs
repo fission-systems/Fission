@@ -1,5 +1,6 @@
 //! Rust-Sleigh decode + NIR rendering pipeline (`decompile_with_rust_sleigh`).
 
+mod arm_thumb_heuristic;
 pub mod bounds;
 mod config;
 mod decode;

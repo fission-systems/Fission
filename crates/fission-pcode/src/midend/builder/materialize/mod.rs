@@ -977,6 +977,7 @@ impl<'a> PreviewBuilder<'a> {
             replacement_plan,
             no_consumer_hazard,
             no_consumer_profile,
+            self.is_hidden_pspec_register_output(output),
         );
         match no_consumer_decision {
             NoConsumerMaterializationDecision::Suppress

@@ -21,6 +21,30 @@ impl<'a> PreviewBuilder<'a> {
             )
     }
 
+    /// Whether `output` names one of the `.pspec`-declared hidden registers
+    /// (e.g. ARM's `ISAModeSwitch`/`TB` interworking-mode bookkeeping): a
+    /// SLEIGH register that only steers how the *next* instruction gets
+    /// decoded, never real program-visible state, so a dead write to it is
+    /// as safe to drop as a dead write to an x86 status flag -- generalizes
+    /// `is_x86_status_flag_output` beyond the one architecture it was
+    /// hardcoded for. `hw_name_at` always lowercases, so the comparison
+    /// against the pspec's original-case register names is case-insensitive.
+    pub(in crate::midend::builder) fn is_hidden_pspec_register_output(
+        &self,
+        output: &Varnode,
+    ) -> bool {
+        if !is_register_varnode(output) || self.options.pspec_hidden_registers.is_empty() {
+            return false;
+        }
+        let Some(name) = self.sla_hw_name(output.offset, output.size) else {
+            return false;
+        };
+        self.options
+            .pspec_hidden_registers
+            .iter()
+            .any(|hidden| hidden.eq_ignore_ascii_case(&name))
+    }
+
     fn no_consumer_flag_rhs_is_pure(expr: &PreHirExpr) -> bool {
         match expr {
             PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => true,
@@ -81,6 +105,7 @@ impl<'a> PreviewBuilder<'a> {
         plan: ReplacementValuePlan,
         hazard: Option<AliasUnsafeHazard>,
         profile: NoConsumerMaterializationProfile,
+        is_hidden_pspec_register: bool,
     ) -> NoConsumerMaterializationDecision {
         if plan.rejection_reason() != Some(MaterializationRejectionReason::AliasUnsafe) {
             return NoConsumerMaterializationDecision::Keep(
@@ -117,7 +142,9 @@ impl<'a> PreviewBuilder<'a> {
                 NoConsumerMaterializationKeepReason::DebugUsePresent,
             );
         }
-        if Self::is_x86_status_flag_output(output) && Self::no_consumer_flag_rhs_is_pure(rhs) {
+        if (Self::is_x86_status_flag_output(output) || is_hidden_pspec_register)
+            && Self::no_consumer_flag_rhs_is_pure(rhs)
+        {
             return NoConsumerMaterializationDecision::SuppressAlways;
         }
         if legacy_inline_candidate {
@@ -343,6 +370,7 @@ mod tests {
                 has_debug_use: false,
                 rhs_side_effectful: false,
             },
+            false,
         );
 
         assert_eq!(decision, NoConsumerMaterializationDecision::Suppress);
@@ -377,6 +405,7 @@ mod tests {
                 has_debug_use: false,
                 rhs_side_effectful: false,
             },
+            false,
         );
 
         assert_eq!(
@@ -413,6 +442,7 @@ mod tests {
                 has_debug_use: false,
                 rhs_side_effectful: false,
             },
+            false,
         );
 
         assert_eq!(
@@ -455,6 +485,7 @@ mod tests {
                 has_debug_use: false,
                 rhs_side_effectful: false,
             },
+            false,
         );
 
         assert_eq!(decision, NoConsumerMaterializationDecision::SuppressAlways);

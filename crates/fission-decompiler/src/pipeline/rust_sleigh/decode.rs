@@ -141,6 +141,59 @@ pub(crate) fn decode_rust_sleigh_pcode(
             userops,
         ));
     }
+    // Thumb-only targets (Cortex-M/ARMv7-M) can NEVER execute ARM-mode
+    // instructions, but a bare even address (as DecBench's eval kit and
+    // other external callers report, having normalized away the ABI's
+    // Thumb-bit marker -- see `low_bit_code_mode_override`'s doc comment)
+    // is indistinguishable from a genuine ARM-mode target at this point.
+    // The retry cascade below only reaches the Thumb-forced fallback
+    // *after* the default-mode attempt visibly fails -- but misreading
+    // Thumb bytes as ARM rarely fails outright (ARM's 32-bit encoding
+    // space is dense enough that almost any bit pattern decodes to
+    // *something*), it just silently produces wrong code (e.g. a
+    // plausible-looking `b <address>` whose target is actually garbage).
+    // Resolve the ambiguity per-*address*, not per-binary: a whole-binary
+    // "odd entry point" signal misses genuinely-Thumb functions living in a
+    // binary whose entry point happens to be even (observed on crazyflie's
+    // cf2.elf). `should_prefer_thumb_decode` mirrors angr/archinfo's
+    // no-cross-reference-needed heuristic (4-byte-alignment fact, then
+    // known Thumb prologue byte patterns, then the entry-point parity as a
+    // last-resort weak prior) -- see its doc comment for why this fits
+    // Fission's single-address decode model better than Ghidra's
+    // full-binary constant-propagation approach.
+    let thumb_preferred = super::arm_thumb_heuristic::should_prefer_thumb_decode(
+        decode_entry_address,
+        bytes,
+        binary.entry_point,
+        &binary.hash,
+    );
+    if thumb_preferred
+        && initial_context_override.is_none()
+        && let Some(forced_override) = lifter.low_bit_code_mode_override()
+        && let Ok(thumb_first) = lifter.lift_raw_pcode_function_with_context_and_memory_context(
+            bytes,
+            decode_entry_address,
+            lift_contract,
+            &memory_context,
+            Some(forced_override),
+        )
+    {
+        let template_source_counts = thumb_first.template_source_counts.clone();
+        super::arm_thumb_heuristic::record_direct_call_targets(
+            &binary.hash,
+            true,
+            &thumb_first.function,
+        );
+        return Ok((
+            thumb_first.function,
+            DecodeDiag {
+                attempts: 1,
+                stop_reason: "success_thumb_preferred_entry_hint".into(),
+                template_source_counts,
+            },
+            userops,
+        ));
+    }
     let result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
         bytes,
         decode_entry_address,
@@ -151,6 +204,11 @@ pub(crate) fn decode_rust_sleigh_pcode(
     match result {
         Ok(lifted) => {
             let template_source_counts = lifted.template_source_counts.clone();
+            super::arm_thumb_heuristic::record_direct_call_targets(
+                &binary.hash,
+                entry_address % 2 == 1,
+                &lifted.function,
+            );
             Ok((
                 lifted.function,
                 DecodeDiag {
