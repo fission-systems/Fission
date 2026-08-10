@@ -66,6 +66,10 @@ pub struct TraceDag<'a> {
     node_visit_counts: HashMap<usize, usize>,
     /// Accumulated likely unstructured edges (from → to).
     likely_gotos: Vec<(usize, usize)>,
+    /// Reused scratch buffer for the per-step active-trace scan in
+    /// `push_branches`, so the hot loop doesn't allocate a fresh `Vec` on
+    /// every one of its (up to 500) steps.
+    active_list_scratch: Vec<usize>,
 }
 
 impl<'a> TraceDag<'a> {
@@ -83,6 +87,7 @@ impl<'a> TraceDag<'a> {
             active_traces: HashSet::default(),
             node_visit_counts: HashMap::default(),
             likely_gotos: Vec::new(),
+            active_list_scratch: Vec::new(),
         }
     }
 
@@ -355,10 +360,12 @@ impl<'a> TraceDag<'a> {
                 break;
             }
 
-            let active_list: Vec<usize> = self.active_traces.iter().copied().collect();
+            self.active_list_scratch.clear();
+            self.active_list_scratch.extend(self.active_traces.iter().copied());
             let mut progress = false;
 
-            for trace_id in active_list {
+            for i in 0..self.active_list_scratch.len() {
+                let trace_id = self.active_list_scratch[i];
                 if !self.active_traces.contains(&trace_id) {
                     continue;
                 }

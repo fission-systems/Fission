@@ -1655,11 +1655,17 @@ fn build_out_of_ssa_facts(
     // `materialize`/`cross_block.rs` merge-binding fixes were chasing by
     // hand at the PreHIR layer -- this closes the gap at the fact layer
     // those fixes should have been able to rely on.
+    let mut group_covers: Vec<Vec<SsaCoverBlock>> = value_covers.clone();
     for phis in ssa.phis.values() {
         for phi in phis {
             let operand_values: Vec<SsaValueId> =
                 phi.operands.iter().map(|operand| operand.value).collect();
-            coalesce_phi_congruence_class(&mut parents, phi.output, &operand_values, &value_covers);
+            coalesce_phi_congruence_class(
+                &mut parents,
+                &mut group_covers,
+                phi.output,
+                &operand_values,
+            );
         }
     }
 
@@ -1710,10 +1716,10 @@ fn build_out_of_ssa_facts(
             }
             let left = find_root(&mut parents, output.value.0 as usize);
             let right = find_root(&mut parents, input.value.0 as usize);
-            if left == right || groups_interfere(&mut parents, left, right, &value_covers) {
+            if left == right || groups_interfere(&group_covers, left, right) {
                 continue;
             }
-            union_values(&mut parents, left, right);
+            union_values_with_covers(&mut parents, &mut group_covers, left, right);
         }
     }
 
@@ -1807,9 +1813,9 @@ fn build_out_of_ssa_facts(
 /// that could have been proven safe, never forces one that isn't.
 fn coalesce_phi_congruence_class(
     parents: &mut [usize],
+    group_covers: &mut [Vec<SsaCoverBlock>],
     output: SsaValueId,
     operands: &[SsaValueId],
-    covers: &[Vec<SsaCoverBlock>],
 ) {
     for &operand in operands {
         let anchor_root = find_root(parents, output.0 as usize);
@@ -1817,31 +1823,28 @@ fn coalesce_phi_congruence_class(
         if anchor_root == candidate_root {
             continue;
         }
-        if groups_interfere(parents, anchor_root, candidate_root, covers) {
+        if groups_interfere(group_covers, anchor_root, candidate_root) {
             continue;
         }
-        union_values(parents, anchor_root, candidate_root);
+        union_values_with_covers(parents, group_covers, anchor_root, candidate_root);
     }
 }
 
-fn groups_interfere(
-    parents: &mut [usize],
-    left: usize,
-    right: usize,
-    covers: &[Vec<SsaCoverBlock>],
-) -> bool {
-    let left_cover = merge_covers(
-        (0..parents.len())
-            .filter(|&index| find_root(parents, index) == left)
-            .flat_map(|index| covers[index].iter().copied()),
-    );
-    let right_cover = merge_covers(
-        (0..parents.len())
-            .filter(|&index| find_root(parents, index) == right)
-            .flat_map(|index| covers[index].iter().copied()),
-    );
-    left_cover.iter().any(|left| {
-        right_cover.iter().any(|right| {
+/// Whether the (already-current-root) groups `left` and `right` have
+/// overlapping live covers, i.e. can't be coalesced into one high variable.
+///
+/// `group_covers` caches, for every node that is *currently* a union-find
+/// root, the merged cover of every value folded into its group so far;
+/// `union_values` keeps it up to date by merging the losing root's cover
+/// into the winner's on every union. This makes each check O(cover size)
+/// instead of the O(all SSA values in the function) rescan a naive
+/// "walk every value and re-derive its current root" implementation would
+/// need -- for a function with V values and roughly V copy/cast candidates
+/// to check, that rescan was O(V^2), which dominated structuring time on
+/// large real-world functions (multi-second single-function stalls).
+fn groups_interfere(group_covers: &[Vec<SsaCoverBlock>], left: usize, right: usize) -> bool {
+    group_covers[left].iter().any(|left| {
+        group_covers[right].iter().any(|right| {
             left.block == right.block
                 && left.start < right.end_exclusive
                 && right.start < left.end_exclusive
@@ -1958,6 +1961,35 @@ fn union_values(parents: &mut [usize], left: usize, right: usize) {
         (right_root, left_root)
     };
     parents[maximum] = minimum;
+}
+
+fn union_values_with_covers(
+    parents: &mut [usize],
+    group_covers: &mut [Vec<SsaCoverBlock>],
+    left: usize,
+    right: usize,
+) {
+    let left_root = find_root(parents, left);
+    let right_root = find_root(parents, right);
+    if left_root == right_root {
+        return;
+    }
+    let (minimum, maximum) = if left_root < right_root {
+        (left_root, right_root)
+    } else {
+        (right_root, left_root)
+    };
+    parents[maximum] = minimum;
+    // `minimum` is always the surviving root here, so fold `maximum`'s
+    // cached group cover into it (see `groups_interfere`'s doc comment for
+    // why this avoids re-scanning every value on each interference check).
+    let (before, after) = group_covers.split_at_mut(maximum);
+    let merged = merge_covers(
+        before[minimum]
+            .drain(..)
+            .chain(after[0].drain(..)),
+    );
+    before[minimum] = merged;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3684,11 +3716,12 @@ mod tests {
             }],
         ];
 
+        let mut group_covers = covers.clone();
         coalesce_phi_congruence_class(
             &mut parents,
+            &mut group_covers,
             SsaValueId(0),
             &[SsaValueId(1), SsaValueId(2)],
-            &covers,
         );
 
         assert_eq!(
