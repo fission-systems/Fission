@@ -98,7 +98,7 @@ fn deindirect_in_stmt(
             changed |= deindirect_in_expr(expr, initializers, addr_to_symbol);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            for s in body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
@@ -117,7 +117,7 @@ fn deindirect_in_stmt(
             if let Some(c) = cond {
                 changed |= deindirect_in_expr(c, initializers, addr_to_symbol);
             }
-            for s in body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
@@ -127,10 +127,10 @@ fn deindirect_in_stmt(
             else_body,
         } => {
             changed |= deindirect_in_expr(cond, initializers, addr_to_symbol);
-            for s in then_body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body).iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
-            for s in else_body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }
@@ -141,11 +141,11 @@ fn deindirect_in_stmt(
         } => {
             changed |= deindirect_in_expr(expr, initializers, addr_to_symbol);
             for case in cases.iter_mut() {
-                for s in case.body.iter_mut() {
+                for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body).iter_mut() {
                     changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
                 }
             }
-            for s in default.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default).iter_mut() {
                 changed |= deindirect_in_stmt(s, initializers, addr_to_symbol);
             }
         }

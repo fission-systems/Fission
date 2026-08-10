@@ -162,15 +162,15 @@ pub fn try_lower_if(
 
         let stmt = PreHirStmt::If {
             cond: candidate.cond,
-            then_body: std::rc::Rc::unwrap_or_clone(body),
-            else_body: Vec::new(),
+            then_body: body,
+            else_body: std::rc::Rc::new(Vec::new()),
         };
         if candidate.cond_prefix.is_empty() {
             Ok(Some((stmt, skip_to)))
         } else {
             let mut wrapped = candidate.cond_prefix;
             wrapped.push(stmt);
-            Ok(Some((PreHirStmt::Block(wrapped), skip_to)))
+            Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)))
         }
     })();
 

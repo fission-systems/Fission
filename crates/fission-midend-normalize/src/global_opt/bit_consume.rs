@@ -556,7 +556,7 @@ fn simplify_stmt(
         }
         PreHirStmt::VaStart { va_list, .. } => simplify_expr(va_list, consumed, any_changed),
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            simplify_stmts(body, consumed, multi_def, type_map, any_changed);
+            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), consumed, multi_def, type_map, any_changed);
         }
         PreHirStmt::For {
             init,
@@ -573,7 +573,7 @@ fn simplify_stmt(
             if let Some(u) = update {
                 simplify_stmt(u, consumed, multi_def, type_map, any_changed);
             }
-            simplify_stmts(body, consumed, multi_def, type_map, any_changed);
+            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), consumed, multi_def, type_map, any_changed);
         }
         PreHirStmt::If {
             cond,
@@ -581,8 +581,8 @@ fn simplify_stmt(
             else_body,
         } => {
             simplify_expr(cond, consumed, any_changed);
-            simplify_stmts(then_body, consumed, multi_def, type_map, any_changed);
-            simplify_stmts(else_body, consumed, multi_def, type_map, any_changed);
+            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), consumed, multi_def, type_map, any_changed);
+            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), consumed, multi_def, type_map, any_changed);
         }
         PreHirStmt::Switch {
             expr,
@@ -591,9 +591,9 @@ fn simplify_stmt(
         } => {
             simplify_expr(expr, consumed, any_changed);
             for case in cases.iter_mut() {
-                simplify_stmts(&mut case.body, consumed, multi_def, type_map, any_changed);
+                simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), consumed, multi_def, type_map, any_changed);
             }
-            simplify_stmts(default, consumed, multi_def, type_map, any_changed);
+            simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), consumed, multi_def, type_map, any_changed);
         }
         _ => {}
     }

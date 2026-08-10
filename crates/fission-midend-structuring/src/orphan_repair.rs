@@ -81,8 +81,8 @@ pub fn emit_orphan_target_block(
             };
             stmts.push(PreHirStmt::If {
                 cond,
-                then_body,
-                else_body,
+                then_body: std::rc::Rc::new(then_body),
+                else_body: std::rc::Rc::new(else_body),
             });
         }
         LoweredTerminator::Fallthrough(None) => {}

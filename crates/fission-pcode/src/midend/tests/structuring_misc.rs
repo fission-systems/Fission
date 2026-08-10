@@ -282,13 +282,13 @@ fn normalize_removes_constant_false_and_empty_if_residue() {
                 expr: Box::new(PreHirExpr::Var("reg".to_string())),
                 ty: NirType::Bool,
             },
-            then_body: Vec::new(),
-            else_body: Vec::new(),
+            then_body: Vec::new().into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Const(0, NirType::Bool),
-            then_body: vec![PreHirStmt::Goto("block_aa0".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_aa0".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_keep".to_string()),
     ];
@@ -303,8 +303,8 @@ fn normalize_removes_if_goto_immediate_next_label() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_join".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_join".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_join".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("reg".to_string()))),
@@ -326,8 +326,8 @@ fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch()
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_exit".to_string())],
-            else_body: vec![PreHirStmt::Goto("block_fallthrough".to_string())],
+            then_body: vec![PreHirStmt::Goto("block_exit".to_string())].into(),
+            else_body: vec![PreHirStmt::Goto("block_fallthrough".to_string())].into(),
         },
         PreHirStmt::Label("block_fallthrough".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Const(
@@ -364,8 +364,8 @@ fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch()
                         bits: 32,
                         signed: false,
                     },
-                )))],
-                else_body: Vec::new(),
+                )))].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Const(
                 1,
@@ -414,8 +414,8 @@ fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_join".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_join".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var("tmp_1".to_string()),
@@ -455,8 +455,8 @@ fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
                         ),
                     },
                     PreHirStmt::Expr(PreHirExpr::Var("tmp_1".to_string())),
-                ],
-                else_body: Vec::new(),
+                ].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("reg".to_string()))),
         ]
@@ -468,14 +468,14 @@ fn normalize_fuses_boundary_segment_with_nested_if() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("reg".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_join".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_join".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Expr(PreHirExpr::Var("pre".to_string())),
         PreHirStmt::If {
             cond: PreHirExpr::Var("flag".to_string()),
-            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_join".to_string()),
         PreHirStmt::Return(Some(PreHirExpr::Var("reg".to_string()))),
@@ -496,11 +496,11 @@ fn normalize_fuses_boundary_segment_with_nested_if() {
                     PreHirStmt::Expr(PreHirExpr::Var("pre".to_string())),
                     PreHirStmt::If {
                         cond: PreHirExpr::Var("flag".to_string()),
-                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))],
-                        else_body: Vec::new(),
+                        then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))].into(),
+                        else_body: Vec::new().into(),
                     },
-                ],
-                else_body: Vec::new(),
+                ].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Var("reg".to_string()))),
         ]
@@ -512,13 +512,13 @@ fn normalize_promotes_guarded_jump_target_tail() {
     let mut body = vec![
         PreHirStmt::If {
             cond: PreHirExpr::Var("cond_a".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_body".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_body".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::If {
             cond: PreHirExpr::Var("cond_b".to_string()),
-            then_body: vec![PreHirStmt::Goto("block_join".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_join".to_string())].into(),
+            else_body: Vec::new().into(),
         },
         PreHirStmt::Label("block_body".to_string()),
         PreHirStmt::Expr(PreHirExpr::Var("body".to_string())),
@@ -548,8 +548,8 @@ fn normalize_promotes_guarded_jump_target_tail() {
                     }),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("body".to_string()))].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Return(Some(PreHirExpr::Const(
                 0,

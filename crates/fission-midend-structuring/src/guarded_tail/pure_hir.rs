@@ -565,10 +565,10 @@ pub fn count_goto_refs_in_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, usiz
                 else_body,
                 ..
             } => {
-                for nested in then_body {
+                for nested in then_body.iter() {
                     count_goto_refs_in_stmt(nested, out);
                 }
-                for nested in else_body {
+                for nested in else_body.iter() {
                     count_goto_refs_in_stmt(nested, out);
                 }
             }
@@ -576,17 +576,17 @@ pub fn count_goto_refs_in_stmt(stmt: &PreHirStmt, out: &mut HashMap<String, usiz
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                for nested in body {
+                for nested in body.iter() {
                     count_goto_refs_in_stmt(nested, out);
                 }
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    for nested in &case.body {
+                    for nested in case.body.iter() {
                         count_goto_refs_in_stmt(nested, out);
                     }
                 }
-                for nested in default {
+                for nested in default.iter() {
                     count_goto_refs_in_stmt(nested, out);
                 }
             }
@@ -1215,10 +1215,10 @@ pub fn rewrite_goto_label_in_stmt(stmt: &mut PreHirStmt, from: &str, to: &str) {
                 else_body,
                 ..
             } => {
-                for nested in then_body {
+                for nested in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body) {
                     rewrite_goto_label_in_stmt(nested, from, to);
                 }
-                for nested in else_body {
+                for nested in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body) {
                     rewrite_goto_label_in_stmt(nested, from, to);
                 }
             }
@@ -1226,17 +1226,17 @@ pub fn rewrite_goto_label_in_stmt(stmt: &mut PreHirStmt, from: &str, to: &str) {
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                for nested in body {
+                for nested in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                     rewrite_goto_label_in_stmt(nested, from, to);
                 }
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    for nested in &mut case.body {
+                    for nested in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body) {
                         rewrite_goto_label_in_stmt(nested, from, to);
                     }
                 }
-                for nested in default {
+                for nested in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default) {
                     rewrite_goto_label_in_stmt(nested, from, to);
                 }
             }
@@ -1345,8 +1345,8 @@ pub fn rewrite_guarded_tail_sequence(
 
                         out.push(PreHirStmt::If {
                             cond: cond.clone(),
-                            then_body: then_result,
-                            else_body: else_result,
+                            then_body: std::rc::Rc::new(then_result),
+                            else_body: std::rc::Rc::new(else_result),
                         });
                         return GuardedTailRewriteResult {
                             stmts: out,
@@ -1410,8 +1410,8 @@ pub fn rewrite_guarded_tail_sequence(
                         if then_rewritten.exits_to_join && else_rewritten.exits_to_join {
                             out.push(PreHirStmt::If {
                                 cond: cond.clone(),
-                                then_body: then_rewritten.stmts,
-                                else_body: else_rewritten.stmts,
+                                then_body: std::rc::Rc::new(then_rewritten.stmts),
+                                else_body: std::rc::Rc::new(else_rewritten.stmts),
                             });
                             return GuardedTailRewriteResult {
                                 stmts: out,
@@ -1427,16 +1427,16 @@ pub fn rewrite_guarded_tail_sequence(
                             continue_body.extend(rest.stmts);
                             out.push(PreHirStmt::If {
                                 cond: cond.clone(),
-                                then_body: then_rewritten.stmts,
-                                else_body: continue_body,
+                                then_body: std::rc::Rc::new(then_rewritten.stmts),
+                                else_body: std::rc::Rc::new(continue_body),
                             });
                         } else {
                             let mut continue_body = then_rewritten.stmts;
                             continue_body.extend(rest.stmts);
                             out.push(PreHirStmt::If {
                                 cond: cond.clone(),
-                                then_body: continue_body,
-                                else_body: else_rewritten.stmts,
+                                then_body: std::rc::Rc::new(continue_body),
+                                else_body: std::rc::Rc::new(else_rewritten.stmts),
                             });
                         }
                         return GuardedTailRewriteResult {
@@ -1450,8 +1450,8 @@ pub fn rewrite_guarded_tail_sequence(
 
                     out.push(PreHirStmt::If {
                         cond: cond.clone(),
-                        then_body: then_rewritten.stmts,
-                        else_body: else_rewritten.stmts,
+                        then_body: std::rc::Rc::new(then_rewritten.stmts),
+                        else_body: std::rc::Rc::new(else_rewritten.stmts),
                     });
                 }
                 PreHirStmt::Goto(target) => {
@@ -1460,7 +1460,7 @@ pub fn rewrite_guarded_tail_sequence(
                 PreHirStmt::Block(inner) => {
                     let rewritten =
                         rewrite_guarded_tail_sequence(inner, join_label, assumptions);
-                    out.push(PreHirStmt::Block(rewritten.stmts));
+                    out.push(PreHirStmt::Block(std::rc::Rc::new(rewritten.stmts)));
                     if rewritten.exits_to_join {
                         return GuardedTailRewriteResult {
                             stmts: out,

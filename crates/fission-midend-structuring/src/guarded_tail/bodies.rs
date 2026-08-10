@@ -1341,8 +1341,8 @@ pub fn execute_guarded_tail_plan(
             } else {
                 negate_expr(cond)
             },
-            then_body,
-            else_body,
+            then_body: std::rc::Rc::new(then_body),
+            else_body: std::rc::Rc::new(else_body),
         };
 
         for (from, to) in &plan.redirects {

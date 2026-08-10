@@ -89,11 +89,11 @@ fn rewrite_loop_control_gotos_with_stack(
                 else_body,
                 ..
             } => {
-                rewrite_loop_control_gotos_with_stack(then_body, stack, stats);
-                rewrite_loop_control_gotos_with_stack(else_body, stack, stats);
+                rewrite_loop_control_gotos_with_stack(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), stack, stats);
+                rewrite_loop_control_gotos_with_stack(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), stack, stats);
             }
             PreHirStmt::Block(body) => {
-                rewrite_loop_control_gotos_with_stack(body, stack, stats);
+                rewrite_loop_control_gotos_with_stack(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), stack, stats);
             }
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                 stats.skipped_nested_scope_count += 1;
@@ -101,7 +101,7 @@ fn rewrite_loop_control_gotos_with_stack(
                     continue_labels: std::collections::HashSet::default(),
                     break_labels: std::collections::HashSet::default(),
                 });
-                rewrite_loop_control_gotos_with_stack(body, stack, stats);
+                rewrite_loop_control_gotos_with_stack(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), stack, stats);
                 stack.pop();
             }
             PreHirStmt::For { body, .. } => {
@@ -110,7 +110,7 @@ fn rewrite_loop_control_gotos_with_stack(
                     continue_labels: std::collections::HashSet::default(),
                     break_labels: std::collections::HashSet::default(),
                 });
-                rewrite_loop_control_gotos_with_stack(body, stack, stats);
+                rewrite_loop_control_gotos_with_stack(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), stack, stats);
                 stack.pop();
             }
             PreHirStmt::Switch { cases, default, .. } => {
@@ -119,9 +119,9 @@ fn rewrite_loop_control_gotos_with_stack(
                     break_labels: std::collections::HashSet::default(),
                 });
                 for case in cases {
-                    rewrite_loop_control_gotos_with_stack(&mut case.body, stack, stats);
+                    rewrite_loop_control_gotos_with_stack(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), stack, stats);
                 }
-                rewrite_loop_control_gotos_with_stack(default, stack, stats);
+                rewrite_loop_control_gotos_with_stack(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), stack, stats);
                 stack.pop();
             }
             PreHirStmt::Assign { .. }
@@ -284,15 +284,15 @@ pub fn try_lower_infloop_with_break(host: &mut impl StructuringHost,
         let mut body = host.lower_block_stmts(idx)?;
         body.push(PreHirStmt::If {
             cond: break_cond,
-            then_body: vec![PreHirStmt::Break],
-            else_body: Vec::new(),
+            then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+            else_body: std::rc::Rc::new(Vec::new()),
         });
         host.bump_loop_control_explicit_reducer();
 
         Ok(Some((
             PreHirStmt::While {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                body,
+                body: std::rc::Rc::new(body),
             },
             exit_idx,
         )))
@@ -326,7 +326,7 @@ pub fn try_lower_infloop(host: &mut impl StructuringHost,
         Ok(Some((
             PreHirStmt::While {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                body,
+                body: std::rc::Rc::new(body),
             },
             idx + 1,
         )))
@@ -348,7 +348,7 @@ pub fn try_lower_dowhile(host: &mut impl StructuringHost,
             &mut stats,
         );
         host.track_loop_control_rewrite_stats(stats.break_rewrites, stats.continue_rewrites, stats.skipped_nested_scope_count);
-        Ok(Some((PreHirStmt::DoWhile { body, cond }, skip_to)))
+        Ok(Some((PreHirStmt::DoWhile { body: std::rc::Rc::new(body), cond }, skip_to)))
     }
 
 /// Deterministic replacement for the old shared 5000ms wall-clock "total
@@ -769,7 +769,7 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
             );
             host.track_loop_control_rewrite_stats(stats.break_rewrites, stats.continue_rewrites, stats.skipped_nested_scope_count);
             if cond_prefix.is_empty() {
-                return Ok(Some((PreHirStmt::While { cond, body }, exit_idx)));
+                return Ok(Some((PreHirStmt::While { cond, body: std::rc::Rc::new(body) }, exit_idx)));
             }
             if let Some(folded_cond) = try_fold_cond_prefix(&cond_prefix, &cond, &body) {
                 if diag {
@@ -783,7 +783,7 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
                 return Ok(Some((
                     PreHirStmt::While {
                         cond: folded_cond,
-                        body,
+                        body: std::rc::Rc::new(body),
                     },
                     exit_idx,
                 )));
@@ -792,14 +792,14 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
             let mut guarded_body = cond_prefix;
             guarded_body.push(PreHirStmt::If {
                 cond: negate_expr(cond),
-                then_body: vec![PreHirStmt::Break],
-                else_body: Vec::new(),
+                then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+                else_body: std::rc::Rc::new(Vec::new()),
             });
             guarded_body.extend(body);
             Ok(Some((
                 PreHirStmt::While {
                     cond: PreHirExpr::Const(1, NirType::Bool),
-                    body: guarded_body,
+                    body: std::rc::Rc::new(guarded_body),
                 },
                 exit_idx,
             )))
@@ -888,20 +888,20 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
                 let mut guarded = cond_prefix;
                 guarded.push(PreHirStmt::If {
                     cond: negate_expr(cond.clone()),
-                    then_body: vec![PreHirStmt::Break],
-                    else_body: Vec::new(),
+                    then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+                    else_body: std::rc::Rc::new(Vec::new()),
                 });
                 guarded.extend(lowered_body);
                 return Ok(Some((
                     PreHirStmt::While {
                         cond: PreHirExpr::Const(1, NirType::Bool),
-                        body: guarded,
+                        body: std::rc::Rc::new(guarded),
                     },
                     exit_idx,
                 )));
             };
 
-            Ok(Some((PreHirStmt::While { cond, body }, exit_idx)))
+            Ok(Some((PreHirStmt::While { cond, body: std::rc::Rc::new(body) }, exit_idx)))
         })();
 
         if diag {
@@ -1099,7 +1099,7 @@ pub fn try_lower_multiblock_dowhile(host: &mut impl StructuringHost,
         Ok(Some((
             PreHirStmt::While {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                body: lowered,
+                body: std::rc::Rc::new(lowered),
             },
             exit_idx,
         )))
@@ -1321,7 +1321,7 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
                 init: Some(init_box),
                 cond: Some(while_cond),
                 update: Some(update_box),
-                body: for_body,
+                body: std::rc::Rc::new(for_body),
             },
             exit_idx,
         )))
@@ -1572,8 +1572,8 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                         let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![exit_stmt],
-                            else_body: vec![PreHirStmt::Continue],
+                            then_body: std::rc::Rc::new(vec![exit_stmt]),
+                            else_body: std::rc::Rc::new(vec![PreHirStmt::Continue]),
                         });
                         if is_break {
                             host.bump_loop_multi_exit_break();
@@ -1584,8 +1584,8 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                         let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![exit_stmt],
-                            else_body: vec![PreHirStmt::Continue],
+                            then_body: std::rc::Rc::new(vec![exit_stmt]),
+                            else_body: std::rc::Rc::new(vec![PreHirStmt::Continue]),
                         });
                         if is_break {
                             host.bump_loop_multi_exit_break();
@@ -1596,8 +1596,8 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                         let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![exit_stmt],
-                            else_body: Vec::new(),
+                            then_body: std::rc::Rc::new(vec![exit_stmt]),
+                            else_body: std::rc::Rc::new(Vec::new()),
                         });
                         if is_break {
                             host.bump_loop_multi_exit_break();
@@ -1609,8 +1609,8 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                         let is_break = matches!(exit_stmt, PreHirStmt::Break);
                         result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![exit_stmt],
-                            else_body: Vec::new(),
+                            then_body: std::rc::Rc::new(vec![exit_stmt]),
+                            else_body: std::rc::Rc::new(Vec::new()),
                         });
                         if is_break {
                             host.bump_loop_multi_exit_break();
@@ -1618,18 +1618,18 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                     } else if true_is_continue && !false_is_continue {
                         result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body: vec![PreHirStmt::Continue],
-                            else_body: Vec::new(),
+                            then_body: std::rc::Rc::new(vec![PreHirStmt::Continue]),
+                            else_body: std::rc::Rc::new(Vec::new()),
                         });
                     } else if false_is_continue && !true_is_continue {
                         result_stmts.push(PreHirStmt::If {
                             cond: negate_expr(cond),
-                            then_body: vec![PreHirStmt::Continue],
-                            else_body: Vec::new(),
+                            then_body: std::rc::Rc::new(vec![PreHirStmt::Continue]),
+                            else_body: std::rc::Rc::new(Vec::new()),
                         });
                     } else {
                         // General conditional: emit as if/goto like build_multiblock_body fallback
-                        let then_body = if next_addr == Some(true_target) {
+                        let then_body: Vec<PreHirStmt> = if next_addr == Some(true_target) {
                             Vec::new()
                         } else {
                             // Track this as requiring a label if it is in the body.
@@ -1655,8 +1655,8 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                         };
                         result_stmts.push(PreHirStmt::If {
                             cond,
-                            then_body,
-                            else_body,
+                            then_body: std::rc::Rc::new(then_body),
+                            else_body: std::rc::Rc::new(else_body),
                         });
                     }
                 }
@@ -1682,17 +1682,19 @@ pub fn lower_loop_body_subgraph(host: &mut impl StructuringHost,
                         .into_iter()
                         .map(|(value, target)| PreHirSwitchCase {
                             values: vec![value],
-                            body: vec![PreHirStmt::Goto(block_label(target))],
+                            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(target))]),
                         })
                         .collect();
                     result_stmts.push(PreHirStmt::Switch {
                         expr,
                         cases,
-                        default: default_target
-                            .map(block_label)
-                            .map(PreHirStmt::Goto)
-                            .into_iter()
-                            .collect(),
+                        default: std::rc::Rc::new(
+                            default_target
+                                .map(block_label)
+                                .map(PreHirStmt::Goto)
+                                .into_iter()
+                                .collect(),
+                        ),
                     });
                 }
             }
@@ -1791,7 +1793,7 @@ pub fn try_lower_multiblock_infloop(host: &mut impl StructuringHost,
         Ok(Some((
             PreHirStmt::While {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                body: lowered,
+                body: std::rc::Rc::new(lowered),
             },
             max_body_idx + 1,
         )))
@@ -1811,8 +1813,8 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt
             PreHirStmt::Goto("block_exit".to_string()),
             PreHirStmt::If {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                then_body: vec![PreHirStmt::Goto("block_header".to_string())],
-                else_body: vec![PreHirStmt::Goto("block_exit".to_string())],
+                then_body: vec![PreHirStmt::Goto("block_header".to_string())].into(),
+                else_body: vec![PreHirStmt::Goto("block_exit".to_string())].into(),
             },
         ];
 
@@ -1846,7 +1848,7 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt
         let mut body = vec![
             PreHirStmt::While {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                body: vec![PreHirStmt::Goto("block_header".to_string())],
+                body: vec![PreHirStmt::Goto("block_header".to_string())].into(),
             },
             PreHirStmt::Switch {
                 expr: PreHirExpr::Const(
@@ -1858,9 +1860,9 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt
                 ),
                 cases: vec![PreHirSwitchCase {
                     values: vec![1],
-                    body: vec![PreHirStmt::Goto("block_exit".to_string())],
+                    body: vec![PreHirStmt::Goto("block_exit".to_string())].into(),
                 }],
-                default: vec![PreHirStmt::Goto("block_header".to_string())],
+                default: vec![PreHirStmt::Goto("block_header".to_string())].into(),
             },
         ];
 
@@ -1906,9 +1908,9 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt
                 body: vec![
                     PreHirStmt::Goto("outer_continue".to_string()),
                     PreHirStmt::Goto("outer_break".to_string()),
-                ],
+                ].into(),
             }],
-            default: Vec::new(),
+            default: Vec::new().into(),
         }];
 
         let mut stats = LoopControlRewriteStats::default();
@@ -1934,7 +1936,7 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt
             body: vec![
                 PreHirStmt::Goto("outer_continue".to_string()),
                 PreHirStmt::Goto("outer_break".to_string()),
-            ],
+            ].into(),
         }];
 
         let mut stats = LoopControlRewriteStats::default();
@@ -1960,8 +1962,8 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt
     fn undefined_goto_guard_rejects_missing_label_in_structured_loop_body() {
         let body = vec![PreHirStmt::If {
             cond: PreHirExpr::Const(1, NirType::Bool),
-            then_body: vec![PreHirStmt::Goto("block_missing".to_string())],
-            else_body: Vec::new(),
+            then_body: vec![PreHirStmt::Goto("block_missing".to_string())].into(),
+            else_body: Vec::new().into(),
         }];
 
         assert!(has_goto_to_undefined_label(&body));
@@ -1972,8 +1974,8 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                then_body: vec![PreHirStmt::Goto("block_join".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_join".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("block_join".to_string()),
             PreHirStmt::Break,

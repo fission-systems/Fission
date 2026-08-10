@@ -1,4 +1,5 @@
 use fission_midend_core::ir::NirType;
+use std::rc::Rc;
 
 /// The flattened, goto/label-based statement AST that `fission-pcode`'s
 /// builder emits directly from p-code, and that normalize/structuring's own
@@ -29,30 +30,30 @@ pub enum PreHirStmt {
         va_list: PreHirExpr,
         last_named_param: String,
     },
-    Block(Vec<PreHirStmt>),
+    Block(Rc<Vec<PreHirStmt>>),
     Switch {
         expr: PreHirExpr,
         cases: Vec<PreHirSwitchCase>,
-        default: Vec<PreHirStmt>,
+        default: Rc<Vec<PreHirStmt>>,
     },
     If {
         cond: PreHirExpr,
-        then_body: Vec<PreHirStmt>,
-        else_body: Vec<PreHirStmt>,
+        then_body: Rc<Vec<PreHirStmt>>,
+        else_body: Rc<Vec<PreHirStmt>>,
     },
     While {
         cond: PreHirExpr,
-        body: Vec<PreHirStmt>,
+        body: Rc<Vec<PreHirStmt>>,
     },
     DoWhile {
-        body: Vec<PreHirStmt>,
+        body: Rc<Vec<PreHirStmt>>,
         cond: PreHirExpr,
     },
     For {
         init: Option<Box<PreHirStmt>>,
         cond: Option<PreHirExpr>,
         update: Option<Box<PreHirStmt>>,
-        body: Vec<PreHirStmt>,
+        body: Rc<Vec<PreHirStmt>>,
     },
     Label(String),
     Goto(String),
@@ -64,7 +65,7 @@ pub enum PreHirStmt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreHirSwitchCase {
     pub values: Vec<i64>,
-    pub body: Vec<PreHirStmt>,
+    pub body: Rc<Vec<PreHirStmt>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

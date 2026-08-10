@@ -15,36 +15,36 @@ fn process_statement_list(stmts: &mut Vec<PreHirStmt>) -> bool {
     for stmt in stmts.iter_mut() {
         match stmt {
             PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= process_statement_list(body);
+                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
                     if let PreHirStmt::Block(init_body) = init_stmt.as_mut() {
-                        changed |= process_statement_list(init_body);
+                        changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(init_body));
                     }
                 }
                 if let Some(update_stmt) = update {
                     if let PreHirStmt::Block(update_body) = update_stmt.as_mut() {
-                        changed |= process_statement_list(update_body);
+                        changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(update_body));
                     }
                 }
-                changed |= process_statement_list(body);
+                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= process_statement_list(then_body);
-                changed |= process_statement_list(else_body);
+                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= process_statement_list(&mut case.body);
+                    changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= process_statement_list(default);
+                changed |= process_statement_list(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -69,12 +69,12 @@ fn process_statement_list(stmts: &mut Vec<PreHirStmt>) -> bool {
                         if get_var_name(sw_expr) == Some(var_name.clone()) {
                             if sw_default.is_empty()
                                 || else_body.is_empty()
-                                || sw_default == else_body
+                                || sw_default == else_body.as_slice()
                             {
                                 let new_default = if sw_default.is_empty() {
                                     else_body.clone()
                                 } else {
-                                    sw_default.to_vec()
+                                    sw_default.to_vec().into()
                                 };
                                 stmts[i] = PreHirStmt::Switch {
                                     expr: sw_expr.clone(),
@@ -89,12 +89,12 @@ fn process_statement_list(stmts: &mut Vec<PreHirStmt>) -> bool {
                         if get_var_name(sw_expr) == Some(var_name.clone()) {
                             if sw_default.is_empty()
                                 || then_body.is_empty()
-                                || sw_default == then_body
+                                || sw_default == then_body.as_slice()
                             {
                                 let new_default = if sw_default.is_empty() {
                                     then_body.clone()
                                 } else {
-                                    sw_default.to_vec()
+                                    sw_default.to_vec().into()
                                 };
                                 stmts[i] = PreHirStmt::Switch {
                                     expr: sw_expr.clone(),

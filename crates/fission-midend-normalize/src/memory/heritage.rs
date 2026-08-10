@@ -357,7 +357,7 @@ impl<'a> Rewriter<'a> {
                 self.rewrite_expr(expr);
             }
             PreHirStmt::Block(body) => {
-                self.rewrite_stmts(body);
+                self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::If {
                 cond,
@@ -367,8 +367,8 @@ impl<'a> Rewriter<'a> {
                 self.rewrite_expr(cond);
 
                 // Rewrite then/else branches
-                self.rewrite_stmts(then_body);
-                self.rewrite_stmts(else_body);
+                self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
 
                 // Find MemPhis created by this If branch merge.
                 let mut merge_phis = Vec::new();
@@ -392,7 +392,7 @@ impl<'a> Rewriter<'a> {
                                 self.var_names.get(&(phi.key.clone(), then_input))
                             {
                                 append_to_body_before_cf(
-                                    then_body,
+                                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
                                         rhs: PreHirExpr::Var(then_var.clone()),
@@ -404,7 +404,7 @@ impl<'a> Rewriter<'a> {
                                 self.var_names.get(&(phi.key.clone(), else_input))
                             {
                                 append_to_body_before_cf(
-                                    else_body,
+                                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
                                         rhs: PreHirExpr::Var(else_var.clone()),
@@ -427,7 +427,7 @@ impl<'a> Rewriter<'a> {
                     self.current_phi_idx += 1;
                 }
 
-                self.rewrite_stmts(body);
+                self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
 
                 // Insert phi-initializations before the loop, and loop-carried updates at the end of body.
                 for phi in merge_phis {
@@ -449,7 +449,7 @@ impl<'a> Rewriter<'a> {
                                 self.var_names.get(&(phi.key.clone(), body_input))
                             {
                                 append_to_body_before_cf(
-                                    body,
+                                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
                                         rhs: PreHirExpr::Var(body_var.clone()),
@@ -470,7 +470,7 @@ impl<'a> Rewriter<'a> {
                     self.current_phi_idx += 1;
                 }
 
-                self.rewrite_stmts(body);
+                self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 self.rewrite_expr(cond);
 
                 for phi in merge_phis {
@@ -490,7 +490,7 @@ impl<'a> Rewriter<'a> {
                                 self.var_names.get(&(phi.key.clone(), body_input))
                             {
                                 append_to_body_before_cf(
-                                    body,
+                                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
                                         rhs: PreHirExpr::Var(body_var.clone()),
@@ -513,7 +513,7 @@ impl<'a> Rewriter<'a> {
                     if dummy.len() == 1 {
                         *s = Box::new(dummy.remove(0));
                     } else if !dummy.is_empty() {
-                        *s = Box::new(PreHirStmt::Block(dummy));
+                        *s = Box::new(PreHirStmt::Block(dummy.into()));
                     }
                 }
                 if let Some(e) = cond {
@@ -529,7 +529,7 @@ impl<'a> Rewriter<'a> {
                     self.current_phi_idx += 1;
                 }
 
-                self.rewrite_stmts(body);
+                self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
 
                 if let Some(s) = update {
                     let mut dummy = vec![(**s).clone()];
@@ -537,7 +537,7 @@ impl<'a> Rewriter<'a> {
                     if dummy.len() == 1 {
                         *s = Box::new(dummy.remove(0));
                     } else if !dummy.is_empty() {
-                        *s = Box::new(PreHirStmt::Block(dummy));
+                        *s = Box::new(PreHirStmt::Block(dummy.into()));
                     }
                 }
 
@@ -558,7 +558,7 @@ impl<'a> Rewriter<'a> {
                                 self.var_names.get(&(phi.key.clone(), body_input))
                             {
                                 append_to_body_before_cf(
-                                    body,
+                                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                                     PreHirStmt::Assign {
                                         lhs: PreHirLValue::Var(phi_var.clone()),
                                         rhs: PreHirExpr::Var(body_var.clone()),
@@ -577,9 +577,9 @@ impl<'a> Rewriter<'a> {
                 self.rewrite_expr(expr);
 
                 for case in cases.iter_mut() {
-                    self.rewrite_stmts(&mut case.body);
+                    self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                self.rewrite_stmts(default);
+                self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
 
                 // Collect MemPhis for the switch
                 let mut merge_phis = Vec::new();
@@ -619,7 +619,7 @@ impl<'a> Rewriter<'a> {
                                         .or_else(|| pre_var.cloned());
                                     if let Some(v) = arm_var {
                                         append_to_body_before_cf(
-                                            &mut case.body,
+                                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                                             PreHirStmt::Assign {
                                                 lhs: PreHirLValue::Var(phi_var.clone()),
                                                 rhs: PreHirExpr::Var(v),
@@ -632,7 +632,7 @@ impl<'a> Rewriter<'a> {
                                     .or_else(|| pre_var.cloned());
                                 if let Some(v) = default_var {
                                     append_to_body_before_cf(
-                                        default,
+                                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                                         PreHirStmt::Assign {
                                             lhs: PreHirLValue::Var(phi_var.clone()),
                                             rhs: PreHirExpr::Var(v),

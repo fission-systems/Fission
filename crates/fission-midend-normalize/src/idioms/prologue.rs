@@ -216,7 +216,7 @@ fn remove_entry_stack_scaffold_stores_from_body(body: &mut Vec<PreHirStmt>) -> b
     }
 
     if let Some(PreHirStmt::Block(inner)) = body.first_mut() {
-        return remove_entry_stack_scaffold_stores_from_body(inner);
+        return remove_entry_stack_scaffold_stores_from_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner));
     }
 
     false
@@ -439,24 +439,24 @@ fn remove_matching_saves_restores(
 
 fn remove_nested(stmt: &mut PreHirStmt, pairs: &HashMap<String, String>, changed: &mut bool) {
     match stmt {
-        PreHirStmt::Block(body) => remove_matching_saves_restores(body, pairs, changed),
+        PreHirStmt::Block(body) => remove_matching_saves_restores(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), pairs, changed),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            remove_matching_saves_restores(then_body, pairs, changed);
-            remove_matching_saves_restores(else_body, pairs, changed);
+            remove_matching_saves_restores(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), pairs, changed);
+            remove_matching_saves_restores(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), pairs, changed);
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            remove_matching_saves_restores(body, pairs, changed)
+            remove_matching_saves_restores(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), pairs, changed)
         }
-        PreHirStmt::For { body, .. } => remove_matching_saves_restores(body, pairs, changed),
+        PreHirStmt::For { body, .. } => remove_matching_saves_restores(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), pairs, changed),
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
-                remove_matching_saves_restores(&mut case.body, pairs, changed);
+                remove_matching_saves_restores(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), pairs, changed);
             }
-            remove_matching_saves_restores(default, pairs, changed);
+            remove_matching_saves_restores(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), pairs, changed);
         }
         _ => {}
     }
@@ -743,24 +743,24 @@ fn remove_orphaned_slot_restore_nested(
     changed: &mut bool,
 ) {
     match stmt {
-        PreHirStmt::Block(body) => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
+        PreHirStmt::Block(body) => remove_orphaned_slot_restores_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), slots, changed),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            remove_orphaned_slot_restores_from_stmts(then_body, slots, changed);
-            remove_orphaned_slot_restores_from_stmts(else_body, slots, changed);
+            remove_orphaned_slot_restores_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), slots, changed);
+            remove_orphaned_slot_restores_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), slots, changed);
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            remove_orphaned_slot_restores_from_stmts(body, slots, changed)
+            remove_orphaned_slot_restores_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), slots, changed)
         }
-        PreHirStmt::For { body, .. } => remove_orphaned_slot_restores_from_stmts(body, slots, changed),
+        PreHirStmt::For { body, .. } => remove_orphaned_slot_restores_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), slots, changed),
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
-                remove_orphaned_slot_restores_from_stmts(&mut case.body, slots, changed);
+                remove_orphaned_slot_restores_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), slots, changed);
             }
-            remove_orphaned_slot_restores_from_stmts(default, slots, changed);
+            remove_orphaned_slot_restores_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), slots, changed);
         }
         _ => {}
     }
@@ -893,20 +893,20 @@ fn remove_dead_callee_assigns_from_stmts(
                 else_body,
                 ..
             } => {
-                remove_dead_callee_assigns_from_stmts(then_body, dead, changed);
-                remove_dead_callee_assigns_from_stmts(else_body, dead, changed);
+                remove_dead_callee_assigns_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), dead, changed);
+                remove_dead_callee_assigns_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), dead, changed);
             }
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                remove_dead_callee_assigns_from_stmts(body, dead, changed);
+                remove_dead_callee_assigns_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), dead, changed);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    remove_dead_callee_assigns_from_stmts(&mut case.body, dead, changed);
+                    remove_dead_callee_assigns_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), dead, changed);
                 }
-                remove_dead_callee_assigns_from_stmts(default, dead, changed);
+                remove_dead_callee_assigns_from_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), dead, changed);
             }
             _ => {}
         }
@@ -1188,12 +1188,12 @@ mod tests {
                     rhs: PreHirExpr::Var("param_1".to_owned()),
                 },
                 PreHirStmt::Return(None),
-            ])],
+            ].into())],
             ..Default::default()
         };
 
         assert!(remove_entry_stack_scaffold_stores(&mut func));
-        assert_eq!(func.body, vec![PreHirStmt::Block(vec![PreHirStmt::Return(None)])]);
+        assert_eq!(func.body, vec![PreHirStmt::Block(vec![PreHirStmt::Return(None)].into())]);
     }
 
     #[test]
@@ -1387,8 +1387,8 @@ mod tests {
             body: vec![
                 PreHirStmt::If {
                     cond: PreHirExpr::Const(1, u64_ty()),
-                    then_body: vec![slot_restore("rsi", "home_0")],
-                    else_body: vec![],
+                    then_body: vec![slot_restore("rsi", "home_0")].into(),
+                    else_body: vec![].into(),
                 },
                 PreHirStmt::Return(None),
             ],
@@ -1449,8 +1449,8 @@ mod tests {
                 assign_var("rsi", var("param_2")),
                 PreHirStmt::If {
                     cond: var("rsi"),
-                    then_body: vec![PreHirStmt::Return(None)],
-                    else_body: vec![],
+                    then_body: vec![PreHirStmt::Return(None)].into(),
+                    else_body: vec![].into(),
                 },
             ],
             locals: vec![], // undeclared but has reads

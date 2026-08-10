@@ -186,7 +186,7 @@ fn visit_stmt(stmt: &mut PreHirStmt, var_types: &HashMap<String, NirType>) -> bo
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for s in body {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= visit_stmt(s, var_types);
             }
         }
@@ -196,10 +196,10 @@ fn visit_stmt(stmt: &mut PreHirStmt, var_types: &HashMap<String, NirType>) -> bo
             else_body,
         } => {
             changed |= visit_expr(cond, var_types);
-            for s in then_body {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body) {
                 changed |= visit_stmt(s, var_types);
             }
-            for s in else_body {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body) {
                 changed |= visit_stmt(s, var_types);
             }
         }
@@ -210,11 +210,11 @@ fn visit_stmt(stmt: &mut PreHirStmt, var_types: &HashMap<String, NirType>) -> bo
         } => {
             changed |= visit_expr(expr, var_types);
             for case in cases {
-                for s in &mut case.body {
+                for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body) {
                     changed |= visit_stmt(s, var_types);
                 }
             }
-            for s in default {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default) {
                 changed |= visit_stmt(s, var_types);
             }
         }

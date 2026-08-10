@@ -23,39 +23,39 @@ fn recurse_split_stmt(stmt: &mut PreHirStmt) -> bool {
     let mut changed = false;
     match stmt {
         PreHirStmt::Block(body) => {
-            changed |= split_datatype_in_stmts(body);
+            changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= split_datatype_in_stmts(body);
+            changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::For {
             init, update, body, ..
         } => {
             if let Some(init) = init {
                 if let PreHirStmt::Block(body) = init.as_mut() {
-                    changed |= split_datatype_in_stmts(body);
+                    changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
             }
             if let Some(update) = update {
                 if let PreHirStmt::Block(body) = update.as_mut() {
-                    changed |= split_datatype_in_stmts(body);
+                    changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 }
             }
-            changed |= split_datatype_in_stmts(body);
+            changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            changed |= split_datatype_in_stmts(then_body);
-            changed |= split_datatype_in_stmts(else_body);
+            changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+            changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                changed |= split_datatype_in_stmts(&mut case.body);
+                changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
             }
-            changed |= split_datatype_in_stmts(default);
+            changed |= split_datatype_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
         }
         _ => {}
     }

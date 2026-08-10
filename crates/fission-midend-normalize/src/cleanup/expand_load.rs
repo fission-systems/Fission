@@ -52,7 +52,7 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
         PreHirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => changed |= expand_load_in_expr(expr),
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            for s in body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
         }
@@ -71,7 +71,7 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
             if let Some(c) = cond {
                 changed |= expand_load_in_expr(c);
             }
-            for s in body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
         }
@@ -81,10 +81,10 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
             else_body,
         } => {
             changed |= expand_load_in_expr(cond);
-            for s in then_body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body).iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
-            for s in else_body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
         }
@@ -95,11 +95,11 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
         } => {
             changed |= expand_load_in_expr(expr);
             for case in cases.iter_mut() {
-                for s in case.body.iter_mut() {
+                for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body).iter_mut() {
                     changed |= expand_load_in_stmt(s);
                 }
             }
-            for s in default.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default).iter_mut() {
                 changed |= expand_load_in_stmt(s);
             }
         }

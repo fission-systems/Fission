@@ -100,7 +100,7 @@ fn rewrite_stmt(
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
             rewrite_stmts(
-                body,
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
                 last_def,
                 byte_ranged,
@@ -120,7 +120,7 @@ fn rewrite_stmt(
             let mut else_br = byte_ranged.clone();
             let mut else_sum = byte_sum_names.clone();
             rewrite_stmts(
-                then_body,
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 type_map,
                 &mut then_def,
                 &mut then_br,
@@ -128,7 +128,7 @@ fn rewrite_stmt(
                 changed,
             );
             rewrite_stmts(
-                else_body,
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 type_map,
                 &mut else_def,
                 &mut else_br,
@@ -156,7 +156,7 @@ fn rewrite_stmt(
             let mut body_br = byte_ranged.clone();
             let mut body_sum = byte_sum_names.clone();
             rewrite_stmts(
-                body,
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 type_map,
                 &mut body_def,
                 &mut body_br,
@@ -179,12 +179,12 @@ fn rewrite_stmt(
                 let mut d = last_def.clone();
                 let mut b = byte_ranged.clone();
                 let mut s = byte_sum_names.clone();
-                rewrite_stmts(&mut case.body, type_map, &mut d, &mut b, &mut s, changed);
+                rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), type_map, &mut d, &mut b, &mut s, changed);
             }
             let mut d = last_def.clone();
             let mut b = byte_ranged.clone();
             let mut s = byte_sum_names.clone();
-            rewrite_stmts(default, type_map, &mut d, &mut b, &mut s, changed);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), type_map, &mut d, &mut b, &mut s, changed);
         }
         _ => {}
     }

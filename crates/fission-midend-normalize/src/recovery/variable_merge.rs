@@ -1832,7 +1832,7 @@ mod tests {
                             lhs: PreHirLValue::Var("dummy2".to_string()),
                             rhs: PreHirExpr::Var("temp_2".to_string()),
                         },
-                    ],
+                    ].into(),
                 },
             ],
             ..Default::default()
@@ -2098,7 +2098,7 @@ mod tests {
                                 },
                             ),
                         },
-                    ],
+                    ].into(),
                 },
             ],
             ..Default::default()
@@ -2172,8 +2172,8 @@ mod tests {
                     then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
                         2147483647,
                         i32_ty.clone(),
-                    )))],
-                    else_body: vec![],
+                    )))].into(),
+                    else_body: vec![].into(),
                 },
                 PreHirStmt::Return(Some(PreHirExpr::Var("eax".to_string()))),
             ],

@@ -259,7 +259,7 @@ fn verify_reads_in_stmt(stmt: &PreHirStmt, x_name: &str, shift_bits: u32, valid:
             verify_reads(va_list, x_name, shift_bits, valid);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            for s in body {
+            for s in body.iter() {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
@@ -278,7 +278,7 @@ fn verify_reads_in_stmt(stmt: &PreHirStmt, x_name: &str, shift_bits: u32, valid:
             if let Some(u) = update {
                 verify_reads_in_stmt(u, x_name, shift_bits, valid);
             }
-            for s in body {
+            for s in body.iter() {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
@@ -288,10 +288,10 @@ fn verify_reads_in_stmt(stmt: &PreHirStmt, x_name: &str, shift_bits: u32, valid:
             else_body,
         } => {
             verify_reads(cond, x_name, shift_bits, valid);
-            for s in then_body {
+            for s in then_body.iter() {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
-            for s in else_body {
+            for s in else_body.iter() {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
@@ -302,11 +302,11 @@ fn verify_reads_in_stmt(stmt: &PreHirStmt, x_name: &str, shift_bits: u32, valid:
         } => {
             verify_reads(expr, x_name, shift_bits, valid);
             for case in cases {
-                for s in &case.body {
+                for s in case.body.iter() {
                     verify_reads_in_stmt(s, x_name, shift_bits, valid);
                 }
             }
-            for s in default {
+            for s in default.iter() {
                 verify_reads_in_stmt(s, x_name, shift_bits, valid);
             }
         }
@@ -396,7 +396,7 @@ fn rewrite_stmt(
                         lhs: PreHirLValue::Var(x_high.to_string()),
                         rhs: hi,
                     },
-                ]);
+                ].into());
             } else if let Some((hi, lo, _)) = match_zext_write(rhs, x_bits) {
                 *stmt = PreHirStmt::Block(vec![
                     PreHirStmt::Assign {
@@ -407,7 +407,7 @@ fn rewrite_stmt(
                         lhs: PreHirLValue::Var(x_high.to_string()),
                         rhs: hi,
                     },
-                ]);
+                ].into());
             }
         }
         PreHirStmt::Assign { lhs, rhs } => {
@@ -433,7 +433,7 @@ fn rewrite_stmt(
             rewrite_expr(va_list, x_name, x_low, x_high, shift_bits);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            rewrite_stmts(body, x_name, x_low, x_high, shift_bits, x_bits);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), x_name, x_low, x_high, shift_bits, x_bits);
         }
         PreHirStmt::For {
             init,
@@ -450,7 +450,7 @@ fn rewrite_stmt(
             if let Some(u) = update {
                 rewrite_stmt(u, x_name, x_low, x_high, shift_bits, x_bits);
             }
-            rewrite_stmts(body, x_name, x_low, x_high, shift_bits, x_bits);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), x_name, x_low, x_high, shift_bits, x_bits);
         }
         PreHirStmt::If {
             cond,
@@ -458,8 +458,8 @@ fn rewrite_stmt(
             else_body,
         } => {
             rewrite_expr(cond, x_name, x_low, x_high, shift_bits);
-            rewrite_stmts(then_body, x_name, x_low, x_high, shift_bits, x_bits);
-            rewrite_stmts(else_body, x_name, x_low, x_high, shift_bits, x_bits);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), x_name, x_low, x_high, shift_bits, x_bits);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), x_name, x_low, x_high, shift_bits, x_bits);
         }
         PreHirStmt::Switch {
             expr,
@@ -468,9 +468,9 @@ fn rewrite_stmt(
         } => {
             rewrite_expr(expr, x_name, x_low, x_high, shift_bits);
             for case in cases {
-                rewrite_stmts(&mut case.body, x_name, x_low, x_high, shift_bits, x_bits);
+                rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), x_name, x_low, x_high, shift_bits, x_bits);
             }
-            rewrite_stmts(default, x_name, x_low, x_high, shift_bits, x_bits);
+            rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), x_name, x_low, x_high, shift_bits, x_bits);
         }
         _ => {}
     }
@@ -772,7 +772,7 @@ fn split_scalar_role_phases(
     for stmt in stmts.iter_mut() {
         match stmt {
             PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                changed |= split_scalar_role_phases(body, pointer_locals, used_names, new_bindings);
+                changed |= split_scalar_role_phases(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), pointer_locals, used_names, new_bindings);
             }
             PreHirStmt::If {
                 then_body,
@@ -780,9 +780,9 @@ fn split_scalar_role_phases(
                 ..
             } => {
                 changed |=
-                    split_scalar_role_phases(then_body, pointer_locals, used_names, new_bindings);
+                    split_scalar_role_phases(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), pointer_locals, used_names, new_bindings);
                 changed |=
-                    split_scalar_role_phases(else_body, pointer_locals, used_names, new_bindings);
+                    split_scalar_role_phases(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), pointer_locals, used_names, new_bindings);
             }
             PreHirStmt::For {
                 init, update, body, ..
@@ -795,7 +795,7 @@ fn split_scalar_role_phases(
                         new_bindings,
                     );
                 }
-                changed |= split_scalar_role_phases(body, pointer_locals, used_names, new_bindings);
+                changed |= split_scalar_role_phases(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), pointer_locals, used_names, new_bindings);
                 if let Some(update) = update {
                     changed |= split_scalar_role_phases(
                         std::slice::from_mut(update.as_mut()),
@@ -808,14 +808,14 @@ fn split_scalar_role_phases(
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
                     changed |= split_scalar_role_phases(
-                        &mut case.body,
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         pointer_locals,
                         used_names,
                         new_bindings,
                     );
                 }
                 changed |=
-                    split_scalar_role_phases(default, pointer_locals, used_names, new_bindings);
+                    split_scalar_role_phases(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), pointer_locals, used_names, new_bindings);
             }
             _ => {}
         }

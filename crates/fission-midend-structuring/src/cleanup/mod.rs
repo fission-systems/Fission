@@ -51,25 +51,25 @@ fn strip_duplicate_label_definitions_in_place(
                     continue;
                 }
             }
-            PreHirStmt::Block(body) => strip_duplicate_label_definitions_in_place(body, seen),
+            PreHirStmt::Block(body) => strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), seen),
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                strip_duplicate_label_definitions_in_place(then_body, seen);
-                strip_duplicate_label_definitions_in_place(else_body, seen);
+                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), seen);
+                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), seen);
             }
             PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                strip_duplicate_label_definitions_in_place(body, seen);
+                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), seen);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    strip_duplicate_label_definitions_in_place(&mut case.body, seen);
+                    strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), seen);
                 }
-                strip_duplicate_label_definitions_in_place(default, seen);
+                strip_duplicate_label_definitions_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), seen);
             }
             _ => {}
         }
@@ -95,21 +95,21 @@ fn strip_post_total_infloop_label_residuals_in_place(stmts: &mut Vec<PreHirStmt>
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                strip_post_total_infloop_label_residuals_in_place(body);
+                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                strip_post_total_infloop_label_residuals_in_place(then_body);
-                strip_post_total_infloop_label_residuals_in_place(else_body);
+                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    strip_post_total_infloop_label_residuals_in_place(&mut case.body);
+                    strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                strip_post_total_infloop_label_residuals_in_place(default);
+                strip_post_total_infloop_label_residuals_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -334,7 +334,7 @@ fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<PreHirStmt>) {
                     PreHirStmt::While { body, .. }
                     | PreHirStmt::DoWhile { body, .. }
                     | PreHirStmt::For { body, .. } => {
-                        dedupe_structured_region_entry_labels_in_place(body);
+                        dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                         first_meaningful_label(body) == Some(outer.as_str())
                     }
                     _ => false,
@@ -352,39 +352,39 @@ fn dedupe_structured_region_entry_labels_in_place(stmts: &mut Vec<PreHirStmt>) {
 
 fn dedupe_structured_region_entry_labels_stmt(stmt: &mut PreHirStmt) {
     match stmt {
-        PreHirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(body),
+        PreHirStmt::Block(body) => dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            dedupe_structured_region_entry_labels_in_place(then_body);
-            dedupe_structured_region_entry_labels_in_place(else_body);
+            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } | PreHirStmt::For { body, .. } => {
-            dedupe_structured_region_entry_labels_in_place(body);
+            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
                 if case.body.len() >= 2 {
                     if let PreHirStmt::Label(outer) = case.body[0].clone() {
-                        let inner_matches = match &mut case.body[1] {
+                        let inner_matches = match &mut std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body)[1] {
                             PreHirStmt::While { body, .. }
                             | PreHirStmt::DoWhile { body, .. }
                             | PreHirStmt::For { body, .. } => {
-                                dedupe_structured_region_entry_labels_in_place(body);
+                                dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                                 first_meaningful_label(body) == Some(outer.as_str())
                             }
                             _ => false,
                         };
                         if inner_matches {
-                            case.body.remove(0);
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body).remove(0);
                         }
                     }
                 }
-                dedupe_structured_region_entry_labels_in_place(&mut case.body);
+                dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
             }
-            dedupe_structured_region_entry_labels_in_place(default);
+            dedupe_structured_region_entry_labels_in_place(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
         }
         _ => {}
     }
@@ -442,17 +442,17 @@ fn collect_stmt_declared_labels(stmt: &PreHirStmt, declared: &mut HashSet<String
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for s in body {
+            for s in body.iter() {
                 collect_stmt_declared_labels(s, declared);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for s in &case.body {
+                for s in case.body.iter() {
                     collect_stmt_declared_labels(s, declared);
                 }
             }
-            for s in default {
+            for s in default.iter() {
                 collect_stmt_declared_labels(s, declared);
             }
         }
@@ -461,10 +461,10 @@ fn collect_stmt_declared_labels(stmt: &PreHirStmt, declared: &mut HashSet<String
             else_body,
             ..
         } => {
-            for s in then_body {
+            for s in then_body.iter() {
                 collect_stmt_declared_labels(s, declared);
             }
-            for s in else_body {
+            for s in else_body.iter() {
                 collect_stmt_declared_labels(s, declared);
             }
         }
@@ -623,7 +623,10 @@ fn rewrite_stmt_labels(body: Vec<PreHirStmt>, aliases: &HashMap<String, String>)
 
 fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> PreHirStmt {
     match stmt {
-        PreHirStmt::Block(body) => PreHirStmt::Block(rewrite_stmt_labels(body, aliases)),
+        PreHirStmt::Block(body) => PreHirStmt::Block(std::rc::Rc::new(rewrite_stmt_labels(
+            std::rc::Rc::unwrap_or_clone(body),
+            aliases,
+        ))),
         PreHirStmt::Switch {
             expr,
             cases,
@@ -634,10 +637,16 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
                 .into_iter()
                 .map(|case| PreHirSwitchCase {
                     values: case.values,
-                    body: rewrite_stmt_labels(case.body, aliases),
+                    body: std::rc::Rc::new(rewrite_stmt_labels(
+                        std::rc::Rc::unwrap_or_clone(case.body),
+                        aliases,
+                    )),
                 })
                 .collect(),
-            default: rewrite_stmt_labels(default, aliases),
+            default: std::rc::Rc::new(rewrite_stmt_labels(
+                std::rc::Rc::unwrap_or_clone(default),
+                aliases,
+            )),
         },
         PreHirStmt::If {
             cond,
@@ -645,15 +654,27 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
             else_body,
         } => PreHirStmt::If {
             cond,
-            then_body: rewrite_stmt_labels(then_body, aliases),
-            else_body: rewrite_stmt_labels(else_body, aliases),
+            then_body: std::rc::Rc::new(rewrite_stmt_labels(
+                std::rc::Rc::unwrap_or_clone(then_body),
+                aliases,
+            )),
+            else_body: std::rc::Rc::new(rewrite_stmt_labels(
+                std::rc::Rc::unwrap_or_clone(else_body),
+                aliases,
+            )),
         },
         PreHirStmt::While { cond, body } => PreHirStmt::While {
             cond,
-            body: rewrite_stmt_labels(body, aliases),
+            body: std::rc::Rc::new(rewrite_stmt_labels(
+                std::rc::Rc::unwrap_or_clone(body),
+                aliases,
+            )),
         },
         PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
-            body: rewrite_stmt_labels(body, aliases),
+            body: std::rc::Rc::new(rewrite_stmt_labels(
+                std::rc::Rc::unwrap_or_clone(body),
+                aliases,
+            )),
             cond,
         },
         PreHirStmt::For {
@@ -679,7 +700,10 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
                         .unwrap(),
                 )
             }),
-            body: rewrite_stmt_labels(body, aliases),
+            body: std::rc::Rc::new(rewrite_stmt_labels(
+                std::rc::Rc::unwrap_or_clone(body),
+                aliases,
+            )),
         },
         PreHirStmt::Label(label) => PreHirStmt::Label(canonicalize_label(&label, aliases)),
         PreHirStmt::Goto(label) => PreHirStmt::Goto(canonicalize_label(&label, aliases)),
@@ -709,17 +733,17 @@ fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut HashSet<St
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_stmt_referenced_labels(stmt, referenced);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
@@ -728,10 +752,10 @@ fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut HashSet<St
             else_body,
             ..
         } => {
-            for stmt in then_body {
+            for stmt in then_body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
-            for stmt in else_body {
+            for stmt in else_body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
@@ -754,17 +778,17 @@ fn collect_stmt_referenced_label_counts(stmt: &PreHirStmt, counts: &mut HashMap<
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_stmt_referenced_label_counts(stmt, counts);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
@@ -773,10 +797,10 @@ fn collect_stmt_referenced_label_counts(stmt: &PreHirStmt, counts: &mut HashMap<
             else_body,
             ..
         } => {
-            for stmt in then_body {
+            for stmt in then_body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
-            for stmt in else_body {
+            for stmt in else_body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
@@ -869,8 +893,8 @@ mod tests {
         let stmts = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("tail".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("tail".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("tail".to_string()),
             PreHirStmt::Return(None),
@@ -891,7 +915,7 @@ mod tests {
             panic!("expected If: {result:?}");
         };
         assert!(else_body.is_empty(), "else should be empty: {result:?}");
-        assert_eq!(then_body, &vec![PreHirStmt::Return(None)]);
+        assert_eq!(**then_body, vec![PreHirStmt::Return(None)]);
     }
 
     #[test]
@@ -899,8 +923,8 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_alias_a".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_alias_a".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("block_alias_a".to_string()),
             PreHirStmt::Label("block_alias_b".to_string()),
@@ -915,8 +939,8 @@ mod tests {
             vec![
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".to_string()),
-                    then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-                    else_body: Vec::new(),
+                    then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+                    else_body: Vec::new().into(),
                 },
                 PreHirStmt::Label("block_tail".to_string()),
                 PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -929,8 +953,8 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_alias".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_alias".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("block_alias".to_string()),
             PreHirStmt::Goto("block_tail".to_string()),
@@ -945,8 +969,8 @@ mod tests {
             vec![
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".to_string()),
-                    then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-                    else_body: Vec::new(),
+                    then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+                    else_body: Vec::new().into(),
                 },
                 PreHirStmt::Label("block_tail".to_string()),
                 PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
@@ -973,7 +997,7 @@ mod tests {
     fn orphan_goto_labels_detects_missing_declarations() {
         let body = vec![PreHirStmt::While {
             cond: PreHirExpr::Const(1, NirType::Bool),
-            body: vec![PreHirStmt::Goto("block_140001890".to_string())],
+            body: vec![PreHirStmt::Goto("block_140001890".to_string())].into(),
         }];
         assert_eq!(
             orphan_goto_labels(&body),
@@ -1090,7 +1114,7 @@ mod tests {
                 body: vec![
                     PreHirStmt::Label("L".to_string()),
                     PreHirStmt::Continue,
-                ],
+                ].into(),
             },
         ];
         let cleaned = strip_duplicate_label_definitions(body);
@@ -1121,13 +1145,13 @@ mod tests {
                     PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
                     PreHirStmt::If {
                         cond: PreHirExpr::Var("done".to_string()),
-                        then_body: vec![PreHirStmt::Break],
-                        else_body: vec![PreHirStmt::Continue],
+                        then_body: vec![PreHirStmt::Break].into(),
+                        else_body: vec![PreHirStmt::Continue].into(),
                     },
-                ],
+                ].into(),
             },
             PreHirStmt::DoWhile {
-                body: vec![PreHirStmt::Expr(PreHirExpr::Var("work".to_string()))],
+                body: vec![PreHirStmt::Expr(PreHirExpr::Var("work".to_string()))].into(),
                 cond: PreHirExpr::Var("more".to_string()),
             },
             PreHirStmt::Goto("block_inner".to_string()),
@@ -1157,7 +1181,7 @@ mod tests {
                             },
                         ),
                     },
-                ],
+                ].into(),
             },
         ];
 
@@ -1175,7 +1199,7 @@ mod tests {
         let body = vec![
             PreHirStmt::While {
                 cond: PreHirExpr::Const(1, NirType::Bool),
-                body: vec![PreHirStmt::Label("block_residual".to_string())],
+                body: vec![PreHirStmt::Label("block_residual".to_string())].into(),
             },
             PreHirStmt::Label("block_residual".to_string()),
             PreHirStmt::Assign {
@@ -1214,8 +1238,8 @@ mod tests {
         let stmts = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_end".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_end".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("sum".to_string()),
@@ -1231,8 +1255,8 @@ mod tests {
             vec![
                 PreHirStmt::If {
                     cond: PreHirExpr::Var("cond".to_string()),
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("zero".to_string())))],
-                    else_body: Vec::new(),
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("zero".to_string())))].into(),
+                    else_body: Vec::new().into(),
                 },
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("sum".to_string()),

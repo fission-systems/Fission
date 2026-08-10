@@ -161,8 +161,8 @@ mod tests {
                         rhs: Box::new(PreHirExpr::Const(0, int(32))),
                         ty: NirType::Bool,
                     },
-                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(1, int(32))))],
-                    else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(0, int(32))))],
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(1, int(32))))].into(),
+                    else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(0, int(32))))].into(),
                 },
             ],
             ..Default::default()
@@ -280,7 +280,7 @@ fn count_defs_stmt<'a>(
             *counts.entry(name.as_str()).or_default() += 1;
         }
         PreHirStmt::Block(stmts) => {
-            for s in stmts {
+            for s in stmts.iter() {
                 count_defs_stmt(s, temps, counts);
             }
         }
@@ -289,15 +289,15 @@ fn count_defs_stmt<'a>(
             else_body,
             ..
         } => {
-            for s in then_body {
+            for s in then_body.iter() {
                 count_defs_stmt(s, temps, counts);
             }
-            for s in else_body {
+            for s in else_body.iter() {
                 count_defs_stmt(s, temps, counts);
             }
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            for s in body {
+            for s in body.iter() {
                 count_defs_stmt(s, temps, counts);
             }
         }
@@ -310,17 +310,17 @@ fn count_defs_stmt<'a>(
             if let Some(u) = update {
                 count_defs_stmt(u, temps, counts);
             }
-            for s in body {
+            for s in body.iter() {
                 count_defs_stmt(s, temps, counts);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for s in &case.body {
+                for s in case.body.iter() {
                     count_defs_stmt(s, temps, counts);
                 }
             }
-            for s in default {
+            for s in default.iter() {
                 count_defs_stmt(s, temps, counts);
             }
         }
@@ -523,17 +523,17 @@ fn remove_copy_assigns_nested(
     changed: &mut bool,
 ) {
     match stmt {
-        PreHirStmt::Block(stmts) => remove_copy_assigns(stmts, copy_map, changed),
+        PreHirStmt::Block(stmts) => remove_copy_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), copy_map, changed),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            remove_copy_assigns(then_body, copy_map, changed);
-            remove_copy_assigns(else_body, copy_map, changed);
+            remove_copy_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), copy_map, changed);
+            remove_copy_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), copy_map, changed);
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            remove_copy_assigns(body, copy_map, changed);
+            remove_copy_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), copy_map, changed);
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -544,13 +544,13 @@ fn remove_copy_assigns_nested(
             if let Some(u) = update {
                 remove_copy_assigns_nested(u, copy_map, changed);
             }
-            remove_copy_assigns(body, copy_map, changed);
+            remove_copy_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), copy_map, changed);
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
-                remove_copy_assigns(&mut case.body, copy_map, changed);
+                remove_copy_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), copy_map, changed);
             }
-            remove_copy_assigns(default, copy_map, changed);
+            remove_copy_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), copy_map, changed);
         }
         _ => {}
     }
@@ -589,22 +589,22 @@ fn substitute_copies_in_stmt(
         | PreHirStmt::Continue
         | PreHirStmt::Label(_)
         | PreHirStmt::Goto(_) => {}
-        PreHirStmt::Block(stmts) => substitute_copies_in_stmts(stmts, copy_map, changed),
+        PreHirStmt::Block(stmts) => substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), copy_map, changed),
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
             substitute_copies_expr(cond, copy_map, changed);
-            substitute_copies_in_stmts(then_body, copy_map, changed);
-            substitute_copies_in_stmts(else_body, copy_map, changed);
+            substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), copy_map, changed);
+            substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), copy_map, changed);
         }
         PreHirStmt::While { cond, body } => {
             substitute_copies_expr(cond, copy_map, changed);
-            substitute_copies_in_stmts(body, copy_map, changed);
+            substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), copy_map, changed);
         }
         PreHirStmt::DoWhile { body, cond } => {
-            substitute_copies_in_stmts(body, copy_map, changed);
+            substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), copy_map, changed);
             substitute_copies_expr(cond, copy_map, changed);
         }
         PreHirStmt::For {
@@ -622,7 +622,7 @@ fn substitute_copies_in_stmt(
             if let Some(u) = update {
                 substitute_copies_in_stmt(u, copy_map, changed);
             }
-            substitute_copies_in_stmts(body, copy_map, changed);
+            substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), copy_map, changed);
         }
         PreHirStmt::Switch {
             expr,
@@ -631,9 +631,9 @@ fn substitute_copies_in_stmt(
         } => {
             substitute_copies_expr(expr, copy_map, changed);
             for case in cases.iter_mut() {
-                substitute_copies_in_stmts(&mut case.body, copy_map, changed);
+                substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), copy_map, changed);
             }
-            substitute_copies_in_stmts(default, copy_map, changed);
+            substitute_copies_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), copy_map, changed);
         }
     }
 }
@@ -920,7 +920,7 @@ fn count_uses_in_stmt_flat(stmt: &PreHirStmt, name: &str) -> usize {
             count_var_in_expr(expr, name)
                 + cases
                     .iter()
-                    .flat_map(|c| &c.body)
+                    .flat_map(|c| c.body.iter())
                     .map(|s| count_uses_in_stmt_flat(s, name))
                     .sum::<usize>()
                 + default
@@ -1007,22 +1007,22 @@ fn apply_join_renames_stmt(
         | PreHirStmt::Continue
         | PreHirStmt::Label(_)
         | PreHirStmt::Goto(_) => {}
-        PreHirStmt::Block(stmts) => apply_join_renames(stmts, rename_map, changed),
+        PreHirStmt::Block(stmts) => apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), rename_map, changed),
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
             apply_join_renames_expr(cond, rename_map, changed);
-            apply_join_renames(then_body, rename_map, changed);
-            apply_join_renames(else_body, rename_map, changed);
+            apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), rename_map, changed);
+            apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), rename_map, changed);
         }
         PreHirStmt::While { cond, body } => {
             apply_join_renames_expr(cond, rename_map, changed);
-            apply_join_renames(body, rename_map, changed);
+            apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rename_map, changed);
         }
         PreHirStmt::DoWhile { body, cond } => {
-            apply_join_renames(body, rename_map, changed);
+            apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rename_map, changed);
             apply_join_renames_expr(cond, rename_map, changed);
         }
         PreHirStmt::For {
@@ -1040,7 +1040,7 @@ fn apply_join_renames_stmt(
             if let Some(u) = update {
                 apply_join_renames_stmt(u, rename_map, changed);
             }
-            apply_join_renames(body, rename_map, changed);
+            apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rename_map, changed);
         }
         PreHirStmt::Switch {
             expr,
@@ -1049,9 +1049,9 @@ fn apply_join_renames_stmt(
         } => {
             apply_join_renames_expr(expr, rename_map, changed);
             for case in cases.iter_mut() {
-                apply_join_renames(&mut case.body, rename_map, changed);
+                apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), rename_map, changed);
             }
-            apply_join_renames(default, rename_map, changed);
+            apply_join_renames(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), rename_map, changed);
         }
     }
 }
@@ -1211,17 +1211,17 @@ fn remove_constant_assigns_nested(
     changed: &mut bool,
 ) {
     match stmt {
-        PreHirStmt::Block(stmts) => remove_constant_assigns(stmts, const_map, changed),
+        PreHirStmt::Block(stmts) => remove_constant_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), const_map, changed),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            remove_constant_assigns(then_body, const_map, changed);
-            remove_constant_assigns(else_body, const_map, changed);
+            remove_constant_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), const_map, changed);
+            remove_constant_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), const_map, changed);
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            remove_constant_assigns(body, const_map, changed);
+            remove_constant_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), const_map, changed);
         }
         PreHirStmt::For {
             init, update, body, ..
@@ -1232,13 +1232,13 @@ fn remove_constant_assigns_nested(
             if let Some(u) = update {
                 remove_constant_assigns_nested(u, const_map, changed);
             }
-            remove_constant_assigns(body, const_map, changed);
+            remove_constant_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), const_map, changed);
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases.iter_mut() {
-                remove_constant_assigns(&mut case.body, const_map, changed);
+                remove_constant_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), const_map, changed);
             }
-            remove_constant_assigns(default, const_map, changed);
+            remove_constant_assigns(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), const_map, changed);
         }
         _ => {}
     }
@@ -1273,22 +1273,22 @@ fn substitute_constants_in_stmt(
         _ => {}
     }
     match stmt {
-        PreHirStmt::Block(stmts) => substitute_constants_in_stmts(stmts, const_map, changed),
+        PreHirStmt::Block(stmts) => substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts), const_map, changed),
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
             substitute_constants_expr(cond, const_map, changed);
-            substitute_constants_in_stmts(then_body, const_map, changed);
-            substitute_constants_in_stmts(else_body, const_map, changed);
+            substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), const_map, changed);
+            substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), const_map, changed);
         }
         PreHirStmt::While { cond, body } => {
             substitute_constants_expr(cond, const_map, changed);
-            substitute_constants_in_stmts(body, const_map, changed);
+            substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), const_map, changed);
         }
         PreHirStmt::DoWhile { body, cond } => {
-            substitute_constants_in_stmts(body, const_map, changed);
+            substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), const_map, changed);
             substitute_constants_expr(cond, const_map, changed);
         }
         PreHirStmt::For {
@@ -1306,7 +1306,7 @@ fn substitute_constants_in_stmt(
             if let Some(u) = update {
                 substitute_constants_in_stmt(u, const_map, changed);
             }
-            substitute_constants_in_stmts(body, const_map, changed);
+            substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), const_map, changed);
         }
         PreHirStmt::Switch {
             expr,
@@ -1315,9 +1315,9 @@ fn substitute_constants_in_stmt(
         } => {
             substitute_constants_expr(expr, const_map, changed);
             for case in cases.iter_mut() {
-                substitute_constants_in_stmts(&mut case.body, const_map, changed);
+                substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), const_map, changed);
             }
-            substitute_constants_in_stmts(default, const_map, changed);
+            substitute_constants_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), const_map, changed);
         }
         _ => {}
     }

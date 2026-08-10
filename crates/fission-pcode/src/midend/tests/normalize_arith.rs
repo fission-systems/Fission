@@ -569,8 +569,8 @@ fn condition_canonicalizer_turns_nonzero_compare_into_truthy_value() {
                 bits: 32,
                 signed: true,
             },
-        )))],
-        else_body: vec![],
+        )))].into(),
+        else_body: vec![].into(),
     };
     normalize_stmt(&mut stmt);
     match stmt {
@@ -957,8 +957,8 @@ fn logical_and_with_self_equality_tautology_collapses() {
             }),
             ty: NirType::Bool,
         },
-        then_body: vec![PreHirStmt::Return(None)],
-        else_body: vec![],
+        then_body: vec![PreHirStmt::Return(None)].into(),
+        else_body: vec![].into(),
     };
     normalize_stmt(&mut stmt);
     match stmt {
@@ -1078,8 +1078,8 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
                     }),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Return(None)],
-                else_body: vec![],
+                then_body: vec![PreHirStmt::Return(None)].into(),
+                else_body: vec![].into(),
             },
         ],
         ..Default::default()
@@ -1473,11 +1473,11 @@ fn normalize_conditional_const_propagates_equality_branches() {
             then_body: vec![PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("y".to_string()),
                 rhs: PreHirExpr::Var("x".to_string()),
-            }],
+            }].into(),
             else_body: vec![PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("y".to_string()),
                 rhs: PreHirExpr::Var("x".to_string()),
-            }],
+            }].into(),
         }],
         is_64bit: false,
         ..Default::default()
@@ -1635,7 +1635,7 @@ fn normalize_conditional_move() {
                             signed: true,
                         },
                     ),
-                }],
+                }].into(),
                 else_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("x".to_string()),
                     rhs: PreHirExpr::Const(
@@ -1645,7 +1645,7 @@ fn normalize_conditional_move() {
                             signed: true,
                         },
                     ),
-                }],
+                }].into(),
             },
             // Scenario 2: Default-Override
             PreHirStmt::Assign {
@@ -1669,8 +1669,8 @@ fn normalize_conditional_move() {
                             signed: true,
                         },
                     ),
-                }],
-                else_body: vec![],
+                }].into(),
+                else_body: vec![].into(),
             },
         ],
         is_64bit: false,
@@ -2684,10 +2684,10 @@ fn normalize_conditional_const_folds_implied_true_nested_cond() {
         cond: cmp_x(PreHirBinaryOp::SGt, 0),
         then_body: vec![PreHirStmt::If {
             cond: cmp_x(PreHirBinaryOp::SGe, 0),
-            then_body: vec![assign_y(1)],
-            else_body: vec![assign_y(2)],
-        }],
-        else_body: vec![],
+            then_body: vec![assign_y(1)].into(),
+            else_body: vec![assign_y(2)].into(),
+        }].into(),
+        else_body: vec![].into(),
     }]);
 
     assert!(apply_conditional_const_pass(&mut func));
@@ -2712,10 +2712,10 @@ fn normalize_conditional_const_folds_implied_false_nested_cond() {
         cond: cmp_x(PreHirBinaryOp::SGt, 0),
         then_body: vec![PreHirStmt::If {
             cond: cmp_x(PreHirBinaryOp::SLt, 0),
-            then_body: vec![assign_y(1)],
-            else_body: vec![assign_y(2)],
-        }],
-        else_body: vec![],
+            then_body: vec![assign_y(1)].into(),
+            else_body: vec![assign_y(2)].into(),
+        }].into(),
+        else_body: vec![].into(),
     }]);
 
     assert!(apply_conditional_const_pass(&mut func));
@@ -2738,12 +2738,12 @@ fn normalize_conditional_const_keeps_undecidable_else_branch_cond() {
     // else of (x > 0) implies x <= 0; (x >= 0) still undecidable (x may be 0)
     let mut func = cond_const_test_func(vec![PreHirStmt::If {
         cond: cmp_x(PreHirBinaryOp::SGt, 0),
-        then_body: vec![],
+        then_body: vec![].into(),
         else_body: vec![PreHirStmt::If {
             cond: cmp_x(PreHirBinaryOp::SGe, 0),
-            then_body: vec![assign_y(1)],
-            else_body: vec![assign_y(2)],
-        }],
+            then_body: vec![assign_y(1)].into(),
+            else_body: vec![assign_y(2)].into(),
+        }].into(),
     }]);
 
     apply_conditional_const_pass(&mut func);
@@ -2781,11 +2781,11 @@ fn normalize_conditional_const_write_invalidates_range() {
             },
             PreHirStmt::If {
                 cond: cmp_x(PreHirBinaryOp::SGe, 0),
-                then_body: vec![assign_y(1)],
-                else_body: vec![assign_y(2)],
+                then_body: vec![assign_y(1)].into(),
+                else_body: vec![assign_y(2)].into(),
             },
-        ],
-        else_body: vec![],
+        ].into(),
+        else_body: vec![].into(),
     }]);
 
     apply_conditional_const_pass(&mut func);
@@ -2810,10 +2810,10 @@ fn normalize_conditional_const_label_in_dead_arm_blocks_fold() {
         cond: cmp_x(PreHirBinaryOp::SGt, 0),
         then_body: vec![PreHirStmt::If {
             cond: cmp_x(PreHirBinaryOp::SGe, 0),
-            then_body: vec![assign_y(1)],
-            else_body: vec![PreHirStmt::Label("join_1".to_string()), assign_y(2)],
-        }],
-        else_body: vec![],
+            then_body: vec![assign_y(1)].into(),
+            else_body: vec![PreHirStmt::Label("join_1".to_string()), assign_y(2)].into(),
+        }].into(),
+        else_body: vec![].into(),
     }]);
 
     apply_conditional_const_pass(&mut func);
@@ -2851,15 +2851,15 @@ fn normalize_conditional_const_branch_write_invalidates_eq_env_after_join() {
                 then_body: vec![PreHirStmt::Assign {
                     lhs: PreHirLValue::Var("x".to_string()),
                     rhs: PreHirExpr::Const(1, i32_ty),
-                }],
-                else_body: vec![],
+                }].into(),
+                else_body: vec![].into(),
             },
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var("y".to_string()),
                 rhs: PreHirExpr::Var("x".to_string()),
             },
-        ],
-        else_body: vec![],
+        ].into(),
+        else_body: vec![].into(),
     }]);
 
     apply_conditional_const_pass(&mut func);

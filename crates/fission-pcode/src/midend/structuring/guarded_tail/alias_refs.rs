@@ -334,14 +334,14 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("reg".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Expr(PreHirExpr::Var("middle".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("block_mid".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_mid".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Goto("block_mid".to_string()),
             PreHirStmt::Label("block_mid".to_string()),
@@ -351,8 +351,8 @@ mod tests {
                     expr: Box::new(PreHirExpr::Var("cond".to_string())),
                     ty: NirType::Bool,
                 },
-                then_body: vec![PreHirStmt::Goto("block_tail".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Goto("block_tail".to_string()),
             PreHirStmt::Label("block_tail".to_string()),
@@ -379,14 +379,14 @@ mod tests {
         let body = vec![
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Expr(PreHirExpr::Var("payload".to_string())),
             PreHirStmt::If {
                 cond: PreHirExpr::Var("cond".to_string()),
-                then_body: vec![PreHirStmt::Goto("join0".to_string())],
-                else_body: Vec::new(),
+                then_body: vec![PreHirStmt::Goto("join0".to_string())].into(),
+                else_body: Vec::new().into(),
             },
             PreHirStmt::Label("join0".to_string()),
             PreHirStmt::Expr(PreHirExpr::Var("body".to_string())),

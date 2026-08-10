@@ -675,8 +675,8 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                 return Ok(ConditionalTailLoweringResult::Lowered((
                     PreHirStmt::If {
                         cond: negate_expr(cond.clone()),
-                        then_body: Rc::unwrap_or_clone(false_body),
-                        else_body: Vec::new(),
+                        then_body: false_body,
+                        else_body: Rc::new(Vec::new()),
                     },
                     skip_to,
                 )));
@@ -696,8 +696,8 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                 return Ok(ConditionalTailLoweringResult::Lowered((
                     PreHirStmt::If {
                         cond: cond.clone(),
-                        then_body: Rc::unwrap_or_clone(true_body),
-                        else_body: Vec::new(),
+                        then_body: true_body,
+                        else_body: Rc::new(Vec::new()),
                     },
                     skip_to,
                 )));
@@ -764,12 +764,12 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                                 )) => {
                                     let mut block_stmts = vec![PreHirStmt::If {
                                         cond: cond.clone(),
-                                        then_body: Rc::unwrap_or_clone(then_body),
-                                        else_body: Rc::unwrap_or_clone(else_body),
+                                        then_body,
+                                        else_body,
                                     }];
                                     block_stmts.extend(Rc::unwrap_or_clone(shared_tail_body));
                                     return Ok(ConditionalTailLoweringResult::Lowered((
-                                        PreHirStmt::Block(block_stmts),
+                                        PreHirStmt::Block(Rc::new(block_stmts)),
                                         shared_skip.max(then_skip.max(else_skip)),
                                     )));
                                 }
@@ -819,8 +819,8 @@ pub fn lower_conditional_tail(host: &mut impl StructuringHost,
                 ) => Ok(ConditionalTailLoweringResult::Lowered((
                     PreHirStmt::If {
                         cond,
-                        then_body: Rc::unwrap_or_clone(then_body),
-                        else_body: Rc::unwrap_or_clone(else_body),
+                        then_body,
+                        else_body,
                     },
                     then_skip.max(else_skip),
                 ))),

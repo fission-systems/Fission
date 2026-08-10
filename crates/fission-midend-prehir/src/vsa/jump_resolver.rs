@@ -92,7 +92,7 @@ fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv) -> bool {
                     .find(|c| c.values.contains(&v_signed))
                     .map(|c| c.body.clone())
                     .unwrap_or_else(|| default.clone());
-                stmts.splice(i..=i, replacement);
+                stmts.splice(i..=i, std::rc::Rc::unwrap_or_clone(replacement));
                 add_dispatcher_shape_recoveries(1);
                 changed = true;
                 // Don't advance i — the replacement stmts need processing.
@@ -115,11 +115,11 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
 
             // Recurse into case bodies.
             for case in cases.iter_mut() {
-                if refine_stmts(&mut case.body, env) {
+                if refine_stmts(std::rc::Rc::make_mut(&mut case.body), env) {
                     changed = true;
                 }
             }
-            if refine_stmts(default, env) {
+            if refine_stmts(std::rc::Rc::make_mut(default), env) {
                 changed = true;
             }
 
@@ -160,8 +160,8 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
             else_body,
             cond,
         } => {
-            let mut changed = refine_stmts(then_body, env);
-            if refine_stmts(else_body, env) {
+            let mut changed = refine_stmts(std::rc::Rc::make_mut(then_body), env);
+            if refine_stmts(std::rc::Rc::make_mut(else_body), env) {
                 changed = true;
             }
 
@@ -169,33 +169,33 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv) -> bool {
             let range = eval_expr(cond, env);
             if let Some(v) = range.singleton_value() {
                 let replacement = if v != 0 {
-                    then_body.drain(..).collect::<Vec<_>>()
+                    std::rc::Rc::make_mut(then_body).drain(..).collect::<Vec<_>>()
                 } else {
-                    else_body.drain(..).collect::<Vec<_>>()
+                    std::rc::Rc::make_mut(else_body).drain(..).collect::<Vec<_>>()
                 };
-                *stmt = PreHirStmt::Block(replacement);
+                *stmt = PreHirStmt::Block(std::rc::Rc::new(replacement));
                 return true;
             }
             changed
         }
         PreHirStmt::While { body, cond } => {
-            let changed = refine_stmts(body, env);
+            let changed = refine_stmts(std::rc::Rc::make_mut(body), env);
             // If condition is provably false, remove the loop.
             let range = eval_expr(cond, env);
             if range.singleton_value() == Some(0) {
-                *stmt = PreHirStmt::Block(vec![]);
+                *stmt = PreHirStmt::Block(std::rc::Rc::new(vec![]));
                 return true;
             }
             changed
         }
-        PreHirStmt::DoWhile { body, cond: _ } => refine_stmts(body, env),
+        PreHirStmt::DoWhile { body, cond: _ } => refine_stmts(std::rc::Rc::make_mut(body), env),
         PreHirStmt::For {
             init: _,
             body,
             update: _,
             ..
-        } => refine_stmts(body, env),
-        PreHirStmt::Block(stmts) => refine_stmts(stmts, env),
+        } => refine_stmts(std::rc::Rc::make_mut(body), env),
+        PreHirStmt::Block(stmts) => refine_stmts(std::rc::Rc::make_mut(stmts), env),
         _ => false,
     }
 }

@@ -601,8 +601,8 @@ pub fn reconstruct_sese_final_body(
                     };
                     node_body.push(PreHirStmt::If {
                         cond,
-                        then_body,
-                        else_body,
+                        then_body: std::rc::Rc::new(then_body),
+                        else_body: std::rc::Rc::new(else_body),
                     });
                     explicit_edge_surface = true;
                 }
@@ -629,7 +629,7 @@ pub fn reconstruct_sese_final_body(
                                 .filter(|(_, target)| Some(*target) != default_target)
                                 .map(|(value, target)| PreHirSwitchCase {
                                     values: vec![*value],
-                                    body: vec![PreHirStmt::Goto(block_label(*target))],
+                                    body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(*target))]),
                                 })
                                 .collect()
                         } else {
@@ -643,7 +643,7 @@ pub fn reconstruct_sese_final_body(
                             .into_iter()
                             .map(|(value, target)| PreHirSwitchCase {
                                 values: vec![value],
-                                body: vec![PreHirStmt::Goto(block_label(target))],
+                                body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(target))]),
                             })
                             .collect()
                         }
@@ -657,9 +657,9 @@ pub fn reconstruct_sese_final_body(
                             })
                             .map(|(value, block_idx)| PreHirSwitchCase {
                                 values: vec![value],
-                                body: vec![PreHirStmt::Goto(block_label(
+                                body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(
                                     host.block_target_key(block_idx),
-                                ))],
+                                ))]),
                             })
                             .collect()
                     } else {
@@ -669,18 +669,20 @@ pub fn reconstruct_sese_final_body(
                             .enumerate()
                             .map(|(i, t)| PreHirSwitchCase {
                                 values: vec![min_val + i as i64],
-                                body: vec![PreHirStmt::Goto(block_label(t))],
+                                body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(t))]),
                             })
                             .collect()
                     };
                     node_body.push(PreHirStmt::Switch {
                         expr,
                         cases,
-                        default: default_target
-                            .map(block_label)
-                            .map(PreHirStmt::Goto)
-                            .into_iter()
-                            .collect(),
+                        default: std::rc::Rc::new(
+                            default_target
+                                .map(block_label)
+                                .map(PreHirStmt::Goto)
+                                .into_iter()
+                                .collect(),
+                        ),
                     });
                     explicit_edge_surface = true;
                 }

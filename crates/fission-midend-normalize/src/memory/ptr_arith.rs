@@ -1422,7 +1422,7 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             changed |= recover_in_expr(expr, binding_types);
         }
         PreHirStmt::Block(body) => {
-            changed |= recover_in_stmts(body, binding_types);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
         }
         PreHirStmt::If {
             cond,
@@ -1430,15 +1430,15 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             else_body,
         } => {
             changed |= recover_condition_expr(cond, binding_types);
-            changed |= recover_in_stmts(then_body, binding_types);
-            changed |= recover_in_stmts(else_body, binding_types);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), binding_types);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), binding_types);
         }
         PreHirStmt::While { cond, body } => {
             changed |= recover_condition_expr(cond, binding_types);
-            changed |= recover_in_stmts(body, binding_types);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
         }
         PreHirStmt::DoWhile { body, cond } => {
-            changed |= recover_in_stmts(body, binding_types);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
             changed |= recover_condition_expr(cond, binding_types);
         }
         PreHirStmt::For {
@@ -1456,7 +1456,7 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
             if let Some(u) = update {
                 changed |= recover_in_stmt(u, binding_types);
             }
-            changed |= recover_in_stmts(body, binding_types);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), binding_types);
         }
         PreHirStmt::Switch {
             expr,
@@ -1465,9 +1465,9 @@ fn recover_in_stmt(stmt: &mut PreHirStmt, binding_types: &HashMap<String, NirTyp
         } => {
             changed |= recover_in_expr(expr, binding_types);
             for case in cases.iter_mut() {
-                changed |= recover_in_stmts(&mut case.body, binding_types);
+                changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), binding_types);
             }
-            changed |= recover_in_stmts(default, binding_types);
+            changed |= recover_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), binding_types);
         }
         PreHirStmt::Return(Some(expr)) => {
             changed |= recover_in_expr(expr, binding_types);
@@ -1629,21 +1629,21 @@ fn normalize_zero_index_stmt(stmt: &mut PreHirStmt) -> bool {
             else_body,
         } => {
             changed |= normalize_zero_index_expr(cond);
-            for stmt in then_body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body) {
                 changed |= normalize_zero_index_stmt(stmt);
             }
-            for stmt in else_body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body) {
                 changed |= normalize_zero_index_stmt(stmt);
             }
         }
         PreHirStmt::While { cond, body } => {
             changed |= normalize_zero_index_expr(cond);
-            for stmt in body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= normalize_zero_index_stmt(stmt);
             }
         }
         PreHirStmt::DoWhile { body, cond } => {
-            for stmt in body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= normalize_zero_index_stmt(stmt);
             }
             changed |= normalize_zero_index_expr(cond);
@@ -1663,7 +1663,7 @@ fn normalize_zero_index_stmt(stmt: &mut PreHirStmt) -> bool {
             if let Some(update) = update {
                 changed |= normalize_zero_index_stmt(update);
             }
-            for stmt in body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= normalize_zero_index_stmt(stmt);
             }
         }
@@ -1674,16 +1674,16 @@ fn normalize_zero_index_stmt(stmt: &mut PreHirStmt) -> bool {
         } => {
             changed |= normalize_zero_index_expr(expr);
             for case in cases {
-                for stmt in &mut case.body {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body) {
                     changed |= normalize_zero_index_stmt(stmt);
                 }
             }
-            for stmt in default {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default) {
                 changed |= normalize_zero_index_stmt(stmt);
             }
         }
         PreHirStmt::Block(body) => {
-            for stmt in body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 changed |= normalize_zero_index_stmt(stmt);
             }
         }

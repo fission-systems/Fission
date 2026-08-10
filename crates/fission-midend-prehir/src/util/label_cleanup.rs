@@ -2,6 +2,7 @@
 
 use crate::ir::{PreHirStmt, PreHirSwitchCase};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 pub fn cleanup_redundant_labels(
     body: Vec<PreHirStmt>,
@@ -86,7 +87,10 @@ fn rewrite_stmt_labels(
 
 fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> PreHirStmt {
     match stmt {
-        PreHirStmt::Block(body) => PreHirStmt::Block(rewrite_stmt_labels(body, aliases)),
+        PreHirStmt::Block(body) => PreHirStmt::Block(Rc::new(rewrite_stmt_labels(
+            Rc::unwrap_or_clone(body),
+            aliases,
+        ))),
         PreHirStmt::Switch {
             expr,
             cases,
@@ -97,10 +101,10 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
                 .into_iter()
                 .map(|case| PreHirSwitchCase {
                     values: case.values,
-                    body: rewrite_stmt_labels(case.body, aliases),
+                    body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(case.body), aliases)),
                 })
                 .collect(),
-            default: rewrite_stmt_labels(default, aliases),
+            default: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(default), aliases)),
         },
         PreHirStmt::If {
             cond,
@@ -108,15 +112,15 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
             else_body,
         } => PreHirStmt::If {
             cond,
-            then_body: rewrite_stmt_labels(then_body, aliases),
-            else_body: rewrite_stmt_labels(else_body, aliases),
+            then_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(then_body), aliases)),
+            else_body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(else_body), aliases)),
         },
         PreHirStmt::While { cond, body } => PreHirStmt::While {
             cond,
-            body: rewrite_stmt_labels(body, aliases),
+            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases)),
         },
         PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
-            body: rewrite_stmt_labels(body, aliases),
+            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases)),
             cond,
         },
         PreHirStmt::For {
@@ -142,7 +146,7 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
                         .unwrap(),
                 )
             }),
-            body: rewrite_stmt_labels(body, aliases),
+            body: Rc::new(rewrite_stmt_labels(Rc::unwrap_or_clone(body), aliases)),
         },
         PreHirStmt::Label(label) => PreHirStmt::Label(canonicalize_label(&label, aliases)),
         PreHirStmt::Goto(label) => PreHirStmt::Goto(canonicalize_label(&label, aliases)),
@@ -164,17 +168,17 @@ fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut HashSet<St
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_stmt_referenced_labels(stmt, referenced);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
@@ -183,10 +187,10 @@ fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut HashSet<St
             else_body,
             ..
         } => {
-            for stmt in then_body {
+            for stmt in then_body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
-            for stmt in else_body {
+            for stmt in else_body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
@@ -217,17 +221,17 @@ fn collect_stmt_referenced_label_counts(stmt: &PreHirStmt, counts: &mut HashMap<
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_stmt_referenced_label_counts(stmt, counts);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
@@ -236,10 +240,10 @@ fn collect_stmt_referenced_label_counts(stmt: &PreHirStmt, counts: &mut HashMap<
             else_body,
             ..
         } => {
-            for stmt in then_body {
+            for stmt in then_body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
-            for stmt in else_body {
+            for stmt in else_body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }

@@ -2975,8 +2975,8 @@ mod tests {
                 )),
                 ty: NirType::Bool,
             },
-            then_body: vec![],
-            else_body: vec![],
+            then_body: vec![].into(),
+            else_body: vec![].into(),
         }];
         let mut func = make_func(vec![make_binding("a")], body, NirType::Unknown);
         super::apply_use_driven_type_infer_pass(&mut func);
@@ -3066,8 +3066,8 @@ mod tests {
                 target: "param_1".to_owned(),
                 args: Vec::new(),
                 ty: NirType::Unknown,
-            }))],
-            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("fallback".to_owned())))],
+            }))].into(),
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("fallback".to_owned())))].into(),
         }];
         let mut func = make_func(Vec::new(), body, NirType::Unknown);
         func.is_64bit = false;
@@ -3089,8 +3089,8 @@ mod tests {
                 rhs: Box::new(PreHirExpr::Var("b".to_owned())),
                 ty: NirType::Bool,
             },
-            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("b".to_owned())))],
-            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("a".to_owned())))],
+            then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("b".to_owned())))].into(),
+            else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Var("a".to_owned())))].into(),
         }];
         let mut func = PreHirFunction {
             name: "signed_max".to_owned(),
@@ -3425,8 +3425,8 @@ mod tests {
                         rhs: Box::new(PreHirExpr::Const(10, u32_ty.clone())),
                         ty: NirType::Bool,
                     },
-                    then_body: Vec::new(),
-                    else_body: Vec::new(),
+                    then_body: Vec::new().into(),
+                    else_body: Vec::new().into(),
                 },
                 PreHirStmt::Assign {
                     lhs: PreHirLValue::Deref {
@@ -3452,8 +3452,8 @@ mod tests {
                 rhs: Box::new(PreHirExpr::Var("b".to_owned())),
                 ty: NirType::Bool,
             },
-            then_body: vec![],
-            else_body: vec![],
+            then_body: vec![].into(),
+            else_body: vec![].into(),
         }];
         let mut func = make_func(
             vec![make_binding("a"), make_binding("b")],
@@ -3480,8 +3480,8 @@ mod tests {
                 )),
                 ty: NirType::Bool,
             },
-            then_body: vec![],
-            else_body: vec![],
+            then_body: vec![].into(),
+            else_body: vec![].into(),
         }];
         let mut func = make_func(vec![make_binding("a")], body, NirType::Unknown);
         assert!(super::apply_use_driven_type_infer_pass(&mut func));

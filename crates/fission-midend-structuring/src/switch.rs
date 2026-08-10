@@ -89,7 +89,7 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
             }
             cases.push(PreHirSwitchCase {
                 values: vec![value],
-                body: case_body,
+                body: std::rc::Rc::new(case_body),
             });
         }
         merge_equivalent_switch_cases(&mut cases);
@@ -125,7 +125,7 @@ pub fn try_lower_switch(host: &mut impl StructuringHost,
             PreHirStmt::Switch {
                 expr: parsed.selector,
                 cases,
-                default: default_body,
+                default: std::rc::Rc::new(default_body),
             },
             skip_to,
         )))
@@ -219,7 +219,7 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
             max_skip = max_skip.max(skip_to).max(case_idx + 1);
             cases.push(PreHirSwitchCase {
                 values: vec![value],
-                body: std::rc::Rc::unwrap_or_clone(case_body),
+                body: case_body,
             });
         }
         if !success || cases.len() < 2 {
@@ -240,9 +240,9 @@ pub fn try_lower_direct_dispatcher_switch(host: &mut impl StructuringHost,
                 return Ok(None);
             };
             max_skip = max_skip.max(skip_to).max(default_idx + 1);
-            std::rc::Rc::unwrap_or_clone(default_body)
+            default_body
         } else {
-            Vec::new()
+            std::rc::Rc::new(Vec::new())
         };
 
          *host.active_switch_targets_mut() = old_targets;
@@ -541,7 +541,7 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirUnaryOp};
                         bits: 32,
                         signed: false,
                     },
-                )))],
+                )))].into(),
             },
             PreHirSwitchCase {
                 values: vec![2],
@@ -551,7 +551,7 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirUnaryOp};
                         bits: 32,
                         signed: false,
                     },
-                )))],
+                )))].into(),
             },
             PreHirSwitchCase {
                 values: vec![3],
@@ -561,7 +561,7 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirUnaryOp};
                         bits: 32,
                         signed: false,
                     },
-                )))],
+                )))].into(),
             },
         ];
 
@@ -652,11 +652,11 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirUnaryOp};
                 body: vec![
                     PreHirStmt::Label("block_0x0000".to_string()),
                     PreHirStmt::Goto(next_label.clone()),
-                ],
+                ].into(),
             },
             PreHirSwitchCase {
                 values: vec![1],
-                body: vec![PreHirStmt::Label(next_label.clone()), PreHirStmt::Return(None)],
+                body: vec![PreHirStmt::Label(next_label.clone()), PreHirStmt::Return(None)].into(),
             },
         ];
 
@@ -681,11 +681,11 @@ use fission_midend_prehir::{PreHirBinaryOp, PreHirUnaryOp};
                 body: vec![
                     PreHirStmt::Label("block_a".to_string()),
                     PreHirStmt::Goto("block_x".to_string()), // points somewhere else
-                ],
+                ].into(),
             },
             PreHirSwitchCase {
                 values: vec![1],
-                body: vec![PreHirStmt::Label("block_b".to_string()), PreHirStmt::Return(None)],
+                body: vec![PreHirStmt::Label("block_b".to_string()), PreHirStmt::Return(None)].into(),
             },
         ];
         let patched = detect_and_patch_case_fallthrough(&mut cases);

@@ -100,8 +100,8 @@ fn make_flag_func(
     let mut body = flag_assigns;
     body.push(PreHirStmt::If {
         cond,
-        then_body: vec![PreHirStmt::Return(Some(var("a")))],
-        else_body: vec![PreHirStmt::Return(Some(var("b")))],
+        then_body: vec![PreHirStmt::Return(Some(var("a")))].into(),
+        else_body: vec![PreHirStmt::Return(Some(var("b")))].into(),
     });
     PreHirFunction {
         name: "test_flag_recovery".to_string(),
@@ -416,8 +416,8 @@ fn dead_flag_assigns_removed_without_condition_rewrite() {
                     var("a"),
                     PreHirExpr::Const(0, i32_ty()),
                 ),
-                then_body: vec![PreHirStmt::Return(Some(var("b")))],
-                else_body: vec![PreHirStmt::Return(Some(var("a")))],
+                then_body: vec![PreHirStmt::Return(Some(var("b")))].into(),
+                else_body: vec![PreHirStmt::Return(Some(var("a")))].into(),
             },
         ],
         ..Default::default()

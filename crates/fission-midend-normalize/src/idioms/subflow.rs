@@ -186,7 +186,7 @@ fn optimize_stmt(
             changed |= optimize_expr(va_list, type_map, nz_masks);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= optimize_stmts(body, type_map, nz_masks);
+            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, nz_masks);
         }
         PreHirStmt::For {
             init,
@@ -203,7 +203,7 @@ fn optimize_stmt(
             if let Some(u) = update {
                 changed |= optimize_stmt(u.as_mut(), type_map, nz_masks);
             }
-            changed |= optimize_stmts(body, type_map, nz_masks);
+            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), type_map, nz_masks);
         }
         PreHirStmt::If {
             cond,
@@ -211,8 +211,8 @@ fn optimize_stmt(
             else_body,
         } => {
             changed |= optimize_expr(cond, type_map, nz_masks);
-            changed |= optimize_stmts(then_body, type_map, nz_masks);
-            changed |= optimize_stmts(else_body, type_map, nz_masks);
+            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), type_map, nz_masks);
+            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), type_map, nz_masks);
         }
         PreHirStmt::Switch {
             expr,
@@ -221,9 +221,9 @@ fn optimize_stmt(
         } => {
             changed |= optimize_expr(expr, type_map, nz_masks);
             for case in cases {
-                changed |= optimize_stmts(&mut case.body, type_map, nz_masks);
+                changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), type_map, nz_masks);
             }
-            changed |= optimize_stmts(default, type_map, nz_masks);
+            changed |= optimize_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), type_map, nz_masks);
         }
         PreHirStmt::Return(None)
         | PreHirStmt::Label(_)

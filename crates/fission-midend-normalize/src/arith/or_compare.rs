@@ -32,7 +32,7 @@ fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
             changed |= simplify_expr(expr);
         }
         PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            changed |= simplify_stmts(body);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::For {
             init,
@@ -49,7 +49,7 @@ fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
             if let Some(u) = update {
                 changed |= simplify_stmt(u.as_mut());
             }
-            changed |= simplify_stmts(body);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
         }
         PreHirStmt::If {
             cond,
@@ -57,8 +57,8 @@ fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
             else_body,
         } => {
             changed |= simplify_expr(cond);
-            changed |= simplify_stmts(then_body);
-            changed |= simplify_stmts(else_body);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
         }
         PreHirStmt::Switch {
             expr,
@@ -67,9 +67,9 @@ fn simplify_stmt(stmt: &mut PreHirStmt) -> bool {
         } => {
             changed |= simplify_expr(expr);
             for case in cases {
-                changed |= simplify_stmts(&mut case.body);
+                changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
             }
-            changed |= simplify_stmts(default);
+            changed |= simplify_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
         }
         PreHirStmt::VaStart { va_list, .. } => {
             changed |= simplify_expr(va_list);

@@ -375,7 +375,7 @@ pub(super) fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement
         PreHirStmt::VaStart { va_list, .. } => replace_var_in_expr(va_list, name, replacement),
         PreHirStmt::Expr(expr) => replace_var_in_expr(expr, name, replacement),
         PreHirStmt::Block(stmts) => {
-            for stmt in stmts {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
         }
@@ -386,11 +386,11 @@ pub(super) fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement
         } => {
             replace_var_in_expr(expr, name, replacement);
             for case in cases {
-                for stmt in &mut case.body {
+                for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body) {
                     replace_var_in_stmt(stmt, name, replacement);
                 }
             }
-            for stmt in default {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
         }
@@ -400,21 +400,21 @@ pub(super) fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement
             else_body,
         } => {
             replace_var_in_expr(cond, name, replacement);
-            for stmt in then_body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
-            for stmt in else_body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
         }
         PreHirStmt::While { cond, body } => {
             replace_var_in_expr(cond, name, replacement);
-            for stmt in body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
         }
         PreHirStmt::DoWhile { body, cond } => {
-            for stmt in body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
             replace_var_in_expr(cond, name, replacement);
@@ -434,7 +434,7 @@ pub(super) fn replace_var_in_stmt(stmt: &mut PreHirStmt, name: &str, replacement
             if let Some(upd_stmt) = update {
                 replace_var_in_stmt(upd_stmt, name, replacement);
             }
-            for stmt in body {
+            for stmt in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
         }
@@ -557,17 +557,17 @@ pub(super) fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_stmt_referenced_labels(stmt, referenced);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
@@ -576,10 +576,10 @@ pub(super) fn collect_stmt_referenced_labels(stmt: &PreHirStmt, referenced: &mut
             else_body,
             ..
         } => {
-            for stmt in then_body {
+            for stmt in then_body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
-            for stmt in else_body {
+            for stmt in else_body.iter() {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
         }
@@ -605,17 +605,17 @@ pub(super) fn collect_stmt_referenced_label_counts(
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_stmt_referenced_label_counts(stmt, counts);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
@@ -624,10 +624,10 @@ pub(super) fn collect_stmt_referenced_label_counts(
             else_body,
             ..
         } => {
-            for stmt in then_body {
+            for stmt in then_body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
-            for stmt in else_body {
+            for stmt in else_body.iter() {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
         }
@@ -667,17 +667,17 @@ fn collect_stmt_defined_labels(stmt: &PreHirStmt, labels: &mut Vec<String>) {
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for stmt in body {
+            for stmt in body.iter() {
                 collect_stmt_defined_labels(stmt, labels);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for stmt in &case.body {
+                for stmt in case.body.iter() {
                     collect_stmt_defined_labels(stmt, labels);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter() {
                 collect_stmt_defined_labels(stmt, labels);
             }
         }
@@ -686,10 +686,10 @@ fn collect_stmt_defined_labels(stmt: &PreHirStmt, labels: &mut Vec<String>) {
             else_body,
             ..
         } => {
-            for stmt in then_body {
+            for stmt in then_body.iter() {
                 collect_stmt_defined_labels(stmt, labels);
             }
-            for stmt in else_body {
+            for stmt in else_body.iter() {
                 collect_stmt_defined_labels(stmt, labels);
             }
         }

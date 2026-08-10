@@ -56,7 +56,7 @@ fn hoist_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
     for stmt in stmts.iter_mut() {
         match stmt {
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-                if hoist_in_stmts(body) {
+                if hoist_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)) {
                     changed = true;
                 }
             }
@@ -66,7 +66,7 @@ fn hoist_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 if let Some(s) = init {
                     hoist_single(s);
                 }
-                if hoist_in_stmts(body) {
+                if hoist_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)) {
                     changed = true;
                 }
                 if let Some(s) = update {
@@ -78,25 +78,25 @@ fn hoist_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                if hoist_in_stmts(then_body) {
+                if hoist_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body)) {
                     changed = true;
                 }
-                if hoist_in_stmts(else_body) {
+                if hoist_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body)) {
                     changed = true;
                 }
             }
             PreHirStmt::Block(body) => {
-                if hoist_in_stmts(body) {
+                if hoist_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body)) {
                     changed = true;
                 }
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    if hoist_in_stmts(&mut case.body) {
+                    if hoist_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body)) {
                         changed = true;
                     }
                 }
-                if hoist_in_stmts(default) {
+                if hoist_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default)) {
                     changed = true;
                 }
             }
@@ -160,7 +160,7 @@ fn extract_invariants_from_loop(loop_stmt: &mut PreHirStmt) -> Vec<PreHirStmt> {
     // 3. Remove them from the body (in reverse order to preserve indices).
     let mut hoisted = Vec::with_capacity(invariant_indices.len());
     for &idx in invariant_indices.iter().rev() {
-        hoisted.push(body.remove(idx));
+        hoisted.push(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).remove(idx));
     }
     hoisted.reverse(); // Restore original order.
     hoisted

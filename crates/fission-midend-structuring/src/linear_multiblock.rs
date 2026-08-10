@@ -119,7 +119,7 @@ pub fn lower_structured_switch_terminator(
         max_skip = max_skip.max(skip_to);
         cases.push(PreHirSwitchCase {
             values: vec![value],
-            body: std::rc::Rc::unwrap_or_clone(case_body),
+            body: case_body,
         });
     }
     crate::helpers::merge_equivalent_switch_cases(&mut cases);
@@ -129,9 +129,9 @@ pub fn lower_structured_switch_terminator(
             return Ok(None);
         };
         max_skip = max_skip.max(default_skip);
-        std::rc::Rc::unwrap_or_clone(default_body)
+        default_body
     } else {
-        Vec::new()
+        std::rc::Rc::new(Vec::new())
     };
 
     let skip_to = match exit {
@@ -230,8 +230,8 @@ pub fn build_linear_multiblock_body(
                 };
                 body.push(PreHirStmt::If {
                     cond,
-                    then_body,
-                    else_body,
+                    then_body: std::rc::Rc::new(then_body),
+                    else_body: std::rc::Rc::new(else_body),
                 });
             }
             LoweredTerminator::Fallthrough(None) => {}
@@ -271,7 +271,7 @@ pub fn build_linear_multiblock_body(
                         .filter(|(_, target)| Some(*target) != default_target)
                         .map(|(value, target)| PreHirSwitchCase {
                             values: vec![*value],
-                            body: vec![PreHirStmt::Goto(block_label(*target))],
+                            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(*target))]),
                         })
                         .collect()
                 } else {
@@ -281,18 +281,20 @@ pub fn build_linear_multiblock_body(
                         .enumerate()
                         .map(|(i, t)| PreHirSwitchCase {
                             values: vec![min_val + i as i64],
-                            body: vec![PreHirStmt::Goto(block_label(t))],
+                            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(t))]),
                         })
                         .collect()
                 };
                 body.push(PreHirStmt::Switch {
                     expr,
                     cases,
-                    default: default_target
-                        .map(block_label)
-                        .map(PreHirStmt::Goto)
-                        .into_iter()
-                        .collect(),
+                    default: std::rc::Rc::new(
+                        default_target
+                            .map(block_label)
+                            .map(PreHirStmt::Goto)
+                            .into_iter()
+                            .collect(),
+                    ),
                 });
             }
         }

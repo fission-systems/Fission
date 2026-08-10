@@ -76,11 +76,12 @@ fn fold_sequential_siblings(stmts: &mut Vec<PreHirStmt>) -> bool {
                     then_body: then2, ..
                 } = stmts.remove(idx)
                 {
-                    then1.extend(then2);
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut then1)
+                        .extend(std::rc::Rc::unwrap_or_clone(then2));
                     let merged_if = PreHirStmt::If {
                         cond: cond1,
                         then_body: then1,
-                        else_body: Vec::new(),
+                        else_body: Vec::new().into(),
                     };
                     stmts.insert(idx, merged_if);
                     changed = true;
@@ -99,21 +100,21 @@ fn fold_sequential_siblings(stmts: &mut Vec<PreHirStmt>) -> bool {
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= fold_sequential_siblings(body);
+                changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= fold_sequential_siblings(then_body);
-                changed |= fold_sequential_siblings(else_body);
+                changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
+                changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= fold_sequential_siblings(&mut case.body);
+                    changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= fold_sequential_siblings(default);
+                changed |= fold_sequential_siblings(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -144,7 +145,7 @@ fn fold_conditions(
             // Case 1: Redundant If statement where condition is proven True
             if true_conds.contains(&cond) {
                 if let PreHirStmt::If { then_body, .. } = stmts.remove(idx) {
-                    for (i, s) in then_body.into_iter().enumerate() {
+                    for (i, s) in std::rc::Rc::unwrap_or_clone(then_body).into_iter().enumerate() {
                         stmts.insert(idx + i, s);
                     }
                     changed = true;
@@ -154,7 +155,7 @@ fn fold_conditions(
             // Case 2: Redundant If statement where condition is proven False
             else if false_conds.contains(&cond) {
                 if let PreHirStmt::If { else_body, .. } = stmts.remove(idx) {
-                    for (i, s) in else_body.into_iter().enumerate() {
+                    for (i, s) in std::rc::Rc::unwrap_or_clone(else_body).into_iter().enumerate() {
                         stmts.insert(idx + i, s);
                     }
                     changed = true;
@@ -173,20 +174,20 @@ fn fold_conditions(
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
                     nested_true.push(cond.clone());
-                    changed |= fold_conditions(then_body, &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), &mut nested_true, &mut nested_false);
 
                     // Inside else_body: cond is False
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
                     nested_false.push(cond.clone());
-                    changed |= fold_conditions(else_body, &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), &mut nested_true, &mut nested_false);
                 }
             }
         } else {
             // For other control-flow statements, recursively fold with safety invalidations
             match &mut stmts[idx] {
                 PreHirStmt::Block(body) => {
-                    changed |= fold_conditions(body, true_conds, false_conds);
+                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), true_conds, false_conds);
                 }
                 PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
                     let mut assigned_in_body = HashSet::default();
@@ -198,7 +199,7 @@ fn fold_conditions(
                     for var in assigned_in_body {
                         invalidate_variable(&var, &mut nested_true, &mut nested_false);
                     }
-                    changed |= fold_conditions(body, &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut nested_true, &mut nested_false);
                 }
                 PreHirStmt::For {
                     init, update, body, ..
@@ -218,18 +219,18 @@ fn fold_conditions(
                     for var in assigned {
                         invalidate_variable(&var, &mut nested_true, &mut nested_false);
                     }
-                    changed |= fold_conditions(body, &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut nested_true, &mut nested_false);
                 }
                 PreHirStmt::Switch { cases, default, .. } => {
                     for case in cases {
                         let mut nested_true = true_conds.clone();
                         let mut nested_false = false_conds.clone();
                         changed |=
-                            fold_conditions(&mut case.body, &mut nested_true, &mut nested_false);
+                            fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), &mut nested_true, &mut nested_false);
                     }
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
-                    changed |= fold_conditions(default, &mut nested_true, &mut nested_false);
+                    changed |= fold_conditions(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), &mut nested_true, &mut nested_false);
                 }
                 _ => {}
             }
@@ -306,7 +307,7 @@ fn get_assigned_vars_in_stmt(stmt: &PreHirStmt, vars: &mut HashSet<String>) {
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            for s in body {
+            for s in body.iter() {
                 get_assigned_vars_in_stmt(s, vars);
             }
         }
@@ -315,20 +316,20 @@ fn get_assigned_vars_in_stmt(stmt: &PreHirStmt, vars: &mut HashSet<String>) {
             else_body,
             ..
         } => {
-            for s in then_body {
+            for s in then_body.iter() {
                 get_assigned_vars_in_stmt(s, vars);
             }
-            for s in else_body {
+            for s in else_body.iter() {
                 get_assigned_vars_in_stmt(s, vars);
             }
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                for s in &case.body {
+                for s in case.body.iter() {
                     get_assigned_vars_in_stmt(s, vars);
                 }
             }
-            for s in default {
+            for s in default.iter() {
                 get_assigned_vars_in_stmt(s, vars);
             }
         }
@@ -411,18 +412,18 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
         // Recurse into nested blocks first
         match &mut stmts[idx] {
             PreHirStmt::Block(body) => {
-                changed |= iblock_phi_pass(body);
+                changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= iblock_phi_pass(body);
+                changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= iblock_phi_pass(&mut case.body);
+                    changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
                 }
-                changed |= iblock_phi_pass(default);
+                changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
             }
             _ => {}
         }
@@ -600,16 +601,16 @@ fn replace_var_in_stmt(stmt: &mut PreHirStmt, var_name: &str, replacement: &PreH
             else_body,
         } => {
             replace_var_in_expr(cond, var_name, replacement);
-            for s in then_body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body).iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
-            for s in else_body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
         PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
             replace_var_in_expr(cond, var_name, replacement);
-            for s in body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
@@ -628,12 +629,12 @@ fn replace_var_in_stmt(stmt: &mut PreHirStmt, var_name: &str, replacement: &PreH
             if let Some(s) = update {
                 replace_var_in_stmt(s, var_name, replacement);
             }
-            for s in body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
         PreHirStmt::Block(body) => {
-            for s in body.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }
@@ -647,11 +648,11 @@ fn replace_var_in_stmt(stmt: &mut PreHirStmt, var_name: &str, replacement: &PreH
         } => {
             replace_var_in_expr(expr, var_name, replacement);
             for case in cases.iter_mut() {
-                for s in case.body.iter_mut() {
+                for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body).iter_mut() {
                     replace_var_in_stmt(s, var_name, replacement);
                 }
             }
-            for s in default.iter_mut() {
+            for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default).iter_mut() {
                 replace_var_in_stmt(s, var_name, replacement);
             }
         }

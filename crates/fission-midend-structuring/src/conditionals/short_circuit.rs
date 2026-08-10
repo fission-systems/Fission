@@ -105,8 +105,8 @@ pub fn try_lower_short_circuit_and(
 
         let stmt = PreHirStmt::If {
             cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalAnd)),
-            then_body: std::rc::Rc::unwrap_or_clone(then_body),
-            else_body: Vec::new(),
+            then_body,
+            else_body: std::rc::Rc::new(Vec::new()),
         };
 
         if first_prefix.is_empty() {
@@ -114,7 +114,7 @@ pub fn try_lower_short_circuit_and(
         } else {
             let mut wrapped = first_prefix;
             wrapped.push(stmt);
-            return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
+            return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
         }
     }
 }
@@ -207,8 +207,8 @@ pub fn try_lower_short_circuit_and_else(
 
         let stmt = PreHirStmt::If {
             cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalAnd)),
-            then_body: std::rc::Rc::unwrap_or_clone(then_body),
-            else_body: std::rc::Rc::unwrap_or_clone(else_body),
+            then_body,
+            else_body,
         };
 
         if first_prefix.is_empty() {
@@ -216,7 +216,7 @@ pub fn try_lower_short_circuit_and_else(
         } else {
             let mut wrapped = first_prefix;
             wrapped.push(stmt);
-            return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
+            return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
         }
     }
 }
@@ -289,8 +289,8 @@ pub fn try_lower_short_circuit_or(
 
                 let stmt = PreHirStmt::If {
                     cond: conds[0].clone(),
-                    then_body: std::rc::Rc::unwrap_or_clone(then_body),
-                    else_body: Vec::new(),
+                    then_body,
+                    else_body: std::rc::Rc::new(Vec::new()),
                 };
 
                 if first_prefix.is_empty() {
@@ -298,7 +298,7 @@ pub fn try_lower_short_circuit_or(
                 } else {
                     let mut wrapped = first_prefix;
                     wrapped.push(stmt);
-                    return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
+                    return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
                 }
             }
             let Some(exit) = shared_forward_linear_exit(host, idx, body_idx, false_entry_idx)?
@@ -326,8 +326,8 @@ pub fn try_lower_short_circuit_or(
             host.bump_condition_fold_or(conds.len() - 1);
             let stmt = PreHirStmt::If {
                 cond: simplify_logical_expr(fold_logical_chain(conds, PreHirBinaryOp::LogicalOr)),
-                then_body: std::rc::Rc::unwrap_or_clone(then_body),
-                else_body: Vec::new(),
+                then_body,
+                else_body: std::rc::Rc::new(Vec::new()),
             };
 
             if first_prefix.is_empty() {
@@ -335,7 +335,7 @@ pub fn try_lower_short_circuit_or(
             } else {
                 let mut wrapped = first_prefix;
                 wrapped.push(stmt);
-                return Ok(Some((PreHirStmt::Block(wrapped), skip_to)));
+                return Ok(Some((PreHirStmt::Block(std::rc::Rc::new(wrapped)), skip_to)));
             }
         }
 

@@ -301,12 +301,13 @@ impl<'a> PreviewBuilder<'a> {
                         true_target == own_addr || false_target == Some(own_addr);
                     body.push(PreHirStmt::If {
                         cond,
-                        then_body: vec![PreHirStmt::Goto(block_label(true_target))],
+                        then_body: vec![PreHirStmt::Goto(block_label(true_target))].into(),
                         else_body: false_target
                             .map(block_label)
                             .map(PreHirStmt::Goto)
                             .into_iter()
-                            .collect(),
+                            .collect::<Vec<_>>()
+                            .into(),
                     })
                 }
                 LoweredTerminator::Unsupported {
@@ -363,7 +364,7 @@ impl<'a> PreviewBuilder<'a> {
                             .into_iter()
                             .map(|(value, target)| fission_midend_prehir::PreHirSwitchCase {
                                 values: vec![value],
-                                body: vec![PreHirStmt::Goto(block_label(target))],
+                                body: vec![PreHirStmt::Goto(block_label(target))].into(),
                             })
                             .collect();
                         body.push(PreHirStmt::Switch {
@@ -373,7 +374,8 @@ impl<'a> PreviewBuilder<'a> {
                                 .map(block_label)
                                 .map(PreHirStmt::Goto)
                                 .into_iter()
-                                .collect(),
+                                .collect::<Vec<_>>()
+                                .into(),
                         });
                     }
                 }
