@@ -95,7 +95,10 @@ fn stmt_contains_referenced_label(stmt: &PreHirStmt, referenced_labels: &HashSet
     }
 }
 
-pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<PreHirStmt>) -> bool {
+pub fn simplify_empty_and_constant_ifs(
+    stmts: &mut Vec<PreHirStmt>,
+    global_refs: Option<&HashSet<String>>,
+) -> bool {
     let mut changed = false;
     let mut rewritten = Vec::with_capacity(stmts.len());
 
@@ -106,18 +109,38 @@ pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<PreHirStmt>) -> bool {
                 then_body,
                 else_body,
             } => {
-                let constant = match cond {
-                    PreHirExpr::Const(value, _) => Some(value != 0),
+                let constant = match &cond {
+                    PreHirExpr::Const(value, _) => Some(*value != 0),
                     _ => None,
                 };
 
                 if let Some(trueish) = constant {
-                    changed = true;
-                    rewritten.extend(std::rc::Rc::unwrap_or_clone(if trueish {
-                        then_body
-                    } else {
-                        else_body
-                    }));
+                    let discarded = if trueish { &else_body } else { &then_body };
+                    // A discarded branch can still be some *other* scope's
+                    // only route to a label -- e.g. GCC loop-rotation's
+                    // `if (precheck) { while (1) { L: ... } }` guard, where
+                    // the real entry is an unconditional `goto L` elsewhere
+                    // in the function, landing straight past this guard.
+                    // Constant-folding `precheck` away must not silently
+                    // erase `L` and its body out from under that goto.
+                    let discards_live_label = collect_defined_labels(discarded).iter().any(|l| {
+                        PROTECTED_LSDA_LABELS.with(|protected| protected.borrow().contains(l))
+                            || global_refs.is_some_and(|refs| refs.contains(l))
+                    });
+                    if !discards_live_label {
+                        changed = true;
+                        rewritten.extend(std::rc::Rc::unwrap_or_clone(if trueish {
+                            then_body
+                        } else {
+                            else_body
+                        }));
+                        continue;
+                    }
+                    rewritten.push(PreHirStmt::If {
+                        cond,
+                        then_body,
+                        else_body,
+                    });
                     continue;
                 }
 
@@ -157,14 +180,17 @@ pub fn simplify_empty_and_constant_ifs(stmts: &mut Vec<PreHirStmt>) -> bool {
     changed
 }
 
-pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<PreHirStmt>) -> bool {
+pub fn simplify_empty_and_constant_ifs_recursive(
+    stmts: &mut Vec<PreHirStmt>,
+    global_refs: Option<&HashSet<String>>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. } => {
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
             }
             PreHirStmt::For {
                 init, update, body, ..
@@ -172,28 +198,28 @@ pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<PreHirStmt>) ->
                 if let Some(init) = init.as_mut()
                     && let PreHirStmt::Block(body) = init.as_mut()
                 {
-                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
                 }
                 if let Some(update) = update.as_mut()
                     && let PreHirStmt::Block(body) = update.as_mut()
                 {
-                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
                 }
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), global_refs);
             }
             PreHirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), global_refs);
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), global_refs);
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), global_refs);
                 }
-                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |= simplify_empty_and_constant_ifs_recursive(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), global_refs);
             }
             PreHirStmt::Assign { .. }
             | PreHirStmt::VaStart { .. }
@@ -205,7 +231,7 @@ pub fn simplify_empty_and_constant_ifs_recursive(stmts: &mut Vec<PreHirStmt>) ->
             | PreHirStmt::Continue => {}
         }
     }
-    changed |= simplify_empty_and_constant_ifs(stmts);
+    changed |= simplify_empty_and_constant_ifs(stmts, global_refs);
     let before_len = stmts.len();
     stmts.retain(|stmt| !matches!(stmt, PreHirStmt::Block(body) if body.is_empty()));
     changed | (stmts.len() != before_len)

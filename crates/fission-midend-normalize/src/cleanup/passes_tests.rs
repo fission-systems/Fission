@@ -40,7 +40,7 @@ fn recursive_empty_if_cleanup_prunes_nested_pure_empty_guard() {
         else_body: Vec::new().into(),
     }].into())];
 
-    assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts));
+    assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts, None));
     assert!(stmts.is_empty());
 }
 
@@ -56,7 +56,7 @@ fn recursive_empty_if_cleanup_preserves_side_effectful_empty_guard() {
         else_body: Vec::new().into(),
     }];
 
-    assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts));
+    assert!(simplify_empty_and_constant_ifs_recursive(&mut stmts, None));
     assert!(matches!(
         &stmts[..],
         [PreHirStmt::Expr(PreHirExpr::Call { target, .. })] if target == "unknown_predicate"

@@ -1815,7 +1815,7 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("eliminate_redundant_var_assigns");
         }
-        if simplify_empty_and_constant_ifs(stmts) {
+        if simplify_empty_and_constant_ifs(stmts, global_refs) {
             changed = true;
             last_changed_pass = Some("simplify_empty_and_constant_ifs");
         }

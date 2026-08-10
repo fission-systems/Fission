@@ -43,10 +43,10 @@ use super::super::recovery::{
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::types::{apply_interproc_callsite_arity_pass, apply_variadic_stack_region_pass};
 use super::run::{
-    apply_type_signature_fixed_point, body_contains_popcount_call, body_has_loopish_shapes,
-    cleanup_func_stmt_list, contains_call_stmts, hir_shape, is_large_hir_function,
-    jump_resolver_admission, memory_fact_prefilter_allows_full, run_cleanup_block,
-    run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
+    PROTECTED_LSDA_LABELS, apply_type_signature_fixed_point, body_contains_popcount_call,
+    body_has_loopish_shapes, cleanup_func_stmt_list, contains_call_stmts, hir_shape,
+    is_large_hir_function, jump_resolver_admission, memory_fact_prefilter_allows_full,
+    run_cleanup_block, run_cleanup_family_passes, run_pass_logged, sccp_admission_summary,
 };
 use fission_midend_core::wave_stats;
 use fission_midend_prehir::PreHirFunction;
@@ -700,7 +700,11 @@ pub fn run_stage_cleanup(func: &mut PreHirFunction, diag: bool, perf: bool) {
         wave_stats::add_pass_rerun_skipped_by_preservation(1);
     }
     run_pass_logged(func, "cleanup_empty_ifs_final", perf, |f| {
-        simplify_empty_and_constant_ifs_recursive(&mut f.body)
+        let mut refs = super::super::cleanup::utils::collect_referenced_labels(&f.body);
+        PROTECTED_LSDA_LABELS.with(|protected| {
+            refs.extend(protected.borrow().iter().cloned());
+        });
+        simplify_empty_and_constant_ifs_recursive(&mut f.body, Some(&refs))
     });
     run_pass_logged(func, "canonicalize_minmax_final", perf, |f| {
         canonicalize_minmax_conditional_returns(&mut f.body)
