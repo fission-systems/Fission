@@ -97,6 +97,43 @@ const LIBC_FID_FILES_X64: &[&str] = &["libc-x86.LE.64.default.fidbf", "libc-AARC
 
 const LIBC_FID_FILES_X86: &[&str] = &["libc-x86.LE.32.default.fidbf", "libc-ARM.LE.32.v8.fidbf"];
 
+/// Resolve the (compiler-ID, C-library) FID database pair for a non-x86
+/// processor, if `utils/signatures/fid/` has one. Both `GCC_FID_FILES_X64`
+/// and `LIBC_FID_FILES_X64`/`_X86` already *contain* an ARM/AArch64 entry
+/// each -- but `get_preferred_fid_paths` only ever reads `.first()` from
+/// those arrays, so the second entry was unreachable dead data. This is the
+/// architecture-aware selector that actually reaches it, plus the other
+/// processors `utils/signatures/fid/` has both a `gcc-*` and `libc-*`
+/// database for (MIPS/PowerPC/SPARC/SuperH4/avr8/pa-risc/68000). Some pairs
+/// mix endian/bitness variants because that reflects what's vendored, not a
+/// deliberate match -- `FidDatabaseSet::discover_for_load_spec`'s own
+/// `language_id` filter is the real safety net for a mismatched pick, so
+/// being permissive here costs nothing but an extra skipped-database parse.
+fn non_x86_fid_files(processor: &str, is_64bit: bool) -> Option<(&'static str, &'static str)> {
+    let p = processor.to_ascii_lowercase();
+    if p.contains("aarch64") || (p.contains("arm") && is_64bit) {
+        Some(("gcc-AARCH64.LE.64.v8A.fidbf", "libc-AARCH64.LE.64.v8A.fidbf"))
+    } else if p.contains("arm") {
+        Some(("gcc-ARM.LE.32.v8.fidbf", "libc-ARM.LE.32.v8.fidbf"))
+    } else if p.contains("mips") {
+        Some(("gcc-MIPS.BE.32.default.fidbf", "libc-MIPS.LE.32.default.fidbf"))
+    } else if p.contains("powerpc") || p.contains("ppc") {
+        Some(("gcc-PowerPC.BE.32.default.fidbf", "libc-PowerPC.BE.32.default.fidbf"))
+    } else if p.contains("sparc") {
+        Some(("gcc-sparc.BE.64.default.fidbf", "libc-sparc.BE.32.default.fidbf"))
+    } else if p.contains("superh") || p.contains("sh4") {
+        Some(("gcc-SuperH4.BE.32.default.fidbf", "libc-SuperH4.LE.32.default.fidbf"))
+    } else if p.contains("avr") {
+        Some(("gcc-avr8.LE.16.extended.fidbf", "libc-avr8.LE.16.extended.fidbf"))
+    } else if p.contains("pa-risc") || p.contains("parisc") {
+        Some(("gcc-pa-risc.BE.32.default.fidbf", "libc-pa-risc.BE.32.default.fidbf"))
+    } else if p.contains("68000") || p.contains("coldfire") || p.contains("m68k") {
+        Some(("gcc-68000.BE.32.Coldfire.fidbf", "libc-68000.BE.32.Coldfire.fidbf"))
+    } else {
+        None
+    }
+}
+
 /// Third-party statically-linked library FID databases, keyed by the DIE
 /// (Detect-It-Easy) `DetectionType::Library` name that should trigger them
 /// (see `get_library_fid_paths`). All three OpenSSL builds are tried since
@@ -607,11 +644,24 @@ impl PathConfig {
         is_64bit: bool,
         format: Option<&str>,
         compiler_id: Option<&str>,
+        processor: Option<&str>,
     ) -> Vec<PathBuf> {
         let compiler = compiler_id.unwrap_or_default().to_ascii_lowercase();
         let is_pe = format
             .map(|value| value.to_ascii_uppercase().starts_with("PE"))
             .unwrap_or(false);
+
+        // Non-x86 processors (ARM/AArch64/MIPS/...) never reach the x86-
+        // centric branches below, since those only ever pick `.first()` off
+        // arrays that put an x86 file first -- check the actual CPU first.
+        if let Some(processor) = processor
+            && let Some((gcc, libc)) = non_x86_fid_files(processor, is_64bit)
+        {
+            return [gcc, libc]
+                .into_iter()
+                .filter_map(|name| self.find_fid_file(name))
+                .collect();
+        }
 
         if compiler.contains("gcc") || compiler.contains("mingw") {
             let (gcc, libc): (Option<&str>, Option<&str>) = if is_64bit {
@@ -1015,7 +1065,7 @@ mod tests {
     fn preferred_fid_paths_include_libc_for_gcc_but_not_mingw() {
         let config = PathConfig::detect();
 
-        let gcc_paths = config.get_preferred_fid_paths(true, Some("ELF"), Some("gcc"));
+        let gcc_paths = config.get_preferred_fid_paths(true, Some("ELF"), Some("gcc"), None);
         assert!(
             gcc_paths.iter().any(|p| p
                 .file_name()
@@ -1024,13 +1074,44 @@ mod tests {
             "gcc/ELF should try the glibc FID database, got {gcc_paths:?}"
         );
 
-        let mingw_paths = config.get_preferred_fid_paths(true, Some("PE"), Some("mingw"));
+        let mingw_paths = config.get_preferred_fid_paths(true, Some("PE"), Some("mingw"), None);
         assert!(
             mingw_paths.iter().all(|p| !p
                 .file_name()
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n.starts_with("libc-"))),
             "MinGW (msvcrt/ucrt, not glibc) should not pull in the glibc FID database, got {mingw_paths:?}"
+        );
+    }
+
+    /// Regression test for a real sample-set finding: 58/224 DecBench
+    /// sample-set binaries are 32-bit ARM (not x86), and
+    /// `get_preferred_fid_paths` only ever read `.first()` off
+    /// `GCC_FID_FILES_X64`/`LIBC_FID_FILES_X64` -- both of which *contain*
+    /// an ARM/AArch64 entry, just unreachably second in the array -- so
+    /// every non-x86 binary got the x86 FID database (or none at all,
+    /// since `ingest_signature_matches`'s `is_x86` gate skipped FID
+    /// matching for them entirely before this fix).
+    #[test]
+    fn preferred_fid_paths_select_arm_databases_for_arm_processor() {
+        let config = PathConfig::detect();
+
+        let arm32_paths = config.get_preferred_fid_paths(false, Some("ELF"), Some("gcc"), Some("ARM"));
+        assert!(
+            arm32_paths.iter().any(|p| p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains("ARM") && !n.contains("AARCH64"))),
+            "32-bit ARM should select the ARM (not x86) FID databases, got {arm32_paths:?}"
+        );
+
+        let aarch64_paths = config.get_preferred_fid_paths(true, Some("ELF"), Some("gcc"), Some("AArch64"));
+        assert!(
+            aarch64_paths.iter().any(|p| p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains("AARCH64"))),
+            "64-bit AArch64 should select the AARCH64 FID databases, got {aarch64_paths:?}"
         );
     }
 

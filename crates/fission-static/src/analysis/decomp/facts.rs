@@ -272,20 +272,44 @@ impl FactStore {
     /// `PROJECT.md`'s FID entries) -- the same primitive `fission_cli
     /// identify` uses.
     fn ingest_signature_matches(&mut self, binary: &LoadedBinary) {
-        // Only support PE/ELF/Mach-O or format specification with x86 architecture for FID matching
-        let is_x86 = binary.arch_spec.to_lowercase().contains("x86")
-            || binary.arch_spec.to_lowercase().contains("x64")
-            || binary.arch_spec.to_lowercase().contains("amd64");
-        if !is_x86 {
+        // FID matching needs an actual FID database for the target CPU.
+        // `PathConfig::get_preferred_fid_paths`/`non_x86_fid_files` cover
+        // x86, ARM, AArch64, MIPS, PowerPC, SPARC, SuperH4, avr8, pa-risc,
+        // and 68000 (every processor `utils/signatures/fid/` has both a
+        // compiler-ID and library-ID database for) -- this mirrors that
+        // same set so the expensive per-function CFG-build-and-hash loop
+        // below is skipped outright for anything else, rather than running
+        // it only to find zero matches.
+        let arch = binary.arch_spec.to_lowercase();
+        let is_covered = arch.contains("x86")
+            || arch.contains("x64")
+            || arch.contains("amd64")
+            || arch.contains("arm")
+            || arch.contains("aarch64")
+            || arch.contains("mips")
+            || arch.contains("powerpc")
+            || arch.contains("ppc")
+            || arch.contains("sparc")
+            || arch.contains("superh")
+            || arch.contains("sh4")
+            || arch.contains("avr")
+            || arch.contains("pa-risc")
+            || arch.contains("parisc")
+            || arch.contains("68000")
+            || arch.contains("coldfire")
+            || arch.contains("m68k");
+        if !is_covered {
             return;
         }
 
         let compiler_id = binary.get_ghidra_compiler_id();
+        let processor = binary.architecture.as_ref().map(|a| a.processor.as_str());
         let db_set = FidDatabaseSet::discover_for_load_spec(
             binary.sleigh_language_id(),
             compiler_id.as_deref(),
             Some(&binary.format),
             binary.is_64bit,
+            processor,
         );
 
         let mut databases = db_set.databases;

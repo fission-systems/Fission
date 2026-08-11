@@ -14,11 +14,13 @@ impl FidDatabaseSet {
         compiler_id: Option<&str>,
         format: Option<&str>,
         is_64bit: bool,
+        processor: Option<&str>,
     ) -> Self {
         let paths = ResourceProvider::global().paths().get_preferred_fid_paths(
             is_64bit,
             format,
             compiler_id,
+            processor,
         );
         let mut databases = Vec::new();
         let mut errors = Vec::new();
