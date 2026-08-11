@@ -28,6 +28,7 @@ pub mod fidbf;
 pub mod ghidra_patterns;
 pub mod golang_typeinfo;
 pub mod import_flat;
+pub mod ordinals;
 pub mod provider;
 pub mod win_constants;
 pub mod win_types;
@@ -55,5 +56,6 @@ pub use fidbf::{
 };
 pub use ghidra_patterns::{GhidraFuncPattern, load_ghidra_patterns, parse_ghidra_pattern_xml};
 pub use import_flat::symbol_for_win_api_database_lookup;
+pub use ordinals::{OrdinalDatabase, OrdinalError};
 pub use provider::{SIGNATURE_RESOURCES, SignatureResourceProvider};
 pub use win_constants::WIN_CONSTANTS_DB;

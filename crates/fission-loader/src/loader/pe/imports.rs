@@ -1,5 +1,17 @@
 use super::*;
 
+/// Resolve a PE ordinal-only import to its real exported name via the
+/// bundled DLL ordinal corpus (`fission_signatures::OrdinalDatabase`, sourced
+/// from RetDec's vendored ordinal tables). Returns `None` when the DLL/
+/// ordinal pair isn't in the corpus, letting callers fall back to the
+/// synthetic `dll:Ordinal_N` placeholder.
+fn resolve_ordinal_name(dll_name: &str, ordinal: u32) -> Option<String> {
+    fission_signatures::OrdinalDatabase::try_new()
+        .ok()?
+        .resolve(dll_name, ordinal)
+        .map(str::to_string)
+}
+
 pub(super) fn parse_imports(
     loader: &PeLoaderImpl<'_>,
     dir_rva: u32,
@@ -74,7 +86,9 @@ pub(super) fn parse_imports(
                 };
 
                 let func_name = if is_ordinal {
-                    format!("{}:Ordinal_{}", dll_name, raw_thunk & 0xFFFF)
+                    let ordinal = (raw_thunk & 0xFFFF) as u32;
+                    resolve_ordinal_name(&dll_name, ordinal)
+                        .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
                     let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
@@ -207,7 +221,9 @@ pub(super) fn parse_delay_imports(
                 };
 
                 let func_name = if is_ordinal {
-                    format!("{}:Ordinal_{}", dll_name, raw_thunk & 0xFFFF)
+                    let ordinal = (raw_thunk & 0xFFFF) as u32;
+                    resolve_ordinal_name(&dll_name, ordinal)
+                        .unwrap_or_else(|| format!("{}:Ordinal_{}", dll_name, ordinal))
                 } else {
                     let name_rva = (raw_thunk & 0x7FFFFFFF) as u32;
                     let name_offset = loader.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
@@ -289,4 +305,22 @@ pub(super) fn parse_delay_imports(
     }
 
     Ok((functions, symbol_map, delay_proxies))
+}
+
+#[cfg(test)]
+mod ordinal_resolution_tests {
+    use super::resolve_ordinal_name;
+
+    #[test]
+    fn resolves_known_dll_ordinal_to_real_name() {
+        assert_eq!(
+            resolve_ordinal_name("WS2_32.dll", 1).as_deref(),
+            Some("accept")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_none_for_unknown_dll() {
+        assert_eq!(resolve_ordinal_name("totally_made_up.dll", 1), None);
+    }
 }

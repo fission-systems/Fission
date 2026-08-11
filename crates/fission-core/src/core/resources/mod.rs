@@ -93,4 +93,9 @@ impl ResourceProvider {
     pub fn rust_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
         self.paths.get_rust_typeinfo_json_path(filename)
     }
+
+    #[must_use]
+    pub fn ordinals_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.paths.get_ordinals_json_path(filename)
+    }
 }

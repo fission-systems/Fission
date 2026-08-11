@@ -399,6 +399,26 @@ impl PathConfig {
         })
     }
 
+    /// JSON file under the DLL-ordinal-export-name corpus (e.g.
+    /// `x86_ordinals.json`, extracted from RetDec's vendored ordinal tables
+    /// via `scripts/retdec_ordinals_extract.py`).
+    pub fn get_ordinals_json_path(&self, filename: &str) -> Option<PathBuf> {
+        if let Some(ref base) = self.signatures_base {
+            let path = base.join("ordinals").join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("ordinals")
+                .join(filename);
+            path.exists().then_some(path)
+        })
+    }
+
     /// JSON file under the Rust typeinfo corpus (e.g. `rust_structures.json`,
     /// extracted from `rust-common.gdt` via `scripts/gdt_extract_structs.py`).
     pub fn get_rust_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
