@@ -35,6 +35,7 @@ const EM_PPC64: u16 = 21;
 const EM_ARM: u16 = 40;
 const EM_RISCV: u16 = 243;
 const EM_LOONGARCH: u16 = 258;
+const EM_386: u16 = 3;
 const EM_X86_64: u16 = 62;
 const R_X86_64_64: u32 = 1;
 const R_X86_64_PC32: u32 = 2;
@@ -266,6 +267,12 @@ impl ElfLoader {
                 endian,
                 &mut iat_symbols,
             );
+            functions_info.extend(resolve_elf_plt_stub_imports(
+                bytes,
+                &sections_info,
+                header.machine,
+                &iat_symbols,
+            ));
             let patches_riscv = if is_relocatable && header.machine == EM_RISCV {
                 Some(riscv_relocation_patches_64(
                     bytes,
@@ -546,6 +553,12 @@ impl ElfLoader {
                 endian,
                 &mut iat_symbols,
             );
+            functions_info.extend(resolve_elf_plt_stub_imports(
+                bytes,
+                &sections_info,
+                header.machine,
+                &iat_symbols,
+            ));
             let patches_arm = if is_relocatable && header.machine == EM_ARM {
                 Some(arm_relocation_patches_32(
                     bytes,
@@ -1102,6 +1115,99 @@ fn parse_elf_iat_symbols_32(
             out.entry(addr).or_insert(bare);
         }
     }
+}
+
+/// Decode a single `jmp *disp32(...)` (opcode `ff 25`) indirect-jump stub
+/// starting anywhere in `stub_bytes`, returning the GOT slot address it
+/// dereferences. Scans for the opcode rather than assuming a fixed layout:
+/// toolchains vary on whether a `bnd` prefix (`f2`) or a leading `endbr64`
+/// (`f3 0f 1e fa`, CET) precedes it, and PLT0 -- the lazy-binding resolver
+/// stub, not a real import -- starts with `ff 35` (push), not `ff 25`, so it
+/// never matches here.
+fn decode_plt_stub_got_slot(stub_addr: u64, stub_bytes: &[u8], rip_relative: bool) -> Option<u64> {
+    for start in 0..stub_bytes.len().checked_sub(5)? {
+        if stub_bytes[start] != 0xff || stub_bytes[start + 1] != 0x25 {
+            continue;
+        }
+        let disp_off = start + 2;
+        let disp_bytes: [u8; 4] = stub_bytes.get(disp_off..disp_off + 4)?.try_into().ok()?;
+        let disp = i32::from_le_bytes(disp_bytes);
+        return Some(if rip_relative {
+            // x86-64: RIP-relative, RIP is the address right after this
+            // instruction's 4-byte displacement operand.
+            (stub_addr + disp_off as u64 + 4).wrapping_add(disp as i64 as u64)
+        } else {
+            // i386: the operand is an absolute GOT slot address.
+            disp as u32 as u64
+        });
+    }
+    None
+}
+
+/// Resolve `.plt`/`.plt.sec` indirect-jump stubs to the import name their
+/// GOT slot holds, and return synthetic `FunctionInfo` entries for each
+/// stub at its *real* address.
+///
+/// The dynsym-derived import `FunctionInfo` entries created elsewhere in
+/// this loader live at a synthetic address space (`ELF_EXTERNAL_IMAGE_BASE
+/// + ...`), not at the PLT stub address a `call`/`jmp` instruction in the
+/// binary's own code actually targets -- and a PLT-indirected call is the
+/// *only* way a dynamically-imported function is ever called on ELF. So
+/// without this, a call through the PLT was never resolvable to its import
+/// name at all, regardless of how good FID/symbol matching elsewhere was.
+/// Confirmed on a real sample-set ELF (bin_000.elf): `select`, `read`,
+/// `close`, `pause` all called through `.plt.sec` stubs, none resolved to a
+/// name; every one of the 106 dynamic imports fell back to `sub_<addr>`.
+///
+/// x86/x86-64 only (matches this codebase's existing FID-matching gate);
+/// other architectures' PLT stub encodings differ and aren't decoded here.
+fn resolve_elf_plt_stub_imports(
+    full_data: &[u8],
+    sections: &[SectionInfo],
+    machine: u16,
+    iat_symbols: &HashMap<u64, String>,
+) -> Vec<FunctionInfo> {
+    let rip_relative = match machine {
+        m if m == EM_X86_64 => true,
+        m if m == EM_386 => false,
+        _ => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for section in sections {
+        if !section.is_executable || !matches!(section.name.as_str(), ".plt" | ".plt.sec") {
+            continue;
+        }
+        let start = section.file_offset as usize;
+        let end = start.saturating_add(section.file_size as usize);
+        let Some(section_bytes) = full_data.get(start..end) else {
+            continue;
+        };
+        const STUB_SIZE: usize = 16;
+        let mut offset = 0usize;
+        while offset + STUB_SIZE <= section_bytes.len() {
+            let stub_addr = section.virtual_address + offset as u64;
+            let stub_bytes = &section_bytes[offset..offset + STUB_SIZE];
+            if let Some(got_addr) = decode_plt_stub_got_slot(stub_addr, stub_bytes, rip_relative)
+                && let Some(name) = iat_symbols.get(&got_addr)
+            {
+                out.push(FunctionInfo {
+                    name: name.clone(),
+                    address: stub_addr,
+                    size: STUB_SIZE as u64,
+                    is_export: false,
+                    is_import: true,
+                    origin: Some("elf-plt-stub".to_string()),
+                    kind: Some("import_thunk".to_string()),
+                    source_section: Some(section.name.clone()),
+                    external_library: None,
+                    is_thunk_like: true,
+                    thunk_target: None,
+                });
+            }
+            offset += STUB_SIZE;
+        }
+    }
+    out
 }
 
 fn parse_relocation_symbols_64(
@@ -3581,5 +3687,45 @@ mod tests {
             "iat keys look invalid: {:?}",
             bin.inner().iat_symbols.keys().collect::<Vec<_>>()
         );
+    }
+
+    /// Regression test for a real sample-set finding: a `call`/`jmp` to a
+    /// dynamically-imported function always lands on its `.plt`/`.plt.sec`
+    /// stub address, never on the synthetic address the dynsym-derived
+    /// `FunctionInfo` entries above use -- so without PLT stub resolution,
+    /// `binary.function_at(<the address a real call instruction targets>)`
+    /// can never find the import, and every PLT-indirected call falls back
+    /// to a generic `sub_<addr>` name regardless of how good FID/symbol
+    /// matching is elsewhere. Confirmed on bin_000.elf from the DecBench
+    /// sample-set: `select`/`read`/`close`/`pause` (106 dynamic imports
+    /// total) all called through `.plt.sec`, none resolved to a name.
+    #[test]
+    fn dynamic_elf_resolves_plt_stub_to_import_name_at_its_real_address() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        assert!(
+            path.is_file(),
+            "missing fixture {} (rebuild with zig if needed)",
+            path.display()
+        );
+        let bin = LoadedBinary::from_file(&path).expect("load dynamic ELF");
+        let plt_puts = bin.inner().functions.iter().find(|f| {
+            f.is_import
+                && f.name.starts_with("puts")
+                && f.address < ELF_EXTERNAL_IMAGE_BASE
+        });
+        let Some(plt_puts) = plt_puts else {
+            panic!(
+                "expected a PLT-stub-address FunctionInfo for puts (real address, not the \
+                 synthetic dynsym-entry address), got imports: {:?}",
+                bin.inner()
+                    .functions
+                    .iter()
+                    .filter(|f| f.is_import)
+                    .map(|f| (f.name.clone(), f.address))
+                    .collect::<Vec<_>>()
+            );
+        };
+        assert!(plt_puts.is_thunk_like, "PLT stub entry should be marked thunk-like");
+        assert!(plt_puts.address > 0x1000, "PLT stub address should be a real guest VA");
     }
 }

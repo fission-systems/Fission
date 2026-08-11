@@ -84,6 +84,19 @@ const GCC_FID_FILES_X64: &[&str] = &["gcc-x86.LE.64.default.fidbf", "gcc-AARCH64
 
 const GCC_FID_FILES_X86: &[&str] = &["gcc-x86.LE.32.default.fidbf", "gcc-ARM.LE.32.v8.fidbf"];
 
+/// glibc FID database filenames -- covers statically-linked C-library
+/// functions (`select`, `read`, `close`, `pause`, `__errno_location`, ...),
+/// distinct from `GCC_FID_FILES_*` which only identifies compiler-emitted
+/// helpers (CRT startup, stack-protector glue). Both categories exist in
+/// Ghidra's own default FID configuration and are tried together there;
+/// this pair of files sat on disk unreferenced by any path-selection
+/// function until a real sample-set gcc/glibc-linked ELF (bin_000.elf)
+/// showed Fission resolving under half the call sites Ghidra resolved for
+/// the identical function, entirely because this database was never tried.
+const LIBC_FID_FILES_X64: &[&str] = &["libc-x86.LE.64.default.fidbf", "libc-AARCH64.LE.64.v8A.fidbf"];
+
+const LIBC_FID_FILES_X86: &[&str] = &["libc-x86.LE.32.default.fidbf", "libc-ARM.LE.32.v8.fidbf"];
+
 /// Third-party statically-linked library FID databases, keyed by the DIE
 /// (Detect-It-Easy) `DetectionType::Library` name that should trigger them
 /// (see `get_library_fid_paths`). All three OpenSSL builds are tried since
@@ -529,9 +542,9 @@ impl PathConfig {
     /// Get all available FID database paths for an architecture
     pub fn get_all_fid_paths(&self, is_64bit: bool) -> Vec<PathBuf> {
         let file_lists: Vec<&[&str]> = if is_64bit {
-            vec![MSVC_FID_FILES_X64, GCC_FID_FILES_X64]
+            vec![MSVC_FID_FILES_X64, GCC_FID_FILES_X64, LIBC_FID_FILES_X64]
         } else {
-            vec![MSVC_FID_FILES_X86, GCC_FID_FILES_X86]
+            vec![MSVC_FID_FILES_X86, GCC_FID_FILES_X86, LIBC_FID_FILES_X86]
         };
 
         let mut result = Vec::new();
@@ -601,12 +614,21 @@ impl PathConfig {
             .unwrap_or(false);
 
         if compiler.contains("gcc") || compiler.contains("mingw") {
-            let primary = if is_64bit {
-                GCC_FID_FILES_X64.first().copied()
+            let (gcc, libc): (Option<&str>, Option<&str>) = if is_64bit {
+                (GCC_FID_FILES_X64.first().copied(), LIBC_FID_FILES_X64.first().copied())
             } else {
-                GCC_FID_FILES_X86.first().copied()
+                (GCC_FID_FILES_X86.first().copied(), LIBC_FID_FILES_X86.first().copied())
             };
-            return primary
+            // The glibc FID database only matches statically-linked
+            // *glibc* code; MinGW targets link a different C runtime
+            // (msvcrt/ucrt), so only try it for the non-MinGW (typically
+            // ELF/Linux) gcc case.
+            let names: Vec<&str> = if compiler.contains("mingw") {
+                gcc.into_iter().collect()
+            } else {
+                gcc.into_iter().chain(libc).collect()
+            };
+            return names
                 .into_iter()
                 .filter_map(|name| self.find_fid_file(name))
                 .collect();
@@ -614,9 +636,9 @@ impl PathConfig {
 
         if compiler.contains("clang") && !is_pe {
             let primary = if is_64bit {
-                GCC_FID_FILES_X64.first().copied()
+                GCC_FID_FILES_X64.first().copied().into_iter().chain(LIBC_FID_FILES_X64.first().copied())
             } else {
-                GCC_FID_FILES_X86.first().copied()
+                GCC_FID_FILES_X86.first().copied().into_iter().chain(LIBC_FID_FILES_X86.first().copied())
             };
             return primary
                 .into_iter()
@@ -981,6 +1003,35 @@ mod tests {
                 assert!(found.is_empty(), "expected no FID path for {name}");
             }
         }
+    }
+
+    /// Regression test for the bin_000.elf finding: a statically-linked
+    /// glibc ELF resolved under half the call sites Ghidra resolved for the
+    /// identical function, because `libc-*.fidbf` (present on disk) was
+    /// never referenced by any path-selection function -- only the
+    /// compiler-ID `gcc-*.fidbf` database was tried. MinGW is excluded
+    /// since it links a different C runtime (msvcrt/ucrt), not glibc.
+    #[test]
+    fn preferred_fid_paths_include_libc_for_gcc_but_not_mingw() {
+        let config = PathConfig::detect();
+
+        let gcc_paths = config.get_preferred_fid_paths(true, Some("ELF"), Some("gcc"));
+        assert!(
+            gcc_paths.iter().any(|p| p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("libc-"))),
+            "gcc/ELF should try the glibc FID database, got {gcc_paths:?}"
+        );
+
+        let mingw_paths = config.get_preferred_fid_paths(true, Some("PE"), Some("mingw"));
+        assert!(
+            mingw_paths.iter().all(|p| !p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("libc-"))),
+            "MinGW (msvcrt/ucrt, not glibc) should not pull in the glibc FID database, got {mingw_paths:?}"
+        );
     }
 
     #[test]
