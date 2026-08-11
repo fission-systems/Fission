@@ -443,8 +443,24 @@ impl PathConfig {
     /// JSON file under the Rust typeinfo corpus (e.g. `rust_structures.json`,
     /// extracted from `rust-common.gdt` via `scripts/gdt_extract_structs.py`).
     pub fn get_rust_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.get_typeinfo_json_path_in("rust", filename)
+    }
+
+    /// JSON file under the generic (cross-platform C library) typeinfo
+    /// corpus (e.g. `generic_clib_structures.json`).
+    pub fn get_generic_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.get_typeinfo_json_path_in("generic", filename)
+    }
+
+    /// JSON file under the mac_10.9 typeinfo corpus (e.g.
+    /// `mac_osx_structures.json`).
+    pub fn get_mac_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.get_typeinfo_json_path_in("mac_10.9", filename)
+    }
+
+    fn get_typeinfo_json_path_in(&self, subdir: &str, filename: &str) -> Option<PathBuf> {
         self.signatures_base.as_ref().and_then(|base| {
-            let path = base.join("typeinfo").join("rust").join(filename);
+            let path = base.join("typeinfo").join(subdir).join(filename);
             path.exists().then_some(path)
         }).or_else(|| {
             self.workspace_root.as_ref().and_then(|root| {
@@ -452,7 +468,7 @@ impl PathConfig {
                     .join("utils")
                     .join("signatures")
                     .join("typeinfo")
-                    .join("rust")
+                    .join(subdir)
                     .join(filename);
                 path.exists().then_some(path)
             })

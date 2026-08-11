@@ -95,6 +95,16 @@ impl ResourceProvider {
     }
 
     #[must_use]
+    pub fn generic_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.paths.get_generic_typeinfo_json_path(filename)
+    }
+
+    #[must_use]
+    pub fn mac_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
+        self.paths.get_mac_typeinfo_json_path(filename)
+    }
+
+    #[must_use]
     pub fn ordinals_json_path(&self, filename: &str) -> Option<PathBuf> {
         self.paths.get_ordinals_json_path(filename)
     }

@@ -74,6 +74,20 @@ fn try_read_rust_typeinfo_json(filename: &str) -> Option<String> {
     fs::read_to_string(&path).ok()
 }
 
+/// Same optional-supplement contract as [`try_read_rust_typeinfo_json`], for
+/// the generic (cross-platform C library) typeinfo corpus.
+fn try_read_generic_typeinfo_json(filename: &str) -> Option<String> {
+    let path = resources().generic_typeinfo_json_path(filename)?;
+    fs::read_to_string(&path).ok()
+}
+
+/// Same optional-supplement contract as [`try_read_rust_typeinfo_json`], for
+/// the mac_10.9 typeinfo corpus.
+fn try_read_mac_typeinfo_json(filename: &str) -> Option<String> {
+    let path = resources().mac_typeinfo_json_path(filename)?;
+    fs::read_to_string(&path).ok()
+}
+
 // ============================================================================
 // Windows Base Types (for annotation purposes)
 // ============================================================================
@@ -298,6 +312,32 @@ impl WindowsStructures {
             merge_json_struct_defs(&mut structures, "phnt_structures.json", &phnt_json, false);
         }
 
+        // windows_vs12_structures.json / generic_clib_structures.json /
+        // mac_osx_structures.json are computed from Ghidra's OWN bundled
+        // .gdt archives (Ghidra/Features/Base/data/typeinfo/{win32,generic,
+        // mac_10.9}/) via scripts/gdt_extract_structs.py +
+        // scripts/merge_gdt_struct_widths.py -- struct/composite data this
+        // corpus never mined despite shipping right next to it. Confirmed
+        // >94% net-new against the existing win32 corpus (e.g. 5,187 of
+        // windows_vs12's 5,500 structs have no prior entry at all) with the
+        // same cross-validation approach used for phnt (merged additive-
+        // only for the same reason: ~2-3% of overlapping names disagree on
+        // size and not all are individually audited).
+        if let Ok(vs12_json) = try_read_typeinfo_json("windows_vs12_structures.json") {
+            merge_json_struct_defs(&mut structures, "windows_vs12_structures.json", &vs12_json, false);
+        }
+        if let Some(generic_json) = try_read_generic_typeinfo_json("generic_clib_structures.json") {
+            merge_json_struct_defs(&mut structures, "generic_clib_structures.json", &generic_json, false);
+        }
+        if let Some(mac_json) = try_read_mac_typeinfo_json("mac_osx_structures.json") {
+            // mac_osx.gdt has no 64-bit sibling archive (a legacy Mac OS X
+            // 10.9-era 32-bit-only source) -- these entries carry size_64=0
+            // (see scripts/gdt_extract_structs.py's caller for this file),
+            // which candidate_struct_name/infer_struct_name_from_offsets
+            // already treat as "never matches" rather than a wrong guess.
+            merge_json_struct_defs(&mut structures, "mac_osx_structures.json", &mac_json, false);
+        }
+
         Ok(Self {
             structures: std::sync::Arc::new(structures),
         })
@@ -334,6 +374,26 @@ mod tests {
             .get("OBJECT_ATTRIBUTES")
             .expect("OBJECT_ATTRIBUTES from phnt corpus");
         assert_eq!(oa.size_64, 48);
+    }
+
+    #[test]
+    fn loads_gdt_mined_structures_additively() {
+        let ws = super::WindowsStructures::new();
+        // generic_clib_structures.json: dual-width merge of Ghidra's own
+        // generic_clib.gdt + generic_clib_64.gdt, cross-checked against
+        // real glibc struct layouts before shipping. `stat`/`tm` also exist
+        // (correctly, additively) but collide with windows_vs12's own CRT
+        // `stat`/`tm` definitions, which load first and win -- timespec/
+        // div_t don't collide with anything in the win32-family sources.
+        let timespec = ws.get("timespec").expect("timespec from generic_clib corpus");
+        assert_eq!(timespec.size_32, 8);
+        assert_eq!(timespec.size_64, 16);
+        let div_t = ws.get("div_t").expect("div_t from generic_clib corpus");
+        assert_eq!(div_t.size_32, 8);
+        assert_eq!(div_t.size_64, 8);
+        // windows_vs12_structures.json: net-new (not in the existing win32
+        // corpus) struct pulled from Ghidra's own windows_vs12_{32,64}.gdt.
+        assert!(ws.get("PPM_WMI_PERF_STATE").is_some());
     }
 
     #[test]
