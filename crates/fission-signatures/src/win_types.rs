@@ -173,6 +173,50 @@ struct JsonStructDef {
     fields: Vec<JsonFieldDef>,
 }
 
+/// Parse a `structures.json`-shaped JSON document and merge its entries into
+/// `structures`. When `overwrite` is false, an entry whose name already
+/// exists is left untouched (additive-only merge) rather than replaced.
+fn merge_json_struct_defs(
+    structures: &mut HashMap<String, StructDef>,
+    source_name: &str,
+    json_str: &str,
+    overwrite: bool,
+) {
+    let items: Vec<JsonStructDef> = match serde_json::from_str(json_str) {
+        Ok(items) => items,
+        Err(e) => {
+            eprintln!("fission-signatures win_types: failed to parse {source_name}, skipping: {e}");
+            return;
+        }
+    };
+    for item in items {
+        if !overwrite && structures.contains_key(&item.name) {
+            continue;
+        }
+        let fields = item
+            .fields
+            .into_iter()
+            .map(|f| FieldDef {
+                name: f.name,
+                type_name: f.type_name,
+                offset_32: f.offset_32,
+                offset_64: f.offset_64,
+                size_32: f.size_32,
+                size_64: f.size_64,
+            })
+            .collect();
+        structures.insert(
+            item.name.clone(),
+            StructDef {
+                name: item.name,
+                size_32: item.size_32,
+                size_64: item.size_64,
+                fields,
+            },
+        );
+    }
+}
+
 /// Windows structures database
 ///
 /// `structures` is `Arc`-wrapped so [`WindowsStructures::try_new`] can hand
@@ -236,38 +280,22 @@ impl WindowsStructures {
         }
 
         if let Some(rust_json) = try_read_rust_typeinfo_json("rust_structures.json") {
-            match serde_json::from_str::<Vec<JsonStructDef>>(&rust_json) {
-                Ok(rust_items) => {
-                    for item in rust_items {
-                        let fields = item
-                            .fields
-                            .into_iter()
-                            .map(|f| FieldDef {
-                                name: f.name,
-                                type_name: f.type_name,
-                                offset_32: f.offset_32,
-                                offset_64: f.offset_64,
-                                size_32: f.size_32,
-                                size_64: f.size_64,
-                            })
-                            .collect();
-                        structures.insert(
-                            item.name.clone(),
-                            StructDef {
-                                name: item.name,
-                                size_32: item.size_32,
-                                size_64: item.size_64,
-                                fields,
-                            },
-                        );
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
-                        "fission-signatures win_types: failed to parse rust_structures.json, skipping: {e}"
-                    );
-                }
-            }
+            merge_json_struct_defs(&mut structures, "rust_structures.json", &rust_json, true);
+        }
+
+        // phnt_structures.json is computed (not looked up) from System
+        // Informer's phnt C headers by scripts/phnt_extract_structs.py,
+        // which independently applies MSVC's struct-layout algorithm to
+        // undocumented NT structs the win32 corpus above doesn't have.
+        // Merged additive-only: a handful of names that DO already exist in
+        // structures.json disagree with the phnt-computed size on cross-
+        // validation (some confirmed to be stale/placeholder entries in the
+        // older corpus, e.g. PROCESS_MITIGATION_SEHOP_POLICY, but not all
+        // audited yet) -- so on any name collision the existing entry wins
+        // rather than risking silently replacing a correct value with a
+        // wrong one from an unaudited case.
+        if let Ok(phnt_json) = try_read_typeinfo_json("phnt_structures.json") {
+            merge_json_struct_defs(&mut structures, "phnt_structures.json", &phnt_json, false);
         }
 
         Ok(Self {
@@ -294,6 +322,20 @@ impl Default for WindowsStructures {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn loads_phnt_structures_additively() {
+        let ws = super::WindowsStructures::new();
+        // net-new undocumented NT structs, only available via phnt_structures.json
+        let fbi = ws
+            .get("FILE_BASIC_INFORMATION")
+            .expect("FILE_BASIC_INFORMATION from phnt corpus");
+        assert_eq!(fbi.size_64, 40);
+        let oa = ws
+            .get("OBJECT_ATTRIBUTES")
+            .expect("OBJECT_ATTRIBUTES from phnt corpus");
+        assert_eq!(oa.size_64, 48);
+    }
+
     #[test]
     fn loads_utils_win_types_json() {
         let ws = super::WindowsStructures::new();
