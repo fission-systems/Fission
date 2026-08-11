@@ -98,6 +98,33 @@ pub fn load_ghidra_patterns(arch_tag: &str, compiler_id: Option<&str>) -> Vec<Gh
             "ghidra/x86win_prepatterns.xml",
             "ghidra/x86gcc_prepatterns.xml",
         ],
+        // Non-x86 architectures: mapping taken directly from each
+        // processor's own patternconstraints.xml/prepatternconstraints.xml
+        // under vendor/ghidra (e.g. Ghidra/Processors/ARM/data/patterns/),
+        // not guessed. Most processors don't branch on compiler_id at all
+        // (their constraint file has no <compiler> tag) -- AARCH64 and
+        // PowerPC are the exceptions actually present in the source data.
+        ("ARM_LE", _) => &["ghidra/ARM_LE_patterns.xml", "ghidra/ARM_switch_patterns.xml"],
+        ("ARM_BE", _) => &["ghidra/ARM_BE_patterns.xml", "ghidra/ARM_switch_patterns.xml"],
+        ("AARCH64", Some("windows")) => {
+            &["ghidra/AARCH64_LE_patterns.xml", "ghidra/AARCH64_win_patterns.xml"]
+        }
+        ("AARCH64", _) => &["ghidra/AARCH64_LE_patterns.xml"],
+        ("MIPS_BE", _) => &["ghidra/MIPS_BE_patterns.xml"],
+        ("MIPS_LE", _) => &["ghidra/MIPS_LE_patterns.xml"],
+        ("PowerPC_BE", _) => &["ghidra/PPC_BE_patterns.xml", "ghidra/PPC_BE_prepatterns.xml"],
+        ("PowerPC_LE", _) => &["ghidra/PPC_LE_patterns.xml", "ghidra/PPC_LE_prepatterns.xml"],
+        ("Sparc", _) => &["ghidra/SPARC_patterns.xml"],
+        ("SuperH4", _) => &["ghidra/SuperH4_patterns.xml"],
+        ("V850", _) => &["ghidra/V850_patterns.xml"],
+        ("68000", _) => &["ghidra/68000_patterns.xml"],
+        ("avr8", _) => &["ghidra/AVR8_patterns.xml"],
+        ("Loongarch", _) => &["ghidra/loongarch_patterns.xml"],
+        ("NDS32", _) => &["ghidra/nds32_patterns.xml"],
+        ("PA-RISC", _) => &["ghidra/pa-risc_patterns.xml"],
+        ("RISCV", _) => &["ghidra/riscv_gc_patterns.xml"],
+        ("tricore", _) => &["ghidra/tricore_patterns.xml"],
+        ("Xtensa", _) => &["ghidra/xtensa_patterns.xml"],
         _ => return Vec::new(),
     };
 
@@ -491,6 +518,37 @@ pub fn parse_data_string(s: &str) -> Vec<Option<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loads_patterns_for_every_non_x86_architecture() {
+        // Confirms the pattern files copied from vendor/ghidra's per-
+        // processor patternconstraints.xml actually parse into non-empty
+        // pattern sets, not just that the file paths resolve.
+        for (tag, compiler) in [
+            ("ARM_LE", None),
+            ("ARM_BE", None),
+            ("AARCH64", None),
+            ("AARCH64", Some("windows")),
+            ("MIPS_BE", None),
+            ("MIPS_LE", None),
+            ("PowerPC_BE", None),
+            ("PowerPC_LE", None),
+            ("Sparc", None),
+            ("SuperH4", None),
+            ("V850", None),
+            ("68000", None),
+            ("avr8", None),
+            ("Loongarch", None),
+            ("NDS32", None),
+            ("PA-RISC", None),
+            ("RISCV", None),
+            ("tricore", None),
+            ("Xtensa", None),
+        ] {
+            let patterns = load_ghidra_patterns(tag, compiler);
+            assert!(!patterns.is_empty(), "expected non-empty patterns for {tag}/{compiler:?}");
+        }
+    }
 
     #[test]
     fn test_parse_data_fixed_bytes() {

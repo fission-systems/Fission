@@ -12,6 +12,48 @@ fn discovery_diag_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("FISSION_DISCOVERY_DIAG").is_some())
 }
 
+/// Resolve the `arch_tag` `load_ghidra_patterns` expects from the binary's
+/// actual detected architecture, instead of assuming x86.
+///
+/// `binary.architecture.processor` carries the exact processor name Ghidra
+/// itself uses (read straight from the `.opinion` file's `processor="..."`
+/// attribute during auto-detection -- see `fission_core::architecture`), so
+/// this only needs to fold in endianness for the handful of processors
+/// whose own `patternconstraints.xml` actually splits by it (confirmed
+/// against each processor's real constraint file under
+/// `vendor/ghidra/.../Processors/<name>/data/patterns/`, not guessed).
+/// Returns `None` for any processor `load_ghidra_patterns` doesn't have
+/// pattern data for -- callers already handle that as "no patterns found".
+fn resolve_pattern_arch_tag(binary: &LoadedBinary) -> Option<String> {
+    let arch = binary.architecture.as_ref()?;
+    let be = arch.endian == "big";
+    Some(match arch.processor.as_str() {
+        "x86" => {
+            if binary.is_64bit {
+                "x86-64win".to_string()
+            } else {
+                "x86win".to_string()
+            }
+        }
+        "ARM" => (if be { "ARM_BE" } else { "ARM_LE" }).to_string(),
+        "AARCH64" => "AARCH64".to_string(),
+        "MIPS" => (if be { "MIPS_BE" } else { "MIPS_LE" }).to_string(),
+        "PowerPC" => (if be { "PowerPC_BE" } else { "PowerPC_LE" }).to_string(),
+        "Sparc" => "Sparc".to_string(),
+        "SuperH4" => "SuperH4".to_string(),
+        "V850" => "V850".to_string(),
+        "68000" => "68000".to_string(),
+        "Atmel" => "avr8".to_string(),
+        "Loongarch" => "Loongarch".to_string(),
+        "NDS32" => "NDS32".to_string(),
+        "PA-RISC" => "PA-RISC".to_string(),
+        "RISCV" => "RISCV".to_string(),
+        "tricore" => "tricore".to_string(),
+        "Xtensa" => "Xtensa".to_string(),
+        _ => return None,
+    })
+}
+
 pub fn discover_functions_with_runtime(
     binary: &mut LoadedBinary,
     profile: FunctionDiscoveryProfile,
@@ -938,13 +980,11 @@ fn scan_ghidra_patterns(
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
 ) -> Vec<u64> {
-    let arch_tag = if binary.is_64bit {
-        "x86-64win"
-    } else {
-        "x86win"
+    let Some(arch_tag) = resolve_pattern_arch_tag(binary) else {
+        return Vec::new();
     };
     let compiler_id = binary.get_ghidra_compiler_id();
-    let patterns = load_ghidra_patterns(arch_tag, compiler_id.as_deref());
+    let patterns = load_ghidra_patterns(&arch_tag, compiler_id.as_deref());
     if patterns.is_empty() {
         return Vec::new();
     }
@@ -1108,11 +1148,7 @@ fn scan_ghidra_patterns(
         }
     }
 
-    eprintln!(
-        "[ghidra-patterns] {}: raw hits = {}",
-        if binary.is_64bit { "x86-64" } else { "x86" },
-        raw_hits.len()
-    );
+    eprintln!("[ghidra-patterns] {arch_tag}: raw hits = {}", raw_hits.len());
 
     // Phase 2: SLEIGH validation — once per unique address
     let mut hits: Vec<u64> = raw_hits
