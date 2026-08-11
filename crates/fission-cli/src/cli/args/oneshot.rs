@@ -87,6 +87,13 @@ pub struct OneShotArgs {
     pub identify_cmd: bool,
     /// Optional single function VA to identify (`identify --function`).
     pub identify_function: Option<u64>,
+    /// Canonical `similar` subcommand (fuzzy function similarity).
+    pub similar_cmd: bool,
+    /// Optional single function VA to query (`similar --function`); reports
+    /// every other discovered function's similarity instead of all-pairs.
+    pub similar_function: Option<u64>,
+    /// Max similar matches to report per function (`similar --top`).
+    pub similar_top_k: usize,
 }
 
 impl Default for OneShotArgs {
@@ -160,6 +167,9 @@ impl Default for OneShotArgs {
             callgraph_cmd: false,
             identify_cmd: false,
             identify_function: None,
+            similar_cmd: false,
+            similar_function: None,
+            similar_top_k: 5,
         }
     }
 }

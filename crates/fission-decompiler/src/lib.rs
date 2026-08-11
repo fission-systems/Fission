@@ -30,6 +30,7 @@ pub mod fid;
 pub mod orchestration;
 pub mod pipeline;
 pub mod rendering;
+pub mod similarity;
 
 // ─── Internal backward-compat module aliases ────────────────────────────────
 //

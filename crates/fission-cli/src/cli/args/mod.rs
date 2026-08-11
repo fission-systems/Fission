@@ -149,6 +149,8 @@ enum CliCommand {
     Callgraph(CallgraphArgs),
     /// Identify functions against bundled Ghidra FID (Function ID) signature databases
     Identify(IdentifyArgs),
+    /// Fuzzy function similarity (structural, not exact-match -- a BSim-inspired analog)
+    Similar(SimilarArgs),
     /// Operator-oriented inventory and batch emitters
     Inventory(InventoryArgs),
     /// Inspect resolved resource paths and bundle-root candidates
@@ -633,6 +635,37 @@ struct IdentifyArgs {
 
 #[derive(Args, Debug)]
 #[command(
+    long_about = "Fuzzy function similarity: find functions that are structurally similar but not byte-identical (different compiler/optimization level, renamed duplicate helper, patched-but-related versions).\n\nA Fission-native, BSim-inspired analog -- NOT a byte-compatible clone of Ghidra's BSim (no `.bsim` database import/export, no LSH server). Each function's p-code data-flow and control-flow graph is turned into a sparse feature-hash multiset, compared with TF-IDF-weighted cosine-like similarity against every other discovered function in the same binary. Pass `--function-discovery-profile balanced` (or `aggressive`) first -- without it, only import/export-table functions are known, which defeats the purpose.",
+    after_help = "Examples:\n  fission_cli similar app.exe --function-discovery-profile balanced\n  fission_cli similar app.exe --function-discovery-profile balanced --function 0x140001000\n  fission_cli similar app.exe --function-discovery-profile balanced --top 3 --json"
+)]
+struct SimilarArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Report similarity for only this function entry VA instead of all-pairs
+    #[arg(long, value_parser = parse_hex_address)]
+    function: Option<u64>,
+
+    /// Max similar matches to report per function
+    #[arg(long, default_value_t = 5)]
+    top: usize,
+
+    /// Function discovery profile (conservative|balanced|aggressive) -- without
+    /// this, only import/export-table functions are known, which defeats the
+    /// purpose of a similarity search
+    #[arg(
+        long = "function-discovery-profile",
+        value_enum,
+        default_value = "conservative"
+    )]
+    function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
     long_about = "Inspect bundled runtime resources (signatures, type corpora, detectors).\n\nUse `resources status` to see candidate bundle roots and paths resolved via `PATHS`.",
     after_help = "Examples:\n  fission_cli resources status\n  fission_cli resources status --json\n  fission_cli --resource-root /opt/fission-data resources status --json"
 )]
@@ -710,6 +743,7 @@ const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "xrefs",
     "callgraph",
     "identify",
+    "similar",
     "inventory",
     "resources",
     "script",
@@ -916,6 +950,16 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.verbose = identify.common.verbose;
                     args
                 }
+                CliCommand::Similar(similar) => {
+                    let mut args = OneShotArgs::with_binary(similar.binary);
+                    args.similar_cmd = true;
+                    args.similar_function = similar.function;
+                    args.similar_top_k = similar.top;
+                    args.function_discovery_profile = similar.function_discovery_profile;
+                    args.json = similar.common.json;
+                    args.verbose = similar.common.verbose;
+                    args
+                }
                 CliCommand::Inventory(inventory) => match inventory.command {
                     InventoryCommand::ProgramMetadata(metadata) => {
                         let mut args = OneShotArgs::with_binary(metadata.binary);
@@ -1047,6 +1091,28 @@ mod tests {
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
             ParsedInvocation::Serve { .. } => panic!("legacy parser cannot emit serve"),
         }
+    }
+
+    #[test]
+    fn canonical_similar_invocation_dispatches_correctly() {
+        // Regression: same failure mode as the `serve` case above -- adding
+        // a new CliCommand variant without also listing it in
+        // CANONICAL_SUBCOMMANDS silently falls through to the legacy flat
+        // parser, which treats the subcommand name itself as the BINARY
+        // positional argument.
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "similar",
+            "bin.exe",
+            "--function",
+            "0x1000",
+            "--top",
+            "3",
+        ]);
+        assert!(parsed.args.similar_cmd);
+        assert_eq!(parsed.args.similar_function, Some(0x1000));
+        assert_eq!(parsed.args.similar_top_k, 3);
+        assert_eq!(parsed.args.binary.to_str(), Some("bin.exe"));
     }
 
     #[test]

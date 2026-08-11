@@ -21,6 +21,7 @@ mod pcode_topology;
 mod raw_pcode;
 mod rust_decomp;
 mod script;
+mod similar;
 mod strings;
 mod xrefs;
 
@@ -29,6 +30,7 @@ use callgraph::run_callgraph;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use identify::run_identify;
+use similar::run_similar;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
 use nir_stats::emit_nir_stats;
 use pcode_stages::emit_pcode_stages;
@@ -555,6 +557,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.identify_cmd {
         return Ok(run_identify(cli, &binary)?);
+    }
+
+    if cli.similar_cmd {
+        return Ok(run_similar(cli, &binary)?);
     }
 
     if cli.list {
