@@ -6,6 +6,7 @@ use fission_loader::loader::types::{
 };
 use fission_pcode::midend::cspec::register_model_for_language;
 use fission_signatures::FidDatabaseSet;
+use fission_signatures::fidbf::FidbfDatabase;
 use fission_sleigh::runtime::{
     DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
 };
@@ -287,11 +288,49 @@ impl FactStore {
             binary.is_64bit,
         );
 
-        if db_set.databases.is_empty() {
+        let mut databases = db_set.databases;
+        databases.extend(Self::discover_library_fid_databases(binary));
+
+        if databases.is_empty() {
             return;
         }
 
-        self.ingest_signature_matches_with_databases(binary, &db_set.databases);
+        self.ingest_signature_matches_with_databases(binary, &databases);
+    }
+
+    /// Load any FID database Fission bundles for a statically-linked
+    /// third-party library the DIE (Detect-It-Easy) engine recognizes in
+    /// this binary (`utils/signatures/fid/`'s `sigmoid-openssl-*`,
+    /// `SDL-el-*`, `qt5-el7-*`, `libsodium-*` files -- see
+    /// `PathConfig::get_library_fid_paths`).
+    ///
+    /// DIE's whole-binary "this binary contains OpenSSL" signal doesn't say
+    /// WHICH functions are OpenSSL's -- that's exactly what FID hash
+    /// matching against a real OpenSSL-build FID database answers, at the
+    /// same per-function granularity as the MSVC/GCC-runtime FID matching
+    /// above. Low-confidence detections are excluded (a single weak
+    /// indicator isn't worth the extra database scan); see
+    /// `die_engine.rs`'s confidence-scoring fix for why that threshold
+    /// matters here.
+    fn discover_library_fid_databases(binary: &LoadedBinary) -> Vec<FidbfDatabase> {
+        let detection = fission_loader::detect(binary);
+        let paths = fission_core::PATHS.clone();
+        let mut databases = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for lib in detection.detections.iter().filter(|d| {
+            d.detection_type == fission_loader::DetectionType::Library
+                && d.confidence >= fission_loader::Confidence::Medium
+        }) {
+            for path in paths.get_library_fid_paths(binary.is_64bit, &lib.name) {
+                if !seen.insert(path.clone()) {
+                    continue;
+                }
+                if let Ok(db) = fission_signatures::fidbf::parse_fidbf(&path) {
+                    databases.push(db);
+                }
+            }
+        }
+        databases
     }
 
     /// The per-function decode/hash/lookup loop, split out from
@@ -766,6 +805,29 @@ mod tests {
     /// (`0x37783a7364fbdfe5`) already validated byte-for-byte against real
     /// Ghidra 12.0.4 for `55 48 89 e5 b8 2a 00 00 00 5d c3` (`push rbp; mov
     /// rbp,rsp; mov eax,0x2a; pop rbp; ret`) in
+    /// Confirms the bundled third-party-library FID databases
+    /// (`get_library_fid_paths` -> DIE `Library` detection wiring) are real,
+    /// parseable `.fidbf` files, not just filenames that happen to exist on
+    /// disk -- `parse_fidbf` must successfully read at least one library's
+    /// function hash table out of it.
+    #[test]
+    fn library_fid_databases_are_parseable() {
+        let paths = fission_core::PATHS.get_library_fid_paths(true, "OpenSSL");
+        assert!(!paths.is_empty(), "expected a bundled OpenSSL FID database");
+        let mut parsed_any = false;
+        for path in &paths {
+            if let Ok(db) = fission_signatures::fidbf::parse_fidbf(path) {
+                assert!(
+                    !db.libraries.is_empty(),
+                    "{} parsed but has no libraries",
+                    path.display()
+                );
+                parsed_any = true;
+            }
+        }
+        assert!(parsed_any, "none of {paths:?} parsed successfully");
+    }
+
     /// `fission-sleigh`'s `fid_full_hash_matches_ghidra_exactly_for_register_only_function`.
     #[test]
     fn fid_signature_match_ingests_strong_fid_name_fact() {

@@ -84,6 +84,27 @@ const GCC_FID_FILES_X64: &[&str] = &["gcc-x86.LE.64.default.fidbf", "gcc-AARCH64
 
 const GCC_FID_FILES_X86: &[&str] = &["gcc-x86.LE.32.default.fidbf", "gcc-ARM.LE.32.v8.fidbf"];
 
+/// Third-party statically-linked library FID databases, keyed by the DIE
+/// (Detect-It-Easy) `DetectionType::Library` name that should trigger them
+/// (see `get_library_fid_paths`). All three OpenSSL builds are tried since
+/// the detected library name alone doesn't reliably pin a version.
+const OPENSSL_FID_FILES_X64: &[&str] = &[
+    "sigmoid-openssl-1.1.0f-x86.LE.64.default.fidbf",
+    "sigmoid-openssl-1.0.2l-x86.LE.64.default.fidbf",
+    "sigmoid-openssl-1.0.1u-x86.LE.64.default.fidbf",
+];
+const OPENSSL_FID_FILES_X86: &[&str] = &[
+    "sigmoid-openssl-1.1.0f-x86.LE.32.default.fidbf",
+    "sigmoid-openssl-1.0.2l-x86.LE.32.default.fidbf",
+    "sigmoid-openssl-1.0.1u-x86.LE.32.default.fidbf",
+];
+const SDL_FID_FILES_X64: &[&str] = &["SDL-el-x86.LE.64.default.fidbf"];
+const SDL_FID_FILES_X86: &[&str] = &["SDL-el-x86.LE.32.default.fidbf"];
+const QT5_FID_FILES_X64: &[&str] = &["qt5-el7-x86.LE.64.default.fidbf"];
+const QT5_FID_FILES_X86: &[&str] = &["qt5-el7-x86.LE.32.default.fidbf"];
+const LIBSODIUM_FID_FILES_X64: &[&str] = &["libsodium-x86.LE.64.default.fidbf"];
+const LIBSODIUM_FID_FILES_X86: &[&str] = &["libsodium-x86.LE.32.default.fidbf"];
+
 /// Path configuration for Fission resources
 #[derive(Debug, Clone)]
 pub struct PathConfig {
@@ -508,6 +529,45 @@ impl PathConfig {
         result
     }
 
+    /// FID database paths for a specific known statically-linked library, if
+    /// Fission bundles one (`utils/signatures/fid/`'s `sigmoid-openssl-*`,
+    /// `SDL-el-*`, `qt5-el7-*`, `libsodium-*` files). `library_name` is
+    /// matched case-insensitively by substring against DIE's
+    /// `DetectionType::Library` detection names (e.g. "OpenSSL", "SDL",
+    /// "Qt") -- returns an empty `Vec` for any library Fission doesn't have
+    /// a dedicated FID database for.
+    pub fn get_library_fid_paths(&self, is_64bit: bool, library_name: &str) -> Vec<PathBuf> {
+        let name = library_name.to_ascii_lowercase();
+        let files: &[&str] = if name.contains("openssl") {
+            if is_64bit {
+                OPENSSL_FID_FILES_X64
+            } else {
+                OPENSSL_FID_FILES_X86
+            }
+        } else if name.contains("sdl") {
+            if is_64bit {
+                SDL_FID_FILES_X64
+            } else {
+                SDL_FID_FILES_X86
+            }
+        } else if name.contains("qt") {
+            if is_64bit {
+                QT5_FID_FILES_X64
+            } else {
+                QT5_FID_FILES_X86
+            }
+        } else if name.contains("sodium") {
+            if is_64bit {
+                LIBSODIUM_FID_FILES_X64
+            } else {
+                LIBSODIUM_FID_FILES_X86
+            }
+        } else {
+            return Vec::new();
+        };
+        files.iter().filter_map(|f| self.find_fid_file(f)).collect()
+    }
+
     /// Get preferred FID database paths for a specific target.
     ///
     /// This intentionally returns a smaller, target-aware subset than
@@ -886,6 +946,25 @@ mod tests {
         let config = PathConfig::detect();
         // Should at least detect workspace if running from project
         println!("PathConfig:\n{}", config.summary());
+    }
+
+    #[test]
+    fn library_fid_paths_resolve_for_known_libraries() {
+        let config = PathConfig::detect();
+        for (name, expect_hit) in [
+            ("OpenSSL", true),
+            ("SDL", true),
+            ("Qt", true),
+            ("libsodium", true),
+            ("nonexistent_lib_xyz", false),
+        ] {
+            let found = config.get_library_fid_paths(true, name);
+            if expect_hit {
+                assert!(!found.is_empty(), "expected at least one FID path for {name}");
+            } else {
+                assert!(found.is_empty(), "expected no FID path for {name}");
+            }
+        }
     }
 
     #[test]
