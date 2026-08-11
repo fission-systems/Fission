@@ -873,11 +873,23 @@ impl DieMatcher {
             return None;
         }
 
-        // Calculate confidence based on match ratio
+        // Calculate confidence based on match ratio. `total_rules` counts
+        // rules THIS interpreter's DSL subset successfully extracted from
+        // the .sg script, not the real DIE signature's full complexity --
+        // for many real-world scripts that's just 1 (a single string/byte
+        // pattern), and treating a single match as "High confidence" (per
+        // Confidence's own doc comment, "High" means MULTIPLE strong
+        // indicators) produced dozens of implausible simultaneous
+        // detections on ordinary binaries (confirmed empirically: a normal
+        // unpacked PE test binary reported "High confidence" DarkBASIC,
+        // Kotlin, Nvidia PhysX, SoftLok dongle, etc. simultaneously, each
+        // from a single coincidentally-matching primitive). Require at
+        // least 2 matched rules for High/Medium; a lone match is exactly
+        // what "Low -- single weak indicator" describes.
         let ratio = matched_rules as f32 / total_rules as f32;
-        let confidence = if ratio >= 0.8 && sig.unsupported_rule_count == 0 {
+        let confidence = if matched_rules >= 2 && ratio >= 0.8 && sig.unsupported_rule_count == 0 {
             Confidence::High
-        } else if ratio >= 0.5 {
+        } else if matched_rules >= 2 && ratio >= 0.5 {
             Confidence::Medium
         } else {
             Confidence::Low
@@ -1625,5 +1637,52 @@ mod tests {
         let detections = matcher.match_binary(&binary);
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].confidence, Confidence::High);
+    }
+
+    #[test]
+    fn test_single_matched_rule_caps_at_low_confidence() {
+        // Regression: a signature where this interpreter only extracted one
+        // rule from the real .sg script used to score matched=1/total=1 as
+        // ratio 1.0 >= 0.8, i.e. "High" confidence -- even though a single
+        // matched primitive is exactly what Confidence::Low's own doc
+        // comment describes ("single weak indicator"). Confirmed empirically
+        // to produce dozens of simultaneous "High confidence" hits
+        // (DarkBASIC, Kotlin, Nvidia PhysX, SoftLok dongle, ...) on one
+        // ordinary unpacked PE test binary before this fix.
+        use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+        let data = b"CODE....DATA....PK\x03\x04".to_vec();
+        let binary = LoadedBinaryBuilder::new("fixture.bin".to_string(), DataBuffer::Heap(data))
+            .format("PE")
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 8,
+                file_offset: 0,
+                file_size: 8,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("fixture binary");
+
+        let sig = Signature {
+            name: "single-rule-fixture".to_string(),
+            sig_type: "packer".to_string(),
+            rules: vec![SignatureRule::OverlayPresent { present: true }],
+            source_format: Some("PE".to_string()),
+            source_file: Some("db/PE/test.1.sg".to_string()),
+            unsupported_rule_count: 0,
+        };
+        let mut matcher = DieMatcher::new(SignatureDatabase {
+            format_version: "test".to_string(),
+            description: "test".to_string(),
+            source: "test".to_string(),
+            signatures: vec![sig],
+        });
+        let detections = matcher.match_binary(&binary);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].confidence, Confidence::Low);
     }
 }

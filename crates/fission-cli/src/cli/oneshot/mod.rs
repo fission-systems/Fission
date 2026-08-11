@@ -51,6 +51,49 @@ use script::execute_script;
 use std::fs;
 use std::io;
 
+/// Print a one-time stderr warning when the DIE detection engine
+/// (`fission_loader::detect`, backed by the full `utils/signatures/die/`
+/// mirror) finds a Packer/Protector/SFX on this binary at Medium+
+/// confidence.
+///
+/// This data was already being computed for every binary load (`fission_cli
+/// info --detections` has always been able to show it), but nothing
+/// surfaced it during ordinary decompilation -- a packed/protected
+/// binary's `.text` is largely encrypted/compressed stub code, so
+/// decompiling it as-is produces plausible-looking but meaningless output
+/// with no indication why. Low-confidence hits are suppressed here (kept
+/// for `info --detections`'s more exhaustive listing) since a single weak
+/// indicator isn't worth interrupting every run for.
+fn warn_if_packed_or_protected(binary: &LoadedBinary) {
+    let detection = fission_loader::detect(binary);
+    let hits: Vec<&fission_loader::Detection> = detection
+        .detections
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.detection_type,
+                fission_loader::DetectionType::Packer
+                    | fission_loader::DetectionType::Protector
+                    | fission_loader::DetectionType::Sfx
+            ) && d.confidence >= fission_loader::Confidence::Medium
+        })
+        .collect();
+    if hits.is_empty() {
+        return;
+    }
+    let names: Vec<String> = hits
+        .iter()
+        .map(|d| match &d.version {
+            Some(v) => format!("{} {v}", d.name),
+            None => d.name.clone(),
+        })
+        .collect();
+    eprintln!(
+        "[!] WARNING: binary appears packed/protected ({}) -- decompiled output may be unreliable until unpacked. Run `fission_cli info --detections` for the full list.",
+        names.join(", ")
+    );
+}
+
 fn map_discovery_profile_arg(profile: FunctionDiscoveryProfileArg) -> FunctionDiscoveryProfile {
     match profile {
         FunctionDiscoveryProfileArg::Conservative => FunctionDiscoveryProfile::Conservative,
@@ -524,6 +567,8 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             binary.functions.len()
         );
     }
+
+    warn_if_packed_or_protected(&binary);
 
     if cli.info {
         return Ok(print_binary_info(

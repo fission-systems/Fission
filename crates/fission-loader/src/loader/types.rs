@@ -474,9 +474,21 @@ impl LoadedBinary {
         }
         let detection = crate::detector::detect(self);
         let is_pe = self.format.to_ascii_uppercase().starts_with("PE");
-        detection
-            .compiler()
-            .map(|d| match d.name.to_lowercase().as_str() {
+        detection.compiler().map(|d| {
+            // DIE's DetectIt Easy signature DB (utils/signatures/die/) recognizes
+            // ~50 distinct compilers/languages by name (see the `meta("compiler", ...)`
+            // declaration in each .sg detection script) -- this used to collapse
+            // everything outside msvc/gcc/clang straight to "default", silently
+            // discarding compiler_id values that downstream consumers
+            // (fission_signatures::load_ghidra_patterns's borlandcpp/borlanddelphi
+            // branches, in particular) already know how to use. The mapping below
+            // targets real Ghidra compiler-spec IDs where one exists
+            // (x86borland/x86delphi/x86-*-golang -- confirmed against the .cspec
+            // files Ghidra ships) and a plain lowercased language tag otherwise
+            // (rust/zig/nim/swift have no distinct Ghidra cspec -- they use the
+            // standard C ABI cspec for their target -- but the tag still lets
+            // e.g. a future GDT/struct-corpus selector match on it).
+            match d.name.to_lowercase().as_str() {
                 "microsoft visual c++" | "msvc" => "windows".to_string(),
                 "gcc" | "mingw" => {
                     if is_pe {
@@ -486,8 +498,16 @@ impl LoadedBinary {
                     }
                 }
                 "clang" => "clang".to_string(),
+                "borland c++" => "borlandcpp".to_string(),
+                "borland delphi" | "borland kylix" => "borlanddelphi".to_string(),
+                "go" => "golang".to_string(),
+                "rust" => "rust".to_string(),
+                "zig" => "zig".to_string(),
+                "nim" => "nim".to_string(),
+                "swift" => "swift".to_string(),
                 _ => "default".to_string(),
-            })
+            }
+        })
     }
 
     /// Canonical SLEIGH language ID selected by the loader.
