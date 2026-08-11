@@ -85,6 +85,11 @@ impl ResourceProvider {
     }
 
     #[must_use]
+    pub fn wdk_signatures_txt(&self) -> Option<PathBuf> {
+        self.paths.get_wdk_signatures_path()
+    }
+
+    #[must_use]
     pub fn rust_typeinfo_json_path(&self, filename: &str) -> Option<PathBuf> {
         self.paths.get_rust_typeinfo_json_path(filename)
     }

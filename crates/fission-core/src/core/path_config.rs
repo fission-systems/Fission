@@ -269,6 +269,34 @@ impl PathConfig {
         })
     }
 
+    /// `wdk_signatures.txt` (pipe-separated Windows Driver Kit kernel-mode API
+    /// signatures, extracted from angr's vendored WDK prototype JSON via
+    /// `scripts/angr_wdk_extract_signatures.py`), if present.
+    pub fn get_wdk_signatures_path(&self) -> Option<PathBuf> {
+        let filename = "wdk_signatures.txt";
+        if let Some(ref gdt_dir) = self.gdt_dir {
+            let path = gdt_dir.join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        if let Some(ref base) = self.signatures_base {
+            let path = base.join("typeinfo").join("win32").join(filename);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        self.workspace_root.as_ref().and_then(|root| {
+            let path = root
+                .join("utils")
+                .join("signatures")
+                .join("typeinfo")
+                .join("win32")
+                .join(filename);
+            path.exists().then_some(path)
+        })
+    }
+
     /// `generic_clib_signatures.txt` (pipe-separated generic C library signatures), if present.
     pub fn get_generic_clib_signatures_path(&self) -> Option<PathBuf> {
         let filename = "generic_clib_signatures.txt";

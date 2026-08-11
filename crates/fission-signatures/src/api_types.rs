@@ -55,6 +55,9 @@ impl ApiTypeDatabase {
         if let Some(path) = ResourceProvider::global().ntoskrnl_signatures_txt() {
             db.merge_path(&path)?;
         }
+        if let Some(path) = ResourceProvider::global().wdk_signatures_txt() {
+            db.merge_path(&path)?;
+        }
         if let Some(path) = ResourceProvider::global().generic_clib_signatures_txt() {
             db.merge_path(&path)?;
         }
