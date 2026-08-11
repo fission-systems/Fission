@@ -238,6 +238,30 @@ def extract_structures(bf: BufferFile, verbose: bool = False) -> List[dict]:
 
     resolver = TypeResolver(builtins, typedefs, composites, pointers)
 
+    # Reverse index: composite key -> typedef alias names pointing at it
+    # (e.g. `typedef struct tagRECT {...} RECT;` registers "RECT" as an
+    # alias of tagRECT's composite key), resolved through up to a couple of
+    # chained typedef hops (`typedef RECT RECTL;`-style indirection is rare
+    # but does happen) rather than assuming direct typedef->composite only.
+    NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    alias_names_by_composite: Dict[int, List[str]] = {}
+    for t in typedefs.values():
+        name = t.get("name")
+        if not name or not NAME_RE.match(name):
+            continue
+        target = t.get("underlying_dtid")
+        for _hop in range(4):
+            if target is None:
+                break
+            kind, _ = split_kind(target)
+            if kind == KIND_COMPOSITE:
+                alias_names_by_composite.setdefault(target, []).append(name)
+                break
+            if kind == KIND_TYPEDEF:
+                target = typedefs.get(target, {}).get("underlying_dtid")
+                continue
+            break
+
     structs: List[dict] = []
     for comp_key, cdef in sorted(composites.items()):
         if cdef["is_union"]:
@@ -259,12 +283,21 @@ def extract_structures(bf: BufferFile, verbose: bool = False) -> List[dict]:
             })
         if not fields:
             continue
-        structs.append({
-            "name": cdef["name"],
-            "size_32": cdef["length"],
-            "size_64": cdef["length"],
-            "fields": fields,
-        })
+
+        names = [cdef["name"]]
+        seen = {cdef["name"]}
+        for alias in alias_names_by_composite.get(comp_key, []):
+            if alias not in seen:
+                names.append(alias)
+                seen.add(alias)
+
+        for name in names:
+            structs.append({
+                "name": name,
+                "size_32": cdef["length"],
+                "size_64": cdef["length"],
+                "fields": fields,
+            })
 
     return structs
 

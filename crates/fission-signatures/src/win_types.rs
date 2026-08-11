@@ -394,6 +394,14 @@ mod tests {
         // windows_vs12_structures.json: net-new (not in the existing win32
         // corpus) struct pulled from Ghidra's own windows_vs12_{32,64}.gdt.
         assert!(ws.get("PPM_WMI_PERF_STATE").is_some());
+        // scripts/gdt_extract_structs.py also emits typedef aliases (not
+        // just the Composite tag name) -- ACTCTX/tagACTCTXA/tagACTCTXW are
+        // all net-new (not in the pre-existing win32 corpus) and must
+        // resolve to the same layout regardless of which name is used.
+        let by_alias = ws.get("ACTCTX").expect("ACTCTX typedef alias");
+        let by_tag = ws.get("tagACTCTXA").expect("tagACTCTXA composite tag name");
+        assert_eq!(by_alias.size_64, by_tag.size_64);
+        assert_eq!(by_alias.fields.len(), by_tag.fields.len());
     }
 
     #[test]
