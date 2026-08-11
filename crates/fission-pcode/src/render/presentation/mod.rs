@@ -243,7 +243,13 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr) {
         | HirStmt::Goto(_)
         | HirStmt::Break
         | HirStmt::Continue => {}
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) => {
+            for s in body {
+                replace_var_in_stmt(s, name, replacement);
+            }
+        }
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            replace_var_in_expr(cond, name, replacement);
             for s in body {
                 replace_var_in_stmt(s, name, replacement);
             }
@@ -4004,8 +4010,10 @@ fn collect_used_names_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
         }
         HirStmt::Expr(e) | HirStmt::Return(Some(e)) => collect_used_names_expr(e, out),
         HirStmt::Return(None) => {}
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            collect_used_names_stmts(body, out)
+        HirStmt::Block(body) => collect_used_names_stmts(body, out),
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            collect_used_names_expr(cond, out);
+            collect_used_names_stmts(body, out);
         }
         HirStmt::If {
             cond,
@@ -4155,6 +4163,47 @@ mod tests {
         apply_hir_presentation(&mut func);
         assert!(func.locals.iter().all(|b| b.name != "home_0"));
         assert!(func.locals.iter().any(|b| b.name == "x"));
+    }
+
+    /// Regression test for the bin_000.elf finding: a variable referenced
+    /// only inside a do-while loop's condition (`while (r15 != rax)`, never
+    /// elsewhere in the body) must keep its declaration. `collect_used_names_stmt`
+    /// used to match `While`/`DoWhile` as `{ body, .. }`, silently discarding
+    /// the `cond` field, so `drop_unused_presentation_locals` pruned the
+    /// declaration while the renderer still printed the condition
+    /// referencing it -- producing HIR that referenced an undeclared
+    /// variable.
+    #[test]
+    fn hir_presentation_keeps_local_referenced_only_in_dowhile_condition() {
+        let mut func = HirFunction {
+            name: "f".into(),
+            params: vec![],
+            locals: vec![local("guard"), local("cursor")],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::DoWhile {
+                body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("cursor".into()),
+                    rhs: HirExpr::Binary {
+                        op: fission_midend_core::ir::HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("cursor".into())),
+                        rhs: Box::new(HirExpr::Const(1, int_ty(32, true))),
+                    ty: int_ty(32, true),
+                    },
+                }],
+                cond: HirExpr::Binary {
+                    op: fission_midend_core::ir::HirBinaryOp::Ne,
+                    lhs: Box::new(HirExpr::Var("guard".into())),
+                    rhs: Box::new(HirExpr::Var("cursor".into())),
+                    ty: int_ty(32, true),
+                },
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            func.locals.iter().any(|b| b.name == "guard"),
+            "local used only in a do-while condition must keep its declaration"
+        );
     }
 
     #[test]
