@@ -94,6 +94,9 @@ pub struct OneShotArgs {
     pub similar_function: Option<u64>,
     /// Max similar matches to report per function (`similar --top`).
     pub similar_top_k: usize,
+    /// Force a specific SLEIGH language ID instead of auto-detecting one
+    /// (global `--language` flag, canonical parser only).
+    pub language_override: Option<String>,
 }
 
 impl Default for OneShotArgs {
@@ -170,6 +173,7 @@ impl Default for OneShotArgs {
             similar_cmd: false,
             similar_function: None,
             similar_top_k: 5,
+            language_override: None,
         }
     }
 }

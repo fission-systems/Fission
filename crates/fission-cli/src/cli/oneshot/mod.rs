@@ -51,6 +51,78 @@ use script::execute_script;
 use std::fs;
 use std::io;
 
+/// Force `binary`'s SLEIGH language to `language_id`, bypassing the usual
+/// ELF/PE/Mach-O `.opinion`-based auto-detection entirely.
+///
+/// Most of Fission's ~130 lift-ready languages (see `fission-sleigh`'s
+/// runtime-readiness audit -- 100% of constructor templates covered)
+/// describe raw-firmware/embedded targets (8-bit MCUs, legacy ISA variants)
+/// that never carry an ELF/PE/Mach-O header to auto-detect from -- same as
+/// in Ghidra itself, where these need to be picked from a language list,
+/// not inferred. This is that manual picker for the CLI.
+fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Result<()> {
+    let known = fission_core::architecture::known_language_ids()
+        .map_err(|e| anyhow::anyhow!("failed to load SLEIGH language manifest: {e}"))?;
+    if !known.contains(language_id) {
+        let prefix = language_id.split(':').next().unwrap_or(language_id);
+        let mut suggestions: Vec<&String> = known
+            .iter()
+            .filter(|id| id.starts_with(prefix))
+            .collect();
+        suggestions.sort();
+        anyhow::bail!(
+            "unknown --language `{language_id}` (not a lift-ready SLEIGH language id).{}",
+            if suggestions.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\nDid you mean one of:\n  {}",
+                    suggestions
+                        .iter()
+                        .take(15)
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n  ")
+                )
+            }
+        );
+    }
+
+    let parts: Vec<&str> = language_id.split(':').collect();
+    let [processor, endian, size, variant] = parts[..] else {
+        anyhow::bail!(
+            "malformed --language id `{language_id}` (expected processor:endian:size:variant)"
+        );
+    };
+    let bitness: u8 = size
+        .parse()
+        .map_err(|_| anyhow::anyhow!("malformed --language id `{language_id}`: size `{size}` is not a number"))?;
+
+    binary.load_spec = Some(fission_core::architecture::BinaryLoadSpec::new(
+        binary.format.clone(),
+        binary.image_base,
+        language_id,
+        "default",
+        "cli-language-override",
+    ));
+    binary.arch_spec = language_id.to_string();
+    binary.is_64bit = bitness == 64;
+    let endian_word = match endian {
+        "LE" | "le" => "little",
+        "BE" | "be" => "big",
+        other => other,
+    };
+    binary.architecture = Some(fission_core::architecture::ArchitectureDescriptor {
+        processor: processor.to_string(),
+        endian: endian_word.to_string(),
+        bitness,
+        variant: variant.to_string(),
+        abi: None,
+        raw_machine: "cli-language-override".to_string(),
+    });
+    Ok(())
+}
+
 /// Print a one-time stderr warning when the DIE detection engine
 /// (`fission_loader::detect`, backed by the full `utils/signatures/die/`
 /// mirror) finds a Packer/Protector/SFX on this binary at Medium+
@@ -542,6 +614,13 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         cli.binary.to_string_lossy().to_string(),
     )
     .with_context(|| format!("failed to parse binary `{}`", cli.binary.display()))?;
+
+    if let Some(language_id) = cli.language_override.as_deref() {
+        apply_language_override(&mut binary, language_id)?;
+        if cli.verbose {
+            eprintln!("[*] Forced SLEIGH language: {language_id}");
+        }
+    }
 
     if let Some(profile_arg) = cli.function_discovery_profile {
         let profile = map_discovery_profile_arg(profile_arg);

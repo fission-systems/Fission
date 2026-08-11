@@ -119,6 +119,17 @@ struct CliArgs {
     #[arg(long = "resource-root", global = true, value_name = "DIR")]
     resource_root: Option<PathBuf>,
 
+    /// Force a specific SLEIGH language ID (`processor:endian:size:variant`,
+    /// e.g. `PIC:LE:16:default`) instead of auto-detecting one from the
+    /// binary's container format. Every language Fission's own lifter can
+    /// run is a candidate (see `fission-sleigh`'s runtime-readiness audit),
+    /// but most describe raw-firmware/embedded targets with no ELF/PE/
+    /// Mach-O header to auto-detect from -- same as in Ghidra itself,
+    /// those need to be picked explicitly. Skips auto-detection entirely
+    /// when given, even for formats that would otherwise resolve fine.
+    #[arg(long = "language", global = true, value_name = "LANG_ID")]
+    language: Option<String>,
+
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -786,7 +797,15 @@ where
     if should_use_canonical_parser(&argv) {
         let cli = CliArgs::parse_from(argv);
         fission_core::resource_roots::set_cli_resource_bundle_root(cli.resource_root.clone());
-        normalize_canonical(cli)
+        let language_override = cli.language.clone();
+        let invocation = normalize_canonical(cli);
+        match invocation {
+            ParsedInvocation::OneShot(mut parsed) => {
+                parsed.args.language_override = language_override;
+                ParsedInvocation::OneShot(parsed)
+            }
+            other => other,
+        }
     } else {
         ParsedInvocation::OneShot(normalize_legacy(LegacyCliArgs::parse_from(argv)))
     }
@@ -1113,6 +1132,43 @@ mod tests {
         assert_eq!(parsed.args.similar_function, Some(0x1000));
         assert_eq!(parsed.args.similar_top_k, 3);
         assert_eq!(parsed.args.binary.to_str(), Some("bin.exe"));
+    }
+
+    #[test]
+    fn canonical_language_override_flows_into_oneshot_args() {
+        // --language is `global = true` on CliArgs (like --resource-root),
+        // so it must survive whichever CliCommand variant is chosen --
+        // verified here via the post-match injection in
+        // parse_oneshot_args_from, not a per-subcommand field.
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "--language",
+            "PIC-24E:LE:24:default",
+            "info",
+            "bin.exe",
+        ]);
+        assert_eq!(
+            parsed.args.language_override.as_deref(),
+            Some("PIC-24E:LE:24:default")
+        );
+
+        // Also works with --language placed after the subcommand (clap's
+        // `global = true` recognizes it at any position).
+        let parsed2 = parse_canonical(&[
+            "fission_cli",
+            "info",
+            "bin.exe",
+            "--language",
+            "6502:LE:16:default",
+        ]);
+        assert_eq!(
+            parsed2.args.language_override.as_deref(),
+            Some("6502:LE:16:default")
+        );
+
+        // Omitted entirely: no override.
+        let parsed3 = parse_canonical(&["fission_cli", "info", "bin.exe"]);
+        assert_eq!(parsed3.args.language_override, None);
     }
 
     #[test]

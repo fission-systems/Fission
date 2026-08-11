@@ -976,6 +976,60 @@ fn sleigh_specs_root() -> PathBuf {
     repo_root().join("utils").join("sleigh-specs")
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct LanguageManifestEntry {
+    processor: String,
+    entry_id: String,
+    language_ids: Vec<String>,
+    runtime_status: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct LanguageManifest {
+    entries: Vec<LanguageManifestEntry>,
+}
+
+/// Every SLEIGH language ID (`processor:endian:size:variant`) confirmed
+/// `executable_candidate` in `utils/sleigh-specs/ghidra_language_manifest.json`
+/// -- i.e. lift-ready per `sla_runtime_ready_audit`, regardless of whether
+/// any `.opinion` constraint can auto-select it from a real binary's format
+/// header. Used to validate a manually-specified `--language` override
+/// (see `fission_cli`'s language-override flag) before accepting it, since
+/// most of these IDs describe niche/embedded targets (raw firmware for
+/// 8-bit MCUs, legacy ISA variants) that -- same as in Ghidra itself --
+/// are never auto-detected from a container format and must be picked
+/// explicitly.
+///
+/// The manifest's own `runtime_status` isn't fully trustworthy on its own:
+/// Ghidra's `Toy` architecture (its internal test/example ISA, never a real
+/// decompilation target) is marked `executable_candidate` there too, despite
+/// having no compiled `.sla` checked in under `compiled/Toy/` -- confirmed
+/// by running `sla_runtime_ready_audit --all` directly, which hard-errors
+/// on exactly this ("missing checked-in compiled .sla"). So this also
+/// requires the compiled artifact (`compiled/<processor>/<entry_id>.sla`)
+/// to actually exist on disk before accepting an entry, rather than
+/// trusting the manifest field alone.
+pub fn known_language_ids() -> Result<HashSet<String>, String> {
+    let path = sleigh_specs_root().join("ghidra_language_manifest.json");
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read language manifest at {}: {e}", path.display()))?;
+    let manifest: LanguageManifest = serde_json::from_str(&content)
+        .map_err(|e| format!("failed to parse language manifest at {}: {e}", path.display()))?;
+    let compiled_root = sleigh_specs_root().join("compiled");
+    Ok(manifest
+        .entries
+        .into_iter()
+        .filter(|e| e.runtime_status == "executable_candidate")
+        .filter(|e| {
+            compiled_root
+                .join(&e.processor)
+                .join(format!("{}.sla", e.entry_id))
+                .is_file()
+        })
+        .flat_map(|e| e.language_ids)
+        .collect())
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -1039,6 +1093,22 @@ mod tests {
             spec.source
                 .starts_with("opinion: loader=Portable Executable (PE)")
         );
+    }
+
+    #[test]
+    fn known_language_ids_covers_common_and_niche_architectures() {
+        let known = known_language_ids().expect("load language manifest");
+        // mainstream, auto-detectable via .opinion
+        assert!(known.contains("x86:LE:64:default"));
+        assert!(known.contains("AARCH64:LE:64:v8A"));
+        // niche/embedded, never auto-detected from a container format --
+        // exactly the case fission_cli's --language override exists for
+        assert!(known.contains("PIC-24E:LE:24:default"));
+        assert!(known.contains("6502:LE:16:default"));
+        // Ghidra's own internal test architecture must not leak in (no
+        // checked-in compiled .sla for it -- see gdt_extract_structs.py's
+        // sibling investigation this session for the same Toy exclusion)
+        assert!(!known.iter().any(|id| id.starts_with("Toy")));
     }
 
     #[test]
