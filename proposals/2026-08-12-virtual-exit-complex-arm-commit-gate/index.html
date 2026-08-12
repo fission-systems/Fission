@@ -1053,6 +1053,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#8-isolated-complex-arm-slice-2026-08-12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Isolated Complex-Arm Slice (2026-08-12)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1112,9 +1123,16 @@
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>1. In a CFG with multiple real exits, the common postdominator of arms that end
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>   at different exits is a typed VirtualExit fact, not an absent fact and not a
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>   fabricated real block index.
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>2. Recursive complex-arm structuring may execute only after shape and admission
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>   have established that its enclosing stable-first conditional will commit.
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>   Failed probes must not recursively lower arbitrary blocks.
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>2. Each arm owns only the nodes exclusively reachable from its successor. Nodes
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>   reachable from both successors form a shared terminal tail owned once after
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>   the conditional; they are not duplicated into either arm.
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>3. Arm ownership is a membership set, not a lexical block-index interval. Every
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>   exclusive node must have no side entry, every exclusive exit must enter the
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>   shared tail or leave the region, and the shared tail must be closed toward
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>   the region exit.
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>4. Recursive complex-arm structuring may execute only after shape and admission
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>   have established that its enclosing stable-first conditional will commit.
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>   Failed probes must not recursively lower arbitrary blocks.
 </span></code></pre></div>
 <p>ISA-agnostic check:</p>
 <ul>
@@ -1126,6 +1144,8 @@
 <ul>
 <li>Multiple exits: two conditional arms reach distinct returns.</li>
 <li>Mixed arm: one arm is linear and the other contains a loop/nested conditional before a distinct return.</li>
+<li>Shared terminal tail: interleaved lexical layout where both exclusive arm
+  sets enter common tail nodes that remain outside the emitted <code>if/else</code>.</li>
 <li>Negative: an arm trapped in a non-terminating SCC has no exit-reachable postdominator.</li>
 </ul>
 <h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
@@ -1169,6 +1189,85 @@
 <li>[x] No hardcoded row identity in production.</li>
 <li>[x] No benchmark/printer-only semantic claim.</li>
 <li>[x] Existing postdom and conditional owners are extended; no duplicate pass.</li>
+</ul>
+<h2 id="8-isolated-complex-arm-slice-2026-08-12">8. Isolated Complex-Arm Slice (2026-08-12)<a class="headerlink" href="#8-isolated-complex-arm-slice-2026-08-12" title="Permanent link">&para;</a></h2>
+<p>Implementation:</p>
+<ul>
+<li>Proves exclusive arm membership and the shared terminal tail from CFG facts
+  before statement lowering.</li>
+<li>Places the deferred candidate immediately before the plain-if/goto fallback
+  in stable Conditional order.</li>
+<li>Clones <code>PreviewBuilder</code> and uses a private register-origin side channel;
+  commits the isolated host only after both membership-limited arms lower.</li>
+<li>Does not snapshot or roll back global builder state.</li>
+<li>Preserves shared-tail blocks outside the <code>if/else</code> and normalizes overlapping
+  bottom-up SESE children back to raw parent reconstruction.</li>
+<li>Fixes HIR presentation's subtree-local label pruning/recovery so an enclosing
+  or sibling goto cannot lose its target label.</li>
+</ul>
+<p>Measured focused row, release build:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th style="text-align: right;">Before goto / lines / bytes</th>
+<th style="text-align: right;">After goto / lines / bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NIR</td>
+<td style="text-align: right;">42 / 559 / 16,501</td>
+<td style="text-align: right;">41 / 599 / 21,689</td>
+</tr>
+<tr>
+<td>HIR</td>
+<td style="text-align: right;">40 / 529 / 14,835</td>
+<td style="text-align: right;">39 / 563 / 17,817</td>
+</tr>
+</tbody>
+</table>
+<p>Measured 224-binary / 250-function DecBench sample set:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th style="text-align: right;">Before goto / lines / bytes</th>
+<th style="text-align: right;">After goto / lines / bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NIR</td>
+<td style="text-align: right;">2,135 / 38,444 / 1,022,738</td>
+<td style="text-align: right;">2,130 / 38,850 / 1,072,419</td>
+</tr>
+<tr>
+<td>HIR</td>
+<td style="text-align: right;">2,034 / 35,576 / 942,938</td>
+<td style="text-align: right;">2,023 / 35,931 / 973,271</td>
+</tr>
+</tbody>
+</table>
+<p>Interpretation: goto density improved in both layers and all rows completed,
+but output size increased (NIR +49,681 bytes; HIR +30,333 bytes), and individual
+files include both improvements and regressions. This is a measured trade-off,
+not an unqualified readability win. The earlier type-pollution reproduction
+<code>bin_103</code> remained byte-identical in both NIR and HIR, including
+<code>uint sub_72f1(uint param_1)</code>.</p>
+<p>Regression gates:</p>
+<ul>
+<li><code>cargo nextest run -p fission-midend-structuring</code>: 124 passed.</li>
+<li><code>cargo nextest run -p fission-pcode</code>: 998 passed, 1 skipped.</li>
+<li><code>cargo check -p fission-pcode</code>, <code>fission-decompiler</code>, and
+  <code>fission-automation</code>: passed.</li>
+<li><code>scripts/check/owner_boundaries.sh</code>: passed.</li>
+<li>External local Docker service built from the dirty tree and passed <code>/health</code>.
+  The requested 40-row dev runner did not produce valid semantic rows because
+  pyjoern's fast parser repeatedly omitted every decompiled function (and one
+  row reported <code>adapter_error</code>); the isolation loop was stopped rather than
+  treating adapter/coverage failures as zero semantic scores. This local run
+  was not published.</li>
 </ul>
 
 
