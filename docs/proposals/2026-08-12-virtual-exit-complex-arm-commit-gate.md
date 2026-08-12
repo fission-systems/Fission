@@ -80,9 +80,12 @@ Comparable coverage:
 - [x] Focused real row
   - Command: rebuild release CLI and rerun `bin_073.elf@0x6780`.
   - Expected for substrate-only slice: byte-identical NIR/HIR, 42 gotos.
-- [ ] External sample-set smoke
+- [x] External sample-set smoke
   - Command: `vendor/decbench-evalkit/decbench-evalkit-sample-set/run_fission.py`
-  - Expected for substrate-only slice: no output/goto regression.
+  - Result: NIR and HIR each completed 224/224 binaries and 250/250 functions.
+    NIR: 2,135 gotos, 38,444 lines, 1,022,738 bytes. HIR: 2,034 gotos,
+    35,576 lines, 942,938 bytes. The focused `bin_073@0x6780` output remained
+    byte-identical (NIR 42 gotos; HIR 40 gotos).
 - [x] Related checks
   - Command: `cargo check -p fission-pcode && cargo check -p fission-decompiler`
   - Result: both checks passed; `nir_boundary_scan.py` also reported zero findings.
