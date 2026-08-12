@@ -32,8 +32,17 @@ pub fn decide_structuring_admission(
         return StructuringAdmissionReason::ExplicitForceLinear;
     }
 
-    let extreme_budget = input.block_count > 192
-        || input.total_ops > 3_000
+    // Raised from 192/3_000 (measured on the DecBench sample-set corpus: 4
+    // functions with 122-207 *reducible* blocks -- scc_irreducible_count==0,
+    // so the ReplacementPlanExplosion risk documented for IrreducibleBudget
+    // broadening does not apply here -- were being force-linearized purely
+    // on size, well short of any actual structuring cost problem (full SESE
+    // structuring completed in 2-3.6s each, vs. Ghidra emitting 3-4x fewer
+    // gotos for the same functions). New thresholds keep ~3x headroom over
+    // the largest confirmed-safe case (207 blocks) in that corpus rather
+    // than removing the guard outright.
+    let extreme_budget = input.block_count > 600
+        || input.total_ops > 10_000
         || (input.edge_count > input.block_count.saturating_mul(4)
             && input.max_predecessors >= 6
             && input.max_scc_component_size > 64);

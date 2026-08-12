@@ -428,6 +428,57 @@ mod tests {
         assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
     }
 
+    /// Pins the block-count-only ExtremeBudget threshold. Raised from 192 to
+    /// 600 after measuring on the DecBench sample-set corpus: reducible
+    /// (scc_irreducible_count == 0) functions with 122-207 blocks were being
+    /// force-linearized on size alone, well short of any real structuring
+    /// cost problem (full SESE structuring completed in 2-3.6s each). ~3x
+    /// headroom over the largest confirmed-safe case in that corpus.
+    #[test]
+    fn structuring_admission_allows_graph_collapse_below_raised_block_count_budget() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 207,
+            total_ops: 2_500,
+            edge_count: 327,
+            multi_pred_blocks: 20,
+            max_predecessors: 4,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 40,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::GraphCollapse);
+    }
+
+    #[test]
+    fn structuring_admission_forces_linear_above_raised_block_count_budget() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 601,
+            total_ops: 2_500,
+            edge_count: 900,
+            multi_pred_blocks: 20,
+            max_predecessors: 4,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 40,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
+    }
+
+    #[test]
+    fn structuring_admission_forces_linear_above_raised_total_ops_budget() {
+        let decision = decide_structuring_admission(StructuringAdmissionInput {
+            block_count: 150,
+            total_ops: 10_001,
+            edge_count: 250,
+            multi_pred_blocks: 10,
+            max_predecessors: 4,
+            scc_irreducible_count: 0,
+            max_scc_component_size: 30,
+            explicit_force_linear: false,
+        });
+        assert_eq!(decision, StructuringAdmissionReason::ExtremeBudget);
+    }
+
     #[test]
     fn blockgraph_collapse_gate_allows_irreducible_budget_graph_collapse() {
         let decision = apply_blockgraph_collapse_admission_gate(
