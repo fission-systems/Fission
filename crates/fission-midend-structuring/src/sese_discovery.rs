@@ -213,10 +213,18 @@ pub fn build_sese_tree(mut regions: Vec<SeseRegion>, total_nodes: usize) -> Sese
 }
 
 /// Recursively structures the SESE tree bottom-up.
+///
+/// `results` values carry, alongside the region's body, the *achieved* exit
+/// (see `build_sese_region_body`'s doc comment: a collapse rule can consume
+/// blocks past the region's a-priori tree boundary) and any block indices
+/// absorbed even beyond that -- both must survive composition into the
+/// parent's `child_map` instead of being silently reset to the tree's bare
+/// `child.exit` range, or blocks the child already consumed get rescanned
+/// as if untouched once this region is no longer the top-level call.
 pub fn sese_structure_region(
     host: &mut impl StructuringHost,
     region: &SeseRegion,
-    results: &mut HashMap<(usize, usize), Vec<PreHirStmt>>,
+    results: &mut HashMap<(usize, usize), (Vec<PreHirStmt>, usize, Vec<usize>)>,
     total_nodes: usize,
 ) -> Result<(), MlilPreviewError> {
     let is_root = region.entry == 0 && region.exit == total_nodes;
@@ -226,7 +234,7 @@ pub fn sese_structure_region(
             match build_linear_sese_child_fallback(host, child.entry, child.exit) {
                 Ok(body) => {
                     host.bump_sese_child_localized_linear();
-                    results.insert((child.entry, child.exit), body);
+                    results.insert((child.entry, child.exit), (body, child.exit, Vec::new()));
                 }
                 Err(_) => return Err(err),
             }
@@ -242,23 +250,31 @@ pub fn sese_structure_region(
         // recursively-nested PreHirStmt body, which profiling showed was a
         // second (smaller) instance of the same clone-heavy pattern already
         // fixed in `lower_linear_body_cached`.
-        if let Some(body) = results.remove(&(child.entry, child.exit)) {
-            let proof =
-                RegionProof::structured(RegionKind::Sequence, child.entry, child.exit, None);
-            child_map.insert(child.entry, (body, child.exit, proof));
+        if let Some((body, achieved_exit, extra_members)) =
+            results.remove(&(child.entry, child.exit))
+        {
+            let effective_exit = achieved_exit.max(child.exit);
+            let mut proof =
+                RegionProof::structured(RegionKind::Sequence, child.entry, effective_exit, None);
+            if !extra_members.is_empty() {
+                proof.members.extend(extra_members);
+                proof.members.sort_unstable();
+                proof.members.dedup();
+            }
+            child_map.insert(child.entry, (body, effective_exit, proof));
         }
     }
 
     match build_sese_region_body(host, region.entry, region.exit, child_map) {
-        Ok(body) => {
-            results.insert((region.entry, region.exit), body);
+        Ok((body, achieved_exit, extra_members)) => {
+            results.insert((region.entry, region.exit), (body, achieved_exit, extra_members));
             Ok(())
         }
         Err(err) if is_root => Err(err),
         Err(err) => match build_linear_sese_child_fallback(host, region.entry, region.exit) {
             Ok(body) => {
                 host.bump_sese_child_localized_linear();
-                results.insert((region.entry, region.exit), body);
+                results.insert((region.entry, region.exit), (body, region.exit, Vec::new()));
                 Ok(())
             }
             Err(_) => Err(err),
@@ -280,7 +296,10 @@ pub fn structure_cfg_via_sese(
     let mut results = HashMap::default();
     sese_structure_region(host, &tree.root, &mut results, total_nodes)?;
 
-    Ok(results.remove(&(0, total_nodes)).unwrap_or_default())
+    Ok(results
+        .remove(&(0, total_nodes))
+        .map(|(body, _, _)| body)
+        .unwrap_or_default())
 }
 
 #[cfg(test)]

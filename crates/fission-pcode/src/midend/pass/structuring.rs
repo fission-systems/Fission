@@ -261,7 +261,7 @@ impl NirPass for SeseStructuringPass {
         // path is the free-fn structure_cfg_via_sese (no pcode thin wrap).
         let sese_result = if collapse_loop_admission_enabled() {
             match build_sese_region_body(ir.builder, 0, total_blocks, Default::default()) {
-                Ok(body) => Ok(body),
+                Ok((body, _achieved_exit, _extra_members)) => Ok(body),
                 Err(err) => {
                     if diag {
                         eprintln!(

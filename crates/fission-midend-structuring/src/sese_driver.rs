@@ -150,6 +150,9 @@ pub fn consider_structured_candidate(
     candidates: &mut Vec<CollapseCandidate>,
     result: Result<Option<(PreHirStmt, usize)>, MlilPreviewError>,
 ) -> Result<(), MlilPreviewError> {
+    // Drain unconditionally: a rejected/failed attempt's pushes must not leak
+    // into a different rule's attempt at the same `start_idx`.
+    let extra_members = host.take_extra_absorbed_members();
     if let Some((stmt, skip_to)) = capture_structuring_failure(result, last_structuring_failure)? {
         let accepted = if matches!(rule, CollapseRule::Switch) {
             let region: HashSet<usize> = (start_idx..skip_to).collect();
@@ -158,9 +161,14 @@ pub fn consider_structured_candidate(
             host.accept_structured_region(start_idx, skip_to, targeted)
         };
         if accepted {
-            let Some(proof) = build_region_proof(start_idx, skip_to, &stmt) else {
+            let Some(mut proof) = build_region_proof(start_idx, skip_to, &stmt) else {
                 return Ok(());
             };
+            if !extra_members.is_empty() {
+                proof.members.extend(extra_members);
+                proof.members.sort_unstable();
+                proof.members.dedup();
+            }
             host.record_region_candidate(&proof);
             candidates.push(CollapseCandidate {
                 rule,
@@ -179,12 +187,30 @@ pub fn select_structured_candidate(
 }
 
 /// Tier-1 / tier-2 collapse loop + virtualize, then final reconstruction.
+///
+/// Collapse rules operate on the raw CFG and don't know about the caller's
+/// `[entry, exit)` boundary, so a rule can legitimately consume blocks past
+/// `exit` (e.g. a do-while whose latch/exit lies beyond a SESE sub-region
+/// boundary chosen by `find_sese_regions`). Returns, alongside the body:
+/// - the *achieved* exit -- the true exclusive upper bound of what was
+///   consumed starting at `entry`, which can exceed the requested `exit`.
+/// - any block indices absorbed outside even that achieved range (e.g. a
+///   do-while's embedded early-return guard target, absorbed via
+///   `record_extra_absorbed_member`).
+///
+/// Callers that compose this region's result into an *enclosing* region's
+/// `child_map` (see `sese_discovery.rs`'s `sese_structure_region`) must use
+/// the achieved exit -- not the SESE-tree's a-priori `child.exit` -- as the
+/// child's key range, and fold the extra members into that entry's own
+/// `RegionProof.members`. Otherwise blocks already consumed by this call
+/// silently reappear as independently-scanned residuals once this region is
+/// no longer the top-level call.
 pub fn build_sese_region_body(
     host: &mut impl StructuringHost,
     entry: usize,
     exit: usize,
     child_map: HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
-) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
+) -> Result<(Vec<PreHirStmt>, usize, Vec<usize>), MlilPreviewError> {
     let diag = structuring_diag_enabled();
     if host.sese_region_proof_budget_exceeded() {
         if diag {
@@ -233,11 +259,26 @@ pub fn build_sese_region_body(
             break;
         }
 
+        // Block indices already owned by some accepted region's (possibly
+        // non-contiguous) `proof.members`, beyond that region's own
+        // `[start, child_exit)` key range -- e.g. a do-while's absorbed
+        // early-return guard target. Recomputed each outer iteration since
+        // `active_child_map` can change.
+        let owned_elsewhere = crate::graph::BlockOwnership::from_members(
+            active_child_map
+                .values()
+                .flat_map(|(_, _, proof)| proof.members.iter().copied()),
+        );
+
         // Tier 1: ideal structured rules
         let mut idx = entry;
         while idx < exit {
             if let Some((_, child_exit, _)) = active_child_map.get(&idx) {
                 idx = *child_exit;
+                continue;
+            }
+            if owned_elsewhere.contains(idx) {
+                idx += 1;
                 continue;
             }
 
@@ -332,6 +373,10 @@ pub fn build_sese_region_body(
                 idx = *child_exit;
                 continue;
             }
+            if owned_elsewhere.contains(idx) {
+                idx += 1;
+                continue;
+            }
 
             let block_key = host.block_target_key(idx);
             let has_same_start_peer = host.has_same_start_address_peer(idx);
@@ -384,7 +429,30 @@ pub fn build_sese_region_body(
         }
     }
 
-    reconstruct_sese_final_body(host, entry, exit, &active_child_map, &targeted, diag)
+    // The true consumed upper bound starting at `entry`: a collapse rule can
+    // legitimately structure past the requested `exit` (see doc comment).
+    let achieved_exit = active_child_map
+        .get(&entry)
+        .map(|&(_, child_exit, _)| child_exit.max(exit))
+        .unwrap_or(exit);
+
+    // Any accepted region's `proof.members` outside its own `[start, child_exit)`
+    // key range was absorbed beyond the naive range formula (guard-absorption
+    // etc). Surface that to the caller so composition into an enclosing
+    // region's `child_map` doesn't silently drop it back to a bare range.
+    let mut region_extra_members: Vec<usize> = Vec::new();
+    for (&start, (_, child_exit, proof)) in active_child_map.iter() {
+        for &m in &proof.members {
+            if m < start || m >= *child_exit {
+                region_extra_members.push(m);
+            }
+        }
+    }
+    region_extra_members.sort_unstable();
+    region_extra_members.dedup();
+
+    let body = reconstruct_sese_final_body(host, entry, exit, &active_child_map, &targeted, diag)?;
+    Ok((body, achieved_exit, region_extra_members))
 }
 
 /// Promote guarded-tail regions to a fixed point (free entry).

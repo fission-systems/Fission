@@ -40,6 +40,8 @@ pub(crate) struct PreviewBuilder<'a> {
     /// Empty when no splitting has been applied (all blocks are genuine pcode blocks).
     pub(crate) virtual_block_map: Vec<usize>,
     pub(crate) loop_bodies: Vec<crate::midend::structuring::loop_analysis::LoopBody>,
+    /// Side channel for [`fission_midend_structuring::StructuringHost::record_extra_absorbed_member`].
+    pub(crate) extra_absorbed_members: Vec<usize>,
     pub(crate) params: BTreeMap<usize, PreHirBinding>,
     pub(crate) locals: BTreeMap<i64, StackSlot>,
     pub(crate) locals_next_id: StackSlotId,

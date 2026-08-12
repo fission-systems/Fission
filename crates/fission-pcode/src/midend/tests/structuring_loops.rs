@@ -438,6 +438,138 @@ fn natural_while_with_preheader_after_body_layout() {
 }
 
 #[test]
+fn do_while_absorbs_embedded_early_return_guard() {
+    // do-while with an embedded early-return guard whose target lies outside
+    // the loop's own contiguous [entry, skip_to) span:
+    //   0x5500 head:   local_10 = 11; (falls through)
+    //   0x5510 guard:  if (guard_cond) goto 0x5540;  (else falls through)
+    //   0x5520 latch:  if (loop_cond) goto 0x5500;  else falls through (normal exit)
+    //   0x5530 exit:   return 0;
+    //   0x5540 early:  return 99;
+    // Without absorbing 0x5540 into the do-while region's ownership, the
+    // residual scan re-structures it independently, duplicating `return 99;`.
+    let ptr1 = uniq(0x531, 8);
+    let guard_cond = uniq(0x532, 1);
+    let latch_cond = uniq(0x533, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x5500,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x5500,
+                        output: Some(ptr1.clone()),
+                        inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x5501,
+                        output: None,
+                        inputs: vec![cst(0, 4), ptr1, cst(11, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x5510,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5510,
+                        output: Some(guard_cond.clone()),
+                        inputs: vec![reg(0x08, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5511,
+                        output: None,
+                        inputs: vec![cst(0x5540, 8), guard_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x5520,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x5520,
+                        output: Some(latch_cond.clone()),
+                        inputs: vec![reg(0x09, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5521,
+                        output: None,
+                        inputs: vec![cst(0x5500, 8), latch_cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x5530,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5530,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x5540,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5540,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(99, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(
+        &func,
+        "do_while_early_return_guard_fn",
+        0x5500,
+        &preview_options(),
+    )
+    .expect("preview render");
+    assert!(code.contains("do {"), "{code}");
+    assert!(code.contains("local_10 = 11;"), "{code}");
+    assert_eq!(
+        code.matches("return 99;").count(),
+        1,
+        "expected exactly one `return 99;`: {code}"
+    );
+    assert!(code.contains("return 0;"), "{code}");
+    assert!(!code.contains("goto "), "{code}");
+}
+
+#[test]
 fn do_while_preview_lowers_multi_block_body() {
     let cond = uniq(0x430, 1);
     let ptr1 = uniq(0x431, 8);

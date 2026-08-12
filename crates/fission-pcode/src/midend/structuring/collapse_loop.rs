@@ -18,6 +18,7 @@ pub(crate) fn structure_cfg_via_collapse_loop(
     total_nodes: usize,
 ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
     fission_midend_structuring::build_sese_region_body(builder, 0, total_nodes, HashMap::default())
+        .map(|(body, _achieved_exit, _extra_members)| body)
 }
 
 impl<'a> PreviewBuilder<'a> {

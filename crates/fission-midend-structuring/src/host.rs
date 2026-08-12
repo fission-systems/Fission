@@ -191,6 +191,15 @@ pub trait StructuringHost {
         skip_to: usize,
         targeted: &HashSet<u64>,
     ) -> bool;
+    /// Report a block index absorbed into the in-progress region candidate
+    /// but lying outside its own `[start, skip_to)` span (e.g. a do-while's
+    /// embedded early-return guard target). Drained by the caller that
+    /// decides whether the candidate is accepted; a rejected candidate's
+    /// pushes must not leak into a different rule's attempt for the same idx.
+    fn record_extra_absorbed_member(&mut self, block_idx: usize);
+    /// Drain all block indices recorded via [`Self::record_extra_absorbed_member`]
+    /// since the last drain.
+    fn take_extra_absorbed_members(&mut self) -> Vec<usize>;
     fn sese_region_proof_budget_exceeded(&self) -> bool;
     fn region_has_external_entry(&self, region: &HashSet<usize>, header_idx: usize) -> bool;
     /// Whether the condition head block has only pure ops discardable for for-loop form.

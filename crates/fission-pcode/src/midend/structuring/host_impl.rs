@@ -288,6 +288,12 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     ) -> bool {
         PreviewBuilder::accept_structured_region(self, start_idx, skip_to, targeted)
     }
+    fn record_extra_absorbed_member(&mut self, block_idx: usize) {
+        self.extra_absorbed_members.push(block_idx);
+    }
+    fn take_extra_absorbed_members(&mut self) -> Vec<usize> {
+        std::mem::take(&mut self.extra_absorbed_members)
+    }
     fn sese_region_proof_budget_exceeded(&self) -> bool {
         PreviewBuilder::sese_region_proof_budget_exceeded(self)
     }

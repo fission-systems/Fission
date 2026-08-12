@@ -142,6 +142,7 @@ impl<'a> PreviewBuilder<'a> {
             irreducible_edges,
             virtual_block_map: Vec::new(),
             loop_bodies,
+            extra_absorbed_members: Vec::new(),
             params: BTreeMap::new(),
             locals: BTreeMap::new(),
             locals_next_id: 0,

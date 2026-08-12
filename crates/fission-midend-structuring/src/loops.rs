@@ -918,13 +918,38 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
         subgraph_result
     }
 
-pub fn lower_do_while_region(host: &mut impl StructuringHost, 
+/// Whether `block_idx` is nothing but a bare `return <expr>;` -- i.e. a
+/// do-while's embedded early-return guard target. Uses the same (cached,
+/// idempotent-per-call) lowering hooks the reconstruction pass below already
+/// relies on, so re-invoking it during reconstruction is safe.
+fn trivial_return_expr(
+    host: &mut impl StructuringHost,
+    block_idx: usize,
+) -> Result<Option<Option<PreHirExpr>>, MlilPreviewError> {
+    let stmts = host.lower_block_stmts(block_idx)?;
+    if !stmts.is_empty() {
+        return Ok(None);
+    }
+    match host.lower_block_terminator(block_idx)? {
+        LoweredTerminator::Return(expr) => Ok(Some(expr)),
+        _ => Ok(None),
+    }
+}
+
+pub fn lower_do_while_region(host: &mut impl StructuringHost,
         start_idx: usize,
     ) -> Result<Option<(Vec<PreHirStmt>, PreHirExpr, usize, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
+        // Confirmed loop head (real back-edge) -- required before we allow any
+        // speculative lowering of blocks reachable from `start_idx` for the
+        // guard-absorption branch below, otherwise a doomed do-while attempt at
+        // a non-loop `start_idx` can corrupt order-dependent builder state
+        // (`materialized_vns`) via out-of-order `lower_block_stmts` calls.
+        let is_confirmed_loop_head = host.get_loop_body(start_idx).is_some();
         let mut idx = start_idx;
         let mut visited = HashSet::default();
         let mut path = Vec::new();
+        let mut absorbed_guards: HashSet<usize> = HashSet::default();
         let (cond_idx, exit_idx) = loop {
             if host.sese_region_proof_budget_exceeded() {
                 return Ok(None);
@@ -947,13 +972,35 @@ pub fn lower_do_while_region(host: &mut impl StructuringHost,
                 };
                 break (idx, exit_idx);
             }
-            let [next_idx] = successors.as_slice() else {
-                return Ok(None);
+            let next_idx = match successors.as_slice() {
+                [next_idx] => *next_idx,
+                _ if is_confirmed_loop_head && idx != start_idx && successors.len() == 2 => {
+                    // Embedded early-return guard: one successor continues the
+                    // linear do-while chain, the other is a bare `return expr;`
+                    // block that lies outside the loop's contiguous body.
+                    let mut absorbed = None;
+                    for (i, &succ) in successors.iter().enumerate() {
+                        if visited.contains(&succ) {
+                            continue;
+                        }
+                        if trivial_return_expr(host, succ)?.is_some() {
+                            absorbed = Some((succ, successors[1 - i]));
+                            break;
+                        }
+                    }
+                    let Some((return_target, continue_idx)) = absorbed else {
+                        return Ok(None);
+                    };
+                    host.record_extra_absorbed_member(return_target);
+                    absorbed_guards.insert(idx);
+                    continue_idx
+                }
+                _ => return Ok(None),
             };
-            if !host.can_inline_linear_successor(idx, *next_idx, &visited) {
+            if !host.can_inline_linear_successor(idx, next_idx, &visited) {
                 return Ok(None);
             }
-            idx = *next_idx;
+            idx = next_idx;
         };
 
         if diag {
@@ -977,6 +1024,41 @@ pub fn lower_do_while_region(host: &mut impl StructuringHost,
                 let Some(expected_next) = path.get(path_pos + 1).copied() else {
                     return Ok(None);
                 };
+                if absorbed_guards.contains(&block_idx) {
+                    let LoweredTerminator::Cond {
+                        cond,
+                        true_target,
+                        false_target,
+                    } = terminator
+                    else {
+                        return Ok(None);
+                    };
+                    let expected_next_addr = host.block_target_key(expected_next);
+                    let (guard_cond, return_target_addr) = if true_target == expected_next_addr {
+                        (negate_expr(cond), false_target)
+                    } else if false_target == Some(expected_next_addr) {
+                        (cond, Some(true_target))
+                    } else {
+                        return Ok(None);
+                    };
+                    let Some(return_target_addr) = return_target_addr else {
+                        return Ok(None);
+                    };
+                    let Some(return_target_idx) =
+                        host.find_block_index_by_address(return_target_addr)
+                    else {
+                        return Ok(None);
+                    };
+                    let Some(return_expr) = trivial_return_expr(host, return_target_idx)? else {
+                        return Ok(None);
+                    };
+                    body.push(PreHirStmt::If {
+                        cond: guard_cond,
+                        then_body: std::rc::Rc::new(vec![PreHirStmt::Return(return_expr)]),
+                        else_body: std::rc::Rc::new(Vec::new()),
+                    });
+                    continue;
+                }
                 let target = match terminator {
                     LoweredTerminator::Fallthrough(Some(target))
                     | LoweredTerminator::Goto(target) => target,

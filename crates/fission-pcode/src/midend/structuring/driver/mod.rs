@@ -123,6 +123,7 @@ impl<'a> PreviewBuilder<'a> {
             exit,
             child_map_std,
         )
+        .map(|(body, _achieved_exit, _extra_members)| body)
     }
 
     pub(crate) fn structuring_admission_reason(
