@@ -158,9 +158,46 @@ rather than hidden: the aggregate is -50 HIR gotos across 23 improved files,
 and both forms are semantically correct — one simply keeps a jump the other
 structures.
 
-## 7. Follow-up
+## 7. Follow-up slice: full if/else recovery (2026-08-13)
 
-The clean resolution for the residual HIR interaction is to teach this pass
-to decline candidates matching HIR's richer if/else shape (span ending in
-`goto Lend` with a single-reference label), so the two owners partition the
-work instead of racing for it. That needs its own measured slice.
+The residual HIR interaction was resolved by *implementing* the richer shape
+here rather than declining it. Declining would have handed those candidates
+back to HIR (good for HIR, 2 jumps -> 0) but left NIR with 2 jumps -> 2,
+a NIR regression. Recovering the shape at PreHIR level is strictly better for
+both layers, and leaves HIR's own recovery nothing to race for.
+
+```text
+if (C) { goto Lelse; } THEN...; goto Lend; Lelse: ELSE...; Lend:
+    becomes
+if (C) { ELSE } else { THEN }   Lend:
+```
+
+Both jumps retire: the guard's, and the then-arm's jump to the join. `Lelse`
+disappears with its single reference; `Lend` stays because other predecessors
+may still target it. Admission mirrors the HIR owner's proven conditions --
+`Lelse` must have exactly one function-wide reference, and neither THEN nor
+ELSE may declare a label -- plus this pass's own recursive label check and
+size bound. It is tried before the plain inversion, since it retires two
+jumps rather than one.
+
+Reference counts are snapshotted once per function. The rewrites only ever
+remove `Goto`s, so a count can go stale high but never low, and a stale-high
+count only makes the single-reference test decline -- the safe direction.
+
+Measured against a clean rebuild of the committed parent, 224/224 binaries
+and 250/250 functions in both layers:
+
+| Layer | Gotos before | Gotos after | Delta | Files improved | Files regressed |
+|---|---:|---:|---:|---:|---:|
+| NIR | 1,921 | 1,916 | -5 | 3 | **0** |
+| HIR | 1,909 | 1,905 | -4 | 2 | **0** |
+
+An interim measurement appeared to show three NIR regressions; that baseline
+was confounded (it had been generated at `MAX_SPAN_STMTS = 400` rather than
+the committed 24). Regenerating the baseline from the committed parent showed
+zero regressions in either layer. Interim numbers are only comparable against
+a baseline built from the same configuration.
+
+Validation: 3 new unit tests (recovery, single-reference requirement,
+label-in-else rejection) for 13 total in this module; 1,152 crate tests
+passed; `count_bits_matches_real_machine_code` passed.

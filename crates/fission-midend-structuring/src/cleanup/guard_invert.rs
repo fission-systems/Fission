@@ -47,6 +47,7 @@
 
 use fission_midend_prehir::PreHirStmt;
 use fission_midend_prehir::util::negate_expr;
+use crate::HashMap;
 use crate::HashSet;
 
 /// Largest span (recursive statement count) this pass will pull into an
@@ -70,16 +71,52 @@ pub fn invert_forward_guard_gotos(
     mut body: Vec<PreHirStmt>,
     protected: &HashSet<String>,
 ) -> (Vec<PreHirStmt>, usize) {
+    // Function-wide label reference counts. The rewrites below only ever
+    // remove `Goto`s, so a count can go stale *high* but never low, and a
+    // stale-high count only makes the single-reference test decline -- the
+    // safe direction.
+    let global_refs = super::collect_referenced_label_counts(&body);
     let mut removed = 0usize;
-    invert_in_place(&mut body, protected, &mut removed);
+    invert_in_place(&mut body, protected, &global_refs, &mut removed);
     (body, removed)
 }
 
-fn invert_in_place(stmts: &mut Vec<PreHirStmt>, protected: &HashSet<String>, removed: &mut usize) {
+fn invert_in_place(
+    stmts: &mut Vec<PreHirStmt>,
+    protected: &HashSet<String>,
+    global_refs: &HashMap<String, usize>,
+    removed: &mut usize,
+) {
     let mut idx = 0usize;
     while idx < stmts.len() {
         if let Some(target) = guard_goto_target(&stmts[idx]) {
             if !protected.contains(&target) {
+                // Try the richer if/else shape first: it retires both the
+                // guard's jump and the then-arm's jump to the join.
+                if recover_if_else(stmts, idx, &target, protected, global_refs) {
+                    *removed += 2;
+                    if let PreHirStmt::If {
+                        then_body,
+                        else_body,
+                        ..
+                    } = &mut stmts[idx]
+                    {
+                        invert_in_place(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                            protected,
+                            global_refs,
+                            removed,
+                        );
+                        invert_in_place(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                            protected,
+                            global_refs,
+                            removed,
+                        );
+                    }
+                    idx += 1;
+                    continue;
+                }
                 if let Some(label_idx) = forward_label_index(stmts, idx, &target) {
                     if span_is_invertible(&stmts[idx + 1..label_idx]) {
                         let PreHirStmt::If { cond, .. } = &stmts[idx] else {
@@ -99,6 +136,7 @@ fn invert_in_place(stmts: &mut Vec<PreHirStmt>, protected: &HashSet<String>, rem
                             invert_in_place(
                                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                                 protected,
+                                global_refs,
                                 removed,
                             );
                         }
@@ -109,7 +147,7 @@ fn invert_in_place(stmts: &mut Vec<PreHirStmt>, protected: &HashSet<String>, rem
             }
         }
         for seq in child_sequences_mut(&mut stmts[idx]) {
-            invert_in_place(seq, protected, removed);
+            invert_in_place(seq, protected, global_refs, removed);
         }
         idx += 1;
     }
@@ -154,16 +192,100 @@ fn forward_label_index(stmts: &[PreHirStmt], from: usize, target: &str) -> Optio
 /// A span may be pulled into a conditional only when it declares no label
 /// anywhere and stays inside the size bound.
 fn span_is_invertible(span: &[PreHirStmt]) -> bool {
+    span.iter().all(|stmt| !declares_label(stmt)) && span_within_bound(span)
+}
+
+fn span_within_bound(span: &[PreHirStmt]) -> bool {
     let mut total = 0usize;
     for stmt in span {
-        if declares_label(stmt) {
-            return false;
-        }
         total += statement_count(stmt);
         if total > MAX_SPAN_STMTS {
             return false;
         }
     }
+    true
+}
+
+/// Recover a full if/else from the two-jump shape:
+///
+/// ```text
+/// if (C) { goto Lelse; }   THEN...;  goto Lend;   Lelse:  ELSE...;  Lend:
+/// ```
+///
+/// becomes
+///
+/// ```text
+/// if (C) { ELSE } else { THEN }   Lend:
+/// ```
+///
+/// Both jumps retire -- the guard's, and the then-arm's jump to the join --
+/// so this is preferred over the plain inversion, which only retires one.
+/// `Lelse` disappears with its single reference; `Lend` is left in place
+/// because other predecessors may still target it.
+///
+/// This mirrors the recovery the HIR presentation layer already performs
+/// (`render/presentation/mod.rs`, `if_is_single_goto`). Doing it here means
+/// NIR -- which has no such layer -- gets the same shape, and the two owners
+/// agree instead of the earlier PreHIR pass pre-empting the better HIR one
+/// with a weaker single-jump inversion.
+fn recover_if_else(
+    stmts: &mut Vec<PreHirStmt>,
+    idx: usize,
+    lelse: &str,
+    protected: &HashSet<String>,
+    global_refs: &HashMap<String, usize>,
+) -> bool {
+    // The guard's jump must be this label's only reference; otherwise removing
+    // the label would strand the other predecessors that target it.
+    if global_refs.get(lelse).copied() != Some(1) {
+        return false;
+    }
+    let Some(le_idx) = forward_label_index(stmts, idx, lelse) else {
+        return false;
+    };
+    let then_span = &stmts[idx + 1..le_idx];
+    // The then-arm must hand control to a join rather than falling into ELSE.
+    let Some(PreHirStmt::Goto(lend)) = then_span.last() else {
+        return false;
+    };
+    let lend = lend.clone();
+    if lend == lelse || protected.contains(&lend) {
+        return false;
+    }
+    if !span_is_invertible(then_span) {
+        return false;
+    }
+    let Some(lend_idx) = stmts
+        .iter()
+        .enumerate()
+        .skip(le_idx + 1)
+        .find(|(_, stmt)| matches!(stmt, PreHirStmt::Label(label) if *label == lend))
+        .map(|(i, _)| i)
+    else {
+        return false;
+    };
+    let else_span = &stmts[le_idx + 1..lend_idx];
+    if !span_is_invertible(else_span) {
+        return false;
+    }
+
+    let PreHirStmt::If { cond, .. } = &stmts[idx] else {
+        return false;
+    };
+    let cond = cond.clone();
+    // `goto Lelse` when C means: when C run ELSE, otherwise run THEN.
+    let recovered_then: Vec<PreHirStmt> = else_span.to_vec();
+    let mut recovered_else: Vec<PreHirStmt> = then_span.to_vec();
+    recovered_else.pop();
+
+    stmts.splice(
+        idx..lend_idx,
+        std::iter::once(PreHirStmt::If {
+            cond,
+            then_body: std::rc::Rc::new(recovered_then),
+            else_body: std::rc::Rc::new(recovered_else),
+        }),
+    );
     true
 }
 
@@ -389,6 +511,74 @@ mod tests {
         body.push(PreHirStmt::Label("L".into()));
         let (_, removed) = invert_forward_guard_gotos(body, &HashSet::default());
         assert_eq!(removed, 0, "over-long span must not be absorbed");
+    }
+
+    #[test]
+    fn recovers_full_if_else_and_retires_both_jumps() {
+        // if (c) goto Lelse; THEN; goto Lend; Lelse: ELSE; Lend: rest
+        let body = vec![
+            guard("Lelse"),
+            expr_stmt("then1"),
+            PreHirStmt::Goto("Lend".into()),
+            PreHirStmt::Label("Lelse".into()),
+            expr_stmt("else1"),
+            PreHirStmt::Label("Lend".into()),
+            PreHirStmt::Return(None),
+        ];
+        let (out, removed) = invert_forward_guard_gotos(body, &HashSet::default());
+        assert_eq!(removed, 2, "guard jump and join jump both retire");
+        let PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = &out[0]
+        else {
+            panic!("expected recovered if/else, got {:?}", out[0]);
+        };
+        // Condition is kept as-is here; `goto Lelse` when c means "when c, ELSE".
+        assert_eq!(cond, &var("c"));
+        assert_eq!(then_body.as_slice(), &[expr_stmt("else1")]);
+        assert_eq!(else_body.as_slice(), &[expr_stmt("then1")]);
+        // Lelse is gone with its only reference; Lend stays for other callers.
+        assert!(!out.contains(&PreHirStmt::Label("Lelse".into())));
+        assert_eq!(out[1], PreHirStmt::Label("Lend".into()));
+    }
+
+    #[test]
+    fn if_else_recovery_needs_single_reference_label() {
+        // A second `goto Lelse` means removing the label would strand it.
+        let body = vec![
+            guard("Lelse"),
+            expr_stmt("then1"),
+            PreHirStmt::Goto("Lend".into()),
+            PreHirStmt::Label("Lelse".into()),
+            expr_stmt("else1"),
+            PreHirStmt::Label("Lend".into()),
+            PreHirStmt::If {
+                cond: var("d"),
+                then_body: vec![PreHirStmt::Goto("Lelse".into())].into(),
+                else_body: Vec::new().into(),
+            },
+        ];
+        let (out, removed) = invert_forward_guard_gotos(body, &HashSet::default());
+        // Falls back to the plain single-jump inversion, never the if/else form.
+        assert_ne!(removed, 2);
+        assert!(out.iter().any(|s| matches!(s, PreHirStmt::Label(l) if l == "Lelse")));
+    }
+
+    #[test]
+    fn if_else_recovery_refuses_label_in_else_span() {
+        let body = vec![
+            guard("Lelse"),
+            expr_stmt("then1"),
+            PreHirStmt::Goto("Lend".into()),
+            PreHirStmt::Label("Lelse".into()),
+            PreHirStmt::Label("Inner".into()),
+            expr_stmt("else1"),
+            PreHirStmt::Label("Lend".into()),
+        ];
+        let (_, removed) = invert_forward_guard_gotos(body, &HashSet::default());
+        assert_ne!(removed, 2, "label inside ELSE must block if/else recovery");
     }
 
     #[test]
