@@ -869,6 +869,105 @@ mod tests {
     }
 
     #[test]
+    fn goto_elim_removes_nested_block_fallthrough_to_enclosing_label() {
+        let stmts = vec![
+            PreHirStmt::Block(
+                vec![
+                    PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+                    PreHirStmt::Goto("join".to_string()),
+                ]
+                .into(),
+            ),
+            PreHirStmt::Label("join".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let result = eliminate_redundant_gotos(stmts);
+        let PreHirStmt::Block(body) = &result[0] else {
+            panic!("expected nested block: {result:?}");
+        };
+        assert_eq!(
+            **body,
+            vec![PreHirStmt::Expr(PreHirExpr::Var("work".to_string()))]
+        );
+    }
+
+    #[test]
+    fn goto_elim_removes_if_arm_fallthrough_to_enclosing_label() {
+        let stmts = vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("join".to_string())].into(),
+                else_body: vec![
+                    PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+                    PreHirStmt::Goto("join".to_string()),
+                ]
+                .into(),
+            },
+            PreHirStmt::Label("join".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let result = eliminate_redundant_gotos(stmts);
+        let PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = &result[0]
+        else {
+            panic!("expected if: {result:?}");
+        };
+        assert!(then_body.is_empty());
+        assert_eq!(
+            **else_body,
+            vec![PreHirStmt::Expr(PreHirExpr::Var("work".to_string()))]
+        );
+    }
+
+    #[test]
+    fn goto_elim_keeps_loop_tail_goto_to_enclosing_label() {
+        let stmts = vec![
+            PreHirStmt::While {
+                cond: PreHirExpr::Var("cond".to_string()),
+                body: vec![PreHirStmt::Goto("exit".to_string())].into(),
+            },
+            PreHirStmt::Label("exit".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let result = eliminate_redundant_gotos(stmts);
+        let PreHirStmt::While { body, .. } = &result[0] else {
+            panic!("expected while: {result:?}");
+        };
+        assert_eq!(**body, vec![PreHirStmt::Goto("exit".to_string())]);
+    }
+
+    #[test]
+    fn goto_elim_keeps_switch_case_tail_goto_to_enclosing_label() {
+        let stmts = vec![
+            PreHirStmt::Switch {
+                expr: PreHirExpr::Var("selector".to_string()),
+                cases: vec![PreHirSwitchCase {
+                    values: vec![1],
+                    body: vec![PreHirStmt::Goto("join".to_string())].into(),
+                }],
+                default: Vec::new().into(),
+            },
+            PreHirStmt::Label("join".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let result = eliminate_redundant_gotos(stmts);
+        let PreHirStmt::Switch { cases, .. } = &result[0] else {
+            panic!("expected switch: {result:?}");
+        };
+        assert_eq!(
+            *cases[0].body,
+            vec![PreHirStmt::Goto("join".to_string())]
+        );
+    }
+
+    #[test]
     fn goto_elim_removes_single_ref_label_and_goto_pair() {
         // Goto(L) immediately before Label(L) with a single reference → both removed.
         let stmts = vec![

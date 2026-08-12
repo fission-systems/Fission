@@ -8,21 +8,24 @@ use crate::HashSet;
 // Goto elimination post-pass
 // ---------------------------------------------------------------------------
 //
-// Three fixpoint rules applied in sequence until convergence:
+// Five fixpoint rules applied in sequence until convergence:
 //
-//  1. Empty-jump removal:   `Goto(L)` immediately followed by `Label(L)` → remove the Goto.
-//  2. Single-reference inline: `Label(L)` referenced exactly once as `Goto(L)` → remove the
+//  1. Nested fallthrough removal: a trailing `Goto(L)` in a sequential Block/If arm whose
+//     enclosing successor is `Label(L)` → remove the Goto.
+//  2. Empty-jump removal:   `Goto(L)` immediately followed by `Label(L)` → remove the Goto.
+//  3. Single-reference inline: `Label(L)` referenced exactly once as `Goto(L)` → remove the
 //     Label and the Goto (they're already adjacent after rule 1 or after inlining).
-//  3. Conditional goto inversion: `if (cond) { Goto(L) }` directly followed by `Label(L)`
+//  4. Conditional goto inversion: `if (cond) { Goto(L) }` directly followed by `Label(L)`
 //     and the rest of the code → replace with `if (!cond) { rest_code }`.
-//  4. Guard clause promotion: `if (cond) { Goto(L) }; code; L: return val` →
+//  5. Guard clause promotion: `if (cond) { Goto(L) }; code; L: return val` →
 //     `if (cond) { return val }; code`.  Handles the extremely common early-exit guard
 //     pattern where a forward goto jumps over the main body to a trailing return.
 //
-// Rules are applied at the TOP LEVEL only (not recursed into nested scopes) per iteration.
-// After each pass that changes anything, the whole pass restarts to reach a fixpoint.
+// Only rule 1 recurses, and it propagates an enclosing successor through sequential Block/If
+// scopes only. The other rules remain top-level. After each changed pass, the whole pass
+// restarts to reach a fixpoint.
 
-/// Apply all three goto-elimination rules at the top level of a statement list.
+/// Apply the goto-elimination rules once to a statement list.
 /// Returns `(cleaned, changed)` where `changed` indicates whether any rule fired.
 fn goto_elim_pass(stmts: Vec<PreHirStmt>) -> (Vec<PreHirStmt>, bool) {
     let mut changed = false;
@@ -31,7 +34,124 @@ fn goto_elim_pass(stmts: Vec<PreHirStmt>) -> (Vec<PreHirStmt>, bool) {
     let stmts = single_ref_label_inline(stmts, &mut changed);
     let stmts = guard_clause_promotion(stmts, &mut changed);
     let stmts = cond_goto_inversion(stmts, &mut changed);
+    // Preserve the established top-level rewrites above when they apply; this
+    // recursive rule is the fallback for sequential nesting they cannot see.
+    let stmts = nested_fallthrough_removal(stmts, None, &mut changed);
     (stmts, changed)
+}
+
+/// Remove a goto whose target is the next label reached by ordinary sequential
+/// fallthrough, including when the goto is nested inside a `Block` or either
+/// arm of an `If`.
+///
+/// An enclosing successor is deliberately not propagated through loop or
+/// switch boundaries: falling off a loop body begins another iteration, and a
+/// switch case has case/break ownership that cannot be inferred from lexical
+/// nesting alone. Local same-list adjacency is still cleaned inside those
+/// bodies because it needs no enclosing-flow assumption.
+fn nested_fallthrough_removal(
+    stmts: Vec<PreHirStmt>,
+    enclosing_successor: Option<&str>,
+    changed: &mut bool,
+) -> Vec<PreHirStmt> {
+    let mut out = Vec::with_capacity(stmts.len());
+
+    for idx in 0..stmts.len() {
+        let successor = match stmts.get(idx + 1) {
+            Some(PreHirStmt::Label(label)) => Some(label.clone()),
+            Some(_) => None,
+            None => enclosing_successor.map(str::to_owned),
+        };
+
+        let rewritten = match stmts[idx].clone() {
+            PreHirStmt::Goto(label) if successor.as_deref() == Some(label.as_str()) => {
+                *changed = true;
+                continue;
+            }
+            PreHirStmt::Block(body) => PreHirStmt::Block(std::rc::Rc::new(
+                nested_fallthrough_removal(
+                    body.as_ref().clone(),
+                    successor.as_deref(),
+                    changed,
+                ),
+            )),
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => PreHirStmt::If {
+                cond,
+                then_body: std::rc::Rc::new(nested_fallthrough_removal(
+                    then_body.as_ref().clone(),
+                    successor.as_deref(),
+                    changed,
+                )),
+                else_body: std::rc::Rc::new(nested_fallthrough_removal(
+                    else_body.as_ref().clone(),
+                    successor.as_deref(),
+                    changed,
+                )),
+            },
+            PreHirStmt::While { cond, body } => PreHirStmt::While {
+                cond,
+                body: std::rc::Rc::new(nested_fallthrough_removal(
+                    body.as_ref().clone(),
+                    None,
+                    changed,
+                )),
+            },
+            PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
+                body: std::rc::Rc::new(nested_fallthrough_removal(
+                    body.as_ref().clone(),
+                    None,
+                    changed,
+                )),
+                cond,
+            },
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body: std::rc::Rc::new(nested_fallthrough_removal(
+                    body.as_ref().clone(),
+                    None,
+                    changed,
+                )),
+            },
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => PreHirStmt::Switch {
+                expr,
+                cases: cases
+                    .into_iter()
+                    .map(|case| PreHirSwitchCase {
+                        values: case.values,
+                        body: std::rc::Rc::new(nested_fallthrough_removal(
+                            case.body.as_ref().clone(),
+                            None,
+                            changed,
+                        )),
+                    })
+                    .collect(),
+                default: std::rc::Rc::new(nested_fallthrough_removal(
+                    default.as_ref().clone(),
+                    None,
+                    changed,
+                )),
+            },
+            stmt => stmt,
+        };
+        out.push(rewritten);
+    }
+
+    out
 }
 
 fn strip_unreachable_after_unconditional_transfer(
@@ -316,8 +436,8 @@ fn is_promotable_guard_tail(tail: &[PreHirStmt]) -> bool {
 }
 
 /// Apply `goto_elim_pass` to fixpoint (convergence when no rule fires).
-/// Only operates at the TOP LEVEL of `stmts`; nested scopes are not recursed.
-/// Callers that need nested cleanup should call this recursively.
+/// Structural rules other than nested fallthrough removal operate only at the
+/// top level of `stmts`.
 pub fn eliminate_redundant_gotos(mut stmts: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
     const MAX_GOTO_ELIM_ITERS: usize = 32;
     for _ in 0..MAX_GOTO_ELIM_ITERS {
