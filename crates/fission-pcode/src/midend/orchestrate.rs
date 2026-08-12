@@ -242,6 +242,14 @@ pub fn render_mlil_preview_with_binary_and_context(
         std::mem::take(&mut hir.body),
         &protected,
     );
+    // Shared terminal tails (bare epilogues, abort handlers, cleanup-and-return
+    // blocks) are emitted once with every other predecessor reaching them by
+    // `goto`. Copying a *terminal* tail into its jump sites is behaviour-
+    // preserving and removes the jump -- the AST-level analog of Ghidra's
+    // `ActionReturnSplit` / angr SAILR's `ReturnDuplicatorHigh`. Runs after the
+    // alias pass so aliased labels are already canonicalized to one target.
+    let (body, _) =
+        fission_midend_structuring::cleanup::duplicate_terminal_tails(body, &protected);
     hir.body = body;
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to

@@ -636,7 +636,12 @@ fn test_switch_skips_to_exit() {
     assert!(code.contains("case 1:"));
     assert!(code.contains("case 2:"));
     assert!(code.contains("default:"));
-    assert!(code.contains("goto block_5030"));
+    // The shared `return rax` exit is a terminal tail, so `duplicate_terminal_tails`
+    // copies it into the `default` arm rather than jumping back into `case 2`'s
+    // body. That removes both the goto and the label-inside-a-case it targeted.
+    assert!(!code.contains("goto block_5030"), "{code}");
+    assert!(!code.contains("block_5030:"), "{code}");
+    assert_eq!(code.matches("return rax;").count(), 2, "{code}");
 }
 
 #[test]
