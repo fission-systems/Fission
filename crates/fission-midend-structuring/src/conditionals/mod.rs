@@ -8,7 +8,8 @@ mod plain_if;
 mod short_circuit;
 
 pub use if_else::{
-    ComplexArmPlan, VirtualExitIfElsePlan, lower_virtual_exit_if_else_committed,
+    ComplexArmPlan, VirtualExitIfElsePlan, count_explicit_gotos,
+    lower_virtual_exit_if_else_committed,
     plan_virtual_exit_if_else, try_lower_if_else, try_lower_return_chain_arm,
     try_reduce_if_else_with_follow,
 };

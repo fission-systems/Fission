@@ -428,24 +428,80 @@ fn build_sese_region_body_impl(
                 break;
             }
 
-            // Execute recursive arms only after stable-first selection has
-            // established that no earlier candidate won this block.
-            if let Some(plan) = virtual_exit_plan {
+            idx += 1;
+        }
+
+        if progress {
+            continue;
+        }
+
+        // Ghidra's IfNoExit-equivalent rule runs only after every ordinary
+        // collapse rule has reached a graph-wide fixed point. The plan still
+        // reserves its stable Conditional slot before plain-if above, but the
+        // expensive recursive execution is deferred until this full scan has
+        // found no ordinary candidate anywhere in the region.
+        if allowed_members.is_none() {
+            let mut idx = entry;
+            while idx < exit {
+                if let Some((_, child_exit, _)) = active_child_map.get(&idx) {
+                    idx = *child_exit;
+                    continue;
+                }
+                if owned_elsewhere.contains(idx) {
+                    idx += 1;
+                    continue;
+                }
+                let Some(fallthrough_idx) = host.fallthrough_index(idx) else {
+                    idx += 1;
+                    continue;
+                };
+                let Some(plan) = plan_virtual_exit_if_else(
+                    host.successors(),
+                    host.predecessors(),
+                    host.cfg_facts().immediate_postdominators(),
+                    idx,
+                    fallthrough_idx,
+                    host.block_count(),
+                ) else {
+                    idx += 1;
+                    continue;
+                };
+
+                fn children_for_members(
+                    child_map: &HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
+                    members: &[usize],
+                ) -> crate::host::StructuredChildMap {
+                    let members: HashSet<usize> = members.iter().copied().collect();
+                    child_map
+                        .iter()
+                        .filter(|(_, (_, _, proof))| {
+                            proof.members.iter().all(|member| members.contains(member))
+                        })
+                        .map(|(&start, child)| (start, child.clone()))
+                        .collect()
+                }
+
+                let first_children =
+                    children_for_members(&active_child_map, &plan.first_arm.members);
+                let second_children =
+                    children_for_members(&active_child_map, &plan.second_arm.members);
                 if diag {
                     eprintln!(
-                        "[DIAG] virtual-exit conditional admitted: block={} first_entry={} first_members={} second_entry={} second_members={} shared_tail={} skip_to={}",
+                        "[DIAG] virtual-exit conditional fixed-point admission: block={} first_members={} first_children={} second_members={} second_children={} shared_tail={}",
                         idx,
-                        plan.first_arm.entry,
                         plan.first_arm.members.len(),
-                        plan.second_arm.entry,
+                        first_children.len(),
                         plan.second_arm.members.len(),
+                        second_children.len(),
                         plan.shared_tail.len(),
-                        plan.skip_to,
                     );
                 }
-                if let Some((stmt, skip_to)) =
-                    host.lower_virtual_exit_if_else_isolated(idx, plan.clone())?
-                {
+                if let Some((stmt, skip_to)) = host.lower_virtual_exit_if_else_isolated(
+                    idx,
+                    plan.clone(),
+                    first_children,
+                    second_children,
+                )? {
                     let Some(mut proof) = build_region_proof(idx, skip_to, &stmt) else {
                         idx += 1;
                         continue;
@@ -463,13 +519,11 @@ fn build_sese_region_body_impl(
                     progress = true;
                     break;
                 }
+                idx += 1;
             }
-
-            idx += 1;
-        }
-
-        if progress {
-            continue;
+            if progress {
+                continue;
+            }
         }
 
         // Tier 2: deferred linearization fallback
@@ -617,6 +671,29 @@ pub fn reconstruct_sese_final_body(
         targeted,
         diag,
         None,
+    )
+}
+
+/// Reconstruct the currently admitted graph for an exact member set without
+/// running another collapse pass. This is the stable fixed-point alternative
+/// used to score a deferred complex-arm candidate before its isolated host is
+/// committed.
+pub fn reconstruct_sese_final_body_for_members(
+    host: &mut impl StructuringHost,
+    entry: usize,
+    exit: usize,
+    active_child_map: &HashMap<usize, (Vec<PreHirStmt>, usize, crate::regions::RegionProof)>,
+    allowed_members: &HashSet<usize>,
+) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
+    let targeted = host.collect_jump_targets()?;
+    reconstruct_sese_final_body_impl(
+        host,
+        entry,
+        exit,
+        active_child_map,
+        &targeted,
+        false,
+        Some(allowed_members),
     )
 }
 
@@ -928,6 +1005,7 @@ fn reconstruct_sese_final_body_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conditionals::count_explicit_gotos;
 
     #[test]
     fn structured_label_does_not_own_residual_block() {
@@ -947,5 +1025,21 @@ mod tests {
             structured_region_owns_block(2, &ownership),
             "proven region range must still consume block 2 exactly once"
         );
+    }
+
+    #[test]
+    fn explicit_goto_cost_counts_nested_control_scopes() {
+        use fission_midend_core::ir::NirType;
+
+        let body = vec![PreHirStmt::If {
+            cond: fission_midend_prehir::PreHirExpr::Const(1, NirType::Bool),
+            then_body: std::rc::Rc::new(vec![PreHirStmt::Goto("then".into())]),
+            else_body: std::rc::Rc::new(vec![PreHirStmt::While {
+                cond: fission_midend_prehir::PreHirExpr::Const(1, NirType::Bool),
+                body: std::rc::Rc::new(vec![PreHirStmt::Goto("loop".into())]),
+            }]),
+        }];
+
+        assert_eq!(count_explicit_gotos(&body), 2);
     }
 }

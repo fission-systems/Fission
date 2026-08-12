@@ -136,18 +136,98 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         &mut self,
         idx: usize,
         plan: fission_midend_structuring::conditionals::VirtualExitIfElsePlan,
+        first_children: fission_midend_structuring::host::StructuredChildMap,
+        second_children: fission_midend_structuring::host::StructuredChildMap,
     ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+        let mut baseline_children = first_children.clone();
+        baseline_children.extend(second_children.clone());
+        let mut baseline_members: HashSet<usize> = plan
+            .first_arm
+            .members
+            .iter()
+            .chain(plan.second_arm.members.iter())
+            .copied()
+            .collect();
+        baseline_members.insert(idx);
+        let mut baseline = self.clone();
+        let baseline_body = crate::midend::builder::with_discarded_register_origins(|| {
+            fission_midend_structuring::reconstruct_sese_final_body_for_members(
+                &mut baseline,
+                idx,
+                self.block_count(),
+                &baseline_children,
+                &baseline_members,
+            )
+        })?;
+        let baseline_gotos = fission_midend_structuring::count_explicit_gotos(&baseline_body);
+
         let mut isolated = self.clone();
         let result = crate::midend::builder::with_isolated_register_origins(|| {
-            fission_midend_structuring::conditionals::lower_virtual_exit_if_else_committed(
-                &mut isolated,
-                idx,
-                plan,
-            )
+            let candidate =
+                fission_midend_structuring::conditionals::lower_virtual_exit_if_else_committed(
+                    &mut isolated,
+                    idx,
+                    plan,
+                    first_children,
+                    second_children,
+                )?;
+            let Some((stmt, skip_to)) = candidate else {
+                return Ok(None);
+            };
+            let candidate_gotos =
+                fission_midend_structuring::count_explicit_gotos(std::slice::from_ref(&stmt));
+            if candidate_gotos > baseline_gotos {
+                if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+                    eprintln!(
+                        "[DIAG] virtual-exit conditional cost rejection: block={} candidate_gotos={} baseline_gotos={}",
+                        idx, candidate_gotos, baseline_gotos
+                    );
+                }
+                return Ok(None);
+            }
+            Ok(Some((stmt, skip_to)))
         });
         match result {
             Ok(Some(candidate)) => {
-                *self = isolated;
+                // Commit only the semantic identities referenced by the
+                // accepted AST. The isolated host's CFG, collapse caches,
+                // terminator caches, and trial ordering must not affect
+                // lowering of the shared tail or any later region.
+                for (index, binding) in isolated.params {
+                    self.params.entry(index).or_insert(binding);
+                }
+                for (offset, slot) in isolated.locals {
+                    self.locals.entry(offset).or_insert(slot);
+                }
+                self.locals_next_id = self.locals_next_id.max(isolated.locals_next_id);
+                for (offset, owners) in isolated.stack_slot_memory_owners {
+                    self.stack_slot_memory_owners.entry(offset).or_insert(owners);
+                }
+                for (name, binding) in isolated.temps {
+                    self.temps.entry(name).or_insert(binding);
+                }
+                self.temp_next_id = self.temp_next_id.max(isolated.temp_next_id);
+                self.used_param_local_names
+                    .extend(isolated.used_param_local_names);
+                for (key, name) in isolated.materialized_vns {
+                    self.materialized_vns.entry(key).or_insert(name);
+                }
+                self.load_address_bindings.extend(isolated.load_address_bindings);
+                self.load_value_bindings.extend(isolated.load_value_bindings);
+                for (key, name) in isolated.explicit_merge_bindings {
+                    self.explicit_merge_bindings.entry(key).or_insert(name);
+                }
+                for (site, name) in isolated.call_result_bindings {
+                    self.call_result_bindings.entry(site).or_insert(name);
+                }
+                for (offset, index) in isolated.register_param_aliases {
+                    self.register_param_aliases.entry(offset).or_insert(index);
+                }
+                self.sese_region_proof_calls.set(
+                    self.sese_region_proof_calls
+                        .get()
+                        .max(isolated.sese_region_proof_calls.get()),
+                );
                 Ok(Some(candidate))
             }
             Ok(None) => {

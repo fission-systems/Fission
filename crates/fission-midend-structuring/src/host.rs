@@ -33,6 +33,12 @@ use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 use crate::HashMap;
 use crate::HashSet;
 
+pub type StructuredChildMap = std::collections::HashMap<
+    usize,
+    (Vec<PreHirStmt>, usize, crate::regions::RegionProof),
+    rustc_hash::FxBuildHasher,
+>;
+
 /// Context required by free-function structuring algorithms.
 pub trait StructuringHost {
     // ── CFG graph ──────────────────────────────────────────────────────────
@@ -98,6 +104,8 @@ pub trait StructuringHost {
         &mut self,
         idx: usize,
         plan: VirtualExitIfElsePlan,
+        first_children: StructuredChildMap,
+        second_children: StructuredChildMap,
     ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError>;
     fn lower_return_join_expr_for_predecessor(
         &mut self,

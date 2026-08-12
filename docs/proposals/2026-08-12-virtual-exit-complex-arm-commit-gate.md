@@ -162,3 +162,70 @@ Regression gates:
   row reported `adapter_error`); the isolation loop was stopped rather than
   treating adapter/coverage failures as zero semantic scores. This local run
   was not published.
+
+## 9. Global Fixed-Point Admission Follow-up
+
+Reference-owner comparison:
+
+- Ghidra `CollapseStructure::collapseInternal` repeatedly applies goto,
+  concatenation, proper-if, if/else, loop, and switch collapses across the whole
+  graph. Only when that inner loop reaches a fixed point does it try
+  `ruleBlockIfNoExit`, then restart normal collapse.
+- Fission's first isolated complex-arm slice admitted the equivalent deferred
+  candidate immediately at the current block. On an early entry block this can
+  recursively lower a large arm before later blocks have been collapsed.
+
+Invariant for the follow-up:
+
+```text
+A VirtualExit complex-arm candidate may reserve its stable Conditional slot
+ahead of plain-if/goto, but isolated recursive execution occurs only after the
+entire current SESE scan has no ordinary structured candidate. Already accepted
+child regions wholly owned by an arm are inputs to that arm's isolated lowering;
+they are not lowered a second time.
+```
+
+Measured motivation is the slice above: aggregate goto improved, but NIR grew
+49,681 bytes and HIR grew 30,333 bytes, with per-file goto regressions up to
++11 NIR and +8 HIR. The follow-up must remeasure the same 224/250 corpus and
+must not be called an improvement unless both layers retain their goto movement
+without the observed broad expansion/regression pattern.
+
+Implementation and admission:
+
+- Deferred execution now runs only after a graph-wide ordinary-rule fixed
+  point, matching the reference owner order.
+- Arm-local child regions accepted before that point are reused by the
+  membership-limited recursive build.
+- A second isolated host reconstructs the already-admitted graph without
+  another collapse pass. The complex candidate commits only when its recursive
+  explicit-goto cost is no greater than that stable alternative.
+- A successful candidate merges only identity-bearing binding state required
+  by its emitted AST. Trial CFG mutations and structuring/lowering caches remain
+  isolated; no global snapshot or rollback is used.
+
+Measured 224-binary / 250-function result relative to the isolated-arm commit:
+
+| Layer | Isolated-arm goto / lines / bytes | Fixed-point goto / lines / bytes | Delta |
+|---|---:|---:|---:|
+| NIR | 2,130 / 38,850 / 1,072,419 | 2,115 / 38,736 / 1,065,829 | -15 goto, -114 lines, -6,590 bytes |
+| HIR | 2,023 / 35,931 / 973,271 | 2,009 / 35,769 / 965,428 | -14 goto, -162 lines, -7,843 bytes |
+
+Both runs completed 224/224 binaries and 250/250 functions. Relative to the
+original pre-complex-arm baseline, the final totals moved from 2,135 to 2,115
+NIR gotos and from 2,034 to 2,009 HIR gotos. The focused `bin_073` row retained
+its one-goto reduction in both layers. The prior type-pollution reproduction
+`bin_103` remained byte-identical to the original baseline in both NIR and HIR.
+
+The fixed-point follow-up improves goto count and reverses part of the first
+slice's output expansion in both layers. It does not erase every per-file
+trade-off inherited from the isolated-arm slice, so this is an aggregate
+measured improvement rather than a claim that every function became shorter.
+
+Follow-up regression gates:
+
+- `cargo nextest run -p fission-midend-structuring`: 125 passed.
+- `cargo nextest run -p fission-pcode`: 998 passed, 1 skipped.
+- `cargo check -p fission-pcode`, `fission-decompiler`, and
+  `fission-automation`: passed.
+- Release `fission-cli` build and `scripts/check/owner_boundaries.sh`: passed.

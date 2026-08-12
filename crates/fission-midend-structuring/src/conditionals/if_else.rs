@@ -4,13 +4,48 @@ use super::{forward_join_idx_from_address, shared_forward_linear_exit};
 use crate::HashMap;
 use crate::HashSet;
 use crate::cfg_analysis::{CommonPostdominator, ImmPostDomTree};
-use crate::host::StructuringHost;
+use crate::host::{StructuringHost, StructuredChildMap};
 use crate::linear_types::{LinearExit, LoweredTerminator};
 use crate::regions::RegionProof;
 use crate::sese_driver::build_sese_region_body_for_members;
 use fission_midend_core::ir::{MlilPreviewError};
 use fission_midend_prehir::{PreHirStmt};
 use fission_midend_prehir::util::negate_expr;
+
+/// Count the explicit control-flow debt retained by a structured candidate.
+/// Nested scopes count because both NIR and HIR render each retained goto.
+pub fn count_explicit_gotos(stmts: &[PreHirStmt]) -> usize {
+    fn count_stmt(stmt: &PreHirStmt) -> usize {
+        match stmt {
+            PreHirStmt::Goto(_) => 1,
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => count_explicit_gotos(body),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => count_explicit_gotos(then_body) + count_explicit_gotos(else_body),
+            PreHirStmt::Switch { cases, default, .. } => {
+                cases
+                    .iter()
+                    .map(|case| count_explicit_gotos(&case.body))
+                    .sum::<usize>()
+                    + count_explicit_gotos(default)
+            }
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => 0,
+        }
+    }
+
+    stmts.iter().map(count_stmt).sum()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComplexArmPlan {
@@ -170,6 +205,8 @@ pub fn lower_virtual_exit_if_else_committed(
     host: &mut impl StructuringHost,
     idx: usize,
     plan: VirtualExitIfElsePlan,
+    first_children: StructuredChildMap,
+    second_children: StructuredChildMap,
 ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
     let cond_prefix = host.lower_block_stmts(idx)?;
     let LoweredTerminator::Cond {
@@ -201,12 +238,12 @@ pub fn lower_virtual_exit_if_else_committed(
     fn lower_arm(
         host: &mut impl StructuringHost,
         arm: &ComplexArmPlan,
+        child_map: StructuredChildMap,
     ) -> Result<Option<std::rc::Rc<Vec<PreHirStmt>>>, MlilPreviewError> {
         let Some(scan_end) = arm.scan_end() else {
             return Ok(None);
         };
         let members: HashSet<usize> = arm.members.iter().copied().collect();
-        let child_map: HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)> = HashMap::default();
         let (body, achieved_exit, extra_members) =
             build_sese_region_body_for_members(host, arm.entry, scan_end, child_map, &members)?;
         if achieved_exit != scan_end || extra_members.iter().any(|member| !members.contains(member)) {
@@ -215,10 +252,10 @@ pub fn lower_virtual_exit_if_else_committed(
         Ok(Some(std::rc::Rc::new(body)))
     }
 
-    let Some(first_body) = lower_arm(host, &plan.first_arm)? else {
+    let Some(first_body) = lower_arm(host, &plan.first_arm, first_children)? else {
         return Ok(None);
     };
-    let Some(second_body) = lower_arm(host, &plan.second_arm)? else {
+    let Some(second_body) = lower_arm(host, &plan.second_arm, second_children)? else {
         return Ok(None);
     };
     // `cond` is normalized so true means the lexical fallthrough arm.

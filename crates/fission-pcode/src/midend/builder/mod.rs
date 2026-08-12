@@ -79,6 +79,21 @@ pub(in crate::midend) fn with_isolated_register_origins<T, E>(
     result
 }
 
+/// Run read-only trial lowering with a private register-origin channel and
+/// discard every origin it produces. The caller must also use a cloned host;
+/// together those two boundaries make the trial observational only.
+pub(in crate::midend) fn with_discarded_register_origins<T, E>(
+    lower: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    let parent = REGISTER_ORIGINS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    let result = lower();
+    REGISTER_ORIGINS.with(|slot| {
+        let _ = std::mem::take(&mut *slot.borrow_mut());
+        *slot.borrow_mut() = parent;
+    });
+    result
+}
+
 /// Runs after structuring finishes (see `orchestrate.rs`'s call order) --
 /// operates on the real, final `HirFunction`, not `PreHirFunction`, despite
 /// living under `builder/` (historical location, not a PreHIR/HIR statement).

@@ -98,7 +98,7 @@ pub use linear_body::{
     lower_linear_body_with_budget, shared_exit_for_indices, shared_linear_exit,
 };
 pub use conditionals::{
-    ComplexArmPlan, VirtualExitIfElsePlan, is_trivial_structuring_stmt,
+    ComplexArmPlan, VirtualExitIfElsePlan, count_explicit_gotos, is_trivial_structuring_stmt,
     lower_virtual_exit_if_else_committed, plan_virtual_exit_if_else, try_lower_if,
     try_lower_if_else, try_lower_return_chain_arm,
     try_lower_short_circuit_and, try_lower_short_circuit_and_else, try_lower_short_circuit_if,
@@ -119,7 +119,7 @@ pub use collapse_loop::{
 pub use collapse_structure::{
     collapse_all_virtualize_one, collect_likely_gotos, emit_likely_edges_for_loop, select_goto,
 };
-pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule, build_sese_region_body, build_sese_region_body_for_members, reconstruct_sese_final_body};
+pub use sese_driver::{ACTIVE_COLLAPSE_RULES, CollapseCandidate, CollapseRule, IDEAL_COLLAPSE_RULES, apply_collapse_rule, build_sese_region_body, build_sese_region_body_for_members, reconstruct_sese_final_body, reconstruct_sese_final_body_for_members};
 pub use switch::{
     SWITCH_CHAIN_PARSE_BUDGET_MAX, canonicalize_switch_target, try_lower_switch,
 };
