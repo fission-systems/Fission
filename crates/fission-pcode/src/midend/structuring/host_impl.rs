@@ -132,6 +132,42 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     ) -> Result<LoweredTerminator, MlilPreviewError> {
         PreviewBuilder::lower_block_terminator(self, block_idx)
     }
+    fn lower_virtual_exit_if_else_isolated(
+        &mut self,
+        idx: usize,
+        plan: fission_midend_structuring::conditionals::VirtualExitIfElsePlan,
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+        let mut isolated = self.clone();
+        let result = crate::midend::builder::with_isolated_register_origins(|| {
+            fission_midend_structuring::conditionals::lower_virtual_exit_if_else_committed(
+                &mut isolated,
+                idx,
+                plan,
+            )
+        });
+        match result {
+            Ok(Some(candidate)) => {
+                *self = isolated;
+                Ok(Some(candidate))
+            }
+            Ok(None) => {
+                self.sese_region_proof_calls.set(
+                    self.sese_region_proof_calls
+                        .get()
+                        .max(isolated.sese_region_proof_calls.get()),
+                );
+                Ok(None)
+            }
+            Err(err) => {
+                self.sese_region_proof_calls.set(
+                    self.sese_region_proof_calls
+                        .get()
+                        .max(isolated.sese_region_proof_calls.get()),
+                );
+                Err(err)
+            }
+        }
+    }
     fn lower_return_join_expr_for_predecessor(
         &mut self,
         pred_idx: usize,

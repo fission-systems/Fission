@@ -44,7 +44,14 @@ Generalized rules:
 1. In a CFG with multiple real exits, the common postdominator of arms that end
    at different exits is a typed VirtualExit fact, not an absent fact and not a
    fabricated real block index.
-2. Recursive complex-arm structuring may execute only after shape and admission
+2. Each arm owns only the nodes exclusively reachable from its successor. Nodes
+   reachable from both successors form a shared terminal tail owned once after
+   the conditional; they are not duplicated into either arm.
+3. Arm ownership is a membership set, not a lexical block-index interval. Every
+   exclusive node must have no side entry, every exclusive exit must enter the
+   shared tail or leave the region, and the shared tail must be closed toward
+   the region exit.
+4. Recursive complex-arm structuring may execute only after shape and admission
    have established that its enclosing stable-first conditional will commit.
    Failed probes must not recursively lower arbitrary blocks.
 ```
@@ -59,6 +66,8 @@ Comparable coverage:
 
 - Multiple exits: two conditional arms reach distinct returns.
 - Mixed arm: one arm is linear and the other contains a loop/nested conditional before a distinct return.
+- Shared terminal tail: interleaved lexical layout where both exclusive arm
+  sets enter common tail nodes that remain outside the emitted `if/else`.
 - Negative: an arm trapped in a non-terminating SCC has no exit-reachable postdominator.
 
 ## 4. Risk And Ownership Check
@@ -102,3 +111,54 @@ Comparable coverage:
 - [x] No hardcoded row identity in production.
 - [x] No benchmark/printer-only semantic claim.
 - [x] Existing postdom and conditional owners are extended; no duplicate pass.
+
+## 8. Isolated Complex-Arm Slice (2026-08-12)
+
+Implementation:
+
+- Proves exclusive arm membership and the shared terminal tail from CFG facts
+  before statement lowering.
+- Places the deferred candidate immediately before the plain-if/goto fallback
+  in stable Conditional order.
+- Clones `PreviewBuilder` and uses a private register-origin side channel;
+  commits the isolated host only after both membership-limited arms lower.
+- Does not snapshot or roll back global builder state.
+- Preserves shared-tail blocks outside the `if/else` and normalizes overlapping
+  bottom-up SESE children back to raw parent reconstruction.
+- Fixes HIR presentation's subtree-local label pruning/recovery so an enclosing
+  or sibling goto cannot lose its target label.
+
+Measured focused row, release build:
+
+| Layer | Before goto / lines / bytes | After goto / lines / bytes |
+|---|---:|---:|
+| NIR | 42 / 559 / 16,501 | 41 / 599 / 21,689 |
+| HIR | 40 / 529 / 14,835 | 39 / 563 / 17,817 |
+
+Measured 224-binary / 250-function DecBench sample set:
+
+| Layer | Before goto / lines / bytes | After goto / lines / bytes |
+|---|---:|---:|
+| NIR | 2,135 / 38,444 / 1,022,738 | 2,130 / 38,850 / 1,072,419 |
+| HIR | 2,034 / 35,576 / 942,938 | 2,023 / 35,931 / 973,271 |
+
+Interpretation: goto density improved in both layers and all rows completed,
+but output size increased (NIR +49,681 bytes; HIR +30,333 bytes), and individual
+files include both improvements and regressions. This is a measured trade-off,
+not an unqualified readability win. The earlier type-pollution reproduction
+`bin_103` remained byte-identical in both NIR and HIR, including
+`uint sub_72f1(uint param_1)`.
+
+Regression gates:
+
+- `cargo nextest run -p fission-midend-structuring`: 124 passed.
+- `cargo nextest run -p fission-pcode`: 998 passed, 1 skipped.
+- `cargo check -p fission-pcode`, `fission-decompiler`, and
+  `fission-automation`: passed.
+- `scripts/check/owner_boundaries.sh`: passed.
+- External local Docker service built from the dirty tree and passed `/health`.
+  The requested 40-row dev runner did not produce valid semantic rows because
+  pyjoern's fast parser repeatedly omitted every decompiled function (and one
+  row reported `adapter_error`); the isolation loop was stopped rather than
+  treating adapter/coverage failures as zero semantic scores. This local run
+  was not published.

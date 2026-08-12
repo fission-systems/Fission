@@ -49,7 +49,9 @@ fn apply_hir_presentation_passes(func: &mut HirFunction) {
         changed |= expand_goto_shared_returns(&mut func.body);
         changed |= collapse_trivial_assign_returns(&mut func.body);
         // O0-style `if (c) goto L; body; L:` → structured if/else for readability.
-        changed |= recover_if_else_from_gotos(&mut func.body);
+        let mut global_goto_refs = HashMap::new();
+        collect_goto_ref_counts(&func.body, &mut global_goto_refs);
+        changed |= recover_if_else_from_gotos(&mut func.body, &global_goto_refs);
         // O0 while: `goto Lcond; Lbody: …; Lcond: if (c) goto Lbody;`
         changed |= recover_while_from_gotos(&mut func.body);
         // Structuring often emits `while (1) { if (!c) break; body }` → `while (c)`.
@@ -3391,7 +3393,10 @@ fn simplify_casts_in_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirTyp
 }
 
 /// Recover structured if/else from O0 `if (c) goto` / label shapes.
-fn recover_if_else_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
+fn recover_if_else_from_gotos(
+    stmts: &mut Vec<HirStmt>,
+    global_goto_refs: &HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
@@ -3399,21 +3404,21 @@ fn recover_if_else_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
             | HirStmt::While { body: b, .. }
             | HirStmt::DoWhile { body: b, .. }
             | HirStmt::For { body: b, .. } => {
-                changed |= recover_if_else_from_gotos(b);
+                changed |= recover_if_else_from_gotos(b, global_goto_refs);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= recover_if_else_from_gotos(then_body);
-                changed |= recover_if_else_from_gotos(else_body);
+                changed |= recover_if_else_from_gotos(then_body, global_goto_refs);
+                changed |= recover_if_else_from_gotos(else_body, global_goto_refs);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= recover_if_else_from_gotos(&mut case.body);
+                    changed |= recover_if_else_from_gotos(&mut case.body, global_goto_refs);
                 }
-                changed |= recover_if_else_from_gotos(default);
+                changed |= recover_if_else_from_gotos(default, global_goto_refs);
             }
             _ => {}
         }
@@ -3421,7 +3426,7 @@ fn recover_if_else_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
 
     let mut i = 0;
     while i < stmts.len() {
-        if try_recover_if_else_at(stmts, i) {
+        if try_recover_if_else_at(stmts, i, global_goto_refs) {
             changed = true;
             // Restart from i so nested/adjacent patterns can fire.
             continue;
@@ -3431,7 +3436,11 @@ fn recover_if_else_from_gotos(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
-fn try_recover_if_else_at(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
+fn try_recover_if_else_at(
+    stmts: &mut Vec<HirStmt>,
+    i: usize,
+    global_goto_refs: &HashMap<String, usize>,
+) -> bool {
     // After goto→return expansion: `if (C) return a; return b;` → if/else.
     if try_recover_if_return_else_fallthrough(stmts, i) {
         return true;
@@ -3442,6 +3451,12 @@ fn try_recover_if_else_at(stmts: &mut Vec<HirStmt>, i: usize) -> bool {
     };
     let cond = cond.clone();
     let lelse = lelse.to_string();
+    // Every recovery below consumes `Label(lelse)`. A recursive call operates
+    // on only one subtree, so subtree-local reference counts cannot prove that
+    // another arm or enclosing scope does not still jump to the label.
+    if global_goto_refs.get(&lelse).copied() != Some(1) {
+        return false;
+    }
 
     // Find Label(lelse) after i.
     let Some(le_idx) = stmts
@@ -3687,6 +3702,14 @@ fn collect_goto_targets(stmts: &[HirStmt], out: &mut HashSet<String>) {
     }
 }
 
+fn collect_goto_ref_counts(stmts: &[HirStmt], out: &mut HashMap<String, usize>) {
+    let mut targets = HashSet::new();
+    collect_goto_targets(stmts, &mut targets);
+    for target in targets {
+        out.insert(target.clone(), count_goto_refs(stmts, &target));
+    }
+}
+
 /// Drop fallthrough stmts after an if whose every branch already returns.
 fn prune_unreachable_after_total_return(
     stmts: &mut Vec<HirStmt>,
@@ -3731,7 +3754,7 @@ fn prune_unreachable_after_total_return(
             // labeled tail itself untouched.
             let keep_from = stmts[i + 1..]
                 .iter()
-                .position(|s| matches!(s, HirStmt::Label(l) if goto_targets.contains(l)))
+                .position(|s| stmt_contains_targeted_label(s, goto_targets))
                 .map(|offset| i + 1 + offset);
             match keep_from {
                 Some(keep_from) if keep_from > i + 1 => {
@@ -3752,6 +3775,33 @@ fn prune_unreachable_after_total_return(
         i += 1;
     }
     changed
+}
+
+fn stmt_contains_targeted_label(stmt: &HirStmt, targets: &HashSet<String>) -> bool {
+    match stmt {
+        HirStmt::Label(label) => targets.contains(label),
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. } => body
+            .iter()
+            .any(|stmt| stmt_contains_targeted_label(stmt, targets)),
+        HirStmt::If { then_body, else_body, .. } => then_body
+            .iter()
+            .chain(else_body.iter())
+            .any(|stmt| stmt_contains_targeted_label(stmt, targets)),
+        HirStmt::For { init, update, body, .. } => init
+            .iter()
+            .chain(update.iter())
+            .map(|stmt| stmt.as_ref())
+            .chain(body.iter())
+            .any(|stmt| stmt_contains_targeted_label(stmt, targets)),
+        HirStmt::Switch { cases, default, .. } => cases
+            .iter()
+            .flat_map(|case| case.body.iter())
+            .chain(default.iter())
+            .any(|stmt| stmt_contains_targeted_label(stmt, targets)),
+        _ => false,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -4558,6 +4608,76 @@ mod tests {
             "HIR must not drop the labeled tail (y = 2) reachable only via goto:\n{}",
             layered.hir
         );
+    }
+
+    #[test]
+    fn hir_presentation_keeps_nested_goto_target_after_unconditional_return() {
+        let func = HirFunction {
+            name: "f".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: le("param_1", "param_1"),
+                    then_body: vec![HirStmt::Goto("L1".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Const(1, int_ty(32, true)))),
+                HirStmt::Block(vec![
+                    HirStmt::Label("L1".into()),
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Const(2, int_ty(32, true)),
+                    },
+                    HirStmt::Return(Some(HirExpr::Var("x".into()))),
+                ]),
+            ],
+            ..Default::default()
+        };
+
+        let options = MlilPreviewOptions::default();
+        let layered = render_layered_pseudocode(&func, &options);
+        if layered.hir.contains("goto") {
+            assert!(layered.hir.contains("L1:"), "{0}", layered.hir);
+        }
+        assert!(layered.hir.contains('2'), "{0}", layered.hir);
+    }
+
+    #[test]
+    fn hir_presentation_keeps_cross_scope_target_during_local_if_recovery() {
+        let cond = || HirStmt::If {
+            cond: le("param_1", "param_1"),
+            then_body: vec![HirStmt::Goto("L1".into())],
+            else_body: vec![],
+        };
+        let func = HirFunction {
+            name: "f".into(),
+            params: vec![param("param_1")],
+            locals: vec![local("x")],
+            return_type: int_ty(32, true),
+            body: vec![
+                cond(),
+                HirStmt::Block(vec![
+                    cond(),
+                    HirStmt::Return(Some(HirExpr::Const(1, int_ty(32, true)))),
+                    HirStmt::Label("L1".into()),
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("x".into()),
+                        rhs: HirExpr::Const(2, int_ty(32, true)),
+                    },
+                    HirStmt::Return(Some(HirExpr::Var("x".into()))),
+                ]),
+            ],
+            ..Default::default()
+        };
+
+        let options = MlilPreviewOptions::default();
+        let layered = render_layered_pseudocode(&func, &options);
+        if layered.hir.contains("goto") {
+            assert!(layered.hir.contains("L1:"), "{0}", layered.hir);
+        }
+        assert!(layered.hir.contains('2'), "{0}", layered.hir);
     }
 
     #[test]

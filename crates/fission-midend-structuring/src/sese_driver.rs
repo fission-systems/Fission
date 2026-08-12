@@ -6,7 +6,8 @@
 use crate::cfg_analysis::compute_follow_blocks;
 use crate::collapse_loop::{collapse_loop_admission_enabled, try_virtualize_one_bad_edge};
 use crate::conditionals::{
-    try_lower_if, try_lower_if_else, try_lower_short_circuit_if, try_reduce_if_else_with_follow,
+    plan_virtual_exit_if_else, try_lower_if, try_lower_if_else, try_lower_short_circuit_if,
+    try_reduce_if_else_with_follow,
 };
 use crate::driver_pure::{region_kind_for_stmt, region_selector_or_condition};
 use crate::graph::{StructureNode, capture_structuring_failure};
@@ -211,6 +212,31 @@ pub fn build_sese_region_body(
     exit: usize,
     child_map: HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
 ) -> Result<(Vec<PreHirStmt>, usize, Vec<usize>), MlilPreviewError> {
+    build_sese_region_body_impl(host, entry, exit, child_map, None)
+}
+
+/// Build one admitted arm while restricting ownership and final surface to an
+/// explicit CFG membership set. This runs only inside an isolated host fork.
+pub fn build_sese_region_body_for_members(
+    host: &mut impl StructuringHost,
+    entry: usize,
+    exit: usize,
+    child_map: HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
+    members: &HashSet<usize>,
+) -> Result<(Vec<PreHirStmt>, usize, Vec<usize>), MlilPreviewError> {
+    if !members.contains(&entry) {
+        return Err(MlilPreviewError::UnsupportedCfgRegionShape);
+    }
+    build_sese_region_body_impl(host, entry, exit, child_map, Some(members))
+}
+
+fn build_sese_region_body_impl(
+    host: &mut impl StructuringHost,
+    entry: usize,
+    exit: usize,
+    child_map: HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
+    allowed_members: Option<&HashSet<usize>>,
+) -> Result<(Vec<PreHirStmt>, usize, Vec<usize>), MlilPreviewError> {
     let diag = structuring_diag_enabled();
     if host.sese_region_proof_budget_exceeded() {
         if diag {
@@ -273,6 +299,10 @@ pub fn build_sese_region_body(
         // Tier 1: ideal structured rules
         let mut idx = entry;
         while idx < exit {
+            if allowed_members.is_some_and(|members| !members.contains(&idx)) {
+                idx += 1;
+                continue;
+            }
             if let Some((_, child_exit, _)) = active_child_map.get(&idx) {
                 idx = *child_exit;
                 continue;
@@ -296,6 +326,23 @@ pub fn build_sese_region_body(
             let mut ideal_candidates = Vec::new();
             let follow = follow_blocks.get(idx).copied().flatten();
             let mut last_structuring_failure = None;
+            // Prove ownership before any rule at this block lowers statements.
+            // This deferred candidate is stable immediately before plain-if.
+            let virtual_exit_plan = allowed_members
+                .is_none()
+                .then(|| {
+                    host.fallthrough_index(idx).and_then(|fallthrough_idx| {
+                        plan_virtual_exit_if_else(
+                            host.successors(),
+                            host.predecessors(),
+                            host.cfg_facts().immediate_postdominators(),
+                            idx,
+                            fallthrough_idx,
+                            host.block_count(),
+                        )
+                    })
+                })
+                .flatten();
 
             for rule in ACTIVE_COLLAPSE_RULES {
                 if matches!(rule, CollapseRule::Sequence | CollapseRule::Unstructured) {
@@ -308,7 +355,21 @@ pub fn build_sese_region_body(
                         rule.name()
                     );
                 }
-                let res = apply_collapse_rule(host, rule, idx, follow);
+                let res = if matches!(rule, CollapseRule::Conditional)
+                    && virtual_exit_plan.is_some()
+                {
+                    let mut cond = try_lower_short_circuit_if(host, idx);
+                    if cond.is_err() || matches!(cond, Ok(None)) {
+                        cond = try_reduce_if_else_with_follow(host, idx, follow);
+                    }
+                    if cond.is_err() || matches!(cond, Ok(None)) {
+                        cond = try_lower_if_else(host, idx);
+                    }
+                    // The deferred complex candidate precedes plain-if/goto.
+                    cond
+                } else {
+                    apply_collapse_rule(host, rule, idx, follow)
+                };
                 if let Some(started) = rule_started {
                     eprintln!(
                         "[DIAG] structuring rule finish: rule={} block={idx} elapsed_ms={:.3} outcome={}",
@@ -336,6 +397,14 @@ pub fn build_sese_region_body(
                 tier1_failures.insert(idx, err.clone());
             }
 
+            if let Some(members) = allowed_members {
+                ideal_candidates.retain(|candidate| {
+                    candidate.node.proof.as_ref().is_some_and(|proof| {
+                        proof.members.iter().all(|member| members.contains(member))
+                    })
+                });
+            }
+
             if let Some(best) = select_structured_candidate(ideal_candidates) {
                 let skip_to = best.node.skip_to;
                 if skip_to <= idx {
@@ -359,6 +428,43 @@ pub fn build_sese_region_body(
                 break;
             }
 
+            // Execute recursive arms only after stable-first selection has
+            // established that no earlier candidate won this block.
+            if let Some(plan) = virtual_exit_plan {
+                if diag {
+                    eprintln!(
+                        "[DIAG] virtual-exit conditional admitted: block={} first_entry={} first_members={} second_entry={} second_members={} shared_tail={} skip_to={}",
+                        idx,
+                        plan.first_arm.entry,
+                        plan.first_arm.members.len(),
+                        plan.second_arm.entry,
+                        plan.second_arm.members.len(),
+                        plan.shared_tail.len(),
+                        plan.skip_to,
+                    );
+                }
+                if let Some((stmt, skip_to)) =
+                    host.lower_virtual_exit_if_else_isolated(idx, plan.clone())?
+                {
+                    let Some(mut proof) = build_region_proof(idx, skip_to, &stmt) else {
+                        idx += 1;
+                        continue;
+                    };
+                    proof.members.extend(plan.first_arm.members.iter().copied());
+                    proof.members.extend(plan.second_arm.members.iter().copied());
+                    proof.members.push(idx);
+                    proof.members.sort_unstable();
+                    proof.members.dedup();
+                    let node = StructureNode::region(usize::MAX, stmt, skip_to, proof.clone());
+                    host.record_region_candidate(&proof);
+                    host.record_selected_region(&node);
+                    active_child_map.retain(|&k, _| !proof.members.contains(&k));
+                    active_child_map.insert(idx, (node.statements, skip_to, proof));
+                    progress = true;
+                    break;
+                }
+            }
+
             idx += 1;
         }
 
@@ -369,6 +475,10 @@ pub fn build_sese_region_body(
         // Tier 2: deferred linearization fallback
         let mut idx = entry;
         while idx < exit {
+            if allowed_members.is_some_and(|members| !members.contains(&idx)) {
+                idx += 1;
+                continue;
+            }
             if let Some((_, child_exit, _)) = active_child_map.get(&idx) {
                 idx = *child_exit;
                 continue;
@@ -417,7 +527,7 @@ pub fn build_sese_region_body(
         // Tier 3: CollapseStructure collapseAll step — virtualize one likely
         // unstructured edge (LoopBody emitLikelyEdges → TraceDAG → FAS) and
         // retry structured rules. Ghidra never multi-emits; it removes edges.
-        if !progress && collapse_loop_admission_enabled() {
+        if !progress && allowed_members.is_none() && collapse_loop_admission_enabled() {
             if try_virtualize_one_bad_edge(host, entry, exit)? {
                 if diag {
                     eprintln!(
@@ -451,7 +561,15 @@ pub fn build_sese_region_body(
     region_extra_members.sort_unstable();
     region_extra_members.dedup();
 
-    let body = reconstruct_sese_final_body(host, entry, exit, &active_child_map, &targeted, diag)?;
+    let body = reconstruct_sese_final_body_impl(
+        host,
+        entry,
+        exit,
+        &active_child_map,
+        &targeted,
+        diag,
+        allowed_members,
+    )?;
     Ok((body, achieved_exit, region_extra_members))
 }
 
@@ -491,6 +609,26 @@ pub fn reconstruct_sese_final_body(
     targeted: &HashSet<u64>,
     diag: bool,
 ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
+    reconstruct_sese_final_body_impl(
+        host,
+        entry,
+        exit,
+        active_child_map,
+        targeted,
+        diag,
+        None,
+    )
+}
+
+fn reconstruct_sese_final_body_impl(
+    host: &mut impl StructuringHost,
+    entry: usize,
+    exit: usize,
+    active_child_map: &HashMap<usize, (Vec<PreHirStmt>, usize, crate::regions::RegionProof)>,
+    targeted: &HashSet<u64>,
+    diag: bool,
+    allowed_members: Option<&HashSet<usize>>,
+) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
     use crate::cleanup::{child_body_has_entry_label, collect_defined_labels};
     use crate::graph::{
         BlockOwnership, StructureEdgeFlags, StructureGraph, StructureNode, surface_structure_graph,
@@ -515,6 +653,10 @@ pub fn reconstruct_sese_final_body(
 
         let mut idx = entry;
         while idx < exit {
+            if allowed_members.is_some_and(|members| !members.contains(&idx)) {
+                idx += 1;
+                continue;
+            }
             let block_key = host.block_target_key(idx);
             let has_same_start_peer = host.has_same_start_address_peer(idx);
             let is_orphan_unreachable = idx != 0

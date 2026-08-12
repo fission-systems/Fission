@@ -60,6 +60,25 @@ pub(super) fn take_register_origins() -> HashMap<String, (u64, u32)> {
     REGISTER_ORIGINS.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
 }
 
+/// Run lowering with a private register-origin side channel. Origins produced
+/// by a committed candidate are merged into the parent channel; rejected or
+/// failed isolated lowering is discarded without restoring builder-global
+/// state from a snapshot.
+pub(in crate::midend) fn with_isolated_register_origins<T, E>(
+    lower: impl FnOnce() -> Result<Option<T>, E>,
+) -> Result<Option<T>, E> {
+    let mut parent = REGISTER_ORIGINS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    let result = lower();
+    let isolated = REGISTER_ORIGINS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+    if matches!(&result, Ok(Some(_))) {
+        for (name, origin) in isolated {
+            parent.entry(name).or_insert(origin);
+        }
+    }
+    REGISTER_ORIGINS.with(|slot| *slot.borrow_mut() = parent);
+    result
+}
+
 /// Runs after structuring finishes (see `orchestrate.rs`'s call order) --
 /// operates on the real, final `HirFunction`, not `PreHirFunction`, despite
 /// living under `builder/` (historical location, not a PreHIR/HIR statement).

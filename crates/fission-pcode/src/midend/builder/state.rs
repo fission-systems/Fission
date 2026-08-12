@@ -5,7 +5,7 @@ use std::cell::RefCell;
 pub(super) type BuilderCacheMap<K, V> = rustc_hash::FxHashMap<K, V>;
 pub(super) type BuilderCacheSet<T> = rustc_hash::FxHashSet<T>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PreviewBuilder<'a> {
     pub(crate) pcode: &'a PcodeFunction,
     pub(crate) options: &'a MlilPreviewOptions,

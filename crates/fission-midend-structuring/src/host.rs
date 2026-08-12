@@ -26,6 +26,7 @@ use crate::linear_types::{
     LinearBodyCacheKey, LinearBodyCachedOutcome, LinearBodyLoweringOutcome,
     LinearBodyRejectReason, LinearExit, LoweredTerminator,
 };
+use crate::conditionals::VirtualExitIfElsePlan;
 use crate::loop_analysis::LoopBody;
 use fission_midend_core::ir::{MlilPreviewError, MlilPreviewOptions};
 use fission_midend_prehir::{PreHirExpr, PreHirStmt};
@@ -91,6 +92,13 @@ pub trait StructuringHost {
         &mut self,
         block_idx: usize,
     ) -> Result<LoweredTerminator, MlilPreviewError>;
+    /// Execute an already-admitted virtual-exit if/else candidate on isolated
+    /// host state. The production host commits the fork only on success.
+    fn lower_virtual_exit_if_else_isolated(
+        &mut self,
+        idx: usize,
+        plan: VirtualExitIfElsePlan,
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError>;
     fn lower_return_join_expr_for_predecessor(
         &mut self,
         pred_idx: usize,

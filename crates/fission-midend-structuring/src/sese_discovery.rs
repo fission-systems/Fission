@@ -264,6 +264,7 @@ pub fn sese_structure_region(
             child_map.insert(child.entry, (body, effective_exit, proof));
         }
     }
+    prune_children_overlapping_non_contiguous_owner(&mut child_map);
 
     match build_sese_region_body(host, region.entry, region.exit, child_map) {
         Ok((body, achieved_exit, extra_members)) => {
@@ -279,6 +280,43 @@ pub fn sese_structure_region(
             }
             Err(_) => Err(err),
         },
+    }
+}
+
+/// A recursively structured non-contiguous child can absorb part or all of a
+/// sibling region beyond its lexical `child_exit`. A prebuilt sibling body is
+/// indivisible, so discard any later child that overlaps such an owner. Blocks
+/// not owned by the earlier proof remain in the parent CFG and are reconstructed
+/// from their raw nodes; owned blocks are already present in the earlier body.
+fn prune_children_overlapping_non_contiguous_owner(
+    child_map: &mut HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
+) {
+    let mut starts: Vec<_> = child_map.keys().copied().collect();
+    starts.sort_unstable();
+    let mut non_contiguous_owners: Vec<HashSet<usize>> = Vec::new();
+    let mut remove = Vec::new();
+
+    for start in starts {
+        let Some((_, child_exit, proof)) = child_map.get(&start) else {
+            continue;
+        };
+        if non_contiguous_owners
+            .iter()
+            .any(|owner| proof.members.iter().any(|member| owner.contains(member)))
+        {
+            remove.push(start);
+            continue;
+        }
+        if proof
+            .members
+            .iter()
+            .any(|member| *member < start || *member >= *child_exit)
+        {
+            non_contiguous_owners.push(proof.members.iter().copied().collect());
+        }
+    }
+    for start in remove {
+        child_map.remove(&start);
     }
 }
 
@@ -361,5 +399,28 @@ mod tests {
         let crossing_b = region(0, 3, &[0, 1, 2]);
         let tree = build_sese_tree(vec![crossing_a, crossing_b], 6);
         assert_no_crossing_siblings(std::slice::from_ref(&tree.root));
+    }
+
+    #[test]
+    fn prunes_children_overlapping_non_contiguous_predecessor() {
+        let mut child_map = HashMap::default();
+        let mut owner = RegionProof::structured(RegionKind::Sequence, 0, 3, None);
+        owner.members.extend([4, 5]);
+        owner.members.sort_unstable();
+        child_map.insert(0, (Vec::new(), 3, owner));
+        child_map.insert(
+            2,
+            (Vec::new(), 5, RegionProof::structured(RegionKind::Sequence, 2, 5, None)),
+        );
+        child_map.insert(
+            4,
+            (Vec::new(), 6, RegionProof::structured(RegionKind::Sequence, 4, 6, None)),
+        );
+
+        prune_children_overlapping_non_contiguous_owner(&mut child_map);
+
+        assert!(child_map.contains_key(&0));
+        assert!(!child_map.contains_key(&2));
+        assert!(!child_map.contains_key(&4));
     }
 }

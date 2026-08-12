@@ -5,7 +5,7 @@
 
 use crate::midend::ir::PreviewBuildStats;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct BuilderTelemetry {
     pub(crate) core: CoreTelemetry,
     pub(crate) procedure: ProcedureTelemetry,
@@ -28,7 +28,7 @@ impl BuilderTelemetry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct CoreTelemetry {
     pub(crate) build_duration_ms: usize,
     pub(crate) normalize_duration_ms: usize,
@@ -49,7 +49,7 @@ impl CoreTelemetry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct ProcedureTelemetry {
     pub(crate) procedure_summary_contracted_count: usize,
     pub(crate) procedure_summary_tail_wrapper_count: usize,
@@ -64,7 +64,7 @@ impl ProcedureTelemetry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct CallTargetTelemetry {
     pub(crate) call_target_import_resolved_count: usize,
     pub(crate) call_target_direct_symbol_resolved_count: usize,
@@ -126,7 +126,7 @@ impl CallTargetTelemetry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct IndirectControlTelemetry {
     pub(crate) unsupported_indirect_control_count: usize,
     pub(crate) unsupported_indirect_call_count: usize,
@@ -147,7 +147,7 @@ impl IndirectControlTelemetry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct MaterializationTelemetry {
     pub(crate) materialization_stabilized_count: usize,
     pub(crate) replacement_plan_candidate_count: usize,
@@ -190,7 +190,7 @@ impl MaterializationTelemetry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct DispatcherTelemetry {
     pub(crate) dispatcher_proof_unit_count: usize,
     pub(crate) dispatcher_proof_completed_count: usize,
@@ -211,7 +211,7 @@ impl DispatcherTelemetry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct StructuringTelemetry {
     pub(crate) forced_linear_structuring_count: usize,
     pub(crate) blockgraph_collapse_admission_enabled_count: usize,

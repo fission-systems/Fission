@@ -7,7 +7,11 @@ mod if_else;
 mod plain_if;
 mod short_circuit;
 
-pub use if_else::{try_lower_if_else, try_lower_return_chain_arm, try_reduce_if_else_with_follow};
+pub use if_else::{
+    ComplexArmPlan, VirtualExitIfElsePlan, lower_virtual_exit_if_else_committed,
+    plan_virtual_exit_if_else, try_lower_if_else, try_lower_return_chain_arm,
+    try_reduce_if_else_with_follow,
+};
 pub use plain_if::try_lower_if;
 pub use short_circuit::{
     try_lower_short_circuit_and, try_lower_short_circuit_and_else, try_lower_short_circuit_if,
