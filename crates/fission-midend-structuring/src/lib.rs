@@ -29,6 +29,7 @@ pub mod cfg_analysis;
 pub mod cleanup;
 pub mod collapse_graph;
 pub mod collapse_loop;
+pub mod collapse_shapes;
 pub mod collapse_structure;
 pub mod conditionals;
 pub mod graph;
