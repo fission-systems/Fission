@@ -234,6 +234,15 @@ pub fn render_mlil_preview_with_binary_and_context(
     // Structuring may wrap/rearrange after normalize; drop pure identity
     // assigns that only become adjacent post-layout.
     let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut hir.body);
+    // The dead/identity cleanup above can expose an alias-only block that did
+    // not exist at structuring time. Retarget its function-scoped predecessors
+    // before crossing the canonical PreHIR -> HIR boundary.
+    let protected = builder.lsda_landing_pad_labels();
+    let (body, _) = fission_midend_structuring::cleanup::eliminate_nonfallthrough_label_aliases(
+        std::mem::take(&mut hir.body),
+        &protected,
+    );
+    hir.body = body;
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to
     // the genuinely separate `HirStmt` grammar and `hir` is rebound to a

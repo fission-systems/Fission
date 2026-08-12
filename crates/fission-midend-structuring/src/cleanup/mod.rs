@@ -30,6 +30,180 @@ pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<PreHi
     body
 }
 
+/// Remove `Label(alias); Goto(target)` from a sequential list when its
+/// preceding sibling proves that ordinary control cannot fall into `alias`.
+/// Goto rewriting is function-wide because C labels are function-scoped.
+pub fn eliminate_nonfallthrough_label_aliases(
+    mut body: Vec<PreHirStmt>,
+    protected: &HashSet<String>,
+) -> (Vec<PreHirStmt>, usize) {
+    let mut definition_counts = HashMap::default();
+    collect_defined_label_counts_in(&body, &mut definition_counts);
+
+    let mut aliases = HashMap::default();
+    collect_nonfallthrough_label_aliases(
+        &body,
+        protected,
+        &definition_counts,
+        &mut aliases,
+    );
+    if aliases.is_empty() {
+        return (body, 0);
+    }
+
+    let discovered = aliases.clone();
+    aliases.retain(|alias, _| !alias_chain_is_cyclic(alias, &discovered));
+    if aliases.is_empty() {
+        return (body, 0);
+    }
+
+    remove_nonfallthrough_alias_segments_in_place(&mut body, &aliases);
+    let rewritten_count = aliases.len();
+    (rewrite_stmt_labels(body, &aliases), rewritten_count)
+}
+
+fn collect_defined_label_counts_in(
+    stmts: &[PreHirStmt],
+    counts: &mut HashMap<String, usize>,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Label(label) => *counts.entry(label.clone()).or_insert(0) += 1,
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_defined_label_counts_in(body, counts),
+            PreHirStmt::If { then_body, else_body, .. } => {
+                collect_defined_label_counts_in(then_body, counts);
+                collect_defined_label_counts_in(else_body, counts);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_defined_label_counts_in(&case.body, counts);
+                }
+                collect_defined_label_counts_in(default, counts);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_nonfallthrough_label_aliases(
+    stmts: &[PreHirStmt],
+    protected: &HashSet<String>,
+    definition_counts: &HashMap<String, usize>,
+    aliases: &mut HashMap<String, String>,
+) {
+    for window in stmts.windows(3) {
+        let [previous, PreHirStmt::Label(alias), PreHirStmt::Goto(target)] = window else {
+            continue;
+        };
+        if is_total_transfer(previous)
+            && alias != target
+            && !protected.contains(alias)
+            && definition_counts.get(alias) == Some(&1)
+            && definition_counts.contains_key(target)
+        {
+            aliases.insert(alias.clone(), target.clone());
+        }
+    }
+
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_nonfallthrough_label_aliases(
+                body, protected, definition_counts, aliases,
+            ),
+            PreHirStmt::If { then_body, else_body, .. } => {
+                collect_nonfallthrough_label_aliases(
+                    then_body, protected, definition_counts, aliases,
+                );
+                collect_nonfallthrough_label_aliases(
+                    else_body, protected, definition_counts, aliases,
+                );
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_nonfallthrough_label_aliases(
+                        &case.body, protected, definition_counts, aliases,
+                    );
+                }
+                collect_nonfallthrough_label_aliases(
+                    default, protected, definition_counts, aliases,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn is_total_transfer(stmt: &PreHirStmt) -> bool {
+    matches!(
+        stmt,
+        PreHirStmt::Return(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue
+    )
+}
+
+fn alias_chain_is_cyclic(start: &str, aliases: &HashMap<String, String>) -> bool {
+    let mut current = start;
+    let mut seen = HashSet::default();
+    while let Some(next) = aliases.get(current) {
+        if !seen.insert(current.to_string()) {
+            return true;
+        }
+        current = next;
+    }
+    false
+}
+
+fn remove_nonfallthrough_alias_segments_in_place(
+    stmts: &mut Vec<PreHirStmt>,
+    aliases: &HashMap<String, String>,
+) {
+    let mut idx = 0usize;
+    while idx < stmts.len() {
+        if let (Some(PreHirStmt::Label(alias)), Some(PreHirStmt::Goto(target))) =
+            (stmts.get(idx), stmts.get(idx + 1))
+        {
+            if aliases.get(alias) == Some(target) {
+                stmts.drain(idx..idx + 2);
+                continue;
+            }
+        }
+
+        match &mut stmts[idx] {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => remove_nonfallthrough_alias_segments_in_place(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), aliases,
+            ),
+            PreHirStmt::If { then_body, else_body, .. } => {
+                remove_nonfallthrough_alias_segments_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), aliases,
+                );
+                remove_nonfallthrough_alias_segments_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), aliases,
+                );
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    remove_nonfallthrough_alias_segments_in_place(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), aliases,
+                    );
+                }
+                remove_nonfallthrough_alias_segments_in_place(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), aliases,
+                );
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+}
+
 /// C labels are function-scoped. Keep the first `Label(L)` and drop later
 /// definitions of the same name (multi-emit of the same CFG block header).
 pub fn strip_duplicate_label_definitions(mut body: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
@@ -853,6 +1027,98 @@ mod tests {
     use super::*;
 
     use super::*;
+
+    #[test]
+    fn nonfallthrough_aliases_retarget_function_scoped_gotos() {
+        for transfer in [
+            PreHirStmt::Return(None),
+            PreHirStmt::Goto("escape".to_string()),
+            PreHirStmt::Break,
+            PreHirStmt::Continue,
+        ] {
+            let body = vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("cond".to_string()),
+                    then_body: vec![PreHirStmt::Goto("alias".to_string())].into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Const(1, NirType::Bool),
+                    body: vec![
+                        transfer,
+                        PreHirStmt::Label("alias".to_string()),
+                        PreHirStmt::Goto("target".to_string()),
+                    ].into(),
+                },
+                PreHirStmt::Label("escape".to_string()),
+                PreHirStmt::Label("target".to_string()),
+                PreHirStmt::Return(None),
+            ];
+
+            let (rewritten, count) =
+                eliminate_nonfallthrough_label_aliases(body, &HashSet::default());
+            assert_eq!(count, 1);
+            let PreHirStmt::If { then_body, .. } = &rewritten[0] else {
+                panic!("expected if: {rewritten:?}");
+            };
+            assert_eq!(**then_body, vec![PreHirStmt::Goto("target".to_string())]);
+            let PreHirStmt::While { body, .. } = &rewritten[1] else {
+                panic!("expected while: {rewritten:?}");
+            };
+            assert_eq!(body.len(), 1, "alias pair should be removed: {rewritten:?}");
+        }
+    }
+
+    #[test]
+    fn nonfallthrough_aliases_keep_protected_and_unproven_shapes() {
+        let cases = [
+            vec![
+                PreHirStmt::Return(None),
+                PreHirStmt::Label("protected".to_string()),
+                PreHirStmt::Goto("target".to_string()),
+                PreHirStmt::Label("target".to_string()),
+            ],
+            vec![
+                PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+                PreHirStmt::Label("fallthrough".to_string()),
+                PreHirStmt::Goto("target".to_string()),
+                PreHirStmt::Label("target".to_string()),
+            ],
+            vec![
+                PreHirStmt::Return(None),
+                PreHirStmt::Label("duplicate".to_string()),
+                PreHirStmt::Goto("target".to_string()),
+                PreHirStmt::Label("duplicate".to_string()),
+                PreHirStmt::Label("target".to_string()),
+            ],
+            vec![
+                PreHirStmt::Return(None),
+                PreHirStmt::Label("undefined".to_string()),
+                PreHirStmt::Goto("missing".to_string()),
+            ],
+            vec![
+                PreHirStmt::Return(None),
+                PreHirStmt::Label("self_alias".to_string()),
+                PreHirStmt::Goto("self_alias".to_string()),
+            ],
+            vec![
+                PreHirStmt::Return(None),
+                PreHirStmt::Label("cycle_a".to_string()),
+                PreHirStmt::Goto("cycle_b".to_string()),
+                PreHirStmt::Return(None),
+                PreHirStmt::Label("cycle_b".to_string()),
+                PreHirStmt::Goto("cycle_a".to_string()),
+            ],
+        ];
+        let protected = HashSet::from_iter(["protected".to_string()]);
+
+        for body in cases {
+            let (rewritten, count) =
+                eliminate_nonfallthrough_label_aliases(body.clone(), &protected);
+            assert_eq!(count, 0, "unexpected alias admission: {body:?}");
+            assert_eq!(rewritten, body);
+        }
+    }
 
     #[test]
     fn goto_elim_removes_empty_jump_before_label() {
