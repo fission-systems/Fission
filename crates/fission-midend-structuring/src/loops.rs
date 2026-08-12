@@ -629,6 +629,22 @@ fn try_fold_cond_prefix(
 pub fn try_lower_while(host: &mut impl StructuringHost,
         idx: usize,
     ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+        try_lower_while_impl(host, idx, false)
+    }
+
+/// Lower an already graph-admitted rotated natural loop. Unlike the ordinary
+/// speculative reducer, its body is recursively structured inside the proven
+/// loop membership set before the loop node is committed.
+pub fn try_lower_rotated_while(host: &mut impl StructuringHost,
+        idx: usize,
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+        try_lower_while_impl(host, idx, true)
+    }
+
+fn try_lower_while_impl(host: &mut impl StructuringHost,
+        idx: usize,
+        structure_body_members: bool,
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
         if structuring_total_work_budget_exceeded(host) {
             return Ok(None);
         }
@@ -874,8 +890,11 @@ pub fn try_lower_while(host: &mut impl StructuringHost,
                 return Ok(None);
             }
 
-            let Some(lowered_body) =
+            let Some(lowered_body) = (if structure_body_members {
+                lower_loop_body_via_sese(host, &body_set, body_start_idx, exit_idx, idx)?
+            } else {
                 lower_loop_body_subgraph(host, &body_set, body_start_idx, Some(exit_idx), idx)?
+            })
             else {
                 return Ok(None);
             };
@@ -1427,6 +1446,46 @@ pub fn try_lower_for(host: &mut impl StructuringHost,
         Ok(return_expr
             .map(|expr| PreHirStmt::Return(Some(expr)))
             .unwrap_or(PreHirStmt::Break))
+    }
+
+    /// Structure the acyclic interior of an already-admitted cyclic owner.
+    /// This mirrors angr's region ordering: identify/own the loop first, then
+    /// run ordinary acyclic structuring inside that exact membership set.
+    fn lower_loop_body_via_sese(
+        host: &mut impl StructuringHost,
+        body_set: &HashSet<usize>,
+        start_idx: usize,
+        break_idx: usize,
+        head_idx: usize,
+    ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+        if body_set.iter().copied().min() != Some(start_idx) {
+            return Ok(None);
+        }
+        let (mut body, _, _) = crate::sese_driver::build_sese_region_body_for_members(
+            host,
+            start_idx,
+            host.block_count(),
+            crate::HashMap::default(),
+            body_set,
+        )?;
+        let continue_label = block_label(host.block_target_key(head_idx));
+        let break_label = block_label(host.block_target_key(break_idx));
+        let mut stats = LoopControlRewriteStats::default();
+        rewrite_loop_control_gotos_in_stmts(
+            &mut body,
+            Some(&continue_label),
+            Some(&break_label),
+            &mut stats,
+        );
+        host.track_loop_control_rewrite_stats(
+            stats.break_rewrites,
+            stats.continue_rewrites,
+            stats.skipped_nested_scope_count,
+        );
+        while body.last() == Some(&PreHirStmt::Continue) {
+            body.pop();
+        }
+        Ok(Some(body))
     }
 
     /// Lower all blocks in `body_set` (the loop body excluding the head) into a HIR statement

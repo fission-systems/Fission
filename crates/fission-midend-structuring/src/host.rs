@@ -107,6 +107,13 @@ pub trait StructuringHost {
         first_children: StructuredChildMap,
         second_children: StructuredChildMap,
     ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError>;
+    /// Execute an already graph-admitted rotated natural loop on isolated
+    /// host state. The production host commits the fork only on success.
+    fn lower_rotated_while_isolated(
+        &mut self,
+        head_idx: usize,
+        entry_pred_idx: usize,
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError>;
     fn lower_return_join_expr_for_predecessor(
         &mut self,
         pred_idx: usize,

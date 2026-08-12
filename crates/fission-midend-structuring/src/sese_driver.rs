@@ -15,6 +15,7 @@ use crate::guarded_tail::promote_guarded_tail_regions_until_stable;
 use crate::host::StructuringHost;
 use crate::linear_recovery::{SESE_REGION_PROOF_BUDGET_CALLS, try_recover_region_linearized_body};
 use crate::linear_types::structuring_diag_enabled;
+use crate::loop_analysis::LoopBody;
 use crate::loops::{
     try_lower_dowhile, try_lower_for, try_lower_infloop, try_lower_infloop_with_break,
     try_lower_multiblock_dowhile, try_lower_multiblock_infloop, try_lower_while,
@@ -187,6 +188,80 @@ pub fn select_structured_candidate(
     candidates.into_iter().next()
 }
 
+/// Membership-only admission for a natural loop whose header sorts after at
+/// least one body block. The complete loop must fit inside the current owner,
+/// have one canonical exit, and be disjoint from every admitted child.
+fn rotated_loop_membership(
+    loop_body: &LoopBody,
+    entry: usize,
+    exit: usize,
+    allowed_members: Option<&HashSet<usize>>,
+    active_child_map: &HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
+) -> Option<HashSet<usize>> {
+    let canonical_exit = loop_body.exit_idx?;
+    if loop_body.all_exits.len() != 1 || loop_body.all_exits[0] != canonical_exit {
+        return None;
+    }
+    let members: HashSet<usize> = loop_body.body.iter().copied().collect();
+    if !members.contains(&loop_body.head)
+        || !members.iter().any(|member| *member < loop_body.head)
+        || loop_body.head < entry
+        || loop_body.head >= exit
+        || members.iter().any(|member| *member < entry || *member >= exit)
+        || allowed_members.is_some_and(|allowed| !members.is_subset(allowed))
+        || active_child_map.values().any(|(_, _, proof)| {
+            proof.members.iter().any(|member| members.contains(member))
+        })
+    {
+        return None;
+    }
+    Some(members)
+}
+
+/// Prove that exclusive loop ownership also removes a real lexical entry
+/// jump: the sole outside predecessor is immediately before a contiguous
+/// rotated body range, targets only the header, and is not layout-fallthrough.
+fn rotated_loop_nonfallthrough_entry(
+    host: &impl StructuringHost,
+    members: &HashSet<usize>,
+    head: usize,
+) -> Option<usize> {
+    let Some(entry_pred) = rotated_loop_entry_predecessor(
+        host.predecessors(),
+        host.successors(),
+        members,
+        head,
+    ) else {
+        return None;
+    };
+    (host.fallthrough_index(entry_pred) != Some(head)).then_some(entry_pred)
+}
+
+fn rotated_loop_entry_predecessor(
+    predecessors: &[Vec<usize>],
+    successors: &[Vec<usize>],
+    members: &HashSet<usize>,
+    head: usize,
+) -> Option<usize> {
+    let Some(first_member) = members.iter().copied().min() else {
+        return None;
+    };
+    if !(first_member..=head).all(|member| members.contains(&member)) {
+        return None;
+    }
+    let outside_predecessors: Vec<usize> = predecessors.get(head)?
+        .iter()
+        .copied()
+        .filter(|pred| !members.contains(pred))
+        .collect();
+    let [entry_pred] = outside_predecessors.as_slice() else {
+        return None;
+    };
+    (entry_pred.checked_add(1) == Some(first_member)
+        && successors.get(*entry_pred).is_some_and(|succs| succs.as_slice() == [head]))
+        .then_some(*entry_pred)
+}
+
 /// Tier-1 / tier-2 collapse loop + virtualize, then final reconstruction.
 ///
 /// Collapse rules operate on the raw CFG and don't know about the caller's
@@ -283,6 +358,70 @@ fn build_sese_region_body_impl(
                 );
             }
             break;
+        }
+
+        // Own a rotated cyclic region before lexical lower-index body nodes
+        // become independent acyclic children. Membership admission is pure;
+        // the winning loop is lowered on an isolated host and recursively
+        // structures acyclic regions only inside the proven body set.
+        let mut loop_candidates = host.loop_bodies().to_vec();
+        loop_candidates.sort_by_key(|loop_body| (loop_body.body.len(), loop_body.head));
+        for loop_body in loop_candidates {
+            let Some(members) = rotated_loop_membership(
+                &loop_body,
+                entry,
+                exit,
+                allowed_members,
+                &active_child_map,
+            ) else {
+                continue;
+            };
+            if host.region_has_external_entry(&members, loop_body.head) {
+                continue;
+            }
+            let Some(entry_pred_idx) =
+                rotated_loop_nonfallthrough_entry(host, &members, loop_body.head)
+            else {
+                continue;
+            };
+            // This slice owns only a region-entry trampoline. Nested rotated
+            // loops can still be absorbed by an enclosing conditional/loop;
+            // preempting them here can merely reshuffle materialization
+            // without reducing the final function's unstructured surface.
+            if entry_pred_idx != entry {
+                continue;
+            }
+            let Some((stmt, skip_to)) =
+                host.lower_rotated_while_isolated(loop_body.head, entry_pred_idx)?
+            else {
+                continue;
+            };
+            if Some(skip_to) != loop_body.exit_idx {
+                continue;
+            }
+            let Some(mut proof) = build_region_proof(loop_body.head, skip_to, &stmt) else {
+                continue;
+            };
+            proof.members.extend(members);
+            proof.members.sort_unstable();
+            proof.members.dedup();
+            let node = StructureNode::region(usize::MAX, stmt, skip_to, proof.clone());
+            host.record_region_candidate(&proof);
+            host.record_selected_region(&node);
+            active_child_map.insert(loop_body.head, (node.statements, skip_to, proof));
+            progress = true;
+            if diag {
+                eprintln!(
+                    "[DIAG] rotated natural loop admitted: head={} exit={} members={}",
+                    loop_body.head,
+                    skip_to,
+                    loop_body.body.len()
+                );
+            }
+            break;
+        }
+        if progress {
+            continue;
         }
 
         // Block indices already owned by some accepted region's (possibly
@@ -1041,5 +1180,90 @@ mod tests {
         }];
 
         assert_eq!(count_explicit_gotos(&body), 2);
+    }
+
+    fn loop_body(head: usize, body: &[usize], exit: usize) -> LoopBody {
+        LoopBody {
+            head,
+            tails: vec![*body.last().expect("test loop body")],
+            body: body.to_vec(),
+            exit_idx: Some(exit),
+            all_exits: vec![exit],
+        }
+    }
+
+    #[test]
+    fn rotated_loop_membership_requires_complete_disjoint_single_exit_owner() {
+        let loop_body = loop_body(4, &[4, 1, 2, 3], 5);
+        let active = HashMap::default();
+        let members = rotated_loop_membership(&loop_body, 0, 6, None, &active)
+            .expect("rotated complete loop should be eligible");
+        assert_eq!(members, HashSet::from_iter([1, 2, 3, 4]));
+
+        let mut overlapping = HashMap::default();
+        overlapping.insert(
+            2,
+            (
+                Vec::new(),
+                3,
+                RegionProof::structured(RegionKind::Conditional, 2, 3, None),
+            ),
+        );
+        assert!(
+            rotated_loop_membership(&loop_body, 0, 6, None, &overlapping).is_none(),
+            "an admitted child must not be pruned or double-owned"
+        );
+
+        let allowed = HashSet::from_iter([2, 3, 4]);
+        assert!(
+            rotated_loop_membership(&loop_body, 0, 6, Some(&allowed), &active).is_none(),
+            "isolated bounds must contain the entire loop"
+        );
+
+        let mut multiple_exits = loop_body.clone();
+        multiple_exits.all_exits.push(6);
+        assert!(
+            rotated_loop_membership(&multiple_exits, 0, 7, None, &active).is_none(),
+            "multi-exit loops remain on the ordinary path"
+        );
+    }
+
+    #[test]
+    fn rotated_loop_membership_rejects_non_rotated_layout() {
+        let loop_body = loop_body(1, &[1, 2, 3], 4);
+        assert!(
+            rotated_loop_membership(&loop_body, 0, 5, None, &HashMap::default()).is_none()
+        );
+    }
+
+    #[test]
+    fn rotated_loop_entry_requires_one_contiguous_single_edge_predecessor() {
+        let predecessors = vec![vec![], vec![], vec![3], vec![1], vec![0, 3], vec![4]];
+        let successors = vec![vec![4], vec![3], vec![], vec![4], vec![5], vec![]];
+        let members = HashSet::from_iter([1, 2, 3, 4]);
+        assert_eq!(
+            rotated_loop_entry_predecessor(&predecessors, &successors, &members, 4),
+            Some(0)
+        );
+
+        let gapped = HashSet::from_iter([1, 3, 4]);
+        assert_eq!(
+            rotated_loop_entry_predecessor(&predecessors, &successors, &gapped, 4),
+            None
+        );
+
+        let mut multiple_entries = predecessors.clone();
+        multiple_entries[4].push(5);
+        assert_eq!(
+            rotated_loop_entry_predecessor(&multiple_entries, &successors, &members, 4),
+            None
+        );
+
+        let mut branching_entry = successors.clone();
+        branching_entry[0].push(5);
+        assert_eq!(
+            rotated_loop_entry_predecessor(&predecessors, &branching_entry, &members, 4),
+            None
+        );
     }
 }

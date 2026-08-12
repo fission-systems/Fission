@@ -5,6 +5,57 @@ use fission_midend_structuring::StructuringHost;
 use fission_midend_structuring::cfg_analysis::{CfgFactCache, DomTree};
 use fission_midend_structuring::loop_analysis::LoopBody;
 
+fn commit_isolated_semantic_identities<'a>(
+    target: &mut PreviewBuilder<'a>,
+    isolated: PreviewBuilder<'a>,
+) {
+    for (index, binding) in isolated.params {
+        target.params.entry(index).or_insert(binding);
+    }
+    for (offset, slot) in isolated.locals {
+        target.locals.entry(offset).or_insert(slot);
+    }
+    target.locals_next_id = target.locals_next_id.max(isolated.locals_next_id);
+    for (offset, owners) in isolated.stack_slot_memory_owners {
+        target.stack_slot_memory_owners.entry(offset).or_insert(owners);
+    }
+    for (name, binding) in isolated.temps {
+        target.temps.entry(name).or_insert(binding);
+    }
+    target.temp_next_id = target.temp_next_id.max(isolated.temp_next_id);
+    target.used_param_local_names.extend(isolated.used_param_local_names);
+    for (key, name) in isolated.materialized_vns {
+        target.materialized_vns.entry(key).or_insert(name);
+    }
+    target.load_address_bindings.extend(isolated.load_address_bindings);
+    target.load_value_bindings.extend(isolated.load_value_bindings);
+    for (key, name) in isolated.explicit_merge_bindings {
+        target.explicit_merge_bindings.entry(key).or_insert(name);
+    }
+    for (site, name) in isolated.call_result_bindings {
+        target.call_result_bindings.entry(site).or_insert(name);
+    }
+    for (offset, index) in isolated.register_param_aliases {
+        target.register_param_aliases.entry(offset).or_insert(index);
+    }
+    target.sese_region_proof_calls.set(
+        target.sese_region_proof_calls
+            .get()
+            .max(isolated.sese_region_proof_calls.get()),
+    );
+}
+
+fn isolated_work_counter(
+    parent: &std::rc::Rc<std::cell::Cell<u64>>,
+) -> std::rc::Rc<std::cell::Cell<u64>> {
+    std::rc::Rc::new(std::cell::Cell::new(parent.get()))
+}
+
+fn fork_structuring_work_counter<'a>(builder: &mut PreviewBuilder<'a>) {
+    builder.structuring_total_work_units =
+        isolated_work_counter(&builder.structuring_total_work_units);
+}
+
 impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn successors(&self) -> &[Vec<usize>] {
         &self.successors
@@ -193,41 +244,78 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
                 // accepted AST. The isolated host's CFG, collapse caches,
                 // terminator caches, and trial ordering must not affect
                 // lowering of the shared tail or any later region.
-                for (index, binding) in isolated.params {
-                    self.params.entry(index).or_insert(binding);
-                }
-                for (offset, slot) in isolated.locals {
-                    self.locals.entry(offset).or_insert(slot);
-                }
-                self.locals_next_id = self.locals_next_id.max(isolated.locals_next_id);
-                for (offset, owners) in isolated.stack_slot_memory_owners {
-                    self.stack_slot_memory_owners.entry(offset).or_insert(owners);
-                }
-                for (name, binding) in isolated.temps {
-                    self.temps.entry(name).or_insert(binding);
-                }
-                self.temp_next_id = self.temp_next_id.max(isolated.temp_next_id);
-                self.used_param_local_names
-                    .extend(isolated.used_param_local_names);
-                for (key, name) in isolated.materialized_vns {
-                    self.materialized_vns.entry(key).or_insert(name);
-                }
-                self.load_address_bindings.extend(isolated.load_address_bindings);
-                self.load_value_bindings.extend(isolated.load_value_bindings);
-                for (key, name) in isolated.explicit_merge_bindings {
-                    self.explicit_merge_bindings.entry(key).or_insert(name);
-                }
-                for (site, name) in isolated.call_result_bindings {
-                    self.call_result_bindings.entry(site).or_insert(name);
-                }
-                for (offset, index) in isolated.register_param_aliases {
-                    self.register_param_aliases.entry(offset).or_insert(index);
-                }
+                commit_isolated_semantic_identities(self, isolated);
+                Ok(Some(candidate))
+            }
+            Ok(None) => {
                 self.sese_region_proof_calls.set(
                     self.sese_region_proof_calls
                         .get()
                         .max(isolated.sese_region_proof_calls.get()),
                 );
+                Ok(None)
+            }
+            Err(err) => {
+                self.sese_region_proof_calls.set(
+                    self.sese_region_proof_calls
+                        .get()
+                        .max(isolated.sese_region_proof_calls.get()),
+                );
+                Err(err)
+            }
+        }
+    }
+    fn lower_rotated_while_isolated(
+        &mut self,
+        head_idx: usize,
+        entry_pred_idx: usize,
+    ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+        let Some(expected_exit) = self.get_loop_body(head_idx).and_then(|body| body.exit_idx) else {
+            return Ok(None);
+        };
+
+        let mut baseline = self.clone();
+        fork_structuring_work_counter(&mut baseline);
+        let baseline_stmt = crate::midend::builder::with_discarded_register_origins(|| {
+            fission_midend_structuring::try_lower_while(&mut baseline, head_idx)
+        })?;
+        let Some((baseline_stmt, baseline_exit)) = baseline_stmt else {
+            return Ok(None);
+        };
+        if baseline_exit != expected_exit {
+            return Ok(None);
+        }
+        let baseline_gotos = fission_midend_structuring::count_explicit_gotos(
+            std::slice::from_ref(&baseline_stmt),
+        ) + usize::from(self.fallthrough_index(entry_pred_idx) != Some(head_idx));
+
+        let mut isolated = self.clone();
+        fork_structuring_work_counter(&mut isolated);
+        let result = crate::midend::builder::with_isolated_register_origins(|| {
+            let candidate =
+                fission_midend_structuring::try_lower_rotated_while(&mut isolated, head_idx)?;
+            let Some((stmt, skip_to)) = candidate else {
+                return Ok(None);
+            };
+            if skip_to != expected_exit {
+                return Ok(None);
+            }
+            let candidate_gotos =
+                fission_midend_structuring::count_explicit_gotos(std::slice::from_ref(&stmt));
+            if candidate_gotos >= baseline_gotos {
+                if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+                    eprintln!(
+                        "[DIAG] rotated while cost rejection: block={} candidate_gotos={} baseline_gotos={}",
+                        head_idx, candidate_gotos, baseline_gotos
+                    );
+                }
+                return Ok(None);
+            }
+            Ok(Some((stmt, skip_to)))
+        });
+        match result {
+            Ok(Some(candidate)) => {
+                commit_isolated_semantic_identities(self, isolated);
                 Ok(Some(candidate))
             }
             Ok(None) => {
@@ -994,6 +1082,20 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
         target_expr: Option<PreHirExpr>,
     ) -> PreHirStmt {
         PreviewBuilder::emit_unsupported_control_surface(self, evidence, target_expr)
+    }
+}
+
+#[cfg(test)]
+mod isolated_host_tests {
+    use super::isolated_work_counter;
+
+    #[test]
+    fn isolated_work_counter_does_not_consume_parent_budget() {
+        let parent = std::rc::Rc::new(std::cell::Cell::new(17));
+        let isolated = isolated_work_counter(&parent);
+        isolated.set(99);
+        assert_eq!(parent.get(), 17);
+        assert_eq!(isolated.get(), 99);
     }
 }
 

@@ -108,7 +108,7 @@ pub use helpers::{block_label, merge_equivalent_switch_cases, recovered_switch_c
 pub use loops::{
     lower_loop_body_subgraph, try_lower_dowhile, try_lower_for, try_lower_infloop,
     try_lower_infloop_with_break, try_lower_multiblock_dowhile, try_lower_multiblock_infloop,
-    try_lower_while,
+    try_lower_rotated_while, try_lower_while,
 };
 pub use sese_discovery::{SeseRegion, SeseRegionTree, build_sese_tree, compute_rpo_map, find_sese_regions, sese_structure_region, structure_cfg_via_sese};
 pub use orphan_repair::{find_block_index_by_label, try_repair_orphan_gotos};
