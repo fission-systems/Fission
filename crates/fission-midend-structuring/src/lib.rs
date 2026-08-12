@@ -27,6 +27,7 @@ pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHas
 pub mod admission;
 pub mod cfg_analysis;
 pub mod cleanup;
+pub mod collapse_graph;
 pub mod collapse_loop;
 pub mod collapse_structure;
 pub mod conditionals;
