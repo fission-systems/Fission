@@ -30,25 +30,35 @@
 //! A `Label(L)` region is duplicable only when all of the following hold.
 //! Each is a structural fact about the emitted AST, not a heuristic:
 //!
-//! 1. The region ends in `Return`, so control provably never leaves it by
-//!    falling through -- the copy is a complete substitute for the jump.
+//! 1. The region ends in a total transfer, so control provably never leaves
+//!    it by falling through -- the copy is a complete substitute for the jump.
+//!    A `Return` tail may be *cloned* into any number of sites. A `Goto` tail
+//!    may only be *relocated* to a single site: cloning it would clone its
+//!    trailing jump N ways and win nothing, so that case additionally requires
+//!    the label to have exactly one reference and to be unreachable by
+//!    fallthrough, making the rewrite a move that retires the incoming jump.
 //! 2. The region contains no `Break`/`Continue` anywhere. Those bind to the
 //!    nearest enclosing loop, and a `goto L` site can sit at a different loop
 //!    nesting than `L` itself, so copying them could rebind them to a
 //!    different loop.
-//! 3. The region contains no `Label` or `Goto` anywhere. A copied `Label`
-//!    would be a duplicate definition (C labels are function-scoped), and a
-//!    copied `Goto` would multiply edges this pass has not proven terminal.
+//! 3. The region contains no `Label` anywhere -- a copied `Label` would be a
+//!    duplicate definition, since C labels are function-scoped. It contains no
+//!    `Goto` either in the cloning case, for the multiplication reason above;
+//!    in the relocating case jumps move rather than multiply, so they are
+//!    admissible.
 //! 4. The region is at most [`MAX_TAIL_STMTS`] statements and is referenced
 //!    by at most [`MAX_TAIL_REFS`] gotos, and the function stays within
 //!    [`MAX_DUPLICATED_STMTS`] copied statements overall -- the growth bound
 //!    the reference owners also impose.
 //!
 //! The original `Label(L)` and its region are removed only when the preceding
-//! sibling proves ordinary control cannot fall into it. Otherwise the label
-//! stays (one predecessor keeps the shared copy, exactly as the reference
-//! owners duplicate into "each predecessor but one") and only the `goto`s are
-//! replaced.
+//! sibling proves ordinary control cannot fall into it *and* nothing targets
+//! the label any more. That second condition is checked against freshly
+//! recomputed reference counts, because a `Goto` inside newly spliced content
+//! is skipped by the replacement scan and would otherwise be stranded.
+//! Otherwise the label stays (one predecessor keeps the shared copy, exactly
+//! as the reference owners duplicate into "each predecessor but one") and only
+//! the `goto`s are replaced.
 
 use fission_midend_prehir::PreHirStmt;
 use crate::HashMap;
@@ -95,10 +105,15 @@ pub fn duplicate_terminal_tails(
     if removed == 0 {
         return (body, 0);
     }
-    // A duplicated tail whose label is no longer reachable by fallthrough has
-    // no remaining reference; drop the now-dead original. `finalize_*` would
-    // also prune the bare label, but not the statements behind it.
-    drop_unreachable_tail_definitions(&mut body, &plans, protected);
+    // Drop an original only when nothing targets its label any more. The
+    // reference count must be *recomputed*: a `Goto` sitting inside freshly
+    // spliced content is skipped by the replacement scan, so a label can still
+    // have a live reference even though every reference present at collection
+    // time was rewritten. Dropping on the stale assumption would strand that
+    // jump. `finalize_*` would prune a bare label but not the statements
+    // behind it, so this pass owns the removal.
+    let remaining = super::collect_referenced_label_counts(&body);
+    drop_unreachable_tail_definitions(&mut body, &plans, protected, &remaining);
     (body, removed)
 }
 
@@ -114,7 +129,13 @@ fn collect_candidates(
 ) {
     for (idx, stmt) in stmts.iter().enumerate() {
         if let PreHirStmt::Label(label) = stmt {
-            if let Some(region) = duplicable_region_at(stmts, idx, label, protected, counts, definitions)
+            // Whether ordinary control can fall into this label from its
+            // preceding sibling. A goto-terminated region may only be threaded
+            // when it cannot, because the original has to disappear for the
+            // rewrite to retire a jump rather than clone one.
+            let droppable = idx > 0 && super::is_total_transfer(&stmts[idx - 1]);
+            if let Some(region) =
+                duplicable_region_at(stmts, idx, label, protected, counts, definitions, droppable)
             {
                 let refs = counts.get(label).copied().unwrap_or(0);
                 let cost = region.len().saturating_mul(refs);
@@ -139,6 +160,7 @@ fn duplicable_region_at(
     protected: &HashSet<String>,
     counts: &HashMap<String, usize>,
     definitions: &HashMap<String, usize>,
+    droppable: bool,
 ) -> Option<Vec<PreHirStmt>> {
     if protected.contains(label) {
         return None;
@@ -152,6 +174,13 @@ fn duplicable_region_at(
     if refs == 0 || refs > MAX_TAIL_REFS {
         return None;
     }
+    // A region that hands control on with its own `goto` is threadable, not
+    // duplicable: relocating it retires the incoming jump only because the
+    // original disappears. That needs the sole reference (so nothing else
+    // still targets the label) and an unreachable original (so deleting it
+    // loses no path). Cloning such a region N ways would instead clone its
+    // trailing jump N ways and win nothing.
+    let allow_goto_tail = refs == 1 && droppable;
 
     let mut region: Vec<PreHirStmt> = Vec::new();
     let mut total = 0usize;
@@ -165,30 +194,44 @@ fn duplicable_region_at(
         if total > MAX_TAIL_STMTS {
             return None;
         }
-        let terminal = matches!(stmt, PreHirStmt::Return(_));
+        let terminal = match stmt {
+            PreHirStmt::Return(_) => true,
+            PreHirStmt::Goto(target) => {
+                // Threading its own label back into itself would delete the
+                // very jump the rewrite depends on finding.
+                if !allow_goto_tail || target == label {
+                    return None;
+                }
+                true
+            }
+            _ => false,
+        };
         region.push(stmt.clone());
         if terminal {
-            return region_is_copyable(&region).then_some(region);
+            return region_is_relocatable(&region, allow_goto_tail).then_some(region);
         }
     }
     None
 }
 
-/// No `Break`/`Continue`/`Goto`/`Label` anywhere in the region -- see the
-/// admission rules in the module docs for why each is disqualifying.
-fn region_is_copyable(region: &[PreHirStmt]) -> bool {
-    region.iter().all(stmt_is_copyable)
+/// No `Break`/`Continue`/`Label` anywhere in the region -- see the admission
+/// rules in the module docs for why each is disqualifying.
+///
+/// `Goto` is disqualifying only when the region will be *cloned*: copying a
+/// jump N ways multiplies it. When the region is instead being relocated to
+/// its sole reference (`allow_goto`), jumps inside it move rather than
+/// multiply, so they are admissible.
+fn region_is_relocatable(region: &[PreHirStmt], allow_goto: bool) -> bool {
+    region.iter().all(|stmt| stmt_is_relocatable(stmt, allow_goto))
 }
 
-fn stmt_is_copyable(stmt: &PreHirStmt) -> bool {
+fn stmt_is_relocatable(stmt: &PreHirStmt, allow_goto: bool) -> bool {
     match stmt {
-        PreHirStmt::Break
-        | PreHirStmt::Continue
-        | PreHirStmt::Goto(_)
-        | PreHirStmt::Label(_) => false,
+        PreHirStmt::Break | PreHirStmt::Continue | PreHirStmt::Label(_) => false,
+        PreHirStmt::Goto(_) => allow_goto,
         _ => child_sequences(stmt)
             .into_iter()
-            .all(|seq| seq.iter().all(stmt_is_copyable)),
+            .all(|seq| seq.iter().all(|s| stmt_is_relocatable(s, allow_goto))),
     }
 }
 
@@ -249,6 +292,7 @@ fn drop_unreachable_tail_definitions(
     stmts: &mut Vec<PreHirStmt>,
     plans: &HashMap<String, Vec<PreHirStmt>>,
     protected: &HashSet<String>,
+    remaining: &HashMap<String, usize>,
 ) {
     let mut idx = 0usize;
     while idx < stmts.len() {
@@ -256,27 +300,41 @@ fn drop_unreachable_tail_definitions(
             PreHirStmt::Label(label) => {
                 !protected.contains(label)
                     && plans.contains_key(label.as_str())
+                    && remaining.get(label.as_str()).copied().unwrap_or(0) == 0
                     && idx > 0
                     && super::is_total_transfer(&stmts[idx - 1])
             }
             _ => false,
         };
         if removable {
-            let PreHirStmt::Label(label) = &stmts[idx] else {
-                unreachable!("checked above");
-            };
-            let region_len = plans[label.as_str()].len();
-            // The label plus exactly the statements the plan copied: the
-            // region was read from this position, so the lengths agree.
-            let end = (idx + 1 + region_len).min(stmts.len());
-            stmts.drain(idx..end);
-            continue;
+            // Re-derive the region's extent rather than trusting the length
+            // recorded at collection time: `replace_gotos_in_place` may have
+            // expanded a `Goto` *inside* this region into its own tail, so the
+            // statement count behind the label can differ from the plan's.
+            if let Some(end) = region_end_after(stmts, idx) {
+                stmts.drain(idx..end);
+                continue;
+            }
         }
         for seq in child_sequences_mut(&mut stmts[idx]) {
-            drop_unreachable_tail_definitions(seq, plans, protected);
+            drop_unreachable_tail_definitions(seq, plans, protected, remaining);
         }
         idx += 1;
     }
+}
+
+/// One past the terminal statement of the region following the `Label` at
+/// `idx`, or `None` when the region runs into another label or off the end
+/// without terminating.
+fn region_end_after(stmts: &[PreHirStmt], idx: usize) -> Option<usize> {
+    for (offset, stmt) in stmts[idx + 1..].iter().enumerate() {
+        match stmt {
+            PreHirStmt::Label(_) => return None,
+            PreHirStmt::Return(_) | PreHirStmt::Goto(_) => return Some(idx + offset + 2),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn child_sequences_mut(stmt: &mut PreHirStmt) -> Vec<&mut Vec<PreHirStmt>> {
@@ -431,6 +489,116 @@ mod tests {
         let (out, removed) = duplicate_terminal_tails(body.clone(), &protected);
         assert_eq!(removed, 0);
         assert_eq!(out, body);
+    }
+
+    #[test]
+    fn threads_single_reference_goto_terminated_region() {
+        // if (c) { goto L; }
+        // return a;      <- total transfer, so L is unreachable by fallthrough
+        // L:
+        // x;
+        // goto M;
+        // M:
+        // return b;
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            expr_stmt("x"),
+            PreHirStmt::Goto("M".into()),
+            PreHirStmt::Label("M".into()),
+            PreHirStmt::Return(Some(var("b"))),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body, &HashSet::default());
+        // L's region relocates to its sole reference and the original goes
+        // away, so `goto L` and the original `goto M` collapse into one jump.
+        // `Label(M)` survives: the relocated `goto M` still targets it, which
+        // is exactly what the recomputed reference count protects.
+        assert_eq!(removed, 2);
+        assert!(matches!(&out[0], PreHirStmt::If { then_body, .. }
+            if then_body.as_slice() == [expr_stmt("x"), PreHirStmt::Goto("M".into())]));
+        assert!(!out.contains(&PreHirStmt::Label("L".into())));
+        assert!(out.contains(&PreHirStmt::Label("M".into())));
+        // Net effect: two jumps became one.
+        assert_eq!(count_gotos(&out), 1);
+    }
+
+    fn count_gotos(stmts: &[PreHirStmt]) -> usize {
+        stmts
+            .iter()
+            .map(|s| match s {
+                PreHirStmt::Goto(_) => 1,
+                other => child_sequences(other)
+                    .into_iter()
+                    .map(count_gotos)
+                    .sum::<usize>(),
+            })
+            .sum()
+    }
+
+    #[test]
+    fn refuses_goto_tail_when_label_is_reachable_by_fallthrough() {
+        // Cloning here would clone the trailing jump instead of retiring one.
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            expr_stmt("falls_in"),
+            PreHirStmt::Label("L".into()),
+            expr_stmt("x"),
+            PreHirStmt::Goto("M".into()),
+            PreHirStmt::Label("M".into()),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body.clone(), &HashSet::default());
+        assert_eq!(removed, 0);
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn refuses_goto_tail_with_multiple_references() {
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::If {
+                cond: var("d"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            expr_stmt("x"),
+            PreHirStmt::Goto("M".into()),
+            PreHirStmt::Label("M".into()),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body.clone(), &HashSet::default());
+        assert_eq!(removed, 0, "cloning a jump N ways wins nothing");
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn refuses_self_targeting_goto_tail() {
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            expr_stmt("x"),
+            PreHirStmt::Goto("L".into()),
+        ];
+        let (_, removed) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(removed, 0, "self-loop region must not be threaded");
     }
 
     #[test]
