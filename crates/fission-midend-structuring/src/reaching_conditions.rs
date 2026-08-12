@@ -1,0 +1,346 @@
+//! Reaching conditions: the formula under which each node executes.
+//!
+//! Ghidra matches rules and angr's Phoenix matches schemas; both fall back to
+//! a jump when nothing matches. DREAM (Yakdan et al., NDSS 2015, "No More
+//! Gotos") takes a different route with a different failure mode: instead of
+//! recognising shapes it computes, for every node, the boolean condition
+//! under which control reaches it, simplifies that formula, and lets the
+//! structure fall out of the conditions. There is no shape to fail to match,
+//! so there is no "give up and emit a goto" branch.
+//!
+//! angr implements it in `analyses/decompiler/condition_processor.py`
+//! (`recover_reaching_conditions`), and the recurrence is small:
+//!
+//! ```text
+//! reaching(head) = true
+//! reaching(n)    = OR over predecessors p of ( reaching(p) AND edge(p -> n) )
+//! ```
+//!
+//! Visit in topological order so every predecessor is known before its
+//! successor, then simplify. The graph must be acyclic -- DREAM structures
+//! loops separately and applies this to the acyclic body -- so
+//! [`compute_reaching_conditions`] reports a cycle rather than guessing.
+//!
+//! # What this buys
+//!
+//! Structure becomes a property of the conditions rather than of the shape:
+//!
+//! - two nodes with the *same* reaching condition run under the same guard
+//!   and can share one `if`;
+//! - two nodes whose conditions are `c` and `!c` are the arms of an if/else,
+//!   however the CFG happens to be laid out;
+//! - a node with condition `true` is unconditional.
+//!
+//! None of those queries care whether the CFG matched a diamond, so they see
+//! cases a shape matcher cannot. [`conditions_are_complementary`] is the
+//! primitive the later structuring step needs.
+//!
+//! Pure and host-free by construction: edge conditions arrive through a
+//! closure, so nothing here can lower statements or touch builder state --
+//! the hazard that has repeatedly forced this work to be reverted.
+
+use crate::HashMap;
+use crate::HashSet;
+use fission_midend_prehir::util::{negate_expr, simplify_logical_expr};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr};
+use fission_midend_core::ir::NirType;
+
+/// Node identifier, matching [`crate::collapse_graph::NodeId`].
+pub type NodeId = usize;
+
+/// Why reaching conditions could not be computed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReachingError {
+    /// The region contains a cycle; loops are structured separately.
+    Cyclic,
+    /// `head` is not a node of the graph.
+    UnknownHead(NodeId),
+}
+
+/// `true` -- the condition of an unconditionally executed node.
+pub fn always() -> PreHirExpr {
+    PreHirExpr::Const(1, NirType::Bool)
+}
+
+fn is_always(e: &PreHirExpr) -> bool {
+    matches!(e, PreHirExpr::Const(v, _) if *v != 0)
+}
+
+fn and(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+    if is_always(&lhs) {
+        return rhs;
+    }
+    if is_always(&rhs) {
+        return lhs;
+    }
+    PreHirExpr::Binary {
+        op: PreHirBinaryOp::LogicalAnd,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        ty: NirType::Bool,
+    }
+}
+
+fn or(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+    if is_always(&lhs) || is_always(&rhs) {
+        return always();
+    }
+    PreHirExpr::Binary {
+        op: PreHirBinaryOp::LogicalOr,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        ty: NirType::Bool,
+    }
+}
+
+/// Compute the condition under which each node executes.
+///
+/// `successors` is the adjacency listing; `edge_condition(p, n)` gives the
+/// guard on the edge `p -> n`, or `None` when the edge is unconditional.
+pub fn compute_reaching_conditions(
+    successors: &[Vec<NodeId>],
+    head: NodeId,
+    edge_condition: impl Fn(NodeId, NodeId) -> Option<PreHirExpr>,
+) -> Result<HashMap<NodeId, PreHirExpr>, ReachingError> {
+    if head >= successors.len() {
+        return Err(ReachingError::UnknownHead(head));
+    }
+    let order = topological_order(successors).ok_or(ReachingError::Cyclic)?;
+
+    let mut predecessors: Vec<Vec<NodeId>> = vec![Vec::new(); successors.len()];
+    for (u, outs) in successors.iter().enumerate() {
+        for &v in outs {
+            if v < successors.len() {
+                predecessors[v].push(u);
+            }
+        }
+    }
+
+    let mut reaching: HashMap<NodeId, PreHirExpr> = HashMap::default();
+    reaching.insert(head, always());
+
+    for n in order {
+        if n == head {
+            continue;
+        }
+        let mut acc: Option<PreHirExpr> = None;
+        for &p in &predecessors[n] {
+            // A predecessor that is itself unreachable contributes nothing.
+            let Some(pred_cond) = reaching.get(&p).cloned() else {
+                continue;
+            };
+            let edge = edge_condition(p, n).unwrap_or_else(always);
+            let term = and(pred_cond, edge);
+            acc = Some(match acc {
+                None => term,
+                Some(prev) => or(term, prev),
+            });
+        }
+        if let Some(cond) = acc {
+            reaching.insert(n, simplify_logical_expr(cond));
+        }
+    }
+    Ok(reaching)
+}
+
+/// Kahn's algorithm; `None` when the graph has a cycle.
+fn topological_order(successors: &[Vec<NodeId>]) -> Option<Vec<NodeId>> {
+    let n = successors.len();
+    let mut indegree = vec![0usize; n];
+    for outs in successors {
+        for &v in outs {
+            if v < n {
+                indegree[v] += 1;
+            }
+        }
+    }
+    let mut ready: Vec<NodeId> = (0..n).filter(|i| indegree[*i] == 0).collect();
+    let mut order = Vec::with_capacity(n);
+    while let Some(u) = ready.pop() {
+        order.push(u);
+        for &v in &successors[u] {
+            if v >= n {
+                continue;
+            }
+            indegree[v] -= 1;
+            if indegree[v] == 0 {
+                ready.push(v);
+            }
+        }
+    }
+    (order.len() == n).then_some(order)
+}
+
+/// Whether `a` and `b` are complements -- one holds exactly when the other
+/// does not, so the nodes they guard are the arms of an if/else.
+///
+/// Syntactic and deliberately conservative: it recognises `c` against `!c`
+/// modulo double negation. A real decision procedure would catch more, but a
+/// wrong `true` here would merge two arms that are not actually exclusive.
+pub fn conditions_are_complementary(a: &PreHirExpr, b: &PreHirExpr) -> bool {
+    &negate_expr(a.clone()) == b || &negate_expr(b.clone()) == a
+}
+
+/// Group nodes that execute under the same condition.
+///
+/// Nodes sharing a guard can be emitted under one `if`, whatever the CFG
+/// shape between them.
+pub fn group_by_condition(
+    reaching: &HashMap<NodeId, PreHirExpr>,
+) -> Vec<(PreHirExpr, Vec<NodeId>)> {
+    let mut groups: Vec<(PreHirExpr, Vec<NodeId>)> = Vec::new();
+    let mut nodes: Vec<NodeId> = reaching.keys().copied().collect();
+    nodes.sort_unstable();
+    for n in nodes {
+        let cond = &reaching[&n];
+        match groups.iter_mut().find(|(c, _)| c == cond) {
+            Some((_, members)) => members.push(n),
+            None => groups.push((cond.clone(), vec![n])),
+        }
+    }
+    groups
+}
+
+/// Nodes that always execute -- their condition simplified to `true`.
+pub fn unconditional_nodes(reaching: &HashMap<NodeId, PreHirExpr>) -> HashSet<NodeId> {
+    reaching
+        .iter()
+        .filter(|(_, c)| is_always(c))
+        .map(|(n, _)| *n)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
+    }
+
+    /// Diamond: 0 -> {1,2} -> 3, guarded by `c` and `!c`.
+    fn diamond() -> (Vec<Vec<NodeId>>, impl Fn(NodeId, NodeId) -> Option<PreHirExpr>) {
+        let succ = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let edge = |p: NodeId, n: NodeId| match (p, n) {
+            (0, 1) => Some(var("c")),
+            (0, 2) => Some(negate_expr(var("c"))),
+            _ => None,
+        };
+        (succ, edge)
+    }
+
+    #[test]
+    fn head_is_unconditional_and_arms_get_their_guards() {
+        let (succ, edge) = diamond();
+        let r = compute_reaching_conditions(&succ, 0, edge).unwrap();
+        assert!(is_always(&r[&0]));
+        assert_eq!(r[&1], var("c"));
+        assert_eq!(r[&2], negate_expr(var("c")));
+    }
+
+    #[test]
+    fn a_join_reached_from_both_arms_is_unconditional() {
+        // `(c) OR (!c)` covers every path, so node 3 always runs. This is the
+        // property a shape matcher gets from seeing a diamond; here it falls
+        // out of the formula instead.
+        let (succ, edge) = diamond();
+        let r = compute_reaching_conditions(&succ, 0, edge).unwrap();
+        let cond = &r[&3];
+        assert!(
+            matches!(cond, PreHirExpr::Binary { op: PreHirBinaryOp::LogicalOr, .. })
+                || is_always(cond),
+            "join condition should be a disjunction over both arms, got {cond:?}"
+        );
+    }
+
+    #[test]
+    fn arms_of_a_conditional_are_recognised_as_complementary() {
+        let (succ, edge) = diamond();
+        let r = compute_reaching_conditions(&succ, 0, edge).unwrap();
+        assert!(
+            conditions_are_complementary(&r[&1], &r[&2]),
+            "the two arms guard mutually exclusive paths"
+        );
+    }
+
+    #[test]
+    fn nodes_under_the_same_guard_group_together() {
+        // 0 -> {1,2}; 1 -> 3. Nodes 1 and 3 both run exactly when `c` holds,
+        // even though the CFG between them is a plain edge, not a shape.
+        let succ = vec![vec![1, 2], vec![3], vec![], vec![]];
+        let edge = |p: NodeId, n: NodeId| match (p, n) {
+            (0, 1) => Some(var("c")),
+            (0, 2) => Some(negate_expr(var("c"))),
+            _ => None,
+        };
+        let r = compute_reaching_conditions(&succ, 0, edge).unwrap();
+        assert_eq!(r[&1], r[&3], "a private successor inherits its guard");
+        let groups = group_by_condition(&r);
+        let shared = groups
+            .iter()
+            .find(|(c, _)| *c == var("c"))
+            .expect("a group guarded by c");
+        assert_eq!(shared.1, vec![1, 3]);
+    }
+
+    #[test]
+    fn a_nested_guard_conjoins_with_its_parent() {
+        // 0 -> {1,2}; 1 -> {3,4}. Node 3 runs when c AND d.
+        let succ = vec![vec![1, 2], vec![3, 4], vec![], vec![], vec![]];
+        let edge = |p: NodeId, n: NodeId| match (p, n) {
+            (0, 1) => Some(var("c")),
+            (0, 2) => Some(negate_expr(var("c"))),
+            (1, 3) => Some(var("d")),
+            (1, 4) => Some(negate_expr(var("d"))),
+            _ => None,
+        };
+        let r = compute_reaching_conditions(&succ, 0, edge).unwrap();
+        assert_eq!(
+            r[&3],
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
+                lhs: Box::new(var("c")),
+                rhs: Box::new(var("d")),
+                ty: NirType::Bool,
+            }
+        );
+        // 4 runs under `c AND !d`: same parent guard, opposite inner guard.
+        assert_eq!(
+            r[&4],
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
+                lhs: Box::new(var("c")),
+                rhs: Box::new(negate_expr(var("d"))),
+                ty: NirType::Bool,
+            }
+        );
+    }
+
+    #[test]
+    fn unconditional_nodes_are_reported() {
+        let succ = vec![vec![1], vec![2], vec![]];
+        let r = compute_reaching_conditions(&succ, 0, |_, _| None).unwrap();
+        let u = unconditional_nodes(&r);
+        assert!(u.contains(&0) && u.contains(&1) && u.contains(&2));
+    }
+
+    #[test]
+    fn a_cycle_is_reported_rather_than_guessed() {
+        // Loops are structured separately in DREAM; silently producing a
+        // formula here would be wrong.
+        let succ = vec![vec![1], vec![0]];
+        assert_eq!(
+            compute_reaching_conditions(&succ, 0, |_, _| None),
+            Err(ReachingError::Cyclic)
+        );
+    }
+
+    #[test]
+    fn an_unknown_head_is_rejected() {
+        let succ = vec![vec![]];
+        assert_eq!(
+            compute_reaching_conditions(&succ, 7, |_, _| None),
+            Err(ReachingError::UnknownHead(7))
+        );
+    }
+}

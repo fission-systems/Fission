@@ -46,6 +46,7 @@ mod linear_multiblock;
 pub mod linear_types;
 pub mod loop_analysis;
 pub mod loops;
+pub mod reaching_conditions;
 pub mod regions;
 pub mod switch;
 pub mod sese_driver;
