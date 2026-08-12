@@ -14,6 +14,9 @@ pub use tail_dup::duplicate_terminal_tails;
 mod guard_invert;
 pub use guard_invert::invert_forward_guard_gotos;
 
+mod join_layout;
+pub use join_layout::relocate_jump_only_joins;
+
 /// `protected` labels are never removed by the cleanup passes below even
 /// when nothing in `body` textually references them via `Goto` -- see
 /// [`cleanup_redundant_labels_protecting`]. Pass `host.lsda_landing_pad_labels()`

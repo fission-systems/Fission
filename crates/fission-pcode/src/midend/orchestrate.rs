@@ -254,6 +254,14 @@ pub fn render_mlil_preview_with_binary_and_context(
     // false". Inverting the guard states that directly and drops the jump.
     let (body, inverted) =
         fission_midend_structuring::cleanup::invert_forward_guard_gotos(body, &protected);
+    // A join block can be lexically adjacent to only one predecessor, so
+    // `sum(P - 1)` jumps are structural -- but a block every predecessor
+    // *jumps* to is paying one more than that. Relocating it after one of them
+    // claims that free adjacency, the same ordering-before-goto-marking
+    // principle as Ghidra's `orderBlocks` in `ActionFinalStructure`.
+    let (body, relocated) =
+        fission_midend_structuring::cleanup::relocate_jump_only_joins(body, &protected);
+    let inverted = inverted + relocated;
     // Both rewrites above can leave a label whose last reference just went
     // away; structuring's own `finalize_structured_body` already ran, so prune
     // here rather than shipping a dangling label.
