@@ -1060,10 +1060,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-follow-up" class="md-nav__link">
+  <a href="#7-follow-up-slice-full-ifelse-recovery-2026-08-13" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Follow-up
+        7. Follow-up slice: full if/else recovery (2026-08-13)
       
     </span>
   </a>
@@ -1273,11 +1273,66 @@ is kept so those candidates are left to the owner that handles them properly.</p
 rather than hidden: the aggregate is -50 HIR gotos across 23 improved files,
 and both forms are semantically correct — one simply keeps a jump the other
 structures.</p>
-<h2 id="7-follow-up">7. Follow-up<a class="headerlink" href="#7-follow-up" title="Permanent link">&para;</a></h2>
-<p>The clean resolution for the residual HIR interaction is to teach this pass
-to decline candidates matching HIR's richer if/else shape (span ending in
-<code>goto Lend</code> with a single-reference label), so the two owners partition the
-work instead of racing for it. That needs its own measured slice.</p>
+<h2 id="7-follow-up-slice-full-ifelse-recovery-2026-08-13">7. Follow-up slice: full if/else recovery (2026-08-13)<a class="headerlink" href="#7-follow-up-slice-full-ifelse-recovery-2026-08-13" title="Permanent link">&para;</a></h2>
+<p>The residual HIR interaction was resolved by <em>implementing</em> the richer shape
+here rather than declining it. Declining would have handed those candidates
+back to HIR (good for HIR, 2 jumps -&gt; 0) but left NIR with 2 jumps -&gt; 2,
+a NIR regression. Recovering the shape at PreHIR level is strictly better for
+both layers, and leaves HIR's own recovery nothing to race for.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>if (C) { goto Lelse; } THEN...; goto Lend; Lelse: ELSE...; Lend:
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    becomes
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>if (C) { ELSE } else { THEN }   Lend:
+</span></code></pre></div>
+<p>Both jumps retire: the guard's, and the then-arm's jump to the join. <code>Lelse</code>
+disappears with its single reference; <code>Lend</code> stays because other predecessors
+may still target it. Admission mirrors the HIR owner's proven conditions --
+<code>Lelse</code> must have exactly one function-wide reference, and neither THEN nor
+ELSE may declare a label -- plus this pass's own recursive label check and
+size bound. It is tried before the plain inversion, since it retires two
+jumps rather than one.</p>
+<p>Reference counts are snapshotted once per function. The rewrites only ever
+remove <code>Goto</code>s, so a count can go stale high but never low, and a stale-high
+count only makes the single-reference test decline -- the safe direction.</p>
+<p>Measured against a clean rebuild of the committed parent, 224/224 binaries
+and 250/250 functions in both layers:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th style="text-align: right;">Gotos before</th>
+<th style="text-align: right;">Gotos after</th>
+<th style="text-align: right;">Delta</th>
+<th style="text-align: right;">Files improved</th>
+<th style="text-align: right;">Files regressed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NIR</td>
+<td style="text-align: right;">1,921</td>
+<td style="text-align: right;">1,916</td>
+<td style="text-align: right;">-5</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;"><strong>0</strong></td>
+</tr>
+<tr>
+<td>HIR</td>
+<td style="text-align: right;">1,909</td>
+<td style="text-align: right;">1,905</td>
+<td style="text-align: right;">-4</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;"><strong>0</strong></td>
+</tr>
+</tbody>
+</table>
+<p>An interim measurement appeared to show three NIR regressions; that baseline
+was confounded (it had been generated at <code>MAX_SPAN_STMTS = 400</code> rather than
+the committed 24). Regenerating the baseline from the committed parent showed
+zero regressions in either layer. Interim numbers are only comparable against
+a baseline built from the same configuration.</p>
+<p>Validation: 3 new unit tests (recovery, single-reference requirement,
+label-in-else rejection) for 13 total in this module; 1,152 crate tests
+passed; <code>count_bits_matches_real_machine_code</code> passed.</p>
 
 
 
