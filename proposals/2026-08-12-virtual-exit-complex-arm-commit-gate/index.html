@@ -1064,6 +1064,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#9-global-fixed-point-admission-follow-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Global Fixed-Point Admission Follow-up
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1268,6 +1279,84 @@ not an unqualified readability win. The earlier type-pollution reproduction
   row reported <code>adapter_error</code>); the isolation loop was stopped rather than
   treating adapter/coverage failures as zero semantic scores. This local run
   was not published.</li>
+</ul>
+<h2 id="9-global-fixed-point-admission-follow-up">9. Global Fixed-Point Admission Follow-up<a class="headerlink" href="#9-global-fixed-point-admission-follow-up" title="Permanent link">&para;</a></h2>
+<p>Reference-owner comparison:</p>
+<ul>
+<li>Ghidra <code>CollapseStructure::collapseInternal</code> repeatedly applies goto,
+  concatenation, proper-if, if/else, loop, and switch collapses across the whole
+  graph. Only when that inner loop reaches a fixed point does it try
+  <code>ruleBlockIfNoExit</code>, then restart normal collapse.</li>
+<li>Fission's first isolated complex-arm slice admitted the equivalent deferred
+  candidate immediately at the current block. On an early entry block this can
+  recursively lower a large arm before later blocks have been collapsed.</li>
+</ul>
+<p>Invariant for the follow-up:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>A VirtualExit complex-arm candidate may reserve its stable Conditional slot
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>ahead of plain-if/goto, but isolated recursive execution occurs only after the
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>entire current SESE scan has no ordinary structured candidate. Already accepted
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>child regions wholly owned by an arm are inputs to that arm&#39;s isolated lowering;
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>they are not lowered a second time.
+</span></code></pre></div>
+<p>Measured motivation is the slice above: aggregate goto improved, but NIR grew
+49,681 bytes and HIR grew 30,333 bytes, with per-file goto regressions up to
++11 NIR and +8 HIR. The follow-up must remeasure the same 224/250 corpus and
+must not be called an improvement unless both layers retain their goto movement
+without the observed broad expansion/regression pattern.</p>
+<p>Implementation and admission:</p>
+<ul>
+<li>Deferred execution now runs only after a graph-wide ordinary-rule fixed
+  point, matching the reference owner order.</li>
+<li>Arm-local child regions accepted before that point are reused by the
+  membership-limited recursive build.</li>
+<li>A second isolated host reconstructs the already-admitted graph without
+  another collapse pass. The complex candidate commits only when its recursive
+  explicit-goto cost is no greater than that stable alternative.</li>
+<li>A successful candidate merges only identity-bearing binding state required
+  by its emitted AST. Trial CFG mutations and structuring/lowering caches remain
+  isolated; no global snapshot or rollback is used.</li>
+</ul>
+<p>Measured 224-binary / 250-function result relative to the isolated-arm commit:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th style="text-align: right;">Isolated-arm goto / lines / bytes</th>
+<th style="text-align: right;">Fixed-point goto / lines / bytes</th>
+<th style="text-align: right;">Delta</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NIR</td>
+<td style="text-align: right;">2,130 / 38,850 / 1,072,419</td>
+<td style="text-align: right;">2,115 / 38,736 / 1,065,829</td>
+<td style="text-align: right;">-15 goto, -114 lines, -6,590 bytes</td>
+</tr>
+<tr>
+<td>HIR</td>
+<td style="text-align: right;">2,023 / 35,931 / 973,271</td>
+<td style="text-align: right;">2,009 / 35,769 / 965,428</td>
+<td style="text-align: right;">-14 goto, -162 lines, -7,843 bytes</td>
+</tr>
+</tbody>
+</table>
+<p>Both runs completed 224/224 binaries and 250/250 functions. Relative to the
+original pre-complex-arm baseline, the final totals moved from 2,135 to 2,115
+NIR gotos and from 2,034 to 2,009 HIR gotos. The focused <code>bin_073</code> row retained
+its one-goto reduction in both layers. The prior type-pollution reproduction
+<code>bin_103</code> remained byte-identical to the original baseline in both NIR and HIR.</p>
+<p>The fixed-point follow-up improves goto count and reverses part of the first
+slice's output expansion in both layers. It does not erase every per-file
+trade-off inherited from the isolated-arm slice, so this is an aggregate
+measured improvement rather than a claim that every function became shorter.</p>
+<p>Follow-up regression gates:</p>
+<ul>
+<li><code>cargo nextest run -p fission-midend-structuring</code>: 125 passed.</li>
+<li><code>cargo nextest run -p fission-pcode</code>: 998 passed, 1 skipped.</li>
+<li><code>cargo check -p fission-pcode</code>, <code>fission-decompiler</code>, and
+  <code>fission-automation</code>: passed.</li>
+<li>Release <code>fission-cli</code> build and <code>scripts/check/owner_boundaries.sh</code>: passed.</li>
 </ul>
 
 
