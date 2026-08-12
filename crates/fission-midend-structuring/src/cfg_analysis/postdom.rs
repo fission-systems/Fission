@@ -7,6 +7,15 @@ use super::util::{
 use fission_midend_core::fast_hash::FastMap as HashMap;
 use crate::HashSet;
 
+/// Typed nearest-common-postdominator result. A virtual exit represents the
+/// unique function-level join of multiple real return/exit blocks and must not
+/// be used as a real CFG block index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommonPostdominator {
+    Block(usize),
+    VirtualExit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostDomTree {
     exits: Vec<usize>,
@@ -101,6 +110,8 @@ pub struct ImmPostDomTree {
     rpo_number: Vec<usize>,
     /// Sentinel: all nodes >= node_count are treated as virtual exits.
     node_count: usize,
+    /// Virtual super-exit retained when the CFG has multiple real exits.
+    virtual_exit: Option<usize>,
 }
 
 impl ImmPostDomTree {
@@ -115,6 +126,7 @@ impl ImmPostDomTree {
                 idom: Vec::new(),
                 rpo_number: Vec::new(),
                 node_count: 0,
+                virtual_exit: None,
             };
         }
 
@@ -209,21 +221,11 @@ impl ImmPostDomTree {
             }
         }
 
-        // Trim back to node_count (remove virtual super-exit slot if present).
-        idom.truncate(node_count);
-        rpo_number.truncate(node_count);
-
-        // Remap any idom pointing at the virtual super-exit to self.
-        for i in 0..node_count {
-            if idom[i] >= node_count {
-                idom[i] = i;
-            }
-        }
-
         Self {
             idom,
             rpo_number,
             node_count,
+            virtual_exit: super_exit,
         }
     }
 
@@ -231,12 +233,26 @@ impl ImmPostDomTree {
     /// (i.e. `n` is an exit node or part of a disconnected loop).
     pub fn immediate_postdominator(&self, n: usize) -> Option<usize> {
         let ipdom = self.idom.get(n).copied()?;
-        if ipdom == n { None } else { Some(ipdom) }
+        if ipdom == n || ipdom >= self.node_count { None } else { Some(ipdom) }
     }
 
     /// Nearest common postdominator of a set of nodes (LCA in the idom tree).
-    /// Returns `None` if the set is empty or no common postdominator exists.
+    /// Returns only real CFG blocks for backwards compatibility. Use
+    /// [`Self::nearest_common_postdominator_target`] when a virtual function
+    /// exit is meaningful to the caller.
     pub fn nearest_common_postdominator(&self, nodes: &[usize]) -> Option<usize> {
+        match self.nearest_common_postdominator_target(nodes)? {
+            CommonPostdominator::Block(block) => Some(block),
+            CommonPostdominator::VirtualExit => None,
+        }
+    }
+
+    /// Nearest common postdominator, preserving the virtual super-exit fact
+    /// for arms that terminate at distinct real exits.
+    pub fn nearest_common_postdominator_target(
+        &self,
+        nodes: &[usize],
+    ) -> Option<CommonPostdominator> {
         let mut iter = nodes.iter().copied().filter(|&n| n < self.node_count);
         let mut result = iter.next()?;
         for n in iter {
@@ -247,7 +263,13 @@ impl ImmPostDomTree {
         // Return None if the LCA equals one of the original nodes and that node is a
         // branch arm (not a join block).  For simplicity we return the LCA as-is and
         // let callers filter based on index ordering.
-        Some(result)
+        if Some(result) == self.virtual_exit {
+            Some(CommonPostdominator::VirtualExit)
+        } else if result < self.node_count {
+            Some(CommonPostdominator::Block(result))
+        } else {
+            None
+        }
     }
 
     /// Merge point for two forward CFG arms (e.g. then/else) when both paths reconverge:
@@ -259,11 +281,11 @@ impl ImmPostDomTree {
 
     /// LCA (= nearest common postdominator) of two nodes using Cooper's intersect.
     fn lca(&self, mut a: usize, mut b: usize) -> Option<usize> {
-        if a >= self.node_count || b >= self.node_count {
+        if a >= self.idom.len() || b >= self.idom.len() {
             return None;
         }
         // Walk up the idom tree until both fingers meet.
-        let max_iter = self.node_count + 2;
+        let max_iter = self.idom.len() + 2;
         let mut steps = 0usize;
         while a != b {
             while self.rpo_number.get(a).copied().unwrap_or(usize::MAX)
@@ -290,5 +312,49 @@ impl ImmPostDomTree {
             }
         }
         Some(a)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn predecessors(successors: &[Vec<usize>]) -> Vec<Vec<usize>> {
+        let mut out = vec![Vec::new(); successors.len()];
+        for (from, succs) in successors.iter().enumerate() {
+            for &to in succs {
+                out[to].push(from);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn distinct_return_arms_preserve_virtual_exit_common_postdominator() {
+        // 0 branches to two arms, each of which reaches a different real exit.
+        let successors = vec![vec![1, 2], vec![3], vec![4], vec![], vec![]];
+        let predecessors = predecessors(&successors);
+        let tree = ImmPostDomTree::compute(&successors, &predecessors);
+
+        assert_eq!(
+            tree.nearest_common_postdominator_target(&[1, 2]),
+            Some(CommonPostdominator::VirtualExit)
+        );
+        assert_eq!(tree.nearest_common_postdominator(&[1, 2]), None);
+        assert_eq!(tree.immediate_postdominator(1), Some(3));
+        assert_eq!(tree.immediate_postdominator(3), None);
+    }
+
+    #[test]
+    fn real_diamond_join_remains_a_real_common_postdominator() {
+        let successors = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let predecessors = predecessors(&successors);
+        let tree = ImmPostDomTree::compute(&successors, &predecessors);
+
+        assert_eq!(
+            tree.nearest_common_postdominator_target(&[1, 2]),
+            Some(CommonPostdominator::Block(3))
+        );
+        assert_eq!(tree.nearest_common_postdominator(&[1, 2]), Some(3));
     }
 }

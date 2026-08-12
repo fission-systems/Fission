@@ -16,7 +16,7 @@ pub use dom::{DomTree, DominanceFrontier, ImmDomTree};
 pub use edge::{CfgAnalysis, EdgeClass};
 pub use follow::dom_based_fallthrough_successor;
 pub use goto_selector::select_bad_edge;
-pub use postdom::{ImmPostDomTree, PostDomTree};
+pub use postdom::{CommonPostdominator, ImmPostDomTree, PostDomTree};
 pub use scc::SccAnalysis;
 pub use trace_dag::{TraceDag, TraceDagError};
 
