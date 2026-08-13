@@ -1,0 +1,1717 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/handoff/2026-08-14-goto-density/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Handoff: goto-density work on Fission's structuring engine - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#handoff-goto-density-work-on-fissions-structuring-engine" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Handoff: goto-density work on Fission's structuring engine
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.1.5/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-what-the-work-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. What the work is
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. What the work is">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-it-stands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where it stands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-architecture-as-it-is-now" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Architecture, as it is now
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Architecture, as it is now">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-control-flow-through-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The control flow through it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#two-things-that-are-load-bearing-and-non-obvious" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two things that are load-bearing and non-obvious
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-how-to-measure-anything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. How to measure anything
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. How to measure anything">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#corpus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Corpus
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-drivers-own-census" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The driver's own census
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-funnel-250-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current funnel (250 functions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-dead-ends-do-not-repeat-these" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Dead ends — do not repeat these
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-method-this-is-the-part-that-actually-mattered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Method — this is the part that actually mattered
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-what-guards-correctness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. What guards correctness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-where-i-would-go-next-and-why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Where I would go next, and why
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-working-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Working constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-environment-switches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Environment switches
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-commits-from-this-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Commits from this session
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="handoff-goto-density-work-on-fissions-structuring-engine">Handoff: goto-density work on Fission's structuring engine<a class="headerlink" href="#handoff-goto-density-work-on-fissions-structuring-engine" title="Permanent link">&para;</a></h1>
+<p>Written 2026-08-14, at commit <code>108c089b7</code> on <code>main</code>. Everything below was
+measured on this machine unless it says otherwise. Numbers without a
+measurement behind them are marked as such.</p>
+<hr />
+<h2 id="1-what-the-work-is">1. What the work is<a class="headerlink" href="#1-what-the-work-is" title="Permanent link">&para;</a></h2>
+<p>Fission is a decompiler. Its output carries far more <code>goto</code> statements than
+other decompilers produce for the same functions, which is the single most
+visible quality gap. The job is to reduce that without changing what the
+decompiled code means.</p>
+<h3 id="where-it-stands">Where it stands<a class="headerlink" href="#where-it-stands" title="Permanent link">&para;</a></h3>
+<p>Corpus is <code>vendor/decbench-evalkit/decbench-evalkit-sample-set</code> — 224 binaries,
+250 functions. Two output layers, NIR (semantic) and HIR (readable).</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>start of this session</th>
+<th>now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NIR gotos</td>
+<td>2089</td>
+<td><strong>1214</strong> (−41.9%)</td>
+</tr>
+<tr>
+<td>HIR gotos</td>
+<td>1983</td>
+<td><strong>1207</strong> (−39.1%)</td>
+</tr>
+</tbody>
+</table>
+<p>Against the references, on the 204 functions all three tools decompile:</p>
+<table>
+<thead>
+<tr>
+<th>tool</th>
+<th>gotos</th>
+<th>Fission ÷ it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Fission</strong></td>
+<td><strong>1165</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Ghidra</td>
+<td>691</td>
+<td>1.69x</td>
+</tr>
+<tr>
+<td>angr</td>
+<td>420</td>
+<td>2.77x</td>
+</tr>
+</tbody>
+</table>
+<p>Ghidra ratio went 2.84x → 1.69x today. Two files regressed across the whole
+session (<code>bin_217</code> 2→3, <code>bin_027</code> 0→1); everything else improved or held.</p>
+<p><strong>angr is better than Ghidra here, by a lot.</strong> That surprised me and I had it
+backwards earlier — worth stating plainly since it changes which reference to
+aim at.</p>
+<hr />
+<h2 id="2-architecture-as-it-is-now">2. Architecture, as it is now<a class="headerlink" href="#2-architecture-as-it-is-now" title="Permanent link">&para;</a></h2>
+<p>Three structuring strategies exist, corresponding to the three published
+approaches:</p>
+<table>
+<thead>
+<tr>
+<th>strategy</th>
+<th>reference</th>
+<th>file</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>rules over a live graph</td>
+<td>Ghidra <code>CollapseStructure</code></td>
+<td><code>crates/fission-midend-structuring/src/collapse_structure.rs</code></td>
+</tr>
+<tr>
+<td>schema match-and-fold</td>
+<td>angr Phoenix</td>
+<td><code>crates/fission-midend-structuring/src/collapse_driver.rs</code></td>
+</tr>
+<tr>
+<td>reaching conditions</td>
+<td>DREAM / angr <code>condition_processor</code></td>
+<td><code>crates/fission-midend-structuring/src/reaching_driver.rs</code></td>
+</tr>
+</tbody>
+</table>
+<p>Supporting pieces, all in <code>crates/fission-midend-structuring/src/</code>:</p>
+<ul>
+<li><code>collapse_graph.rs</code> — a CFG that <strong>shrinks</strong> as regions fold. This was the
+  root fix of the session: Fission structured over a static graph with side
+  tables while every reference implementation folds a live one.</li>
+<li><code>collapse_shapes.rs</code> — pure graph matchers (<code>Sequence</code>, <code>IfThen</code>,
+  <code>IfThenElse</code>, <code>IfNoExit</code>, <code>SelfLoop</code>, <code>WhileDo</code>, <code>DoWhile</code>, <code>InfLoop</code>).</li>
+<li><code>reaching_conditions.rs</code> — <code>reaching(n) = OR over preds p of (reaching(p) AND edge(p→n))</code>.</li>
+<li><code>reaching_emit.rs</code> — turns those conditions back into nested <code>if</code>s.</li>
+<li><code>boolean.rs</code> — truth-table decision procedure over guard atoms.</li>
+<li><code>structuring_quality.rs</code> — <strong>the comparator</strong>; see below.</li>
+</ul>
+<h3 id="the-control-flow-through-it">The control flow through it<a class="headerlink" href="#the-control-flow-through-it" title="Permanent link">&para;</a></h3>
+<p><code>crates/fission-pcode/src/midend/pass/structuring.rs</code>, in
+<code>SeseStructuringPass::run</code>:</p>
+<ol>
+<li>The existing SESE path produces a body.</li>
+<li><code>try_alternative_structurings</code> offers that body to each driver, which runs
+   against a <strong>fork</strong> of the host and returns a candidate or declines.</li>
+<li>A candidate replaces the baseline only if it <strong>wins the comparison</strong>.</li>
+<li><code>finalize_structured_body</code>, then normalize downstream.</li>
+</ol>
+<h3 id="two-things-that-are-load-bearing-and-non-obvious">Two things that are load-bearing and non-obvious<a class="headerlink" href="#two-things-that-are-load-bearing-and-non-obvious" title="Permanent link">&para;</a></h3>
+<p><strong>Host isolation</strong> (<code>StructuringHost::lower_isolated</code> / <code>lower_observed</code>,
+implemented in <code>crates/fission-pcode/src/midend/structuring/host_impl.rs</code>).
+Lowering is <em>not</em> a query — <code>lower_block_stmts</code> mints names as a side effect,
+so a driver that lowers a candidate to decide whether to keep it has already
+changed the host when it declines. That leak reverted an earlier attempt at
+this work and reappeared here. Every speculative lowering must route through
+<code>lower_isolated</code>.</p>
+<p><strong>The comparator</strong> (<code>structuring_quality.rs</code>). angr keeps a transform when the
+goto count strictly drops. That is the right idea and the wrong measurement
+here, because goto density cannot see the ways a structuring gets worse. Each
+axis was added because a driver scored an improvement while emitting something
+worse:</p>
+<ul>
+<li><code>switches</code> — hard veto. A switch dispatch is a cascade of two-way branches,
+  which DREAM describes perfectly as nested <code>if</code>s, losing the <code>switch</code>.</li>
+<li><code>empty_if_shells</code> — hard veto. Match-fold emitted <code>if (c) { }</code> where the
+  existing path folds a short-circuit <code>&amp;&amp;</code>.</li>
+<li><code>nesting_depth</code> — <strong>budget</strong>, one level per jump removed. Nesting is the
+  <em>price</em> of trading a jump for a condition, not a defect. Banning any increase
+  looked right and rejected a candidate going from ten jumps to none.</li>
+</ul>
+<p>The comparator judges each body twice: raw (exact at that stage) and after
+<code>finalize_structured_body</code> + <code>normalize_function_body</code> (closer to what ships).
+A candidate must <strong>win on raw and not lose on cleaned</strong>. Measured: raw only =
+1225 jumps / 7 regressions; cleaned only = 1313 / 0; both = <strong>1214 / 2</strong>.</p>
+<hr />
+<h2 id="3-how-to-measure-anything">3. How to measure anything<a class="headerlink" href="#3-how-to-measure-anything" title="Permanent link">&para;</a></h2>
+<p>Every claim below came from these. Run them; do not trust reasoning about what
+the code should do (see §5).</p>
+<h3 id="corpus">Corpus<a class="headerlink" href="#corpus" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">cd</span><span class="w"> </span>vendor/decbench-evalkit/decbench-evalkit-sample-set
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w">          </span><span class="c1"># from repo root first</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>rm<span class="w"> </span>-rf<span class="w"> </span>results<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>python3<span class="w"> </span>run_fission.py<span class="w">      </span><span class="c1"># ~5m20s, NIR</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>grep<span class="w"> </span>-ro<span class="w"> </span><span class="s1">&#39;goto &#39;</span><span class="w"> </span>results<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nv">FISSION_LAYER</span><span class="o">=</span>hir<span class="w"> </span>python3<span class="w"> </span>run_fission.py<span class="w">      </span><span class="c1"># HIR into results-hir/</span>
+</span></code></pre></div>
+<p>Per-file comparison against a saved baseline directory — <strong>always check
+per-file, not just the total</strong>; a net gain can hide regressions:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">counts</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="k">return</span> <span class="p">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">relpath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">r</span><span class="p">,</span><span class="n">f</span><span class="p">),</span><span class="n">d</span><span class="p">):</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>            <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">r</span><span class="p">,</span><span class="n">f</span><span class="p">),</span><span class="n">errors</span><span class="o">=</span><span class="s1">&#39;replace&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s1">&#39;goto &#39;</span><span class="p">)</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>            <span class="k">for</span> <span class="n">r</span><span class="p">,</span><span class="n">_</span><span class="p">,</span><span class="n">fs</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">walk</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">fs</span><span class="p">}</span>
+</span></code></pre></div>
+<h3 id="reference-outputs">Reference outputs<a class="headerlink" href="#reference-outputs" title="Permanent link">&para;</a></h3>
+<p>Already generated, in this session's scratchpad — regenerate with
+<code>run_ghidra_sample.py</code> / <code>run_angr_sample.py</code> found alongside them:</p>
+<ul>
+<li>Ghidra: <code>ghidra_out/</code> (716 total, 219 files)</li>
+<li>angr: <code>angr_out/</code> (428 total, 207 files)</li>
+</ul>
+<p><strong>Compare only on the intersection</strong> (204 files). The three tools decompile
+different subsets and raw totals are not comparable.</p>
+<p>Ghidra gotcha, already paid for once: DecBench addresses are link-time vaddrs
+but Ghidra assigns its own image base for PIE binaries. Retry with
+<code>addr + program.getImageBase().getOffset()</code> or every PIE binary silently
+returns "no function at address".</p>
+<h3 id="the-drivers-own-census">The driver's own census<a class="headerlink" href="#the-drivers-own-census" title="Permanent link">&para;</a></h3>
+<p><code>FISSION_PREVIEW_DIAG=1</code> makes the drivers report per function:</p>
+<ul>
+<li><code>[DIAG] alternatives not asked</code> — baseline already jump-free</li>
+<li><code>[DIAG] DREAM offered: stmts=N</code> / <code>[DIAG] DREAM declined: &lt;reason&gt;</code></li>
+<li><code>[DIAG] DREAM accepted: gotos A -&gt; B</code> / <code>rejected: ..., worse on [...]</code></li>
+</ul>
+<p><code>DeclineReason</code> in <code>reaching_driver.rs</code> enumerates the refusals.</p>
+<p><strong>The census goes stale the moment you change the driver.</strong> It has misled me
+three times in this session — twice I acted on a bucket that had already
+vanished. Re-measure after every change.</p>
+<h3 id="current-funnel-250-functions">Current funnel (250 functions)<a class="headerlink" href="#current-funnel-250-functions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>n</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>already jump-free, drivers not asked</td>
+<td>53</td>
+</tr>
+<tr>
+<td>single-block functions, never reach the pass</td>
+<td>53</td>
+</tr>
+<tr>
+<td><strong>asked</strong></td>
+<td><strong>144</strong></td>
+</tr>
+<tr>
+<td>→ offered a candidate</td>
+<td>116</td>
+</tr>
+<tr>
+<td>→ <strong>accepted</strong></td>
+<td><strong>81</strong></td>
+</tr>
+<tr>
+<td>offers rejected</td>
+<td>35 (29 are ties with nothing to gain)</td>
+</tr>
+<tr>
+<td>declined outright</td>
+<td>28 (cycle-survived 14, unplaceable-terminator 10, guards-too-large 4)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-dead-ends-do-not-repeat-these">4. Dead ends — do not repeat these<a class="headerlink" href="#4-dead-ends-do-not-repeat-these" title="Permanent link">&para;</a></h2>
+<p>Each was built, measured, and abandoned. The reasoning that motivated each one
+was plausible; that is exactly why they are worth recording.</p>
+<table>
+<thead>
+<tr>
+<th>attempt</th>
+<th>result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cross-jump reversion (AST and sibling-arm)</td>
+<td>the copied tail contained a goto, so copying multiplied it: net zero</td>
+</tr>
+<tr>
+<td>fall-through tail reversion</td>
+<td>0 firings across the corpus</td>
+</tr>
+<tr>
+<td><code>ruleCaseFallthru</code></td>
+<td>0 opportunity</td>
+</tr>
+<tr>
+<td><code>ruleBlockIfNoExit</code> via larger tails</td>
+<td>net negative</td>
+</tr>
+<tr>
+<td>node splitting</td>
+<td>0 of 250 functions have irreducible SCCs</td>
+</tr>
+<tr>
+<td>short-circuit condition folding</td>
+<td>0 successes, 12,794 rejections, 96.4% blocked by un-hoistable <code>Load</code>s</td>
+</tr>
+<tr>
+<td><code>FISSION_COLLAPSE_LOOP=1</code> on the static graph</td>
+<td>+51 gotos, 34 files worse</td>
+</tr>
+<tr>
+<td>the "53 functions that never reach the driver" bucket</td>
+<td>49 are single-block functions holding <strong>6 gotos between them</strong></td>
+</tr>
+<tr>
+<td>comparator margin (require winning by ≥2)</td>
+<td>corpus moved 2 jumps, all 7 regressions unchanged</td>
+</tr>
+<tr>
+<td>raising <code>collapse_driver::MAX_CONCESSIONS</code></td>
+<td><strong>unsound as written</strong> — its <code>concede_one_edge</code> only calls <code>virtualize_edge</code> and emits no <code>goto</code>/label, so it would silently delete control flow</td>
+</tr>
+<tr>
+<td>stronger boolean simplifier</td>
+<td>fires 45 times across 25 functions, <strong>changes no output</strong> — see below</td>
+</tr>
+</tbody>
+</table>
+<p><strong>On the simplifier specifically</strong>, since it looks like the obvious next lever:
+the hypothesis was that a weak condition simplifier bounds DREAM-style
+structuring, as claripy does for angr. It was built (<code>boolean.rs</code>, truth tables
+over atoms) and it does fire. It changes nothing, because
+<code>materialize_branch_conditions</code> binds every edge condition to a fresh boolean
+<em>variable</em>, so reaching conditions are already near-canonical trees over
+variables and the syntactic folds already caught what mattered. angr's
+simplifier earns its keep on raw condition expressions; Fission sidesteps that
+problem by construction.</p>
+<p><strong>Caps that turned out to be guarding what the comparator already guards</strong>, and
+cost real gains until raised:</p>
+<ul>
+<li><code>MAX_NESTING_DEPTH</code> 8 → 64 (the comparator judges depth against the actual
+  baseline; a constant can only be wrong in one direction)</li>
+<li><code>MAX_CONCESSIONS</code> 3 → 128 (measured: 3 = −175, 8 = −221, 24 = −232,
+  128 = −244, uncapped = −244; runtime flat throughout)</li>
+</ul>
+<p>Caps that are <strong>real</strong>, because they guard downstream pipeline cost that the
+comparator cannot see: <code>MAX_DECISIONS = 16</code> and
+<code>MAX_GUARD_FORMULA_SIZE = 8000</code>. One region with 39 decisions and depth 9 —
+unremarkable on both — had guards totalling <strong>160,423 expression nodes</strong> and
+cost <strong>45 seconds downstream</strong> against 3.1s on the existing path. Healthy
+candidates run 2 to 2,008 nodes. The two populations do not overlap.</p>
+<hr />
+<h2 id="5-method-this-is-the-part-that-actually-mattered">5. Method — this is the part that actually mattered<a class="headerlink" href="#5-method-this-is-the-part-that-actually-mattered" title="Permanent link">&para;</a></h2>
+<p>Every time I reasoned about where a bound or a blocker was, I was wrong. Every
+time I measured, I was right. Three examples from one day:</p>
+<ul>
+<li>"Cycles survive because the fold loop only folds cyclic shapes." Correct
+  reasoning, fixed it, <strong>changed the count by exactly zero</strong>. Instrumenting
+  where the loop actually stopped found the real cause: <code>lower_shape</code> declined
+  <code>SelfLoop</code> outright, on 36 of 106 functions.</li>
+<li>"The execution check fails because the interpreter has no memory model."
+  Built one. <strong>Coverage moved by zero functions.</strong> The real cause was the
+  <em>arguments</em> — a boundary sweep hands a pointer parameter the integers 0, 1,
+  −1.</li>
+<li>"Terminal <code>Goto</code> means a tail call whose target left the graph." <strong>All 30
+  resolve to a block in the same function.</strong></li>
+</ul>
+<p><strong>A check that passes proves nothing until you have watched it fail.</strong> Before
+trusting any verification, inject a bug it must catch. This is how the
+execution-differential check was found to be worthless in its first two forms —
+it passed, and it also passed with every <code>if</code> condition in every function
+negated.</p>
+<p><strong>Goto density scores real regressions as improvements.</strong> Three times in one
+day: a deleted <code>for</code> loop, a dropped <code>return</code> (signature degrading to
+<code>undefined</code>), a <code>switch</code> rewritten as nested <code>if</code>s. Each was caught by a
+different accident. The corpus reported "no regressions" for all three.</p>
+<hr />
+<h2 id="6-what-guards-correctness">6. What guards correctness<a class="headerlink" href="#6-what-guards-correctness" title="Permanent link">&para;</a></h2>
+<p><code>structuring_quality</code> covers only failures already observed, by construction.
+The independent check is execution:</p>
+<p><code>crates/fission-dir/tests/phase2_corpus_ground_truth.rs</code> — decompile a corpus
+function, evaluate the body, run the real machine code through
+<code>fission-emulator</code>, compare. Twelve functions ground; it catches
+"negate every <code>if</code> condition" (four <code>list_sum</code> divergences).</p>
+<p>It took three attempts to make it catch anything, and its reach is capped for a
+structural reason: ~72 of 900 attempts bail on indirect call dispatch and ~212
+on raw register or global reads. Supplying the registers from the emulator was
+tried and bought nothing — the unblocked functions stop at the very next call.
+Interpreting past that means resolving indirect targets and executing callees,
+which is being an emulator, and there already is one.</p>
+<p>Running it at scale found two real defects in the checker itself: the emulator
+side was normalised to the return type while the interpreter side was compared
+raw (<code>mul_ints(1,-1)</code> reported 4294967295 against −1, one 32-bit pattern read
+two ways), and uninitialized locals were seeded to 0 against the module's own
+documented contract.</p>
+<hr />
+<h2 id="7-where-i-would-go-next-and-why">7. Where I would go next, and why<a class="headerlink" href="#7-where-i-would-go-next-and-why" title="Permanent link">&para;</a></h2>
+<p><strong>The analysis that guided most of this session is now obsolete, and I kept
+quoting it after it stopped being true.</strong> The claimed floor for
+graph-preserving rewrites was <code>Σ(P−1) ≈ 1365</code> on this corpus. Fission is at
+<strong>1214</strong> — below it. Concessions change the graph, so the bound no longer
+applies. <strong>There is currently no valid picture of where the remaining 1214
+gotos live.</strong></p>
+<p>Recommended first move: <strong>rank functions by <code>fission_gotos − ghidra_gotos</code> and
+read the worst ones side by side.</strong> Reasons:</p>
+<ul>
+<li>It found the biggest win of an earlier session (an admission gate skipping
+  structuring entirely on large functions, purely on size).</li>
+<li>The data is already on disk (<code>ghidra_out/</code>), so it costs one script.</li>
+<li>It assumes nothing about where the problem is, which matters given §5.</li>
+</ul>
+<p>Every improvement today was a <strong>wrong refusal or an unnecessary cap</strong>, not a
+missing algorithm — <code>SelfLoop</code> declined outright (36 functions), a <code>while</code> test
+block with statements (25), a folded <code>Sequence</code> forgetting its terminator (20),
+a terminal clause's transfer dropped rather than emitted (18). It is worth
+looking for more of that shape before assuming the remaining gap needs new
+theory.</p>
+<p>Also unexamined: angr's <code>region_identifier.py</code>. It is the one large piece of
+how angr reaches 420 that has not been read. But measure <em>which Fission
+functions would benefit</em> before reading it — that is the order that the
+simplifier experiment got backwards.</p>
+<p><strong>Possible simplification:</strong> the match-fold driver is now redundant.
+<code>FISSION_MATCH_FOLD=0</code> gives identical goto counts on every file, with no
+runtime difference (it wins on ~5 files where DREAM then ties, so the output
+differs byte-wise without differing in count).</p>
+<hr />
+<h2 id="8-working-constraints">8. Working constraints<a class="headerlink" href="#8-working-constraints" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Push to <code>main</code> only. Do not cut a release tag unless explicitly asked.</li>
+<li>DecBench resubmission via <code>package.py</code> stays deferred.</li>
+<li>The workspace has <strong>7 pre-existing <code>fission-emulator</code> failures</strong> unrelated to
+  this work (SLEIGH decode). A clean run shows exactly those seven and nothing
+  else.</li>
+<li><code>vendor/decbench-evalkit/.../binaries/&lt;name&gt;_ghidra/</code> project caches are
+  expensive to regenerate — do not delete them.</li>
+<li>Full suite: <code>cargo nextest run --workspace --no-fail-fast</code>, ~110s.</li>
+</ul>
+<hr />
+<h2 id="9-environment-switches">9. Environment switches<a class="headerlink" href="#9-environment-switches" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>variable</th>
+<th>effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FISSION_PREVIEW_DIAG=1</code></td>
+<td>driver census and per-decision diagnostics</td>
+</tr>
+<tr>
+<td><code>FISSION_MATCH_FOLD=0</code></td>
+<td>disable the match-fold driver (on by default)</td>
+</tr>
+<tr>
+<td><code>FISSION_DREAM=0</code></td>
+<td>disable the DREAM driver (on by default)</td>
+</tr>
+<tr>
+<td><code>FISSION_LAYER=hir</code></td>
+<td>corpus runner emits HIR instead of NIR</td>
+</tr>
+<tr>
+<td><code>FISSION_DIR_FULL_CORPUS=1</code></td>
+<td>ground-truth test sweeps without its attempt budget</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10-commits-from-this-session">10. Commits from this session<a class="headerlink" href="#10-commits-from-this-session" title="Permanent link">&para;</a></h2>
+<p>Oldest first, <code>4f1326688..108c089b7</code>. The messages carry the measurements and
+the reasoning, including the parts that were wrong; they are worth reading
+before changing any of this.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>11bbeff59  host isolation entry point, and what it caught
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>e3edf395d  the DREAM emitter
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>d005b103b  wire the DREAM driver, and measure it
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>2e3267658  drivers offer candidates instead of pre-empting
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>88cf540c0  let the comparator decide nesting depth
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>c56182274  bound the guards, not a stand-in for them
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>f1335f44c  name the DREAM refusals, then fix the biggest one
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>516310e99  two more counted refusals, and folding stops blinding rules
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>220411e89  ground truth over the corpus, and what it cannot check
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>9cab5381a  a memory model, and a correction to why execution still misses structuring
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>bae5833ec  give pointer parameters something to point at
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>a1786d003  keep the transfer a terminal clause ends on
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>1e06857d7  supply the caller state a body reads, and find the ceiling behind it
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>3c05ce2e0  concede an edge when nothing matches and a cycle remains
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>6d5b4dc1f  do not concede a node&#39;s last way in
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>4f4c9366f  the concession budget was guarding what the comparator guards
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>726cf55ff  concede only what leaves every node still reachable
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>9f952dc81  a shape for a cycle with no way out
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>d21116bf0  write out the jumps whose edges were removed before we saw them
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>9e395f0fe  judge candidates through the cleanup that follows them
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>108c089b7  decide what a guard means instead of what it looks like
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
