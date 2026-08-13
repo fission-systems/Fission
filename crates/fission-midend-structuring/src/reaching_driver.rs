@@ -37,6 +37,7 @@ use crate::collapse_shapes::{
     Shape, ShapeKind, find_shape, match_do_while, match_inf_loop, match_self_loop, match_while_do,
 };
 use crate::host::StructuringHost;
+use crate::linear_types::LoweredTerminator;
 use crate::reaching_conditions::{compute_reaching_conditions, topological_order};
 use crate::reaching_emit::{
     Branch, emit_acyclic_region, inline_single_use_guards, materialize_branch_conditions,
@@ -230,6 +231,9 @@ fn describe_region(
     }
     let mut graph = CollapseGraph::from_cfg(&successors);
 
+    // Phase 0: edges already virtualised before structuring ran.
+    materialize_virtual_gotos(host, &mut graph)?;
+
     // Phase 1: cycles. DREAM applies to acyclic regions, so every loop has to
     // become a single node before the conditions mean anything.
     fold_every_cycle(host, &mut graph)?;
@@ -412,6 +416,66 @@ fn governing_block_after(graph: &CollapseGraph, shape: &Shape) -> Option<usize> 
 
 fn graph_member_governing(graph: &CollapseGraph, id: NodeId) -> Option<usize> {
     graph.node(id).and_then(|n| n.governing_block)
+}
+
+/// Write out the jumps whose edges were removed before this driver ever saw
+/// the graph.
+///
+/// A block can have no CFG successors while its terminator still names a
+/// target: `IrreducibleReductionPass` virtualises edges to break irreducible
+/// cycles, taking them out of `successors` and leaving the jump implicit. The
+/// shapes then see a terminal node, and `node_statements` refuses it because a
+/// `Goto` is control flow it cannot place -- which blocked `Sequence` and
+/// `IfNoExit` regions and declined the whole function.
+///
+/// Measured: every one of the 30 such terminators resolves to a block in the
+/// same function. They were never tail calls; the jump simply had nowhere to be
+/// written down. This is the same goto/label materialisation
+/// [`concede_one_edge`] does, minus removing an edge that is already gone.
+fn materialize_virtual_gotos(
+    host: &mut impl StructuringHost,
+    graph: &mut CollapseGraph,
+) -> Result<(), MlilPreviewError> {
+    for id in graph.live_nodes().collect::<Vec<_>>() {
+        let Some(node) = graph.node(id) else { continue };
+        if node.body.is_some() {
+            continue;
+        }
+        let block = node.entry_block;
+        if !host.successors()[block].is_empty() {
+            continue;
+        }
+        let LoweredTerminator::Goto(target) = host.lower_block_terminator(block)? else {
+            continue;
+        };
+        let Some(target_block) = host.find_block_index_by_address(target) else {
+            continue;
+        };
+        let Some(target_node) = graph
+            .live_nodes()
+            .find(|&n| graph.node(n).is_some_and(|x| x.members.contains(target_block)))
+        else {
+            continue;
+        };
+        let label = crate::helpers::block_label(host.block_start_address(target_block));
+
+        let (Some(mut source), Some(mut dest)) = (
+            node_statements(host, graph, id)?,
+            node_statements(host, graph, target_node)?,
+        ) else {
+            continue;
+        };
+        source.push(PreHirStmt::Goto(label.clone()));
+        if !matches!(dest.first(), Some(PreHirStmt::Label(l)) if *l == label) {
+            dest.insert(0, PreHirStmt::Label(label));
+        }
+        let dest_governing = graph.node(target_node).and_then(|n| n.governing_block);
+        graph.set_body(id, source);
+        graph.set_governing_block(id, None);
+        graph.set_body(target_node, dest);
+        graph.set_governing_block(target_node, dest_governing);
+    }
+    Ok(())
 }
 
 /// Turn one edge into a `goto`/`label` pair and remove it from the graph.
