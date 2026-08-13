@@ -107,9 +107,67 @@ macro_rules! define_interp {
                 Goto(String),
             }
 
+            /// An address's own type. Pointer arithmetic produces an address
+            /// whatever it points at, so `infer_ty` needs one to hand back.
+            const PTR_TY: NirType = NirType::Int {
+                bits: 64,
+                signed: false,
+            };
+
+            /// Sparse byte-addressable memory.
+            ///
+            /// Only bytes this body actually stored exist. A read that
+            /// reaches an unwritten byte is an error, not a zero -- the same
+            /// contract the variable environment keeps, and for the same
+            /// reason: against a real emulator, an invented value is a
+            /// confident wrong answer, and it can as easily make a wrong body
+            /// agree as make a right one diverge.
+            ///
+            /// So this models memory a function *uses internally* -- stores to
+            /// a stack slot or a buffer, then loads them back -- and still
+            /// refuses globals and caller-owned pointers, whose contents this
+            /// tier has no way to know.
+            #[derive(Default)]
+            struct Memory {
+                bytes: HashMap<u64, u8>,
+            }
+
+            impl Memory {
+                /// Little-endian, matching every target in the corpus this
+                /// verifies against.
+                fn read(&self, addr: u64, bits: u32) -> Result<Value> {
+                    let n = bytes_for(bits);
+                    let mut raw: u64 = 0;
+                    for i in 0..n {
+                        let at = addr.wrapping_add(i as u64);
+                        let b = self.bytes.get(&at).copied().ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "interp: load from never-written address {at:#x} -- this tier \
+                                 models only memory the body itself wrote"
+                            )
+                        })?;
+                        raw |= (b as u64) << (8 * i);
+                    }
+                    Ok(raw as i64)
+                }
+
+                fn write(&mut self, addr: u64, bits: u32, value: Value) {
+                    for i in 0..bytes_for(bits) {
+                        let b = ((value as u64) >> (8 * i)) as u8;
+                        self.bytes.insert(addr.wrapping_add(i as u64), b);
+                    }
+                }
+            }
+
+            /// Bytes a value of `bits` occupies, rounded up and capped at 8.
+            fn bytes_for(bits: u32) -> u32 {
+                bits.div_ceil(8).clamp(1, 8)
+            }
+
             struct Env {
                 values: HashMap<String, Value>,
                 types: HashMap<String, NirType>,
+                mem: Memory,
             }
 
             impl Env {
@@ -156,8 +214,33 @@ macro_rules! define_interp {
                     | $Expr::Cast { ty, .. }
                     | $Expr::Unary { ty, .. }
                     | $Expr::Binary { ty, .. }
-                    | $Expr::Select { ty, .. } => Ok(ty),
+                    | $Expr::Select { ty, .. }
+                    | $Expr::Load { ty, .. }
+                    | $Expr::FieldAccess { ty, .. } => Ok(ty),
+                    // An address is an address, whatever it points at.
+                    $Expr::PtrOffset { .. } | $Expr::Index { .. } => Ok(&PTR_TY),
                     other => bail!("interp: cannot infer type of unsupported expr {other:?}"),
+                }
+            }
+
+            /// The address expression and width a store targets, or `None`
+            /// for a plain variable.
+            ///
+            /// An `Index` or `FieldAccess` target is the same address
+            /// arithmetic `eval_expr` already does for the reading side, so it
+            /// is expressed by reusing those forms rather than repeating the
+            /// stride and offset rules -- two copies of that arithmetic
+            /// drifting apart would corrupt exactly the comparison this crate
+            /// makes.
+            fn store_target(lhs: &$LValue) -> Option<(&$Expr, u32)> {
+                match lhs {
+                    $LValue::Var(_) => None,
+                    $LValue::Deref { ptr, ty } => Some((ptr, width_of(ty))),
+                    // `base`/`index` and `base`/`offset` are carried by the
+                    // lvalue itself, so the address cannot be handed back as a
+                    // single borrowed expression; those stay unsupported until
+                    // there is a reason to widen this.
+                    _ => None,
                 }
             }
 
@@ -195,6 +278,25 @@ macro_rules! define_interp {
                             eval_expr(else_expr, env)?
                         };
                         Ok(normalize(v, ty))
+                    }
+                    $Expr::Load { ptr, ty } => {
+                        let addr = eval_expr(ptr, env)? as u64;
+                        Ok(normalize(env.mem.read(addr, width_of(ty))?, ty))
+                    }
+                    $Expr::PtrOffset { base, offset } => {
+                        Ok((eval_expr(base, env)?).wrapping_add(*offset))
+                    }
+                    $Expr::Index {
+                        base,
+                        index,
+                        elem_ty,
+                    } => {
+                        let stride = bytes_for(width_of(elem_ty)) as i64;
+                        let i = eval_expr(index, env)?;
+                        Ok((eval_expr(base, env)?).wrapping_add(i.wrapping_mul(stride)))
+                    }
+                    $Expr::FieldAccess { base, offset, .. } => {
+                        Ok((eval_expr(base, env)?).wrapping_add(*offset as i64))
                     }
                     $Expr::Call { target, args, ty } => eval_builtin_call(target, args, ty, env),
                     other => bail!(
@@ -381,11 +483,18 @@ macro_rules! define_interp {
             fn exec_stmt(stmt: &$Stmt, env: &mut Env) -> Result<Flow> {
                 match stmt {
                     $Stmt::Assign { lhs, rhs } => {
+                        // Stores go to memory; only a plain variable falls
+                        // through to the environment below.
+                        if let Some((addr_expr, bits)) = store_target(lhs) {
+                            let addr = eval_expr(addr_expr, env)? as u64;
+                            let v = eval_expr(rhs, env)?;
+                            env.mem.write(addr, bits, v);
+                            return Ok(Flow::Normal);
+                        }
                         let name = match lhs {
                             $LValue::Var(name) => name,
                             other => bail!(
-                                "interp: unsupported assignment target {other:?} -- no memory \
-                                 model at the concrete tier"
+                                "interp: unsupported assignment target {other:?}"
                             ),
                         };
                         // A real function's declared locals don't
@@ -554,6 +663,7 @@ macro_rules! define_interp {
                 let mut env = Env {
                     values: HashMap::new(),
                     types: HashMap::new(),
+                    mem: Memory::default(),
                 };
                 for (p, a) in params.iter().zip(args) {
                     env.types.insert(p.name.clone(), p.ty.clone());

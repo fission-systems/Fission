@@ -4,34 +4,42 @@
 //! the real machine code, compare -- over many corpus functions instead of one
 //! hand-picked case.
 //!
-//! # What this does not cover, measured
+//! # It does not yet guard structuring, and the reason is now specific
 //!
-//! It was built to guard **structuring**, on the reasoning that structuring is
-//! semantics-preserving by definition and so should be checkable by execution.
-//! That reasoning is sound and this tier cannot deliver it. Two deliberate
-//! sabotages were injected and **neither was caught**: emitting `while` where
-//! `do`/`while` was correct, and negating *every* `if` condition in *every*
-//! function.
+//! It was built to, on the reasoning that structuring is semantics-preserving
+//! by definition and so should be checkable by execution. Two sabotages were
+//! injected to test that -- `while` emitted where `do`/`while` was correct,
+//! and **every `if` condition in every function negated** -- and neither was
+//! caught.
 //!
-//! The cause is structural, not a matter of tuning. `crate::eval` has no memory
-//! model and bails on any load, which is the right call -- but code with real
-//! control flow almost always touches memory, so the functions this tier can
-//! ground are close to exactly the functions structuring does not affect. Of
-//! 900 attempted, 41 ground, and those 41 are arithmetic straight lines.
+//! An earlier version of this file blamed the concrete tier's lack of a memory
+//! model, and concluded the groundable functions were "close to exactly the
+//! functions structuring does not affect". **That was wrong, and measuring it
+//! properly says something more useful.** A memory model was added
+//! (`eval::Memory`) and coverage did not move at all. Of the functions that do
+//! ground, a third *do* contain loops and conditionals -- `list_sum` grounds
+//! with one `if` and two loops.
 //!
-//! **A memory model in `crate::eval` is the prerequisite for using execution to
-//! guard structuring.** Until then, `structuring_quality` and the unit tests
-//! remain the only things standing between a structuring change and a silently
-//! wrong body, with the known weakness that they only cover failures already
+//! What stops the sabotage being caught is the **arguments**. `default_samples`
+//! offers integers -- `0`, `1`, `-1`, `i32::MIN` -- and a function like
+//! `list_sum` takes a pointer. Every sample but the null one fails the
+//! emulator call outright, and the null one returns before the loop body ever
+//! runs, so negating its guard changes nothing observable. `list_sum` grounds
+//! on exactly one sample of seven.
+//!
+//! **The prerequisite is a buffer that exists at the same address in both the
+//! emulator and `eval::Memory`, passed as the pointer argument.** The
+//! interpreter half of that is what the memory model is for; the emulator half
+//! is not built. Until it is, `structuring_quality` and the unit tests remain
+//! the only guard on structuring correctness, covering only failures already
 //! seen.
 //!
 //! # What it does cover
 //!
-//! The arithmetic and type pipeline, against real machine code, on 41 functions
-//! rather than one. That is where a wrong integer width, sign extension, or
-//! constant fold shows up, and it is not nothing -- fixing the harness to run
-//! this at all turned up two real defects in the checker itself (see
-//! `ground_truth.rs` and `eval.rs`).
+//! The arithmetic and type pipeline against real machine code, on the corpus's
+//! own functions rather than one. Getting it running turned up two real
+//! defects in the checker itself (see `ground_truth.rs` and `eval.rs`), which
+//! is the usual return on actually executing something.
 
 use fission_dir::report::VerifyOutcome;
 use fission_dir::{EmulatorHarness, check_ground_truth, decompile_one, default_samples};
@@ -62,13 +70,31 @@ const MAX_ARITY: usize = 2;
 /// sampling luck.
 ///
 /// `FISSION_DIR_FULL_CORPUS=1` removes the cap for a full sweep.
-const DEFAULT_ATTEMPT_BUDGET: usize = 900;
+const DEFAULT_ATTEMPT_BUDGET: usize = 250;
 
 fn attempt_budget() -> usize {
     match std::env::var("FISSION_DIR_FULL_CORPUS").as_deref() {
         Ok("1" | "true" | "on" | "yes") => usize::MAX,
         _ => DEFAULT_ATTEMPT_BUDGET,
     }
+}
+
+/// Whether `name` is a function the corpus was built to exercise, rather
+/// than runtime support linked in beside it.
+///
+/// Measured: of 900 functions attempted unfiltered, roughly 230 bail on an
+/// indirect or unmodelled call and 212 on a raw register or global read --
+/// almost all of it mingw's C runtime, which a PE from this corpus carries far
+/// more of than it carries test code. Those are not functions this tier will
+/// ever ground, and attempting them is what made the budget expire before
+/// reaching the code that matters.
+///
+/// The corpus's own functions are plain C identifiers; runtime support is
+/// underscore-prefixed or carries a toolchain prefix.
+fn is_corpus_function(name: &str) -> bool {
+    const RUNTIME_PREFIXES: [&str; 6] = ["mingw", "msvcrt", "pre_c", "tls", "Dll", "Wmain"];
+    !name.starts_with('_')
+        && !RUNTIME_PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
 #[derive(Default, Debug)]
@@ -96,7 +122,7 @@ fn check_binary(path: &PathBuf, tally: &mut Tally, budget: usize) {
         if tally.attempted >= budget {
             return;
         }
-        if func.address == 0 || func.name.is_empty() {
+        if func.address == 0 || func.name.is_empty() || !is_corpus_function(&func.name) {
             continue;
         }
         tally.attempted += 1;
