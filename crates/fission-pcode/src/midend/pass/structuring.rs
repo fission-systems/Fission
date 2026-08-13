@@ -213,7 +213,21 @@ fn try_alternative_structurings(
 ) -> Vec<PreHirStmt> {
     use fission_midend_structuring::structuring_quality::measure;
 
+    // Measure through the cleanup that runs after structuring, not the body as
+    // it stands here. Both `finalize_structured_body` and normalize's own
+    // statement cleanup remove jumps, and not the same number from every
+    // structuring -- so a candidate can win on this bench and lose in the
+    // shipped output, which is where the regressions come from.
+    let protected = ir.builder.lsda_landing_pad_labels();
+    let shipped = |body: &Vec<PreHirStmt>| {
+        let mut cleaned =
+            crate::midend::structuring::finalize_structured_body(&protected, body.clone());
+        fission_midend_normalize::normalize_function_body(&mut cleaned);
+        measure(&cleaned)
+    };
+
     let baseline_quality = measure(&baseline);
+    let baseline_shipped = shipped(&baseline);
     // Nothing to win: the existing path already left no jumps.
     if baseline_quality.gotos == 0 {
         if diag {
@@ -224,11 +238,14 @@ fn try_alternative_structurings(
 
     let mut best = baseline;
     let mut best_quality = baseline_quality;
+    let mut best_shipped = baseline_shipped;
 
+    type Q = fission_midend_structuring::structuring_quality::StructuringQuality;
     let mut consider = |name: &str,
                         candidate: Result<Option<Vec<PreHirStmt>>, MlilPreviewError>,
                         best: &mut Vec<PreHirStmt>,
-                        best_quality: &mut fission_midend_structuring::structuring_quality::StructuringQuality| {
+                        best_quality: &mut Q,
+                        best_shipped: &mut Q| {
         let candidate = match candidate {
             Ok(Some(body)) => body,
             Ok(None) => return,
@@ -239,8 +256,16 @@ fn try_alternative_structurings(
                 return;
             }
         };
+        // Two measures, because neither is enough on its own. The raw bodies
+        // are what this stage can compare exactly, and the cleaned ones are a
+        // closer guess at what ships -- closer, not right, since normalize does
+        // more afterwards. Requiring a win on the first and no loss on the
+        // second keeps the candidates that pay off and drops the ones that
+        // reverse downstream: measured, using the cleaned figure alone removed
+        // every regression and 88 of the gains with it.
         let quality = measure(&candidate);
-        if quality.improves_on(best_quality) {
+        let candidate_shipped = shipped(&candidate);
+        if quality.improves_on(best_quality) && candidate_shipped.gotos <= best_shipped.gotos {
             if diag {
                 eprintln!(
                     "[DIAG] {name} accepted: gotos {} -> {}",
@@ -249,6 +274,7 @@ fn try_alternative_structurings(
             }
             *best = candidate;
             *best_quality = quality;
+            *best_shipped = candidate_shipped;
         } else if diag {
             eprintln!(
                 "[DIAG] {name} rejected: gotos {} -> {}, worse on {:?}",
@@ -261,13 +287,13 @@ fn try_alternative_structurings(
 
     if fission_midend_structuring::collapse_driver::match_fold_driver_enabled() {
         let c = fission_midend_structuring::collapse_driver::structure_by_match_fold(ir.builder);
-        consider("match-fold", c, &mut best, &mut best_quality);
+        consider("match-fold", c, &mut best, &mut best_quality, &mut best_shipped);
     }
     if fission_midend_structuring::reaching_driver::dream_driver_enabled() {
         let c = fission_midend_structuring::reaching_driver::structure_by_reaching_conditions(
             ir.builder,
         );
-        consider("DREAM", c, &mut best, &mut best_quality);
+        consider("DREAM", c, &mut best, &mut best_quality, &mut best_shipped);
     }
     best
 }
