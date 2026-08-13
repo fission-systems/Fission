@@ -217,7 +217,7 @@ fn expected_internal_edges(shape: &Shape) -> Option<Vec<(NodeId, NodeId)>> {
 /// loop had become `if (0 < 10) { return 0; }`. Every block survived; the
 /// cycle did not. Checking membership alone reports that fold as sound, which
 /// is why this check exists separately.
-fn fold_accounts_for_every_internal_edge(graph: &CollapseGraph, shape: &Shape) -> bool {
+pub(crate) fn fold_accounts_for_every_internal_edge(graph: &CollapseGraph, shape: &Shape) -> bool {
     let Some(mut expected) = expected_internal_edges(shape) else {
         return false;
     };
@@ -238,7 +238,7 @@ fn fold_accounts_for_every_internal_edge(graph: &CollapseGraph, shape: &Shape) -
 }
 
 /// Blocks reachable from the function entry, which is always block 0.
-fn blocks_reachable_from_entry(successors: &[Vec<usize>]) -> Vec<usize> {
+pub(crate) fn blocks_reachable_from_entry(successors: &[Vec<usize>]) -> Vec<usize> {
     let mut seen = vec![false; successors.len()];
     let mut stack = vec![0usize];
     seen[0] = true;
@@ -273,7 +273,7 @@ fn blocks_reachable_from_entry(successors: &[Vec<usize>]) -> Vec<usize> {
 ///
 /// Unreachable blocks are excluded deliberately: they contribute no behaviour,
 /// and requiring them would decline folds that are entirely correct.
-fn covers_every_reachable_block(node: &crate::collapse_graph::CollapseNode, reachable: &[usize]) -> bool {
+pub(crate) fn covers_every_reachable_block(node: &crate::collapse_graph::CollapseNode, reachable: &[usize]) -> bool {
     node.entry_block == 0 && reachable.iter().all(|&b| node.members.contains(b))
 }
 
@@ -330,7 +330,7 @@ fn concede_one_edge(graph: &mut CollapseGraph, failed: Option<&Shape>) -> bool {
 /// cannot place, so the region is declined rather than emitted without it.
 ///
 /// `None` means "not expressible", propagated by every caller.
-fn node_statements(
+pub(crate) fn node_statements(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
     id: NodeId,
@@ -374,7 +374,7 @@ fn node_is_at(graph: &CollapseGraph, host: &impl StructuringHost, id: NodeId, ad
 /// The entry's branch condition, oriented so it is true when control goes to
 /// `taken`. `None` when the entry does not end in a two-way branch, or the
 /// targets cannot be matched to the nodes.
-fn condition_towards(
+pub(crate) fn condition_towards(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
     entry: NodeId,
@@ -414,7 +414,7 @@ fn condition_towards(
 /// `None` means the region is graph-legal but not expressible as this shape
 /// with the information available -- the driver then concedes an edge rather
 /// than forcing it.
-fn lower_shape(
+pub(crate) fn lower_shape(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
     shape: &Shape,

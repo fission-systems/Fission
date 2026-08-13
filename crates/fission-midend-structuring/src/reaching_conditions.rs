@@ -199,7 +199,7 @@ pub fn compute_reaching_conditions(
 }
 
 /// Kahn's algorithm; `None` when the graph has a cycle.
-fn topological_order(successors: &[Vec<NodeId>]) -> Option<Vec<NodeId>> {
+pub fn topological_order(successors: &[Vec<NodeId>]) -> Option<Vec<NodeId>> {
     let n = successors.len();
     let mut indegree = vec![0usize; n];
     for outs in successors {

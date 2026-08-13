@@ -284,6 +284,32 @@ impl NirPass for SeseStructuringPass {
             }
         }
 
+        // DREAM: loops folded, then the acyclic remainder written down under
+        // the condition each node runs beneath. Declining is free for the same
+        // reason as above -- it runs against a fork.
+        if fission_midend_structuring::reaching_driver::dream_driver_enabled() {
+            match fission_midend_structuring::reaching_driver::structure_by_reaching_conditions(
+                ir.builder,
+            ) {
+                Ok(Some(body)) => {
+                    if diag {
+                        eprintln!("[DIAG] structuring done (DREAM): stmts={}", body.len());
+                    }
+                    let protected = ir.builder.lsda_landing_pad_labels();
+                    let finalized =
+                        crate::midend::structuring::finalize_structured_body(&protected, body);
+                    ir.set_structured_body(finalized);
+                    return Ok(PassResult::Changed);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    if diag {
+                        eprintln!("[DIAG] DREAM failed ({err:?}), falling back");
+                    }
+                }
+            }
+        }
+
         // Collapse-loop admission: whole-function SESE body at (0, N). SESE tree
         // path is the free-fn structure_cfg_via_sese (no pcode thin wrap).
         let sese_result = if collapse_loop_admission_enabled() {

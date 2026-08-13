@@ -183,6 +183,137 @@ fn strip_conjunct(e: &PreHirExpr, needle: &PreHirExpr) -> PreHirExpr {
     conjunction(conjuncts(e).into_iter().filter(|c| c != needle).collect())
 }
 
+/// Fold a guard binding into the `if` that immediately consumes it.
+///
+/// [`materialize_branch_conditions`] binds every decision so that a guard is
+/// safe to evaluate wherever it ends up. Most guards do not actually travel:
+/// after factoring, the `if` that uses one sits directly after its binding,
+/// and the variable is then pure overhead. Measured on a two-block `if`, the
+/// unfolded form is `dream_c0 = !param_1; if (!dream_c0)` where the existing
+/// path writes `if (param_1)` -- and the variable is not even declared, since
+/// nothing registered it with the builder.
+///
+/// A binding is inlined only when it is read exactly once. That is decided by
+/// counting the name in the debug rendering of the whole body rather than by
+/// a hand-written walk over the expression variants: a variant missed in such
+/// a walk would under-count and inline a guard still read elsewhere, while an
+/// extra mention here can only make this decline.
+pub fn inline_single_use_guards(
+    body: Vec<PreHirStmt>,
+    is_guard: impl Fn(&str) -> bool + Copy,
+) -> Vec<PreHirStmt> {
+    let rendered = format!("{body:?}");
+    // One mention is the binding's own left-hand side, so a single read is two.
+    let single_use = |name: &str| rendered.matches(&format!("{name:?}")).count() == 2;
+    inline_in(body, is_guard, &single_use)
+}
+
+fn inline_in(
+    body: Vec<PreHirStmt>,
+    is_guard: impl Fn(&str) -> bool + Copy,
+    single_use: &impl Fn(&str) -> bool,
+) -> Vec<PreHirStmt> {
+    let mut out: Vec<PreHirStmt> = Vec::with_capacity(body.len());
+    let mut iter = body.into_iter().peekable();
+    while let Some(stmt) = iter.next() {
+        // Recurse first so nested bodies are folded too.
+        let stmt = match stmt {
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => PreHirStmt::If {
+                cond,
+                then_body: std::rc::Rc::new(inline_in(
+                    then_body.as_ref().clone(),
+                    is_guard,
+                    single_use,
+                )),
+                else_body: std::rc::Rc::new(inline_in(
+                    else_body.as_ref().clone(),
+                    is_guard,
+                    single_use,
+                )),
+            },
+            other => other,
+        };
+
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } = &stmt
+        else {
+            out.push(stmt);
+            continue;
+        };
+        if !is_guard(name) || !single_use(name) {
+            out.push(stmt);
+            continue;
+        }
+        let var = PreHirExpr::Var(name.clone());
+        let folded = match iter.peek() {
+            Some(PreHirStmt::If { cond, .. }) if cond == &var => Some(rhs.clone()),
+            Some(PreHirStmt::If { cond, .. }) if cond == &negate_expr(var.clone()) => {
+                Some(negate_expr(rhs.clone()))
+            }
+            _ => None,
+        };
+        let Some(cond) = folded else {
+            out.push(stmt);
+            continue;
+        };
+        let Some(PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        }) = iter.next()
+        else {
+            unreachable!("peeked an if")
+        };
+        out.push(PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        });
+    }
+    out
+}
+
+/// Whether any guard binding survived inlining.
+///
+/// A guard that is read more than once cannot be folded away, and this module
+/// cannot leave it standing either: the name was invented here, never
+/// registered with the builder, so it would print undeclared. Callers decline
+/// rather than emit that.
+pub fn any_guard_remains(body: &[PreHirStmt], is_guard: impl Fn(&str) -> bool) -> bool {
+    fn names(body: &[PreHirStmt], out: &mut Vec<String>) {
+        for s in body {
+            match s {
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(n),
+                    ..
+                } => out.push(n.clone()),
+                PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    names(then_body, out);
+                    names(else_body, out);
+                }
+                PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+                    names(body, out)
+                }
+                PreHirStmt::Block(inner) => names(inner, out),
+                _ => {}
+            }
+        }
+    }
+    let mut found = Vec::new();
+    names(body, &mut found);
+    found.iter().any(|n| is_guard(n))
+}
+
 /// A branch to bind: the node, its condition, and where each way goes.
 #[derive(Debug, Clone)]
 pub struct Branch {

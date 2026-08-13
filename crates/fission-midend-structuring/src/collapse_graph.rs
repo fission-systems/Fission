@@ -118,6 +118,11 @@ impl CollapseGraph {
         }
     }
 
+    /// Slot count, live or retired -- the dense index space node ids live in.
+    pub fn node_capacity(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub fn live_count(&self) -> usize {
         self.live
     }
