@@ -478,34 +478,60 @@ fn concede_one_edge(
 /// The edge to give up.
 ///
 /// Prefers a back edge -- the classic unstructured jump, and the one a reader
-/// least minds seeing -- but only among edges whose target keeps another
-/// predecessor.
+/// least minds seeing -- among edges whose removal leaves every live node
+/// still reachable from the entry.
 ///
-/// That second condition is not cosmetic. Conceding a node's *only* incoming
-/// edge leaves it unreachable in the graph, so it gets no reaching condition
-/// and the whole region is declined -- measured at 30 functions, the second
-/// largest refusal once concession was turned on. The jump still reaches it,
-/// but the conditions are computed from edges, and that one is gone.
+/// That second condition is not cosmetic. Reaching conditions are computed
+/// from edges, so a node the graph can no longer reach gets no condition and
+/// the whole region is declined; the jump still arrives there, but the
+/// arithmetic cannot see it. Requiring the target to merely keep *a*
+/// predecessor is not enough, because concessions compound: each one can be
+/// legal on its own and the last of them still strips a node's only remaining
+/// way in. Measured, that left this the largest refusal of all at 36 functions.
 fn pick_conceded_edge(graph: &CollapseGraph) -> Option<(NodeId, NodeId)> {
+    let head = live_node_owning_entry(graph)?;
     let live: Vec<NodeId> = graph.live_nodes().collect();
-    let usable = |u: NodeId, v: NodeId| {
-        graph.successors(u).len() <= 2 && graph.predecessors(v).len() >= 2
-    };
+    let mut best: Option<(NodeId, NodeId)> = None;
     for &u in &live {
         for &v in graph.successors(u) {
-            if v <= u && usable(u, v) {
+            if graph.successors(u).len() > 2 || !survives_without(graph, head, &live, u, v) {
+                continue;
+            }
+            // A back edge is preferred; anything else is a fallback.
+            if v <= u {
                 return Some((u, v));
             }
+            best.get_or_insert((u, v));
         }
     }
-    for &u in &live {
-        for &v in graph.successors(u) {
-            if usable(u, v) {
-                return Some((u, v));
+    best
+}
+
+/// Whether every live node is still reachable from `head` once `(from, to)`
+/// is gone.
+fn survives_without(
+    graph: &CollapseGraph,
+    head: NodeId,
+    live: &[NodeId],
+    from: NodeId,
+    to: NodeId,
+) -> bool {
+    let mut seen = vec![false; graph.node_capacity()];
+    let mut stack = vec![head];
+    if head >= seen.len() {
+        return false;
+    }
+    seen[head] = true;
+    while let Some(n) = stack.pop() {
+        for &s in graph.successors(n) {
+            if (n, s) == (from, to) || s >= seen.len() || seen[s] {
+                continue;
             }
+            seen[s] = true;
+            stack.push(s);
         }
     }
-    None
+    live.iter().all(|&n| seen[n])
 }
 
 fn graph_has_cycle(graph: &CollapseGraph) -> bool {
