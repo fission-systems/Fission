@@ -78,43 +78,21 @@ const MAX_ROUNDS_PER_NODE: usize = 8;
 /// alternative would mean lowering the function twice.
 const MAX_CONCESSIONS: usize = 0;
 
-/// Opt in with `FISSION_MATCH_FOLD=1`. Off by default.
+/// On by default; opt out with `FISSION_MATCH_FOLD=0`.
 ///
-/// # Why it is still off
-///
-/// On the 250-function corpus this driver is a clean win -- NIR 1629 -> 1620,
-/// HIR 1615 -> 1606, one function reaching zero gotos and **no file
-/// regressing** -- because it declines on all but one of them. Turning it on
-/// by default was tried, and the crate's own structuring tests caught what a
-/// corpus of large functions never exercised: small graphs fold far more
-/// often, and eight tests broke.
-///
-/// That was the correction to the safety argument above. "Folds with no
-/// concessions" bounds the *jump count* of a committed body; it says nothing
-/// about whether the body still means what the function meant. Goto density
-/// cannot tell the difference -- `for_simple_fn` came back with its loop
-/// rewritten to `if (0 < 10) { return 0; }`, scoring a perfect zero.
-///
-/// Five of the eight were that one cause, now fixed and pinned by
-/// [`fold_accounts_for_every_internal_edge`]. Three remain, and they are why
-/// the default has not moved:
-///
-/// - an empty `if` shell where the existing path folds a short-circuit `&&`,
-///   caught by the HIR presentation invariants rather than by any assertion;
-/// - a changed merge binding at a duplicated join;
-/// - a `signum` diamond emitted as a nested ternary instead of `return 1`,
-///   which is a benign form change and the least of the three.
-///
-/// The first two are quality losses this driver would ship if it ran first.
-/// It needs to *compare* against the existing path rather than pre-empt it --
-/// angr's `strictly_less_gotos` discipline, which observed lowering
-/// now makes affordable (see `StructuringHost::lower_observed`).
+/// Safe to default on only because it no longer runs *first*. It offers a
+/// candidate to `try_alternative_structurings`, which keeps the existing
+/// structuring unless this one strictly wins on jumps while giving up nothing
+/// on `crate::structuring_quality`'s other axes. That is what retires the
+/// three failures this driver used to cause -- the empty `if` shell where the
+/// existing path folds a short-circuit `&&` among them. They are not fixed;
+/// they are simply never chosen.
 pub fn match_fold_driver_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
-        matches!(
+        !matches!(
             std::env::var("FISSION_MATCH_FOLD").as_deref(),
-            Ok("1" | "true" | "on" | "yes")
+            Ok("0" | "false" | "off" | "no")
         )
     })
 }
@@ -537,11 +515,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn env_gate_is_off_unless_explicitly_enabled() {
-        // The driver must never engage by accident while it still loses
-        // regions on small graphs.
+    fn env_gate_is_on_unless_explicitly_disabled() {
         if std::env::var_os("FISSION_MATCH_FOLD").is_none() {
-            assert!(!match_fold_driver_enabled());
+            assert!(match_fold_driver_enabled());
         }
     }
 

@@ -65,32 +65,24 @@ const MAX_DECISIONS: usize = 16;
 /// jump, so a body this deep is declined rather than shipped.
 const MAX_NESTING_DEPTH: usize = 8;
 
-/// Opt in with `FISSION_DREAM=1`. Off by default.
+/// On by default; opt out with `FISSION_DREAM=0`.
 ///
-/// # Measured
+/// Measured across 250 functions with both drivers offering candidates: NIR
+/// 1629 -> 1587, HIR 1615 -> 1573, eleven functions improved and none
+/// regressed.
 ///
-/// NIR 1629 -> 1596, HIR 1615 -> 1586, ten functions improved and **none
-/// regressed**, eight of them reaching zero gotos. All 250 functions and 224
-/// binaries still decompile.
-///
-/// # Why it is still off
-///
-/// It pre-empts the existing path, and three switch tests say that is wrong:
-/// a switch dispatch is a cascade of two-way branches, so this driver
-/// describes it perfectly as nested `if`s and loses the `switch` the existing
-/// path recovers. **Goto density scores that as a win**, which is exactly why
-/// the corpus shows no regression while the tests do.
-///
-/// The fix is not another gate here. This driver should run *after* the
-/// existing path, on the regions it leaves as jumps, rather than instead of
-/// it -- the same conclusion the match-fold driver reached, and the reason
-/// `lower_observed` exists.
+/// Safe to default on only because it no longer runs *first*. Pre-empting the
+/// existing path cost `switch` recovery -- a dispatch is a cascade of two-way
+/// branches, which this driver describes perfectly as nested `if`s, and goto
+/// density scores that as a win. Offering a candidate to
+/// `try_alternative_structurings` instead means a structuring that loses a
+/// switch is simply never chosen, and the three switch tests pass untouched.
 pub fn dream_driver_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
-        matches!(
+        !matches!(
             std::env::var("FISSION_DREAM").as_deref(),
-            Ok("1" | "true" | "on" | "yes")
+            Ok("0" | "false" | "off" | "no")
         )
     })
 }
@@ -319,9 +311,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn env_gate_is_off_unless_explicitly_enabled() {
+    fn env_gate_is_on_unless_explicitly_disabled() {
         if std::env::var_os("FISSION_DREAM").is_none() {
-            assert!(!dream_driver_enabled());
+            assert!(dream_driver_enabled());
         }
     }
 

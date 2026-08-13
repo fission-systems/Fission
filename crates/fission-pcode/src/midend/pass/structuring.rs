@@ -201,6 +201,74 @@ impl NirPass for IrreducibleReductionPass {
     }
 }
 
+/// Offer each opt-in driver a chance to beat `baseline`, keeping it unless one
+/// strictly wins.
+///
+/// Both drivers run against a fork of the host ([`StructuringHost::lower_isolated`]),
+/// so a candidate that loses the comparison costs nothing but the attempt.
+fn try_alternative_structurings(
+    ir: &mut NirFunc<'_, '_>,
+    baseline: Vec<PreHirStmt>,
+    diag: bool,
+) -> Vec<PreHirStmt> {
+    use fission_midend_structuring::structuring_quality::measure;
+
+    let baseline_quality = measure(&baseline);
+    // Nothing to win: the existing path already left no jumps.
+    if baseline_quality.gotos == 0 {
+        return baseline;
+    }
+
+    let mut best = baseline;
+    let mut best_quality = baseline_quality;
+
+    let mut consider = |name: &str,
+                        candidate: Result<Option<Vec<PreHirStmt>>, MlilPreviewError>,
+                        best: &mut Vec<PreHirStmt>,
+                        best_quality: &mut fission_midend_structuring::structuring_quality::StructuringQuality| {
+        let candidate = match candidate {
+            Ok(Some(body)) => body,
+            Ok(None) => return,
+            Err(err) => {
+                if diag {
+                    eprintln!("[DIAG] {name} failed ({err:?}), keeping the existing structuring");
+                }
+                return;
+            }
+        };
+        let quality = measure(&candidate);
+        if quality.improves_on(best_quality) {
+            if diag {
+                eprintln!(
+                    "[DIAG] {name} accepted: gotos {} -> {}",
+                    best_quality.gotos, quality.gotos
+                );
+            }
+            *best = candidate;
+            *best_quality = quality;
+        } else if diag {
+            eprintln!(
+                "[DIAG] {name} rejected: gotos {} -> {}, worse on {:?}",
+                best_quality.gotos,
+                quality.gotos,
+                quality.regressions_against(best_quality)
+            );
+        }
+    };
+
+    if fission_midend_structuring::collapse_driver::match_fold_driver_enabled() {
+        let c = fission_midend_structuring::collapse_driver::structure_by_match_fold(ir.builder);
+        consider("match-fold", c, &mut best, &mut best_quality);
+    }
+    if fission_midend_structuring::reaching_driver::dream_driver_enabled() {
+        let c = fission_midend_structuring::reaching_driver::structure_by_reaching_conditions(
+            ir.builder,
+        );
+        consider("DREAM", c, &mut best, &mut best_quality);
+    }
+    best
+}
+
 pub(crate) struct SeseStructuringPass;
 
 impl NirPass for SeseStructuringPass {
@@ -258,58 +326,6 @@ impl NirPass for SeseStructuringPass {
 
         let total_blocks = ir.block_count();
 
-        // Match-fold driver, opt-in. It runs first because it either folds the
-        // whole graph to one node with no conceded jumps -- a body the existing
-        // path cannot beat -- or declines. Declining is free: the fold runs
-        // against a forked host, so a failed attempt leaves nothing behind for
-        // the existing path below to trip over.
-        if fission_midend_structuring::collapse_driver::match_fold_driver_enabled() {
-            match fission_midend_structuring::collapse_driver::structure_by_match_fold(ir.builder) {
-                Ok(Some(body)) => {
-                    if diag {
-                        eprintln!("[DIAG] structuring done (match-fold): stmts={}", body.len());
-                    }
-                    let protected = ir.builder.lsda_landing_pad_labels();
-                    let finalized =
-                        crate::midend::structuring::finalize_structured_body(&protected, body);
-                    ir.set_structured_body(finalized);
-                    return Ok(PassResult::Changed);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    if diag {
-                        eprintln!("[DIAG] match-fold failed ({err:?}), falling back");
-                    }
-                }
-            }
-        }
-
-        // DREAM: loops folded, then the acyclic remainder written down under
-        // the condition each node runs beneath. Declining is free for the same
-        // reason as above -- it runs against a fork.
-        if fission_midend_structuring::reaching_driver::dream_driver_enabled() {
-            match fission_midend_structuring::reaching_driver::structure_by_reaching_conditions(
-                ir.builder,
-            ) {
-                Ok(Some(body)) => {
-                    if diag {
-                        eprintln!("[DIAG] structuring done (DREAM): stmts={}", body.len());
-                    }
-                    let protected = ir.builder.lsda_landing_pad_labels();
-                    let finalized =
-                        crate::midend::structuring::finalize_structured_body(&protected, body);
-                    ir.set_structured_body(finalized);
-                    return Ok(PassResult::Changed);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    if diag {
-                        eprintln!("[DIAG] DREAM failed ({err:?}), falling back");
-                    }
-                }
-            }
-        }
-
         // Collapse-loop admission: whole-function SESE body at (0, N). SESE tree
         // path is the free-fn structure_cfg_via_sese (no pcode thin wrap).
         let sese_result = if collapse_loop_admission_enabled() {
@@ -330,6 +346,12 @@ impl NirPass for SeseStructuringPass {
 
         match sese_result {
             Ok(body) => {
+                // Drivers run *after* the existing path, not instead of it,
+                // and only displace it when they are strictly better on jumps
+                // while giving up nothing else. Running first was tried for
+                // both of them and lost `switch` recovery and short-circuit
+                // `&&` folding -- losses the goto count scores as wins.
+                let body = try_alternative_structurings(ir, body, diag);
                 let elapsed = ir
                     .builder
                     .structuring_start
