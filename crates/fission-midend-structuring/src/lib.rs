@@ -47,6 +47,7 @@ pub mod linear_types;
 pub mod loop_analysis;
 pub mod loops;
 pub mod reaching_conditions;
+pub mod reaching_emit;
 pub mod regions;
 pub mod switch;
 pub mod sese_driver;

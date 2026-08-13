@@ -62,7 +62,7 @@ pub fn always() -> PreHirExpr {
     PreHirExpr::Const(1, NirType::Bool)
 }
 
-fn is_always(e: &PreHirExpr) -> bool {
+pub fn is_always(e: &PreHirExpr) -> bool {
     matches!(e, PreHirExpr::Const(v, _) if *v != 0)
 }
 
@@ -85,12 +85,67 @@ fn or(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
     if is_always(&lhs) || is_always(&rhs) {
         return always();
     }
+    // `(X AND c) OR (X AND NOT c)` is `X`. This is the join of a diamond --
+    // the single most common shape a reaching condition takes -- and without
+    // it every join in the region carries a tautology as its guard.
+    // `simplify_logical_expr` does not recognise complementary disjunction,
+    // so it is done here where the two terms are known to come from the same
+    // decision.
+    if let Some(common) = common_part_of_complementary(&lhs, &rhs) {
+        return common;
+    }
     PreHirExpr::Binary {
         op: PreHirBinaryOp::LogicalOr,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
         ty: NirType::Bool,
     }
+}
+
+/// Flatten a conjunction into its terms; a non-conjunction is a single term.
+pub(crate) fn conjuncts(e: &PreHirExpr) -> Vec<PreHirExpr> {
+    match e {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalAnd,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let mut out = conjuncts(lhs);
+            out.extend(conjuncts(rhs));
+            out
+        }
+        other => vec![other.clone()],
+    }
+}
+
+/// Rebuild a conjunction from its terms; empty is `true`.
+pub(crate) fn conjunction(terms: Vec<PreHirExpr>) -> PreHirExpr {
+    let mut iter = terms.into_iter();
+    let Some(first) = iter.next() else {
+        return always();
+    };
+    iter.fold(first, |acc, c| PreHirExpr::Binary {
+        op: PreHirBinaryOp::LogicalAnd,
+        lhs: Box::new(acc),
+        rhs: Box::new(c),
+        ty: NirType::Bool,
+    })
+}
+
+/// The shared part of two conjunctions whose remainders are complements, so
+/// their disjunction is just that shared part. `None` when they do not have
+/// that form.
+fn common_part_of_complementary(a: &PreHirExpr, b: &PreHirExpr) -> Option<PreHirExpr> {
+    let ca = conjuncts(a);
+    let cb = conjuncts(b);
+    let shared: Vec<PreHirExpr> = ca.iter().filter(|x| cb.contains(x)).cloned().collect();
+    let rest_a: Vec<PreHirExpr> = ca.into_iter().filter(|x| !shared.contains(x)).collect();
+    let rest_b: Vec<PreHirExpr> = cb.into_iter().filter(|x| !shared.contains(x)).collect();
+    let ([only_a], [only_b]) = (&rest_a[..], &rest_b[..]) else {
+        return None;
+    };
+    conditions_are_complementary(only_a, only_b).then(|| conjunction(shared))
 }
 
 /// Compute the condition under which each node executes.
@@ -213,6 +268,35 @@ pub fn unconditional_nodes(reaching: &HashMap<NodeId, PreHirExpr>) -> HashSet<No
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_join_of_a_diamond_is_unconditional() {
+        // Both ways out of one decision reconverge, so the join always runs.
+        // `simplify_logical_expr` does not fold `c OR NOT c`, and without the
+        // fold every join in a region carries a tautology as its guard.
+        let c = PreHirExpr::Var("c".to_string());
+        let joined = or(c.clone(), negate_expr(c.clone()));
+        assert!(is_always(&joined), "got {joined:?}");
+
+        // The same with a shared guard in front: `(a AND c) OR (a AND !c)`.
+        let a = PreHirExpr::Var("a".to_string());
+        let guarded = or(
+            and(a.clone(), c.clone()),
+            and(a.clone(), negate_expr(c.clone())),
+        );
+        assert_eq!(guarded, a, "the shared part survives, the decision does not");
+    }
+
+    #[test]
+    fn unrelated_disjuncts_are_left_alone() {
+        // Two different decisions must not collapse -- that would claim a node
+        // runs unconditionally when it does not.
+        let a = PreHirExpr::Var("a".to_string());
+        let b = PreHirExpr::Var("b".to_string());
+        let joined = or(a, negate_expr(b));
+        assert!(!is_always(&joined), "got {joined:?}");
+    }
+
 
     fn var(name: &str) -> PreHirExpr {
         PreHirExpr::Var(name.to_string())
