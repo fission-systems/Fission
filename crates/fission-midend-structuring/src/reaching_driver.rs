@@ -34,7 +34,7 @@ use crate::collapse_driver::{
 };
 use crate::collapse_graph::{CollapseGraph, NodeId};
 use crate::collapse_shapes::{
-    Shape, ShapeKind, find_shape, match_do_while, match_self_loop, match_while_do,
+    Shape, ShapeKind, find_shape, match_do_while, match_inf_loop, match_self_loop, match_while_do,
 };
 use crate::host::StructuringHost;
 use crate::reaching_conditions::{compute_reaching_conditions, topological_order};
@@ -378,10 +378,10 @@ fn fold_every_cycle(
             }
         };
         if !fold_accounts_for_every_internal_edge(graph, &shape) {
-            return Ok(());
+return Ok(());
         }
         let Some(body) = lower_shape(host, graph, &shape)? else {
-            return Ok(());
+return Ok(());
         };
         // Read before folding: `collapse` retires the member nodes, so the
         // last member's governing block is unreachable afterwards.
@@ -540,13 +540,17 @@ fn graph_has_cycle(graph: &CollapseGraph) -> bool {
 
 fn find_cyclic_shape(graph: &CollapseGraph) -> Option<Shape> {
     graph.live_nodes().find_map(|n| {
-        match_self_loop(graph, n)
+        match_inf_loop(graph, n)
+            .or_else(|| match_self_loop(graph, n))
             .or_else(|| match_while_do(graph, n))
             .or_else(|| match_do_while(graph, n))
             .filter(|s| {
                 matches!(
                     s.kind,
-                    ShapeKind::SelfLoop | ShapeKind::WhileDo | ShapeKind::DoWhile
+                    ShapeKind::InfLoop
+                        | ShapeKind::SelfLoop
+                        | ShapeKind::WhileDo
+                        | ShapeKind::DoWhile
                 )
             })
     })

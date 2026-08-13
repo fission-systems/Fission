@@ -177,6 +177,8 @@ fn expected_internal_edges(shape: &Shape) -> Option<Vec<(NodeId, NodeId)>> {
         (ShapeKind::WhileDo, &[n, inner]) => vec![(n, inner), (inner, n)],
         (ShapeKind::DoWhile, &[n, cond]) => vec![(n, cond), (cond, n)],
         (ShapeKind::SelfLoop, &[n]) => vec![(n, n)],
+        (ShapeKind::InfLoop, &[n]) => vec![(n, n)],
+        (ShapeKind::InfLoop, &[n, s]) => vec![(n, s), (s, n)],
         _ => return None,
     })
 }
@@ -532,6 +534,19 @@ pub(crate) fn lower_shape(
             Ok(Some(vec![PreHirStmt::DoWhile {
                 body: std::rc::Rc::new(body),
                 cond,
+            }]))
+        }
+        ShapeKind::InfLoop => {
+            let mut body = Vec::new();
+            for &m in &shape.members {
+                let Some(stmts) = node_statements(host, graph, m)? else {
+                    return Ok(None);
+                };
+                body.extend(stmts);
+            }
+            Ok(Some(vec![PreHirStmt::While {
+                cond: crate::reaching_conditions::always(),
+                body: std::rc::Rc::new(body),
             }]))
         }
         ShapeKind::SelfLoop => {

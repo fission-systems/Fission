@@ -26,6 +26,8 @@ use crate::collapse_graph::{CollapseGraph, NodeId};
 /// What a matched region will become once lowered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShapeKind {
+    /// A cycle with no exit at all.
+    InfLoop,
     /// `a; b` -- Ghidra `ruleBlockCat`.
     Sequence,
     /// `if (c) { t }` -- Ghidra `ruleBlockProperIf`.
@@ -173,6 +175,42 @@ pub fn match_if_then_else(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
 }
 
 /// A node that branches to itself: `while (1) { n }`.
+/// A cycle with no way out: `while (true) { .. }`.
+///
+/// Ghidra's `ruleBlockInfLoop`, and nothing here covered it. A two-node cycle
+/// whose members reach only each other matched `Sequence`, which the
+/// edge-accounting check then rightly refused -- folding it would delete the
+/// back edge -- leaving the region unfoldable and the function declined.
+/// Measured, that and the exit-less self loop were 10 of the 22 regions the
+/// DREAM driver still could not reduce.
+///
+/// Deliberately narrow: one or two nodes with no successor outside the cycle.
+/// A larger exit-less region needs its interior folded first, which the
+/// ordinary shapes do.
+pub fn match_inf_loop(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
+    if g.successors(n) == [n] {
+        return Some(Shape {
+            kind: ShapeKind::InfLoop,
+            entry: n,
+            members: vec![n],
+            follow: None,
+        });
+    }
+    let [s] = g.successors(n) else {
+        return None;
+    };
+    let s = *s;
+    if s == n || g.successors(s) != [n] || g.predecessors(s) != [n] {
+        return None;
+    }
+    Some(Shape {
+        kind: ShapeKind::InfLoop,
+        entry: n,
+        members: vec![n, s],
+        follow: None,
+    })
+}
+
 pub fn match_self_loop(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
     if !g.successors(n).contains(&n) {
         return None;
