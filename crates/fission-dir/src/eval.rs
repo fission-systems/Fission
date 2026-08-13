@@ -532,9 +532,11 @@ macro_rules! define_interp {
                     .position(|s| matches!(s, $Stmt::Label(l) if l == label))
             }
 
-            /// Interpret `body` with `args` bound to `params` in order,
-            /// `locals` seeded from their initializer expression (or 0 if
-            /// none), and return the function's return value (`None` for
+            /// Interpret `body` with `args` bound to `params` in order and
+            /// `locals` seeded from their initializer expression when they
+            /// have one -- an uninitialized local stays unbound, so reading it
+            /// before assignment is an error rather than a zero -- and return
+            /// the function's return value (`None` for
             /// a bare `return;`, or if control fell off the end of the
             /// body without an explicit `Return`).
             pub fn interpret(
@@ -559,11 +561,22 @@ macro_rules! define_interp {
                 }
                 for l in locals {
                     env.types.insert(l.name.clone(), l.ty.clone());
-                    let v = match &l.initializer {
-                        Some(init) => eval_expr(init, &env)?,
-                        None => 0,
-                    };
-                    env.values.insert(l.name.clone(), v);
+                    // Only a local with an initializer gets a value. An
+                    // uninitialized one stays unbound, so `Env::get` refuses a
+                    // read that reaches it before any assignment -- which is
+                    // this tier's whole contract: bail rather than invent.
+                    //
+                    // Seeding those to 0 made the interpreter answer for
+                    // programs it cannot model. `mingw_get_invalid_parameter_handler`
+                    // decompiles to `return tmp_140007190;` -- a global read
+                    // recovered as an uninitialized temp -- and the zero made
+                    // it look like a confident answer that disagreed with the
+                    // machine, rather than the "cannot check this" it is. The
+                    // same default could equally have made a wrong body agree.
+                    if let Some(init) = &l.initializer {
+                        let v = eval_expr(init, &env)?;
+                        env.values.insert(l.name.clone(), v);
+                    }
                 }
                 match exec_block(body, &mut env)? {
                     Flow::Return(v) => Ok(v),
