@@ -706,3 +706,87 @@ fn non_trap_unknown_producer_is_rejected_before_nir_build() {
         MlilPreviewError::UnsupportedPattern("invalid pcode shape")
     ));
 }
+
+/// The match-fold driver folds an if/then whose join returns, and the
+/// `return` survives the fold.
+///
+/// Regression: `node_statements` originally emitted only `lower_block_stmts`,
+/// so a terminal block's `return` was silently dropped. On the corpus that
+/// read as an *improvement* -- the function's goto count went to zero -- while
+/// the body had lost its `return r0` and the signature had degraded to
+/// `undefined`. A jump-free body is not by itself a correct one.
+#[test]
+fn match_fold_keeps_the_return_of_a_terminal_block() {
+    let cond = uniq(0x700, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            // 0: if (rcx == 1) goto 2; else fall through to 1
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x7000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntEqual,
+                        address: 0x7000,
+                        output: Some(cond.clone()),
+                        inputs: vec![reg(0x08, 8), cst(1, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x7001,
+                        output: None,
+                        inputs: vec![cst(0x7020, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            // 1: the clause -- rax = 7, then falls into the join
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x7010,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x7010,
+                    output: Some(reg(0x00, 8)),
+                    inputs: vec![cst(7, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            // 2: the join -- returns.
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x7020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x7020,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    let body = fission_midend_structuring::collapse_driver::structure_by_match_fold(&mut builder)
+        .expect("match fold")
+        .expect("the graph folds to a single node");
+
+    assert!(
+        matches!(body.last(), Some(PreHirStmt::Return(_))),
+        "the terminal block's return must survive the fold, got: {body:#?}"
+    );
+    assert!(
+        !body.iter().any(|s| matches!(s, PreHirStmt::Goto(_))),
+        "a committed fold concedes no jumps"
+    );
+}

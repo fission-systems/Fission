@@ -257,6 +257,33 @@ impl NirPass for SeseStructuringPass {
         }
 
         let total_blocks = ir.block_count();
+
+        // Match-fold driver, opt-in. It runs first because it either folds the
+        // whole graph to one node with no conceded jumps -- a body the existing
+        // path cannot beat -- or declines. Declining is free: the fold runs
+        // against a forked host, so a failed attempt leaves nothing behind for
+        // the existing path below to trip over.
+        if fission_midend_structuring::collapse_driver::match_fold_driver_enabled() {
+            match fission_midend_structuring::collapse_driver::structure_by_match_fold(ir.builder) {
+                Ok(Some(body)) => {
+                    if diag {
+                        eprintln!("[DIAG] structuring done (match-fold): stmts={}", body.len());
+                    }
+                    let protected = ir.builder.lsda_landing_pad_labels();
+                    let finalized =
+                        crate::midend::structuring::finalize_structured_body(&protected, body);
+                    ir.set_structured_body(finalized);
+                    return Ok(PassResult::Changed);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    if diag {
+                        eprintln!("[DIAG] match-fold failed ({err:?}), falling back");
+                    }
+                }
+            }
+        }
+
         // Collapse-loop admission: whole-function SESE body at (0, N). SESE tree
         // path is the free-fn structure_cfg_via_sese (no pcode thin wrap).
         let sese_result = if collapse_loop_admission_enabled() {

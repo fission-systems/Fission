@@ -30,26 +30,24 @@
 //!   use the existing path. It never returns a partially structured result,
 //!   so there is no half-state for a later stage to misread.
 //!
-//! # Not yet safe to wire in
+//! # Why the whole fold runs isolated
 //!
-//! The safety argument above is **incomplete, and measurement proved it.**
-//! Shape discovery is pure, but [`lower_shape`] calls `lower_block_stmts` and
-//! `lower_block_terminator` to build a region's body *before* the driver
-//! knows whether it will commit. When it then declines, those lowering side
-//! effects have already landed on the host and perturb the existing path that
-//! runs next.
+//! The "discovery cannot touch anything" argument above is **incomplete, and
+//! measurement proved it.** Shape matching is pure, but [`lower_shape`] calls
+//! `lower_block_stmts` and `lower_block_terminator` to build a region's body
+//! *before* the driver knows whether it will commit. When the fold then fails
+//! and the driver returns `None`, those lowering side effects have already
+//! landed on the host and perturb the existing path that runs next.
 //!
-//! This was measured, not theorised. Wired in with concessions capped at zero
-//! -- so every committed body is jump-free and could only reduce the count --
-//! the corpus still moved by +8 gotos with 16 files regressed. Files the
-//! driver *declined* changed, which is only possible through leaked lowering.
+//! This was measured, not theorised. With concessions capped at zero -- so
+//! every committed body is jump-free and could only reduce the count -- the
+//! corpus still moved by +8 gotos with 16 files regressed, and files the
+//! driver *declined* changed. That is only possible through leaked lowering.
 //!
-//! The fix is the clone-and-isolate pattern this codebase already uses for
-//! the same hazard (`midend/structuring/host_impl.rs`,
-//! `lower_virtual_exit_if_else_isolated`): lower against a cloned host and
-//! merge identity bindings back only on success. That needs a host-side entry
-//! point, since `StructuringHost` is generic here and cannot be cloned
-//! through the trait. Until that exists this module stays unwired.
+//! So [`structure_by_match_fold`] runs its entire fold inside
+//! [`StructuringHost::lower_isolated`]. Nothing reaches the host unless the
+//! graph reduced to a single node, which makes the all-or-nothing property
+//! above true of host state and not just of the return value.
 //!
 //! Gated off by default; see [`match_fold_driver_enabled`].
 
@@ -80,10 +78,37 @@ const MAX_ROUNDS_PER_NODE: usize = 8;
 /// alternative would mean lowering the function twice.
 const MAX_CONCESSIONS: usize = 0;
 
-/// Opt in with `FISSION_MATCH_FOLD=1`.
+/// Opt in with `FISSION_MATCH_FOLD=1`. Off by default.
 ///
-/// Off by default while the driver is measured against the existing one. The
-/// codebase already uses this pattern for `FISSION_COLLAPSE_LOOP`.
+/// # Why it is still off
+///
+/// On the 250-function corpus this driver is a clean win -- NIR 1629 -> 1620,
+/// HIR 1615 -> 1606, one function reaching zero gotos and **no file
+/// regressing** -- because it declines on all but one of them. Turning it on
+/// by default was tried, and the crate's own structuring tests caught what a
+/// corpus of large functions never exercised: small graphs fold far more
+/// often, and eight tests broke.
+///
+/// That was the correction to the safety argument above. "Folds with no
+/// concessions" bounds the *jump count* of a committed body; it says nothing
+/// about whether the body still means what the function meant. Goto density
+/// cannot tell the difference -- `for_simple_fn` came back with its loop
+/// rewritten to `if (0 < 10) { return 0; }`, scoring a perfect zero.
+///
+/// Five of the eight were that one cause, now fixed and pinned by
+/// [`fold_accounts_for_every_internal_edge`]. Three remain, and they are why
+/// the default has not moved:
+///
+/// - an empty `if` shell where the existing path folds a short-circuit `&&`,
+///   caught by the HIR presentation invariants rather than by any assertion;
+/// - a changed merge binding at a duplicated join;
+/// - a `signum` diamond emitted as a nested ternary instead of `return 1`,
+///   which is a benign form change and the least of the three.
+///
+/// The first two are quality losses this driver would ship if it ran first.
+/// It needs to *compare* against the existing path rather than pre-empt it --
+/// angr's `strictly_less_gotos` discipline, which observed lowering
+/// now makes affordable (see `StructuringHost::lower_observed`).
 pub fn match_fold_driver_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
@@ -97,8 +122,15 @@ pub fn match_fold_driver_enabled() -> bool {
 /// Structure a whole function by folding its graph to a single node.
 ///
 /// Returns `None` when the graph could not be reduced to one node, leaving
-/// the caller on its existing path.
+/// the caller on its existing path with host state untouched -- the fold runs
+/// against a fork that is committed only if it succeeds.
 pub fn structure_by_match_fold(
+    host: &mut impl StructuringHost,
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    host.lower_isolated(fold_to_single_node)
+}
+
+fn fold_to_single_node(
     host: &mut impl StructuringHost,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
     let successors: Vec<Vec<usize>> = host.successors().to_vec();
@@ -109,15 +141,28 @@ pub fn structure_by_match_fold(
     let budget = successors.len().saturating_mul(MAX_ROUNDS_PER_NODE);
     let mut concessions = 0usize;
 
+    let reachable = blocks_reachable_from_entry(&successors);
+
     for _ in 0..budget {
         if let Some(sole) = graph.sole_live_node() {
-            return Ok(graph
-                .node(sole)
-                .and_then(|n| n.body.clone())
-                .or_else(|| Some(Vec::new())));
+            let Some(node) = graph.node(sole) else {
+                return Ok(None);
+            };
+            if !covers_every_reachable_block(node, &reachable) {
+                return Ok(None);
+            }
+            return Ok(node.body.clone().or_else(|| Some(Vec::new())));
         }
         if let Some(shape) = find_shape(&graph) {
-            let Some(body) = lower_shape(host, &graph, &shape)? else {
+            // Check before lowering: a fold that would delete control flow is
+            // not worth building a body for.
+            let expressible = fold_accounts_for_every_internal_edge(&graph, &shape);
+            let lowered = if expressible {
+                lower_shape(host, &graph, &shape)?
+            } else {
+                None
+            };
+            let Some(body) = lowered else {
                 // The shape is graph-legal but not expressible yet. Concede an
                 // edge so the next round sees a different graph rather than
                 // rediscovering the same unlowerable region forever.
@@ -140,6 +185,96 @@ pub fn structure_by_match_fold(
         }
     }
     Ok(None)
+}
+
+/// The edges a shape's emitted body actually accounts for.
+///
+/// `None` when the member list does not match the kind, which is itself a
+/// reason to decline.
+fn expected_internal_edges(shape: &Shape) -> Option<Vec<(NodeId, NodeId)>> {
+    Some(match (shape.kind, &shape.members[..]) {
+        (ShapeKind::Sequence, &[n, s]) => vec![(n, s)],
+        (ShapeKind::IfThen | ShapeKind::IfNoExit, &[n, clause]) => vec![(n, clause)],
+        (ShapeKind::IfThenElse, &[n, t, e]) => vec![(n, t), (n, e)],
+        (ShapeKind::WhileDo, &[n, inner]) => vec![(n, inner), (inner, n)],
+        (ShapeKind::DoWhile, &[n, cond]) => vec![(n, cond), (cond, n)],
+        (ShapeKind::SelfLoop, &[n]) => vec![(n, n)],
+        _ => return None,
+    })
+}
+
+/// Whether folding `shape` would delete control flow its body does not
+/// express.
+///
+/// **The obligation node coverage cannot express.** [`CollapseGraph::collapse`]
+/// detaches every edge internal to the region, on the assumption that the
+/// emitted body says what those edges said. Any internal edge the shape does
+/// not account for is therefore silently deleted -- and an acyclic shape
+/// matched over a region containing a back edge deletes the loop.
+///
+/// That is exactly what happened: `for_simple_fn` folded with all five of its
+/// blocks present and correctly owned, and came back as a straight line whose
+/// loop had become `if (0 < 10) { return 0; }`. Every block survived; the
+/// cycle did not. Checking membership alone reports that fold as sound, which
+/// is why this check exists separately.
+fn fold_accounts_for_every_internal_edge(graph: &CollapseGraph, shape: &Shape) -> bool {
+    let Some(mut expected) = expected_internal_edges(shape) else {
+        return false;
+    };
+    let set: crate::HashSet<NodeId> = shape.members.iter().copied().collect();
+    let mut actual: Vec<(NodeId, NodeId)> = Vec::new();
+    for &m in &shape.members {
+        for &s in graph.successors(m) {
+            if set.contains(&s) {
+                actual.push((m, s));
+            }
+        }
+    }
+    actual.sort_unstable();
+    actual.dedup();
+    expected.sort_unstable();
+    expected.dedup();
+    actual == expected
+}
+
+/// Blocks reachable from the function entry, which is always block 0.
+fn blocks_reachable_from_entry(successors: &[Vec<usize>]) -> Vec<usize> {
+    let mut seen = vec![false; successors.len()];
+    let mut stack = vec![0usize];
+    seen[0] = true;
+    let mut out = Vec::new();
+    while let Some(b) = stack.pop() {
+        out.push(b);
+        for &s in &successors[b] {
+            if let Some(flag) = seen.get_mut(s) {
+                if !*flag {
+                    *flag = true;
+                    stack.push(s);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Whether the folded node still stands for the whole function.
+///
+/// **The obligation the goto metric cannot express.** Folding to one node with
+/// no conceded edges bounds how many jumps the body contains; it says nothing
+/// about whether the body still contains the function. Those are independent,
+/// and the cheapest way to score a perfect zero is to lose a region: a
+/// `for` loop came back as `return 0;` -- init, test, and body gone, not a
+/// jump anywhere in it -- and every goto-density check called that an
+/// improvement.
+///
+/// So the surviving node must be entered at the function entry and own every
+/// block reachable from it. `BlockOwnership` is merged through every collapse
+/// precisely so this is answerable at the end.
+///
+/// Unreachable blocks are excluded deliberately: they contribute no behaviour,
+/// and requiring them would decline folds that are entirely correct.
+fn covers_every_reachable_block(node: &crate::collapse_graph::CollapseNode, reachable: &[usize]) -> bool {
+    node.entry_block == 0 && reachable.iter().all(|&b| node.members.contains(b))
 }
 
 /// Drop one edge so the next round faces a different graph.
@@ -180,19 +315,53 @@ fn concede_one_edge(graph: &mut CollapseGraph, failed: Option<&Shape>) -> bool {
     false
 }
 
-/// Statements a node contributes, excluding its terminator.
+/// Statements a node contributes, including the `return` a terminal block
+/// ends with.
+///
+/// A node's *outgoing* control flow is carried by graph edges, and the shape
+/// that claimed the node is what expresses them, so a branch or jump
+/// terminator contributes no statement here. A `return` is the exception: no
+/// edge carries it, so leaving it out silently changes what the function
+/// does. It did -- a function whose body folded cleanly came back with its
+/// trailing `return r0` gone and its return type degraded to `undefined`,
+/// while the goto count looked like it had improved.
+///
+/// Anything else a terminal block can end with is control flow this driver
+/// cannot place, so the region is declined rather than emitted without it.
+///
+/// `None` means "not expressible", propagated by every caller.
 fn node_statements(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
     id: NodeId,
-) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
     let Some(node) = graph.node(id) else {
-        return Ok(Vec::new());
+        return Ok(Some(Vec::new()));
     };
     if let Some(body) = &node.body {
-        return Ok(body.clone());
+        return Ok(Some(body.clone()));
     }
-    host.lower_block_stmts(node.entry_block)
+    let block = node.entry_block;
+    let terminal = host.successors()[block].is_empty();
+    let mut stmts = host.lower_block_stmts(block)?;
+    match host.lower_block_terminator(block)? {
+        // No edge carries a return, so it has to become a statement here.
+        LoweredTerminator::Return(expr) if terminal => stmts.push(PreHirStmt::Return(expr)),
+        // Running off the end of the function places nothing.
+        LoweredTerminator::Fallthrough(_) if terminal => {}
+        // Outgoing control flow: the graph edge expresses it and the shape
+        // that claimed this node places it. A branch is re-derived by
+        // `condition_towards` at the shape that owns the condition.
+        LoweredTerminator::Fallthrough(_)
+        | LoweredTerminator::Goto(_)
+        | LoweredTerminator::Cond { .. }
+            if !terminal => {}
+        // A switch dispatch, an unrecovered indirect transfer, or a return
+        // from a node that still has successors: control flow this driver
+        // has no way to place. Decline rather than drop it.
+        _ => return Ok(None),
+    }
+    Ok(Some(stmts))
 }
 
 /// Whether `id` is the node entered at `address`.
@@ -255,8 +424,13 @@ fn lower_shape(
             let [n, s] = shape.members[..] else {
                 return Ok(None);
             };
-            let mut body = node_statements(host, graph, n)?;
-            body.extend(node_statements(host, graph, s)?);
+            let (Some(mut body), Some(tail)) = (
+                node_statements(host, graph, n)?,
+                node_statements(host, graph, s)?,
+            ) else {
+                return Ok(None);
+            };
+            body.extend(tail);
             Ok(Some(body))
         }
         ShapeKind::IfThen | ShapeKind::IfNoExit => {
@@ -269,10 +443,15 @@ fn lower_shape(
             let Some(cond) = condition_towards(host, graph, n, clause, other)? else {
                 return Ok(None);
             };
-            let mut body = node_statements(host, graph, n)?;
+            let (Some(mut body), Some(then_body)) = (
+                node_statements(host, graph, n)?,
+                node_statements(host, graph, clause)?,
+            ) else {
+                return Ok(None);
+            };
             body.push(PreHirStmt::If {
                 cond,
-                then_body: std::rc::Rc::new(node_statements(host, graph, clause)?),
+                then_body: std::rc::Rc::new(then_body),
                 else_body: std::rc::Rc::new(Vec::new()),
             });
             Ok(Some(body))
@@ -284,11 +463,17 @@ fn lower_shape(
             let Some(cond) = condition_towards(host, graph, n, t, e)? else {
                 return Ok(None);
             };
-            let mut body = node_statements(host, graph, n)?;
+            let (Some(mut body), Some(then_body), Some(else_body)) = (
+                node_statements(host, graph, n)?,
+                node_statements(host, graph, t)?,
+                node_statements(host, graph, e)?,
+            ) else {
+                return Ok(None);
+            };
             body.push(PreHirStmt::If {
                 cond,
-                then_body: std::rc::Rc::new(node_statements(host, graph, t)?),
-                else_body: std::rc::Rc::new(node_statements(host, graph, e)?),
+                then_body: std::rc::Rc::new(then_body),
+                else_body: std::rc::Rc::new(else_body),
             });
             Ok(Some(body))
         }
@@ -305,12 +490,18 @@ fn lower_shape(
             // The test block's own statements run every iteration, so they
             // belong inside the loop, ahead of the condition -- which only
             // reads correctly when the test block contributes nothing.
-            if !node_statements(host, graph, n)?.is_empty() {
+            let (Some(test_stmts), Some(body)) = (
+                node_statements(host, graph, n)?,
+                node_statements(host, graph, inner)?,
+            ) else {
+                return Ok(None);
+            };
+            if !test_stmts.is_empty() {
                 return Ok(None);
             }
             Ok(Some(vec![PreHirStmt::While {
                 cond,
-                body: std::rc::Rc::new(node_statements(host, graph, inner)?),
+                body: std::rc::Rc::new(body),
             }]))
         }
         ShapeKind::DoWhile => {
@@ -323,8 +514,13 @@ fn lower_shape(
             let Some(cond) = condition_towards(host, graph, cond_node, n, exit)? else {
                 return Ok(None);
             };
-            let mut body = node_statements(host, graph, n)?;
-            body.extend(node_statements(host, graph, cond_node)?);
+            let (Some(mut body), Some(tail)) = (
+                node_statements(host, graph, n)?,
+                node_statements(host, graph, cond_node)?,
+            ) else {
+                return Ok(None);
+            };
+            body.extend(tail);
             Ok(Some(vec![PreHirStmt::DoWhile {
                 body: std::rc::Rc::new(body),
                 cond,
@@ -342,10 +538,64 @@ mod tests {
 
     #[test]
     fn env_gate_is_off_unless_explicitly_enabled() {
-        // The driver must never engage by accident while it is being measured.
+        // The driver must never engage by accident while it still loses
+        // regions on small graphs.
         if std::env::var_os("FISSION_MATCH_FOLD").is_none() {
             assert!(!match_fold_driver_enabled());
         }
+    }
+
+    #[test]
+    fn a_back_edge_inside_an_acyclic_shape_is_not_foldable() {
+        // 0 -> 1 -> 0. Read as a Sequence, folding {0,1} would detach 1 -> 0
+        // and the loop would be gone -- with every block still present, which
+        // is why membership coverage cannot catch this.
+        let g = CollapseGraph::from_cfg(&[vec![1], vec![0]]);
+        let seq = Shape {
+            kind: ShapeKind::Sequence,
+            entry: 0,
+            members: vec![0, 1],
+            follow: None,
+        };
+        assert!(
+            !fold_accounts_for_every_internal_edge(&g, &seq),
+            "a sequence does not express a back edge"
+        );
+        // The same two nodes as a loop do account for both edges.
+        let loop_shape = Shape {
+            kind: ShapeKind::WhileDo,
+            entry: 0,
+            members: vec![0, 1],
+            follow: None,
+        };
+        assert!(fold_accounts_for_every_internal_edge(&g, &loop_shape));
+    }
+
+    #[test]
+    fn an_extra_internal_edge_blocks_the_fold() {
+        // 0 -> {1,2}, 1 -> 2: an if/then whose clause also reaches the follow
+        // *inside* the region. IfThen expresses only 0 -> 1, so folding
+        // {0,1,2} as one would drop two edges.
+        let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![2], vec![]]);
+        let shape = Shape {
+            kind: ShapeKind::IfThen,
+            entry: 0,
+            members: vec![0, 1, 2],
+            follow: None,
+        };
+        assert!(!fold_accounts_for_every_internal_edge(&g, &shape));
+    }
+
+    #[test]
+    fn a_plain_if_then_accounts_for_its_only_internal_edge() {
+        let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![2], vec![]]);
+        let shape = Shape {
+            kind: ShapeKind::IfThen,
+            entry: 0,
+            members: vec![0, 1],
+            follow: Some(2),
+        };
+        assert!(fold_accounts_for_every_internal_edge(&g, &shape));
     }
 
     #[test]

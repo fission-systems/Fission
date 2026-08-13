@@ -183,6 +183,44 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     ) -> Result<LoweredTerminator, MlilPreviewError> {
         PreviewBuilder::lower_block_terminator(self, block_idx)
     }
+    fn lower_isolated<T, F>(&mut self, lower: F) -> Result<Option<T>, MlilPreviewError>
+    where
+        F: FnOnce(&mut Self) -> Result<Option<T>, MlilPreviewError>,
+    {
+        let mut isolated = self.clone();
+        let result =
+            crate::midend::builder::with_isolated_register_origins(|| lower(&mut isolated));
+        match result {
+            Ok(Some(value)) => {
+                // Commit only the semantic identities the accepted body
+                // references. The fork's CFG, collapse caches, terminator
+                // caches, and trial ordering must not affect any later region.
+                commit_isolated_semantic_identities(self, isolated);
+                Ok(Some(value))
+            }
+            declined => {
+                // The work a declined attempt consumed still counts against
+                // the budget, or speculation would be free.
+                self.sese_region_proof_calls.set(
+                    self.sese_region_proof_calls
+                        .get()
+                        .max(isolated.sese_region_proof_calls.get()),
+                );
+                declined
+            }
+        }
+    }
+    fn lower_observed<T, F>(&mut self, lower: F) -> Result<T, MlilPreviewError>
+    where
+        F: FnOnce(&mut Self) -> Result<T, MlilPreviewError>,
+    {
+        // Nothing is propagated back, not even the proof-call budget: an
+        // observation is meant to be free of consequence. It is still bounded,
+        // because `structuring_total_work_units` is an `Rc` the clone shares,
+        // so the work the trial does is charged to the shared total.
+        let mut observed = self.clone();
+        crate::midend::builder::with_discarded_register_origins(|| lower(&mut observed))
+    }
     fn lower_virtual_exit_if_else_isolated(
         &mut self,
         idx: usize,
@@ -200,23 +238,22 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
             .copied()
             .collect();
         baseline_members.insert(idx);
-        let mut baseline = self.clone();
-        let baseline_body = crate::midend::builder::with_discarded_register_origins(|| {
+        let block_count = self.block_count();
+        let baseline_body = self.lower_observed(|baseline| {
             fission_midend_structuring::reconstruct_sese_final_body_for_members(
-                &mut baseline,
+                baseline,
                 idx,
-                self.block_count(),
+                block_count,
                 &baseline_children,
                 &baseline_members,
             )
         })?;
         let baseline_gotos = fission_midend_structuring::count_explicit_gotos(&baseline_body);
 
-        let mut isolated = self.clone();
-        let result = crate::midend::builder::with_isolated_register_origins(|| {
+        self.lower_isolated(|isolated| {
             let candidate =
                 fission_midend_structuring::conditionals::lower_virtual_exit_if_else_committed(
-                    &mut isolated,
+                    isolated,
                     idx,
                     plan,
                     first_children,
@@ -237,33 +274,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
                 return Ok(None);
             }
             Ok(Some((stmt, skip_to)))
-        });
-        match result {
-            Ok(Some(candidate)) => {
-                // Commit only the semantic identities referenced by the
-                // accepted AST. The isolated host's CFG, collapse caches,
-                // terminator caches, and trial ordering must not affect
-                // lowering of the shared tail or any later region.
-                commit_isolated_semantic_identities(self, isolated);
-                Ok(Some(candidate))
-            }
-            Ok(None) => {
-                self.sese_region_proof_calls.set(
-                    self.sese_region_proof_calls
-                        .get()
-                        .max(isolated.sese_region_proof_calls.get()),
-                );
-                Ok(None)
-            }
-            Err(err) => {
-                self.sese_region_proof_calls.set(
-                    self.sese_region_proof_calls
-                        .get()
-                        .max(isolated.sese_region_proof_calls.get()),
-                );
-                Err(err)
-            }
-        }
+        })
     }
     fn lower_rotated_while_isolated(
         &mut self,
@@ -274,10 +285,12 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
             return Ok(None);
         };
 
-        let mut baseline = self.clone();
-        fork_structuring_work_counter(&mut baseline);
-        let baseline_stmt = crate::midend::builder::with_discarded_register_origins(|| {
-            fission_midend_structuring::try_lower_while(&mut baseline, head_idx)
+        // Both trials fork the work counter rather than sharing it: rotating a
+        // loop is expected to be expensive, and charging the trial to the
+        // shared total would let it starve the real attempt that follows.
+        let baseline_stmt = self.lower_observed(|baseline| {
+            fork_structuring_work_counter(baseline);
+            fission_midend_structuring::try_lower_while(baseline, head_idx)
         })?;
         let Some((baseline_stmt, baseline_exit)) = baseline_stmt else {
             return Ok(None);
@@ -289,11 +302,10 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
             std::slice::from_ref(&baseline_stmt),
         ) + usize::from(self.fallthrough_index(entry_pred_idx) != Some(head_idx));
 
-        let mut isolated = self.clone();
-        fork_structuring_work_counter(&mut isolated);
-        let result = crate::midend::builder::with_isolated_register_origins(|| {
+        self.lower_isolated(|isolated| {
+            fork_structuring_work_counter(isolated);
             let candidate =
-                fission_midend_structuring::try_lower_rotated_while(&mut isolated, head_idx)?;
+                fission_midend_structuring::try_lower_rotated_while(isolated, head_idx)?;
             let Some((stmt, skip_to)) = candidate else {
                 return Ok(None);
             };
@@ -312,29 +324,7 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
                 return Ok(None);
             }
             Ok(Some((stmt, skip_to)))
-        });
-        match result {
-            Ok(Some(candidate)) => {
-                commit_isolated_semantic_identities(self, isolated);
-                Ok(Some(candidate))
-            }
-            Ok(None) => {
-                self.sese_region_proof_calls.set(
-                    self.sese_region_proof_calls
-                        .get()
-                        .max(isolated.sese_region_proof_calls.get()),
-                );
-                Ok(None)
-            }
-            Err(err) => {
-                self.sese_region_proof_calls.set(
-                    self.sese_region_proof_calls
-                        .get()
-                        .max(isolated.sese_region_proof_calls.get()),
-                );
-                Err(err)
-            }
-        }
+        })
     }
     fn lower_return_join_expr_for_predecessor(
         &mut self,

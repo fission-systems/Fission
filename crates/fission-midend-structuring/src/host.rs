@@ -98,6 +98,50 @@ pub trait StructuringHost {
         &mut self,
         block_idx: usize,
     ) -> Result<LoweredTerminator, MlilPreviewError>;
+    /// Run a speculative lowering against forked host state, committing only
+    /// if it succeeds.
+    ///
+    /// `lower` receives a fork of the host. On `Ok(Some(_))` the semantic
+    /// identities the fork minted -- locals, temps, parameter bindings, call
+    /// results, register origins -- are merged back, and everything else it
+    /// touched (CFG, fact caches, terminator memoisation, trial ordering) is
+    /// discarded. On `Ok(None)` or `Err` nothing is merged: the host is left
+    /// as a caller that never attempted the lowering would find it.
+    ///
+    /// This exists because **lowering is not a query.** `lower_block_stmts`
+    /// and `lower_block_terminator` mint names and record bindings as a side
+    /// effect, so a driver that lowers a candidate in order to decide whether
+    /// to keep it has already changed the host by the time it declines. That
+    /// leak is what forced the recursive complex-arm work to be reverted, and
+    /// it reappeared in the match-fold driver -- measurably, as regressions in
+    /// functions that driver *declined*. Any structuring pass that lowers
+    /// before it commits must route through here.
+    ///
+    /// The fork shares the structuring work counter, so trial lowering is
+    /// still charged against the total-work budget and unbounded speculation
+    /// is stopped by it.
+    fn lower_isolated<T, F>(&mut self, lower: F) -> Result<Option<T>, MlilPreviewError>
+    where
+        Self: Sized,
+        F: FnOnce(&mut Self) -> Result<Option<T>, MlilPreviewError>;
+
+    /// Run a lowering purely to observe what it would produce, discarding
+    /// everything it touched on every outcome.
+    ///
+    /// For pricing a candidate -- counting the jumps some alternative would
+    /// cost -- before choosing between it and another. Unlike
+    /// [`Self::lower_isolated`] there is no success path that commits, so the
+    /// result may be inspected but never emitted: its identity bindings do not
+    /// exist on the host that will do the real lowering.
+    ///
+    /// Free of consequence, but not free: the work counter is shared, so a
+    /// caller that observes without bound still exhausts the total-work
+    /// budget.
+    fn lower_observed<T, F>(&mut self, lower: F) -> Result<T, MlilPreviewError>
+    where
+        Self: Sized,
+        F: FnOnce(&mut Self) -> Result<T, MlilPreviewError>;
+
     /// Execute an already-admitted virtual-exit if/else candidate on isolated
     /// host state. The production host commits the fork only on success.
     fn lower_virtual_exit_if_else_isolated(
