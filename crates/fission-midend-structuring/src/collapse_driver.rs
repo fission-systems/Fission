@@ -334,9 +334,20 @@ pub(crate) fn node_statements(
         | LoweredTerminator::Goto(_)
         | LoweredTerminator::Cond { .. }
             if !terminal => {}
-        // A switch dispatch, an unrecovered indirect transfer, or a return
-        // from a node that still has successors: control flow this driver
-        // has no way to place. Decline rather than drop it.
+        // An unresolved transfer out of a terminal block is still
+        // expressible: the linear path emits it as a residual
+        // unsupported-control statement, and emitting the same thing here
+        // keeps the transfer rather than dropping it. This was the single
+        // largest remaining refusal -- 18 of the 19 `IfNoExit` regions the
+        // DREAM driver could not fold ended in a clause exactly like this.
+        LoweredTerminator::Unsupported {
+            evidence,
+            target_expr,
+        } if terminal => {
+            stmts.push(host.emit_unsupported_control_surface(evidence, target_expr));
+        }
+        // A switch dispatch, or a jump whose target left the graph: control
+        // flow this driver has no way to place. Decline rather than drop it.
         _ => return Ok(None),
     }
     Ok(Some(stmts))
