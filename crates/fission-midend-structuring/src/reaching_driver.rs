@@ -461,19 +461,32 @@ fn concede_one_edge(
     Ok(graph.virtualize_edge(from, to))
 }
 
-/// The edge to give up, preferring a back edge.
+/// The edge to give up.
+///
+/// Prefers a back edge -- the classic unstructured jump, and the one a reader
+/// least minds seeing -- but only among edges whose target keeps another
+/// predecessor.
+///
+/// That second condition is not cosmetic. Conceding a node's *only* incoming
+/// edge leaves it unreachable in the graph, so it gets no reaching condition
+/// and the whole region is declined -- measured at 30 functions, the second
+/// largest refusal once concession was turned on. The jump still reaches it,
+/// but the conditions are computed from edges, and that one is gone.
 fn pick_conceded_edge(graph: &CollapseGraph) -> Option<(NodeId, NodeId)> {
     let live: Vec<NodeId> = graph.live_nodes().collect();
+    let usable = |u: NodeId, v: NodeId| {
+        graph.successors(u).len() <= 2 && graph.predecessors(v).len() >= 2
+    };
     for &u in &live {
         for &v in graph.successors(u) {
-            if v <= u && graph.successors(u).len() <= 2 {
+            if v <= u && usable(u, v) {
                 return Some((u, v));
             }
         }
     }
     for &u in &live {
-        if graph.successors(u).len() <= 2 {
-            if let Some(&v) = graph.successors(u).first() {
+        for &v in graph.successors(u) {
+            if usable(u, v) {
                 return Some((u, v));
             }
         }
