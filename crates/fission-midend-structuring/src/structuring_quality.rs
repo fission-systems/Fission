@@ -23,8 +23,9 @@
 //!   remain proportional to the transfer reduction.
 //! The largest single guard is also measured for callers that open a new,
 //! broader candidate funnel. Total formula size can look affordable while one
-//! `if` carries most of the reaching-condition forest; the fallback funnel
-//! uses that measurement as an additional admission constraint.
+//! `if` carries most of the reaching-condition forest; the linear-fallback and
+//! hierarchical funnels use that measurement as an additional admission
+//! constraint.
 //!
 //! A candidate is taken only when it strictly wins on gotos and gives up
 //! nothing on switches or empty shells. Nesting and guard formulas are the
@@ -107,10 +108,10 @@ impl StructuringQuality {
     /// Whether growth of the largest single guard stays proportional to the
     /// transfers removed by this candidate.
     ///
-    /// This is deliberately separate from [`Self::improves_on`]. The main
-    /// candidate funnel predates this measurement and has corpus-validated
-    /// winners outside this narrow bound. Callers opening a broader funnel can
-    /// opt in without retroactively rejecting those established candidates.
+    /// This is deliberately separate from [`Self::improves_on`]. Established
+    /// candidates predate this measurement and have corpus-validated winners
+    /// outside the narrow bound. Callers opening a broader funnel opt in
+    /// without retroactively rejecting those candidates.
     pub fn has_proportional_max_guard_growth(&self, baseline: &Self) -> bool {
         let removed = baseline.gotos.saturating_sub(self.gotos);
         self.max_guard_formula_size <= max_guard_budget(baseline.max_guard_formula_size, removed)
@@ -118,12 +119,11 @@ impl StructuringQuality {
 }
 
 fn max_guard_budget(baseline_max: usize, removed_gotos: usize) -> usize {
-    // One eliminated transfer may expose at most two predicate terms in the
-    // largest condition. A term needs an atom, an optional negation, and a
-    // binary connector: three expression nodes, or six for both terms. Larger
-    // growth means reaching paths are being concentrated into one condition
-    // instead of exchanging a transfer for a local decision.
-    const MAX_GUARD_NODES_PER_REMOVED_GOTO: usize = 6;
+    // One eliminated transfer exposes one predicate term. A materialised term
+    // needs a boolean atom, an optional negation, and a binary connector:
+    // three expression nodes. Four leaves one node of slack without allowing
+    // independent paths to be concentrated into a single condition.
+    const MAX_GUARD_NODES_PER_REMOVED_GOTO: usize = 4;
     baseline_max.saturating_add(removed_gotos.saturating_mul(MAX_GUARD_NODES_PER_REMOVED_GOTO))
 }
 
@@ -447,11 +447,11 @@ mod tests {
     }
 
     #[test]
-    fn one_guard_cannot_absorb_more_than_two_terms_per_removed_jump() {
+    fn one_guard_cannot_absorb_more_than_one_term_per_removed_jump() {
         let baseline = measure(&[if_stmt(vec![goto("a"), goto("b")], vec![])]);
 
         let affordable = measure(&[PreHirStmt::If {
-            cond: doubled_cond(2), // Seven nodes: baseline one plus six.
+            cond: doubled_cond(1), // Three nodes: one boolean term.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);

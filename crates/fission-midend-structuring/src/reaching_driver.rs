@@ -205,8 +205,8 @@ pub fn dream_driver_enabled() -> bool {
 /// costs nothing -- see [`StructuringHost::lower_isolated`].
 pub fn structure_by_reaching_conditions(
     host: &mut impl StructuringHost,
-) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, false))
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, false, false))
 }
 
 /// Structure with internal terminal gotos that an earlier pass virtualized.
@@ -216,8 +216,22 @@ pub fn structure_by_reaching_conditions(
 /// transfer cannot displace a candidate that already structured cleanly.
 pub fn structure_by_reaching_conditions_with_virtual_gotos(
     host: &mut impl StructuringHost,
-) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, true))
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, true, false))
+}
+
+/// Structure after first abstracting proven acyclic SESE subregions.
+pub fn structure_by_hierarchical_reaching_conditions(
+    host: &mut impl StructuringHost,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, false, true))
+}
+
+/// Hierarchical reaching conditions plus explicit virtualized transfers.
+pub fn structure_by_hierarchical_reaching_conditions_with_virtual_gotos(
+    host: &mut impl StructuringHost,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, true, true))
 }
 
 /// Price a reaching-condition candidate without committing minted identities.
@@ -227,30 +241,50 @@ pub fn structure_by_reaching_conditions_with_virtual_gotos(
 /// host state or become the emitted body.
 pub fn preview_reaching_conditions(
     host: &mut impl StructuringHost,
-) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    host.lower_observed(|observed| structure_acyclic_remainder(observed, false))
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_observed(|observed| structure_acyclic_remainder(observed, false, false))
 }
 
 /// Price the virtual-goto reaching-condition variant without committing it.
 pub fn preview_reaching_conditions_with_virtual_gotos(
     host: &mut impl StructuringHost,
-) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    host.lower_observed(|observed| structure_acyclic_remainder(observed, true))
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_observed(|observed| structure_acyclic_remainder(observed, true, false))
+}
+
+/// Price the hierarchical reaching-condition variant without committing it.
+pub fn preview_hierarchical_reaching_conditions(
+    host: &mut impl StructuringHost,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_observed(|observed| structure_acyclic_remainder(observed, false, true))
+}
+
+/// Price hierarchical reaching conditions with virtualized transfers.
+pub fn preview_hierarchical_reaching_conditions_with_virtual_gotos(
+    host: &mut impl StructuringHost,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_observed(|observed| structure_acyclic_remainder(observed, true, true))
 }
 
 fn structure_acyclic_remainder(
     host: &mut impl StructuringHost,
     materialize_virtual_transfers: bool,
-) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    let outcome = describe_region(host, materialize_virtual_transfers)?;
+    hierarchical: bool,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    let outcome = describe_region(host, materialize_virtual_transfers, hierarchical)?;
     if crate::linear_types::structuring_diag_enabled() {
-        let name = if materialize_virtual_transfers {
-            "DREAM+virtual-gotos"
-        } else {
-            "DREAM"
+        let name = match (hierarchical, materialize_virtual_transfers) {
+            (false, false) => "DREAM",
+            (false, true) => "DREAM+virtual-gotos",
+            (true, false) => "DREAM-hierarchical",
+            (true, true) => "DREAM-hierarchical+virtual-gotos",
         };
         match &outcome {
-            Ok(body) => eprintln!("[DIAG] {name} offered: stmts={}", body.len()),
+            Ok(candidate) => eprintln!(
+                "[DIAG] {name} offered: stmts={} hierarchical={}",
+                candidate.body.len(),
+                candidate.used_hierarchical_regions
+            ),
             Err(reason) => eprintln!("[DIAG] {name} declined: {}", reason.as_str()),
         }
     }
@@ -260,7 +294,8 @@ fn structure_acyclic_remainder(
 fn describe_region(
     host: &mut impl StructuringHost,
     materialize_virtual_transfers: bool,
-) -> Result<Result<Vec<PreHirStmt>, DeclineReason>, MlilPreviewError> {
+    hierarchical: bool,
+) -> Result<Result<ReachingCandidate, DeclineReason>, MlilPreviewError> {
     let successors: Vec<Vec<usize>> = host.successors().to_vec();
     if successors.is_empty() {
         return Ok(Err(DeclineReason::EmptyGraph));
@@ -278,6 +313,17 @@ fn describe_region(
     // Phase 1: cycles. DREAM applies to acyclic regions, so every loop has to
     // become a single node before the conditions mean anything.
     fold_every_cycle(host, &mut graph)?;
+
+    // angr's RegionIdentifier does not hand the entire acyclic function to
+    // one condition system. It abstracts the smallest closed regions first,
+    // so decisions local to a diamond stop at its follow instead of becoming
+    // terms in every later node's path formula. Do the same over the live
+    // graph after loops have been folded.
+    let hierarchical_regions = if hierarchical {
+        fold_acyclic_sese_regions(host, &mut graph)?
+    } else {
+        0
+    };
 
     // Phase 2: the acyclic remainder.
     let dense = dense_successors(&graph);
@@ -358,7 +404,18 @@ fn describe_region(
     // rather than through a variable. The rest stay, and are legitimate --
     // they carry a decision to a node that is not adjacent to it.
     let body = inline_single_use_guards(body, &is_guard);
-    Ok(Ok(body))
+    Ok(Ok(ReachingCandidate {
+        body,
+        used_hierarchical_regions: hierarchical_regions > 0,
+    }))
+}
+
+/// A reaching-condition body plus the admission fact introduced by recursive
+/// acyclic region abstraction.
+#[derive(Debug, Clone)]
+pub struct ReachingCandidate {
+    pub body: Vec<PreHirStmt>,
+    pub used_hierarchical_regions: bool,
 }
 
 /// How deeply `body` nests conditionals and loops.
@@ -742,6 +799,216 @@ fn graph_has_cycle(graph: &CollapseGraph) -> bool {
     topological_order(&dense_successors(graph)).is_none()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AcyclicSeseRegion {
+    head: NodeId,
+    follow: NodeId,
+    members: Vec<NodeId>,
+}
+
+/// Find the smallest branch-headed, single-entry/single-exit acyclic region.
+///
+/// A real follow (rather than a virtual function exit) is required: after the
+/// members have been emitted, control can then leave the collapsed node along
+/// its one remaining graph edge. Terminal regions stay for the outer emitter,
+/// which already knows how to place returns and unsupported transfers.
+fn find_acyclic_sese_region(graph: &CollapseGraph) -> Option<AcyclicSeseRegion> {
+    let dense = dense_successors(graph);
+    let order = topological_order(&dense)?;
+    let position: crate::HashMap<NodeId, usize> = order
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(i, n)| (n, i))
+        .collect();
+    let mut best: Option<AcyclicSeseRegion> = None;
+
+    for head in graph.live_nodes() {
+        let outs = graph.successors(head);
+        if outs.len() != 2 {
+            continue;
+        }
+        let left = reachable_nodes(graph, outs[0]);
+        let right = reachable_nodes(graph, outs[1]);
+        let mut follows: Vec<NodeId> = left
+            .intersection(&right)
+            .copied()
+            .filter(|n| graph.is_live(*n) && *n != head)
+            .collect();
+        follows.sort_by_key(|n| (position.get(n).copied().unwrap_or(usize::MAX), *n));
+
+        for follow in follows {
+            let members_set = reachable_without(graph, head, follow);
+            if members_set.len() < 2 || members_set.contains(&follow) {
+                continue;
+            }
+            // A closed region cannot terminate early or leave anywhere except
+            // its one proven follow.
+            if members_set.iter().any(|&n| {
+                graph.successors(n).is_empty()
+                    || graph
+                        .successors(n)
+                        .iter()
+                        .any(|s| !members_set.contains(s) && *s != follow)
+            }) {
+                continue;
+            }
+            let mut members: Vec<NodeId> = members_set.into_iter().collect();
+            members.sort_by_key(|n| (position.get(n).copied().unwrap_or(usize::MAX), *n));
+            if graph.check_single_entry(&members, head).is_err() {
+                continue;
+            }
+            let candidate = AcyclicSeseRegion {
+                head,
+                follow,
+                members,
+            };
+            let key = (
+                candidate.members.len(),
+                position.get(&candidate.head).copied().unwrap_or(usize::MAX),
+                candidate.head,
+                candidate.follow,
+            );
+            let better = best.as_ref().is_none_or(|current| {
+                key < (
+                    current.members.len(),
+                    position.get(&current.head).copied().unwrap_or(usize::MAX),
+                    current.head,
+                    current.follow,
+                )
+            });
+            if better {
+                best = Some(candidate);
+            }
+            break;
+        }
+    }
+    best
+}
+
+fn reachable_nodes(graph: &CollapseGraph, start: NodeId) -> crate::HashSet<NodeId> {
+    let mut seen = crate::HashSet::default();
+    let mut stack = vec![start];
+    while let Some(n) = stack.pop() {
+        if !graph.is_live(n) || !seen.insert(n) {
+            continue;
+        }
+        stack.extend(graph.successors(n).iter().copied());
+    }
+    seen
+}
+
+fn reachable_without(graph: &CollapseGraph, start: NodeId, stop: NodeId) -> crate::HashSet<NodeId> {
+    let mut seen = crate::HashSet::default();
+    let mut stack = vec![start];
+    while let Some(n) = stack.pop() {
+        if n == stop || !graph.is_live(n) || !seen.insert(n) {
+            continue;
+        }
+        stack.extend(graph.successors(n).iter().copied());
+    }
+    seen
+}
+
+/// Abstract closed acyclic regions until no further proof succeeds.
+fn fold_acyclic_sese_regions(
+    host: &mut impl StructuringHost,
+    graph: &mut CollapseGraph,
+) -> Result<usize, MlilPreviewError> {
+    let budget = graph.node_capacity();
+    let mut folded_count = 0usize;
+    for _ in 0..budget {
+        let Some(region) = find_acyclic_sese_region(graph) else {
+            break;
+        };
+        // Lowering is still effectful even after the graph proof. Run the
+        // region on a nested isolated host and commit identities only when its
+        // complete body is placeable and within the downstream cost bounds.
+        let body = host.lower_isolated(|isolated| {
+            lower_acyclic_members(isolated, graph, &region.members, region.head)
+                .map(|outcome| outcome.ok())
+        })?;
+        let Some(body) = body else {
+            // The smallest region is structurally valid but not lowerable.
+            // Trying a containing region would necessarily touch the same
+            // blocker, so preserve the existing whole-region fallback.
+            break;
+        };
+        let folded = graph
+            .collapse(&region.members, region.head, body)
+            .expect("the pure single-entry proof is rechecked without graph mutation");
+        graph.set_governing_block(folded, None);
+        folded_count += 1;
+    }
+    Ok(folded_count)
+}
+
+fn lower_acyclic_members(
+    host: &mut impl StructuringHost,
+    graph: &CollapseGraph,
+    members: &[NodeId],
+    head: NodeId,
+) -> Result<Result<Vec<PreHirStmt>, DeclineReason>, MlilPreviewError> {
+    let member_set: crate::HashSet<NodeId> = members.iter().copied().collect();
+    let mut dense = vec![Vec::new(); graph.node_capacity()];
+    for &n in members {
+        dense[n] = graph
+            .successors(n)
+            .iter()
+            .copied()
+            .filter(|s| member_set.contains(s))
+            .collect();
+    }
+    let Some(order) = topological_order(&dense) else {
+        return Ok(Err(DeclineReason::ReachingFailed));
+    };
+    let branches = match collect_branches_for(host, graph, members.iter().copied())? {
+        Ok(branches) => branches,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    if branches.len() > MAX_DECISIONS {
+        return Ok(Err(DeclineReason::TooManyDecisions));
+    }
+
+    let mut guards = Vec::new();
+    let bound = {
+        let mut mint = |_n: NodeId| {
+            let name = host.alloc_temp_binding(NirType::Bool, None);
+            guards.push(name.clone());
+            name
+        };
+        materialize_branch_conditions(&branches, &mut mint)
+    };
+    let is_guard = |name: &str| guards.iter().any(|g| g == name);
+    let Ok(reaching) = compute_reaching_conditions(&dense, head, bound.edge_condition()) else {
+        return Ok(Err(DeclineReason::ReachingFailed));
+    };
+    if members.iter().any(|n| !reaching.contains_key(n)) {
+        return Ok(Err(DeclineReason::NodeWithoutCondition));
+    }
+
+    let mut bodies = crate::HashMap::default();
+    for &n in members {
+        let Some(mut stmts) = node_statements(host, graph, n)? else {
+            return Ok(Err(DeclineReason::UnplaceableTerminator));
+        };
+        if let Some((_, binding)) = bound.bindings.iter().find(|(node, _)| *node == n) {
+            stmts.push(binding.clone());
+        }
+        bodies.insert(n, stmts);
+    }
+    let body = emit_acyclic_region(&order, &reaching, |n| {
+        bodies.get(&n).cloned().unwrap_or_default()
+    });
+    if nesting_depth(&body) > MAX_NESTING_DEPTH {
+        return Ok(Err(DeclineReason::TooDeep));
+    }
+    if crate::structuring_quality::guard_formula_size(&body) > MAX_GUARD_FORMULA_SIZE {
+        return Ok(Err(DeclineReason::GuardsTooLarge));
+    }
+    Ok(Ok(inline_single_use_guards(body, &is_guard)))
+}
+
 fn find_cyclic_shape(graph: &CollapseGraph) -> Option<Shape> {
     graph.live_nodes().find_map(|n| {
         match_inf_loop(graph, n)
@@ -800,8 +1067,16 @@ fn collect_branches(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
 ) -> Result<Result<Vec<Branch>, DeclineReason>, MlilPreviewError> {
+    collect_branches_for(host, graph, graph.live_nodes())
+}
+
+fn collect_branches_for(
+    host: &mut impl StructuringHost,
+    graph: &CollapseGraph,
+    nodes: impl IntoIterator<Item = NodeId>,
+) -> Result<Result<Vec<Branch>, DeclineReason>, MlilPreviewError> {
     let mut branches = Vec::new();
-    for n in graph.live_nodes().collect::<Vec<_>>() {
+    for n in nodes {
         let outs = graph.successors(n).to_vec();
         match outs.len() {
             0 | 1 => continue,
@@ -868,6 +1143,45 @@ mod tests {
         assert!(covers_every_live_block(&g, &[0, 1]));
         // Block 2 was never in the graph, so nothing owns it.
         assert!(!covers_every_live_block(&g, &[0, 1, 2]));
+    }
+
+    #[test]
+    fn a_closed_diamond_is_an_acyclic_sese_region() {
+        let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![3], vec![3], vec![]]);
+        assert_eq!(
+            find_acyclic_sese_region(&g),
+            Some(AcyclicSeseRegion {
+                head: 0,
+                follow: 3,
+                members: vec![0, 2, 1],
+            })
+        );
+    }
+
+    #[test]
+    fn the_smallest_nested_diamond_is_selected_first() {
+        // Outer 0 -> {1,4} -> 5; inner 1 -> {2,3} -> 4. Folding the inner
+        // decision first prevents its condition from entering the outer path
+        // formulas.
+        let g =
+            CollapseGraph::from_cfg(&[vec![1, 4], vec![2, 3], vec![4], vec![4], vec![5], vec![]]);
+        let region = find_acyclic_sese_region(&g).expect("inner region");
+        assert_eq!((region.head, region.follow), (1, 4));
+        assert_eq!(region.members.len(), 3);
+    }
+
+    #[test]
+    fn a_side_entry_prevents_acyclic_region_abstraction() {
+        // Node 1 looks like a diamond head, but 0 enters one arm directly.
+        let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![2, 3], vec![4], vec![4], vec![]]);
+        let region = find_acyclic_sese_region(&g).expect("the enclosing region is still valid");
+        assert_ne!(region.head, 1, "the side-entered inner region is rejected");
+    }
+
+    #[test]
+    fn branches_with_distinct_exits_are_not_a_closed_region() {
+        let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![], vec![]]);
+        assert!(find_acyclic_sese_region(&g).is_none());
     }
 
     #[test]

@@ -250,21 +250,28 @@ fn try_alternative_structurings(
         MatchFold,
         Dream,
         DreamVirtualGotos,
+        DreamHierarchical,
+        DreamHierarchicalVirtualGotos,
     }
 
     let mut best_quality = baseline_quality;
     let mut best_shipped = baseline_shipped;
     let mut winner = None;
 
+    struct OfferedCandidate {
+        body: Vec<PreHirStmt>,
+        hierarchical: bool,
+    }
+
     type Q = fission_midend_structuring::structuring_quality::StructuringQuality;
     let consider = |driver: AlternativeDriver,
                     name: &str,
-                    candidate: Result<Option<Vec<PreHirStmt>>, MlilPreviewError>,
+                    candidate: Result<Option<OfferedCandidate>, MlilPreviewError>,
                     best_quality: &mut Q,
                     best_shipped: &mut Q,
                     winner: &mut Option<AlternativeDriver>| {
         let candidate = match candidate {
-            Ok(Some(body)) => body,
+            Ok(Some(candidate)) => candidate,
             Ok(None) => return,
             Err(err) => {
                 if diag {
@@ -280,10 +287,13 @@ fn try_alternative_structurings(
         // second keeps the candidates that pay off and drops the ones that
         // reverse downstream: measured, using the cleaned figure alone removed
         // every regression and 88 of the gains with it.
-        let quality = measure(&candidate);
-        let candidate_shipped = shipped(&candidate);
-        let max_guard_admitted = matches!(admission, AlternativeAdmission::Established)
-            || quality.has_proportional_max_guard_growth(best_quality);
+        let quality = measure(&candidate.body);
+        let candidate_shipped = shipped(&candidate.body);
+        let max_guard_required =
+            candidate.hierarchical || matches!(admission, AlternativeAdmission::LinearFallback);
+        let max_guard_admitted = !max_guard_required
+            || (quality.has_proportional_max_guard_growth(best_quality)
+                && candidate_shipped.has_proportional_max_guard_growth(best_shipped));
         if quality.improves_on(best_quality)
             && candidate_shipped.gotos <= best_shipped.gotos
             && max_guard_admitted
@@ -327,7 +337,14 @@ fn try_alternative_structurings(
     };
 
     if fission_midend_structuring::collapse_driver::match_fold_driver_enabled() {
-        let c = fission_midend_structuring::collapse_driver::preview_match_fold(ir.builder);
+        let c = fission_midend_structuring::collapse_driver::preview_match_fold(ir.builder).map(
+            |candidate| {
+                candidate.map(|body| OfferedCandidate {
+                    body,
+                    hierarchical: false,
+                })
+            },
+        );
         consider(
             AlternativeDriver::MatchFold,
             "match-fold",
@@ -339,7 +356,13 @@ fn try_alternative_structurings(
     }
     if fission_midend_structuring::reaching_driver::dream_driver_enabled() {
         let c =
-            fission_midend_structuring::reaching_driver::preview_reaching_conditions(ir.builder);
+            fission_midend_structuring::reaching_driver::preview_reaching_conditions(ir.builder)
+                .map(|candidate| {
+                    candidate.map(|candidate| OfferedCandidate {
+                        body: candidate.body,
+                        hierarchical: candidate.used_hierarchical_regions,
+                    })
+                });
         consider(
             AlternativeDriver::Dream,
             "DREAM",
@@ -350,10 +373,51 @@ fn try_alternative_structurings(
         );
         let c = fission_midend_structuring::reaching_driver::preview_reaching_conditions_with_virtual_gotos(
             ir.builder,
-        );
+        )
+        .map(|candidate| {
+            candidate.map(|candidate| OfferedCandidate {
+                body: candidate.body,
+                hierarchical: candidate.used_hierarchical_regions,
+            })
+        });
         consider(
             AlternativeDriver::DreamVirtualGotos,
             "DREAM+virtual-gotos",
+            c,
+            &mut best_quality,
+            &mut best_shipped,
+            &mut winner,
+        );
+        let c =
+            fission_midend_structuring::reaching_driver::preview_hierarchical_reaching_conditions(
+                ir.builder,
+            )
+            .map(|candidate| {
+                candidate.map(|candidate| OfferedCandidate {
+                    body: candidate.body,
+                    hierarchical: true,
+                })
+            });
+        consider(
+            AlternativeDriver::DreamHierarchical,
+            "DREAM-hierarchical",
+            c,
+            &mut best_quality,
+            &mut best_shipped,
+            &mut winner,
+        );
+        let c = fission_midend_structuring::reaching_driver::preview_hierarchical_reaching_conditions_with_virtual_gotos(
+            ir.builder,
+        )
+        .map(|candidate| {
+            candidate.map(|candidate| OfferedCandidate {
+                body: candidate.body,
+                hierarchical: true,
+            })
+        });
+        consider(
+            AlternativeDriver::DreamHierarchicalVirtualGotos,
+            "DREAM-hierarchical+virtual-gotos",
             c,
             &mut best_quality,
             &mut best_shipped,
@@ -370,13 +434,29 @@ fn try_alternative_structurings(
             "DREAM",
             fission_midend_structuring::reaching_driver::structure_by_reaching_conditions(
                 ir.builder,
-            ),
+            )
+            .map(|candidate| candidate.map(|candidate| candidate.body)),
         ),
         Some(AlternativeDriver::DreamVirtualGotos) => (
             "DREAM+virtual-gotos",
             fission_midend_structuring::reaching_driver::structure_by_reaching_conditions_with_virtual_gotos(
                 ir.builder,
-            ),
+            )
+            .map(|candidate| candidate.map(|candidate| candidate.body)),
+        ),
+        Some(AlternativeDriver::DreamHierarchical) => (
+            "DREAM-hierarchical",
+            fission_midend_structuring::reaching_driver::structure_by_hierarchical_reaching_conditions(
+                ir.builder,
+            )
+            .map(|candidate| candidate.map(|candidate| candidate.body)),
+        ),
+        Some(AlternativeDriver::DreamHierarchicalVirtualGotos) => (
+            "DREAM-hierarchical+virtual-gotos",
+            fission_midend_structuring::reaching_driver::structure_by_hierarchical_reaching_conditions_with_virtual_gotos(
+                ir.builder,
+            )
+            .map(|candidate| candidate.map(|candidate| candidate.body)),
         ),
         None => return baseline,
     };
