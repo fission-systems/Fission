@@ -206,17 +206,52 @@ pub fn dream_driver_enabled() -> bool {
 pub fn structure_by_reaching_conditions(
     host: &mut impl StructuringHost,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    host.lower_isolated(structure_acyclic_remainder)
+    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, false))
+}
+
+/// Structure with internal terminal gotos that an earlier pass virtualized.
+///
+/// This is a separate candidate from the legacy reaching-condition path. The
+/// caller compares both before committing either, so materializing a hidden
+/// transfer cannot displace a candidate that already structured cleanly.
+pub fn structure_by_reaching_conditions_with_virtual_gotos(
+    host: &mut impl StructuringHost,
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    host.lower_isolated(|isolated| structure_acyclic_remainder(isolated, true))
+}
+
+/// Price a reaching-condition candidate without committing minted identities.
+///
+/// The body is valid only for comparison. Once admitted, the caller reruns
+/// [`structure_by_reaching_conditions`] so only the stable winner can affect
+/// host state or become the emitted body.
+pub fn preview_reaching_conditions(
+    host: &mut impl StructuringHost,
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    host.lower_observed(|observed| structure_acyclic_remainder(observed, false))
+}
+
+/// Price the virtual-goto reaching-condition variant without committing it.
+pub fn preview_reaching_conditions_with_virtual_gotos(
+    host: &mut impl StructuringHost,
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    host.lower_observed(|observed| structure_acyclic_remainder(observed, true))
 }
 
 fn structure_acyclic_remainder(
     host: &mut impl StructuringHost,
+    materialize_virtual_transfers: bool,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    let outcome = describe_region(host)?;
+    let outcome = describe_region(host, materialize_virtual_transfers)?;
     if crate::linear_types::structuring_diag_enabled() {
+        let name = if materialize_virtual_transfers {
+            "DREAM+virtual-gotos"
+        } else {
+            "DREAM"
+        };
         match &outcome {
-            Ok(body) => eprintln!("[DIAG] DREAM offered: stmts={}", body.len()),
-            Err(reason) => eprintln!("[DIAG] DREAM declined: {}", reason.as_str()),
+            Ok(body) => eprintln!("[DIAG] {name} offered: stmts={}", body.len()),
+            Err(reason) => eprintln!("[DIAG] {name} declined: {}", reason.as_str()),
         }
     }
     Ok(outcome.ok())
@@ -224,6 +259,7 @@ fn structure_acyclic_remainder(
 
 fn describe_region(
     host: &mut impl StructuringHost,
+    materialize_virtual_transfers: bool,
 ) -> Result<Result<Vec<PreHirStmt>, DeclineReason>, MlilPreviewError> {
     let successors: Vec<Vec<usize>> = host.successors().to_vec();
     if successors.is_empty() {
@@ -231,8 +267,13 @@ fn describe_region(
     }
     let mut graph = CollapseGraph::from_cfg(&successors);
 
-    // Phase 0: edges already virtualised before structuring ran.
-    materialize_virtual_gotos(host, &mut graph)?;
+    // Phase 0: one separately priced variant restores edges already
+    // virtualised before structuring ran. Keeping this out of the legacy
+    // candidate preserves functions that already structured more cleanly
+    // without the extra explicit transfers.
+    if materialize_virtual_transfers {
+        materialize_virtual_gotos(host, &mut graph)?;
+    }
 
     // Phase 1: cycles. DREAM applies to acyclic regions, so every loop has to
     // become a single node before the conditions mean anything.
@@ -375,6 +416,12 @@ fn fold_every_cycle(
                 // jump so the next round faces a different graph, rather than
                 // abandoning a function the existing path will structure worse.
                 if concessions >= MAX_CONCESSIONS || !concede_one_edge(host, graph)? {
+                    if crate::linear_types::structuring_diag_enabled() {
+                        eprintln!(
+                            "[DIAG] DREAM cycle fold stopped: reason=concession-unavailable concessions={concessions} live_nodes={}",
+                            graph.live_count()
+                        );
+                    }
                     return Ok(());
                 }
                 concessions += 1;
@@ -382,15 +429,33 @@ fn fold_every_cycle(
             }
         };
         if !fold_accounts_for_every_internal_edge(graph, &shape) {
-return Ok(());
+            if crate::linear_types::structuring_diag_enabled() {
+                eprintln!(
+                    "[DIAG] DREAM cycle fold stopped: reason=unaccounted-edge shape={:?} members={:?}",
+                    shape.kind, shape.members
+                );
+            }
+            return Ok(());
         }
         let Some(body) = lower_shape(host, graph, &shape)? else {
-return Ok(());
+            if crate::linear_types::structuring_diag_enabled() {
+                eprintln!(
+                    "[DIAG] DREAM cycle fold stopped: reason=unlowerable-shape shape={:?} members={:?}",
+                    shape.kind, shape.members
+                );
+            }
+            return Ok(());
         };
         // Read before folding: `collapse` retires the member nodes, so the
         // last member's governing block is unreachable afterwards.
         let governing = governing_block_after(graph, &shape);
         let Ok(folded) = graph.collapse(&shape.members, shape.entry, body) else {
+            if crate::linear_types::structuring_diag_enabled() {
+                eprintln!(
+                    "[DIAG] DREAM cycle fold stopped: reason=collapse-rejected shape={:?} members={:?}",
+                    shape.kind, shape.members
+                );
+            }
             return Ok(());
         };
         graph.set_governing_block(folded, governing);
@@ -418,6 +483,33 @@ fn graph_member_governing(graph: &CollapseGraph, id: NodeId) -> Option<usize> {
     graph.node(id).and_then(|n| n.governing_block)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VirtualGotoFact {
+    source: NodeId,
+    target: NodeId,
+    label: String,
+}
+
+fn apply_virtual_goto_facts(
+    bodies: &mut crate::HashMap<NodeId, Vec<PreHirStmt>>,
+    facts: &[VirtualGotoFact],
+) -> bool {
+    for fact in facts {
+        let Some(source) = bodies.get_mut(&fact.source) else {
+            return false;
+        };
+        source.push(PreHirStmt::Goto(fact.label.clone()));
+
+        let Some(target) = bodies.get_mut(&fact.target) else {
+            return false;
+        };
+        if !matches!(target.first(), Some(PreHirStmt::Label(label)) if *label == fact.label) {
+            target.insert(0, PreHirStmt::Label(fact.label.clone()));
+        }
+    }
+    true
+}
+
 /// Write out the jumps whose edges were removed before this driver ever saw
 /// the graph.
 ///
@@ -436,6 +528,7 @@ fn materialize_virtual_gotos(
     host: &mut impl StructuringHost,
     graph: &mut CollapseGraph,
 ) -> Result<(), MlilPreviewError> {
+    let mut facts = Vec::new();
     for id in graph.live_nodes().collect::<Vec<_>>() {
         let Some(node) = graph.node(id) else { continue };
         if node.body.is_some() {
@@ -451,29 +544,76 @@ fn materialize_virtual_gotos(
         let Some(target_block) = host.find_block_index_by_address(target) else {
             continue;
         };
-        let Some(target_node) = graph
-            .live_nodes()
-            .find(|&n| graph.node(n).is_some_and(|x| x.members.contains(target_block)))
-        else {
+        let Some(target_node) = graph.live_nodes().find(|&n| {
+            graph
+                .node(n)
+                .is_some_and(|x| x.members.contains(target_block))
+        }) else {
             continue;
         };
         let label = crate::helpers::block_label(host.block_start_address(target_block));
+        facts.push(VirtualGotoFact {
+            source: id,
+            target: target_node,
+            label,
+        });
+    }
+    if facts.is_empty() {
+        return Ok(());
+    }
 
-        let (Some(mut source), Some(mut dest)) = (
-            node_statements(host, graph, id)?,
-            node_statements(host, graph, target_node)?,
-        ) else {
-            continue;
+    // Collect every fact before lowering any body. A target may itself be a
+    // virtual-goto source; marking it materialized while walking the first
+    // edge would otherwise hide its own outgoing transfer.
+    let sources: crate::HashSet<NodeId> = facts.iter().map(|fact| fact.source).collect();
+    let mut touched: Vec<NodeId> = facts
+        .iter()
+        .flat_map(|fact| [fact.source, fact.target])
+        .collect();
+    touched.sort_unstable();
+    touched.dedup();
+
+    let mut bodies: crate::HashMap<NodeId, Vec<PreHirStmt>> = crate::HashMap::default();
+    let mut governing = crate::HashMap::default();
+    for id in touched.iter().copied() {
+        let Some(node) = graph.node(id) else {
+            return Ok(());
         };
-        source.push(PreHirStmt::Goto(label.clone()));
-        if !matches!(dest.first(), Some(PreHirStmt::Label(l)) if *l == label) {
-            dest.insert(0, PreHirStmt::Label(label));
-        }
-        let dest_governing = graph.node(target_node).and_then(|n| n.governing_block);
-        graph.set_body(id, source);
-        graph.set_governing_block(id, None);
-        graph.set_body(target_node, dest);
-        graph.set_governing_block(target_node, dest_governing);
+        let block = node.entry_block;
+        let body = if let Some(body) = &node.body {
+            body.clone()
+        } else if sources.contains(&id) {
+            // The source terminator was proved above to be the internal Goto
+            // this routine places. Ordinary node lowering must reject that
+            // terminator because it has no graph edge; lower only the source's
+            // non-control statements here and append the transfer below.
+            host.lower_block_stmts(block)?
+        } else {
+            let Some(body) = node_statements(host, graph, id)? else {
+                return Ok(());
+            };
+            body
+        };
+        bodies.insert(id, body);
+        governing.insert(id, node.governing_block);
+    }
+
+    if !apply_virtual_goto_facts(&mut bodies, &facts) {
+        return Ok(());
+    }
+    for id in touched {
+        let Some(body) = bodies.remove(&id) else {
+            return Ok(());
+        };
+        graph.set_body(id, body);
+        graph.set_governing_block(
+            id,
+            if sources.contains(&id) {
+                None
+            } else {
+                governing.get(&id).copied().flatten()
+            },
+        );
     }
     Ok(())
 }
@@ -686,6 +826,11 @@ fn collect_branches(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fission_midend_prehir::PreHirExpr;
+
+    fn expr(name: &str) -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Var(name.to_string()))
+    }
 
     #[test]
     fn env_gate_is_on_unless_explicitly_disabled() {
@@ -723,5 +868,75 @@ mod tests {
         assert!(covers_every_live_block(&g, &[0, 1]));
         // Block 2 was never in the graph, so nothing owns it.
         assert!(!covers_every_live_block(&g, &[0, 1, 2]));
+    }
+
+    #[test]
+    fn virtual_goto_chains_keep_every_transfer_and_the_final_body() {
+        let mut bodies = crate::HashMap::default();
+        bodies.insert(0, vec![expr("source")]);
+        bodies.insert(1, vec![expr("middle")]);
+        bodies.insert(2, vec![PreHirStmt::Return(None)]);
+        let facts = [
+            VirtualGotoFact {
+                source: 0,
+                target: 1,
+                label: "L1".to_string(),
+            },
+            VirtualGotoFact {
+                source: 1,
+                target: 2,
+                label: "L2".to_string(),
+            },
+        ];
+
+        assert!(apply_virtual_goto_facts(&mut bodies, &facts));
+        assert_eq!(
+            bodies[&0],
+            vec![expr("source"), PreHirStmt::Goto("L1".to_string())]
+        );
+        assert_eq!(
+            bodies[&1],
+            vec![
+                PreHirStmt::Label("L1".to_string()),
+                expr("middle"),
+                PreHirStmt::Goto("L2".to_string()),
+            ]
+        );
+        assert_eq!(
+            bodies[&2],
+            vec![
+                PreHirStmt::Label("L2".to_string()),
+                PreHirStmt::Return(None),
+            ]
+        );
+    }
+
+    #[test]
+    fn shared_virtual_goto_target_gets_one_label() {
+        let mut bodies = crate::HashMap::default();
+        bodies.insert(0, vec![expr("left")]);
+        bodies.insert(1, vec![expr("right")]);
+        bodies.insert(2, vec![expr("join")]);
+        let facts = [
+            VirtualGotoFact {
+                source: 0,
+                target: 2,
+                label: "join".to_string(),
+            },
+            VirtualGotoFact {
+                source: 1,
+                target: 2,
+                label: "join".to_string(),
+            },
+        ];
+
+        assert!(apply_virtual_goto_facts(&mut bodies, &facts));
+        assert_eq!(
+            bodies[&2]
+                .iter()
+                .filter(|stmt| matches!(stmt, PreHirStmt::Label(label) if label == "join"))
+                .count(),
+            1
+        );
     }
 }

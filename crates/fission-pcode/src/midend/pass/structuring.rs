@@ -204,8 +204,10 @@ impl NirPass for IrreducibleReductionPass {
 /// Offer each opt-in driver a chance to beat `baseline`, keeping it unless one
 /// strictly wins.
 ///
-/// Both drivers run against a fork of the host ([`StructuringHost::lower_isolated`]),
-/// so a candidate that loses the comparison costs nothing but the attempt.
+/// Drivers first run through [`StructuringHost::lower_observed`], so even a
+/// successful candidate cannot touch the host before the comparison. Only the
+/// stable winner is rerun through [`StructuringHost::lower_isolated`] and the
+/// body from that committed rerun may be emitted.
 fn try_alternative_structurings(
     ir: &mut NirFunc<'_, '_>,
     baseline: Vec<PreHirStmt>,
@@ -236,16 +238,24 @@ fn try_alternative_structurings(
         return baseline;
     }
 
-    let mut best = baseline;
+    #[derive(Debug, Clone, Copy)]
+    enum AlternativeDriver {
+        MatchFold,
+        Dream,
+        DreamVirtualGotos,
+    }
+
     let mut best_quality = baseline_quality;
     let mut best_shipped = baseline_shipped;
+    let mut winner = None;
 
     type Q = fission_midend_structuring::structuring_quality::StructuringQuality;
-    let mut consider = |name: &str,
-                        candidate: Result<Option<Vec<PreHirStmt>>, MlilPreviewError>,
-                        best: &mut Vec<PreHirStmt>,
-                        best_quality: &mut Q,
-                        best_shipped: &mut Q| {
+    let consider = |driver: AlternativeDriver,
+                    name: &str,
+                    candidate: Result<Option<Vec<PreHirStmt>>, MlilPreviewError>,
+                    best_quality: &mut Q,
+                    best_shipped: &mut Q,
+                    winner: &mut Option<AlternativeDriver>| {
         let candidate = match candidate {
             Ok(Some(body)) => body,
             Ok(None) => return,
@@ -268,34 +278,106 @@ fn try_alternative_structurings(
         if quality.improves_on(best_quality) && candidate_shipped.gotos <= best_shipped.gotos {
             if diag {
                 eprintln!(
-                    "[DIAG] {name} accepted: gotos {} -> {}",
-                    best_quality.gotos, quality.gotos
+                    "[DIAG] {name} admitted: gotos {} -> {}, guards {} -> {} (cleaned {} -> {})",
+                    best_quality.gotos,
+                    quality.gotos,
+                    best_quality.guard_formula_size,
+                    quality.guard_formula_size,
+                    best_shipped.guard_formula_size,
+                    candidate_shipped.guard_formula_size,
                 );
             }
-            *best = candidate;
             *best_quality = quality;
             *best_shipped = candidate_shipped;
+            *winner = Some(driver);
         } else if diag {
             eprintln!(
-                "[DIAG] {name} rejected: gotos {} -> {}, worse on {:?}",
+                "[DIAG] {name} rejected: gotos {} -> {}, guards {} -> {}, worse on {:?}",
                 best_quality.gotos,
                 quality.gotos,
+                best_quality.guard_formula_size,
+                quality.guard_formula_size,
                 quality.regressions_against(best_quality)
             );
         }
     };
 
     if fission_midend_structuring::collapse_driver::match_fold_driver_enabled() {
-        let c = fission_midend_structuring::collapse_driver::structure_by_match_fold(ir.builder);
-        consider("match-fold", c, &mut best, &mut best_quality, &mut best_shipped);
+        let c = fission_midend_structuring::collapse_driver::preview_match_fold(ir.builder);
+        consider(
+            AlternativeDriver::MatchFold,
+            "match-fold",
+            c,
+            &mut best_quality,
+            &mut best_shipped,
+            &mut winner,
+        );
     }
     if fission_midend_structuring::reaching_driver::dream_driver_enabled() {
-        let c = fission_midend_structuring::reaching_driver::structure_by_reaching_conditions(
+        let c =
+            fission_midend_structuring::reaching_driver::preview_reaching_conditions(ir.builder);
+        consider(
+            AlternativeDriver::Dream,
+            "DREAM",
+            c,
+            &mut best_quality,
+            &mut best_shipped,
+            &mut winner,
+        );
+        let c = fission_midend_structuring::reaching_driver::preview_reaching_conditions_with_virtual_gotos(
             ir.builder,
         );
-        consider("DREAM", c, &mut best, &mut best_quality, &mut best_shipped);
+        consider(
+            AlternativeDriver::DreamVirtualGotos,
+            "DREAM+virtual-gotos",
+            c,
+            &mut best_quality,
+            &mut best_shipped,
+            &mut winner,
+        );
     }
-    best
+
+    let (name, committed) = match winner {
+        Some(AlternativeDriver::MatchFold) => (
+            "match-fold",
+            fission_midend_structuring::collapse_driver::structure_by_match_fold(ir.builder),
+        ),
+        Some(AlternativeDriver::Dream) => (
+            "DREAM",
+            fission_midend_structuring::reaching_driver::structure_by_reaching_conditions(
+                ir.builder,
+            ),
+        ),
+        Some(AlternativeDriver::DreamVirtualGotos) => (
+            "DREAM+virtual-gotos",
+            fission_midend_structuring::reaching_driver::structure_by_reaching_conditions_with_virtual_gotos(
+                ir.builder,
+            ),
+        ),
+        None => return baseline,
+    };
+    match committed {
+        Ok(Some(body)) => {
+            if diag {
+                eprintln!("[DIAG] {name} committed after admission");
+            }
+            body
+        }
+        Ok(None) => {
+            if diag {
+                eprintln!("[DIAG] {name} commit rerun declined, keeping the existing structuring");
+            }
+            baseline
+        }
+        Err(err) => {
+            if diag {
+                eprintln!(
+                    "[DIAG] {name} commit rerun failed ({err:?}), keeping the existing structuring"
+                );
+            }
+            baseline
+        }
+    }
 }
 
 pub(crate) struct SeseStructuringPass;

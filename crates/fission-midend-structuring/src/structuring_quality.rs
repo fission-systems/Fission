@@ -17,13 +17,17 @@
 //! - **nesting depth**: trading jumps for conditions nests by construction. A
 //!   9-goto function came back 9 levels deep, and a 51-node region cost 45
 //!   seconds downstream. Past some depth the jump was the better answer.
+//! - **guard formula size**: materializing a previously hidden transfer made
+//!   four candidates replace a few jumps with thousands of repeated boolean
+//!   nodes. Formula growth must stay within the measured healthy envelope or
+//!   remain proportional to the transfer reduction.
 //!
 //! A candidate is taken only when it strictly wins on gotos and gives up
-//! nothing on switches or empty shells. Nesting is the exception: it is the
-//! *price* of the trade rather than a defect, so it gets a budget of one level
-//! per jump removed. That makes "run a driver" safe by construction rather
-//! than by how a particular corpus happens to score, which is what lets the
-//! drivers run at all.
+//! nothing on switches or empty shells. Nesting and guard formulas are the
+//! price of the trade rather than defects, so each gets a budget tied to the
+//! number of jumps removed. That makes "run a driver" safe by construction
+//! rather than by how a particular corpus happens to score, which is what lets
+//! the drivers run at all.
 
 use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
@@ -38,13 +42,15 @@ pub struct StructuringQuality {
     pub empty_if_shells: usize,
     /// Deepest nesting of conditionals and loops. Lower is better.
     pub nesting_depth: usize,
+    /// Total expression nodes carried by conditional and loop guards.
+    pub guard_formula_size: usize,
 }
 
 impl StructuringQuality {
     /// Whether `self` is worth taking over `baseline`.
     ///
     /// Strictly fewer jumps, no lost switches, no new empty shells -- and
-    /// nesting within budget.
+    /// nesting and guard-formula growth within budget.
     ///
     /// Nesting gets a budget rather than a ban because **it is the price, not
     /// a defect**: replacing a jump with a condition is what puts the code one
@@ -54,14 +60,22 @@ impl StructuringQuality {
     /// rule; the drivers additionally cap depth absolutely, so a runaway
     /// result cannot arrive here no matter how many jumps it bought.
     ///
-    /// Ties on gotos lose: a rewrite that does not reduce them has no reason
-    /// to displace what is already there.
+    /// Guard formulas may stay inside the measured healthy envelope regardless
+    /// of ratio. Beyond it, they receive one copy of the baseline formula
+    /// forest per removed jump. A driver may therefore trade transfers for
+    /// conditions, but large formulas may not grow faster than the number of
+    /// transfers they eliminated.
+    ///
+    /// Ties on gotos lose: a rewrite that does not reduce them has no reason to
+    /// displace what is already there.
     pub fn improves_on(&self, baseline: &Self) -> bool {
         let removed = baseline.gotos.saturating_sub(self.gotos);
+        let guard_budget = guard_budget(baseline.guard_formula_size, removed);
         self.gotos < baseline.gotos
             && self.switches >= baseline.switches
             && self.empty_if_shells <= baseline.empty_if_shells
             && self.nesting_depth <= baseline.nesting_depth + removed
+            && self.guard_formula_size <= guard_budget
     }
 
     /// The axes on which `self` is worse than `baseline`, for diagnostics.
@@ -77,8 +91,24 @@ impl StructuringQuality {
         if self.nesting_depth > baseline.nesting_depth + removed {
             out.push("nesting_depth");
         }
+        let guard_budget = guard_budget(baseline.guard_formula_size, removed);
+        if self.guard_formula_size > guard_budget {
+            out.push("guard_formula_size");
+        }
         out
     }
+}
+
+fn guard_budget(baseline_size: usize, removed_gotos: usize) -> usize {
+    // Full-corpus measurement before this comparator found every healthy
+    // reaching-condition candidate at or below 2,008 nodes. Newly unlocked
+    // candidates at 2,755..4,974 nodes visibly duplicated guard trees, while
+    // the populations did not overlap. Keep the measured envelope, then make
+    // the budget relative so already-large functions are judged at their own
+    // scale instead of by a universal cap.
+    const MEASURED_HEALTHY_GUARD_ENVELOPE: usize = 2_008;
+    MEASURED_HEALTHY_GUARD_ENVELOPE
+        .max(baseline_size.saturating_mul(removed_gotos.saturating_add(1)))
 }
 
 /// Measure a structured body.
@@ -95,8 +125,9 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
             PreHirStmt::If {
                 then_body,
                 else_body,
-                ..
+                cond,
             } => {
+                q.guard_formula_size += expr_size(cond);
                 if then_body.is_empty() && else_body.is_empty() {
                     q.empty_if_shells += 1;
                 }
@@ -105,7 +136,12 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
                 walk(then_body, inner, q);
                 walk(else_body, inner, q);
             }
-            PreHirStmt::Switch { cases, default, .. } => {
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                q.guard_formula_size += expr_size(expr);
                 q.switches += 1;
                 let inner = depth + 1;
                 q.nesting_depth = q.nesting_depth.max(inner);
@@ -114,12 +150,16 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
                 }
                 walk(default, inner, q);
             }
-            PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+                q.guard_formula_size += expr_size(cond);
                 let inner = depth + 1;
                 q.nesting_depth = q.nesting_depth.max(inner);
                 walk(body, inner, q);
             }
-            PreHirStmt::For { body, .. } => {
+            PreHirStmt::For { cond, body, .. } => {
+                if let Some(cond) = cond {
+                    q.guard_formula_size += expr_size(cond);
+                }
                 let inner = depth + 1;
                 q.nesting_depth = q.nesting_depth.max(inner);
                 walk(body, inner, q);
@@ -143,44 +183,7 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
 /// actually costs, rather than on a stand-in that excludes large functions
 /// whether or not their guards are big.
 pub fn guard_formula_size(body: &[PreHirStmt]) -> usize {
-    let mut total = 0;
-    guards(body, &mut total);
-    total
-}
-
-fn guards(body: &[PreHirStmt], total: &mut usize) {
-    for stmt in body {
-        match stmt {
-            PreHirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                *total += expr_size(cond);
-                guards(then_body, total);
-                guards(else_body, total);
-            }
-            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
-                *total += expr_size(cond);
-                guards(body, total);
-            }
-            PreHirStmt::For { cond, body, .. } => {
-                if let Some(cond) = cond {
-                    *total += expr_size(cond);
-                }
-                guards(body, total);
-            }
-            PreHirStmt::Switch { expr, cases, default } => {
-                *total += expr_size(expr);
-                for case in cases {
-                    guards(&case.body, total);
-                }
-                guards(default, total);
-            }
-            PreHirStmt::Block(inner) => guards(inner, total),
-            _ => {}
-        }
-    }
+    measure(body).guard_formula_size
 }
 
 /// Expression nodes in `e`, counting every operand.
@@ -366,5 +369,51 @@ mod tests {
         let flat = vec![if_stmt(vec![], vec![]), if_stmt(vec![], vec![])];
         let nested = vec![if_stmt(vec![if_stmt(vec![], vec![])], vec![])];
         assert_eq!(guard_formula_size(&flat), guard_formula_size(&nested));
+    }
+
+    fn doubled_cond(depth: usize) -> PreHirExpr {
+        if depth == 0 {
+            return cond();
+        }
+        let inner = doubled_cond(depth - 1);
+        PreHirExpr::Binary {
+            op: fission_midend_prehir::PreHirBinaryOp::LogicalAnd,
+            lhs: Box::new(inner.clone()),
+            rhs: Box::new(inner),
+            ty: fission_midend_core::ir::NirType::Bool,
+        }
+    }
+
+    #[test]
+    fn guard_formulas_stay_inside_the_healthy_or_proportional_budget() {
+        let baseline = measure(&[if_stmt(vec![goto("a"), goto("b")], vec![])]);
+        assert_eq!(baseline.guard_formula_size, 1);
+
+        let inside_envelope = measure(&[PreHirStmt::If {
+            cond: doubled_cond(9), // 1,023 expression nodes.
+            then_body: Rc::new(vec![goto("a")]),
+            else_body: Rc::new(Vec::new()),
+        }]);
+        assert!(inside_envelope.improves_on(&baseline));
+
+        let over_budget = measure(&[PreHirStmt::If {
+            cond: doubled_cond(11), // 4,095 nodes for the same one-jump saving.
+            then_body: Rc::new(vec![goto("a")]),
+            else_body: Rc::new(Vec::new()),
+        }]);
+        assert!(!over_budget.improves_on(&baseline));
+        assert!(
+            over_budget
+                .regressions_against(&baseline)
+                .contains(&"guard_formula_size")
+        );
+    }
+
+    #[test]
+    fn an_unconditioned_baseline_uses_the_measured_healthy_envelope() {
+        let baseline = measure(&[goto("a"), goto("b")]);
+        let candidate = measure(&[if_stmt(vec![goto("a")], vec![])]);
+        assert_eq!(baseline.guard_formula_size, 0);
+        assert!(candidate.improves_on(&baseline));
     }
 }

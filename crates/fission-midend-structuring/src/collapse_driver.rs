@@ -108,6 +108,17 @@ pub fn structure_by_match_fold(
     host.lower_isolated(fold_to_single_node)
 }
 
+/// Price a match-fold candidate without committing the identities it mints.
+///
+/// A successful fold is still only a candidate until the caller's quality
+/// comparator admits it. The caller must rerun [`structure_by_match_fold`] for
+/// the winner; a body returned here must never be emitted directly.
+pub fn preview_match_fold(
+    host: &mut impl StructuringHost,
+) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    host.lower_observed(fold_to_single_node)
+}
+
 fn fold_to_single_node(
     host: &mut impl StructuringHost,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
