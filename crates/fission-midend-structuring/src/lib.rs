@@ -25,6 +25,7 @@ pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBu
 pub(crate) type HashSet<K> = std::collections::HashSet<K, rustc_hash::FxBuildHasher>;
 
 pub mod admission;
+pub mod boolean;
 pub mod cfg_analysis;
 pub mod cleanup;
 pub mod collapse_driver;

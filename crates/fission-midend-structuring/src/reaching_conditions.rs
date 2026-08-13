@@ -63,7 +63,7 @@ pub fn always() -> PreHirExpr {
 }
 
 pub fn is_always(e: &PreHirExpr) -> bool {
-    matches!(e, PreHirExpr::Const(v, _) if *v != 0)
+    matches!(e, PreHirExpr::Const(v, _) if *v != 0) || crate::boolean::is_tautology(e)
 }
 
 fn and(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
@@ -229,11 +229,16 @@ pub fn topological_order(successors: &[Vec<NodeId>]) -> Option<Vec<NodeId>> {
 /// Whether `a` and `b` are complements -- one holds exactly when the other
 /// does not, so the nodes they guard are the arms of an if/else.
 ///
-/// Syntactic and deliberately conservative: it recognises `c` against `!c`
-/// modulo double negation. A real decision procedure would catch more, but a
-/// wrong `true` here would merge two arms that are not actually exclusive.
+/// Decided over the atoms rather than by matching shapes, so De Morgan and
+/// anything else that rewrites a formula without changing it are recognised.
+/// [`crate::boolean`] returns `false` when it cannot decide, which loses a
+/// structuring opportunity; a wrong `true` would merge two arms that can both
+/// run, so the syntactic check is kept as the fast path and the decision
+/// procedure only ever adds to it.
 pub fn conditions_are_complementary(a: &PreHirExpr, b: &PreHirExpr) -> bool {
-    &negate_expr(a.clone()) == b || &negate_expr(b.clone()) == a
+    &negate_expr(a.clone()) == b
+        || &negate_expr(b.clone()) == a
+        || crate::boolean::are_complementary(a, b)
 }
 
 /// Group nodes that execute under the same condition.
