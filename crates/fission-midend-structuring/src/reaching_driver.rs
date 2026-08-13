@@ -33,7 +33,9 @@ use crate::collapse_driver::{
     fold_accounts_for_every_internal_edge, lower_shape, node_statements,
 };
 use crate::collapse_graph::{CollapseGraph, NodeId};
-use crate::collapse_shapes::{Shape, ShapeKind, match_do_while, match_self_loop, match_while_do};
+use crate::collapse_shapes::{
+    Shape, ShapeKind, find_shape, match_do_while, match_self_loop, match_while_do,
+};
 use crate::host::StructuringHost;
 use crate::reaching_conditions::{compute_reaching_conditions, topological_order};
 use crate::reaching_emit::{
@@ -41,6 +43,61 @@ use crate::reaching_emit::{
 };
 use fission_midend_core::ir::{MlilPreviewError, NirType};
 use fission_midend_prehir::PreHirStmt;
+
+/// Why a region could not be described by reaching conditions.
+///
+/// Named rather than collapsed into a bare `None` because *which* refusal
+/// fires is the only thing that says where the remaining work is. The driver
+/// offers a candidate for a minority of functions, and guessing at why the
+/// rest are refused has been wrong often enough in this work to be worth the
+/// enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclineReason {
+    /// No CFG at all.
+    EmptyGraph,
+    /// A cycle survived loop folding -- irreducible, or a loop shape
+    /// `collapse_shapes` does not match.
+    CycleSurvived,
+    /// Nothing owns the function entry after folding.
+    NoEntry,
+    /// A node branches more than two ways: a switch dispatch.
+    MultiwayBranch,
+    /// A two-way branch whose condition could not be recovered.
+    ConditionUnrecoverable,
+    /// More decisions than `MAX_DECISIONS`.
+    TooManyDecisions,
+    /// The region is cyclic as far as the condition solver is concerned.
+    ReachingFailed,
+    /// A live node came out with no condition at all.
+    NodeWithoutCondition,
+    /// Folding lost a reachable block.
+    CoverageLost,
+    /// A terminator this driver cannot place.
+    UnplaceableTerminator,
+    /// Deeper than `MAX_NESTING_DEPTH`.
+    TooDeep,
+    /// Guards larger than `MAX_GUARD_FORMULA_SIZE`.
+    GuardsTooLarge,
+}
+
+impl DeclineReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyGraph => "empty-graph",
+            Self::CycleSurvived => "cycle-survived",
+            Self::NoEntry => "no-entry",
+            Self::MultiwayBranch => "multiway-branch",
+            Self::ConditionUnrecoverable => "condition-unrecoverable",
+            Self::TooManyDecisions => "too-many-decisions",
+            Self::ReachingFailed => "reaching-failed",
+            Self::NodeWithoutCondition => "node-without-condition",
+            Self::CoverageLost => "coverage-lost",
+            Self::UnplaceableTerminator => "unplaceable-terminator",
+            Self::TooDeep => "too-deep",
+            Self::GuardsTooLarge => "guards-too-large",
+        }
+    }
+}
 
 /// Ceiling on loop-folding rounds, proportional to graph size.
 const MAX_ROUNDS_PER_NODE: usize = 8;
@@ -128,9 +185,22 @@ pub fn structure_by_reaching_conditions(
 fn structure_acyclic_remainder(
     host: &mut impl StructuringHost,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
+    let outcome = describe_region(host)?;
+    if crate::linear_types::structuring_diag_enabled() {
+        match &outcome {
+            Ok(body) => eprintln!("[DIAG] DREAM offered: stmts={}", body.len()),
+            Err(reason) => eprintln!("[DIAG] DREAM declined: {}", reason.as_str()),
+        }
+    }
+    Ok(outcome.ok())
+}
+
+fn describe_region(
+    host: &mut impl StructuringHost,
+) -> Result<Result<Vec<PreHirStmt>, DeclineReason>, MlilPreviewError> {
     let successors: Vec<Vec<usize>> = host.successors().to_vec();
     if successors.is_empty() {
-        return Ok(None);
+        return Ok(Err(DeclineReason::EmptyGraph));
     }
     let mut graph = CollapseGraph::from_cfg(&successors);
 
@@ -143,19 +213,20 @@ fn structure_acyclic_remainder(
     let Some(order) = topological_order(&dense) else {
         // A cycle survived folding. Guessing at it is exactly the failure this
         // approach exists to avoid.
-        return Ok(None);
+        return Ok(Err(DeclineReason::CycleSurvived));
     };
     let Some(head) = live_node_owning_entry(&graph) else {
-        return Ok(None);
+        return Ok(Err(DeclineReason::NoEntry));
     };
 
-    let Some(branches) = collect_branches(host, &graph)? else {
-        return Ok(None);
+    let branches = match collect_branches(host, &graph)? {
+        Ok(b) => b,
+        Err(reason) => return Ok(Err(reason)),
     };
     // Both the formula sizes and the nesting grow with the decision count,
     // and so does the downstream cost of the result.
     if branches.len() > MAX_DECISIONS {
-        return Ok(None);
+        return Ok(Err(DeclineReason::TooManyDecisions));
     }
     // Bind each condition where its branch actually happened; see
     // `reaching_emit`'s soundness note for why this is not optional.
@@ -175,23 +246,23 @@ fn structure_acyclic_remainder(
     let is_guard = |name: &str| guards.iter().any(|g| g == name);
 
     let Ok(reaching) = compute_reaching_conditions(&dense, head, bound.edge_condition()) else {
-        return Ok(None);
+        return Ok(Err(DeclineReason::ReachingFailed));
     };
 
     // Every live node must have a condition, or emission would silently drop
     // it -- the same class of loss that rewrote a `for` loop as a straight
     // line in the match-fold driver.
     if graph.live_nodes().any(|n| !reaching.contains_key(&n)) {
-        return Ok(None);
+        return Ok(Err(DeclineReason::NodeWithoutCondition));
     }
     if !covers_every_live_block(&graph, &blocks_reachable_from_entry(&successors)) {
-        return Ok(None);
+        return Ok(Err(DeclineReason::CoverageLost));
     }
 
     let mut bodies: crate::HashMap<NodeId, Vec<PreHirStmt>> = crate::HashMap::default();
     for n in graph.live_nodes().collect::<Vec<_>>() {
         let Some(mut stmts) = node_statements(host, &graph, n)? else {
-            return Ok(None);
+            return Ok(Err(DeclineReason::UnplaceableTerminator));
         };
         // The condition binding belongs at the end of the block that decided
         // it, before control leaves.
@@ -205,18 +276,18 @@ fn structure_acyclic_remainder(
         bodies.get(&n).cloned().unwrap_or_default()
     });
     if nesting_depth(&body) > MAX_NESTING_DEPTH {
-        return Ok(None);
+        return Ok(Err(DeclineReason::TooDeep));
     }
     // The real cost bound: what the rest of the pipeline has to carry.
     if crate::structuring_quality::guard_formula_size(&body) > MAX_GUARD_FORMULA_SIZE {
-        return Ok(None);
+        return Ok(Err(DeclineReason::GuardsTooLarge));
     }
     // Most guards are consumed by the `if` directly after them; folding those
     // away is what keeps a simple two-block `if` reading as `if (param_1)`
     // rather than through a variable. The rest stay, and are legitimate --
     // they carry a decision to a node that is not adjacent to it.
     let body = inline_single_use_guards(body, &is_guard);
-    Ok(Some(body))
+    Ok(Ok(body))
 }
 
 /// How deeply `body` nests conditionals and loops.
@@ -238,14 +309,35 @@ fn nesting_depth(body: &[PreHirStmt]) -> usize {
     body.iter().map(depth_of).max().unwrap_or(0)
 }
 
-/// Fold loops until none of the cyclic shapes match.
+/// Fold shapes until the graph has no cycle left.
+///
+/// Not just the cyclic shapes. Every cyclic shape `collapse_shapes` matches is
+/// two nodes -- `WhileDo` is a test and a body, `DoWhile` a body and a latch --
+/// so a loop whose body is more than one block matches none of them until that
+/// body has itself been folded into a single node. Reducing the body is
+/// acyclic work: a `Sequence`, an `IfThen`. Folding only cyclic shapes
+/// therefore cannot structure any loop containing an `if`, which is close to
+/// all of them.
+///
+/// Measured before this was fixed: **106 of the 144 functions the driver was
+/// asked about were refused with a surviving cycle** -- three quarters of every
+/// refusal, and more than four times every other cause combined.
+///
+/// Stopping as soon as the graph is acyclic is what keeps this from becoming
+/// the match-fold driver: everything still standing at that point is handed to
+/// the reaching conditions, which is the whole point of the strategy.
 fn fold_every_cycle(
     host: &mut impl StructuringHost,
     graph: &mut CollapseGraph,
 ) -> Result<(), MlilPreviewError> {
     let budget = graph.node_capacity().saturating_mul(MAX_ROUNDS_PER_NODE);
     for _ in 0..budget {
-        let Some(shape) = find_cyclic_shape(graph) else {
+        if !graph_has_cycle(graph) {
+            return Ok(());
+        }
+        // Prefer a loop shape when one matches, so a loop is closed as soon as
+        // its body is reducible rather than after unrelated folding.
+        let Some(shape) = find_cyclic_shape(graph).or_else(|| find_shape(graph)) else {
             return Ok(());
         };
         if !fold_accounts_for_every_internal_edge(graph, &shape) {
@@ -259,6 +351,10 @@ fn fold_every_cycle(
         }
     }
     Ok(())
+}
+
+fn graph_has_cycle(graph: &CollapseGraph) -> bool {
+    topological_order(&dense_successors(graph)).is_none()
 }
 
 fn find_cyclic_shape(graph: &CollapseGraph) -> Option<Shape> {
@@ -314,7 +410,7 @@ fn covers_every_live_block(graph: &CollapseGraph, reachable: &[usize]) -> bool {
 fn collect_branches(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
-) -> Result<Option<Vec<Branch>>, MlilPreviewError> {
+) -> Result<Result<Vec<Branch>, DeclineReason>, MlilPreviewError> {
     let mut branches = Vec::new();
     for n in graph.live_nodes().collect::<Vec<_>>() {
         let outs = graph.successors(n).to_vec();
@@ -323,7 +419,7 @@ fn collect_branches(
             2 => {
                 let (t, f) = (outs[0], outs[1]);
                 let Some(cond) = condition_towards(host, graph, n, t, f)? else {
-                    return Ok(None);
+                    return Ok(Err(DeclineReason::ConditionUnrecoverable));
                 };
                 branches.push(Branch {
                     node: n,
@@ -332,10 +428,10 @@ fn collect_branches(
                     false_target: f,
                 });
             }
-            _ => return Ok(None),
+            _ => return Ok(Err(DeclineReason::MultiwayBranch)),
         }
     }
-    Ok(Some(branches))
+    Ok(Ok(branches))
 }
 
 #[cfg(test)]

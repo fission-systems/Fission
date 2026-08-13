@@ -216,6 +216,9 @@ fn try_alternative_structurings(
     let baseline_quality = measure(&baseline);
     // Nothing to win: the existing path already left no jumps.
     if baseline_quality.gotos == 0 {
+        if diag {
+            eprintln!("[DIAG] alternatives not asked: baseline already jump-free");
+        }
         return baseline;
     }
 

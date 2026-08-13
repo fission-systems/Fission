@@ -504,9 +504,34 @@ pub(crate) fn lower_shape(
                 cond,
             }]))
         }
-        // A self loop's own terminator decides whether it repeats; expressing
-        // that needs the break placement the linear lowering already owns.
-        ShapeKind::SelfLoop => Ok(None),
+        ShapeKind::SelfLoop => {
+            // A block that branches to itself runs its statements and then
+            // decides whether to go round again -- which is `do { } while`,
+            // with the test already in the right place. This was previously
+            // declined outright, and it was the single largest reason the
+            // DREAM driver could not reduce a graph: 36 of the 106 functions
+            // it refused for a surviving cycle got stuck here.
+            let [n] = shape.members[..] else {
+                return Ok(None);
+            };
+            let Some(exit) = shape.follow else {
+                return Ok(None);
+            };
+            // `condition_towards` declines a node that already carries a body,
+            // so a region that loops back to itself after folding stays
+            // refused -- its test lives inside the body and cannot be lifted
+            // out.
+            let Some(cond) = condition_towards(host, graph, n, n, exit)? else {
+                return Ok(None);
+            };
+            let Some(body) = node_statements(host, graph, n)? else {
+                return Ok(None);
+            };
+            Ok(Some(vec![PreHirStmt::DoWhile {
+                body: std::rc::Rc::new(body),
+                cond,
+            }]))
+        }
     }
 }
 
