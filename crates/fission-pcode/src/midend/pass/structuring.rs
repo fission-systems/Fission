@@ -208,10 +208,17 @@ impl NirPass for IrreducibleReductionPass {
 /// successful candidate cannot touch the host before the comparison. Only the
 /// stable winner is rerun through [`StructuringHost::lower_isolated`] and the
 /// body from that committed rerun may be emitted.
+#[derive(Clone, Copy)]
+enum AlternativeAdmission {
+    Established,
+    LinearFallback,
+}
+
 fn try_alternative_structurings(
     ir: &mut NirFunc<'_, '_>,
     baseline: Vec<PreHirStmt>,
     diag: bool,
+    admission: AlternativeAdmission,
 ) -> Vec<PreHirStmt> {
     use fission_midend_structuring::structuring_quality::measure;
 
@@ -275,16 +282,25 @@ fn try_alternative_structurings(
         // every regression and 88 of the gains with it.
         let quality = measure(&candidate);
         let candidate_shipped = shipped(&candidate);
-        if quality.improves_on(best_quality) && candidate_shipped.gotos <= best_shipped.gotos {
+        let max_guard_admitted = matches!(admission, AlternativeAdmission::Established)
+            || quality.has_proportional_max_guard_growth(best_quality);
+        if quality.improves_on(best_quality)
+            && candidate_shipped.gotos <= best_shipped.gotos
+            && max_guard_admitted
+        {
             if diag {
                 eprintln!(
-                    "[DIAG] {name} admitted: gotos {} -> {}, guards {} -> {} (cleaned {} -> {})",
+                    "[DIAG] {name} admitted: gotos {} -> {}, guards {} -> {} max {} -> {} (cleaned {} -> {}, max {} -> {})",
                     best_quality.gotos,
                     quality.gotos,
                     best_quality.guard_formula_size,
                     quality.guard_formula_size,
+                    best_quality.max_guard_formula_size,
+                    quality.max_guard_formula_size,
                     best_shipped.guard_formula_size,
                     candidate_shipped.guard_formula_size,
+                    best_shipped.max_guard_formula_size,
+                    candidate_shipped.max_guard_formula_size,
                 );
             }
             *best_quality = quality;
@@ -292,12 +308,20 @@ fn try_alternative_structurings(
             *winner = Some(driver);
         } else if diag {
             eprintln!(
-                "[DIAG] {name} rejected: gotos {} -> {}, guards {} -> {}, worse on {:?}",
+                "[DIAG] {name} rejected: gotos {} -> {}, guards {} -> {} max {} -> {}, worse on {:?}",
                 best_quality.gotos,
                 quality.gotos,
                 best_quality.guard_formula_size,
                 quality.guard_formula_size,
-                quality.regressions_against(best_quality)
+                best_quality.max_guard_formula_size,
+                quality.max_guard_formula_size,
+                {
+                    let mut regressions = quality.regressions_against(best_quality);
+                    if !max_guard_admitted {
+                        regressions.push("max_guard_formula_size");
+                    }
+                    regressions
+                }
             );
         }
     };
@@ -462,7 +486,8 @@ impl NirPass for SeseStructuringPass {
                 // while giving up nothing else. Running first was tried for
                 // both of them and lost `switch` recovery and short-circuit
                 // `&&` folding -- losses the goto count scores as wins.
-                let body = try_alternative_structurings(ir, body, diag);
+                let body =
+                    try_alternative_structurings(ir, body, diag, AlternativeAdmission::Established);
                 let elapsed = ir
                     .builder
                     .structuring_start
@@ -633,6 +658,23 @@ impl NirPass for OrphanGotoRepairPass {
 
             let fallback_result =
                 build_linear_multiblock_body(ir.builder, true).map_err(|e| e.to_string())?;
+
+            // A primary SESE failure means only that strategy could not build
+            // a baseline; it does not invalidate the graph-collapse admission
+            // or the independent alternatives. Price them against the exact
+            // linear body that would otherwise ship, while preserving forced
+            // linear admissions as hard budget decisions.
+            let fallback_result = if matches!(admission, StructuringAdmissionReason::GraphCollapse)
+            {
+                try_alternative_structurings(
+                    ir,
+                    fallback_result,
+                    diag,
+                    AlternativeAdmission::LinearFallback,
+                )
+            } else {
+                fallback_result
+            };
 
             let elapsed = ir
                 .builder

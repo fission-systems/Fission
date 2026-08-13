@@ -21,6 +21,10 @@
 //!   four candidates replace a few jumps with thousands of repeated boolean
 //!   nodes. Formula growth must stay within the measured healthy envelope or
 //!   remain proportional to the transfer reduction.
+//! The largest single guard is also measured for callers that open a new,
+//! broader candidate funnel. Total formula size can look affordable while one
+//! `if` carries most of the reaching-condition forest; the fallback funnel
+//! uses that measurement as an additional admission constraint.
 //!
 //! A candidate is taken only when it strictly wins on gotos and gives up
 //! nothing on switches or empty shells. Nesting and guard formulas are the
@@ -44,6 +48,8 @@ pub struct StructuringQuality {
     pub nesting_depth: usize,
     /// Total expression nodes carried by conditional and loop guards.
     pub guard_formula_size: usize,
+    /// Largest single guard expression, in expression nodes.
+    pub max_guard_formula_size: usize,
 }
 
 impl StructuringQuality {
@@ -97,6 +103,28 @@ impl StructuringQuality {
         }
         out
     }
+
+    /// Whether growth of the largest single guard stays proportional to the
+    /// transfers removed by this candidate.
+    ///
+    /// This is deliberately separate from [`Self::improves_on`]. The main
+    /// candidate funnel predates this measurement and has corpus-validated
+    /// winners outside this narrow bound. Callers opening a broader funnel can
+    /// opt in without retroactively rejecting those established candidates.
+    pub fn has_proportional_max_guard_growth(&self, baseline: &Self) -> bool {
+        let removed = baseline.gotos.saturating_sub(self.gotos);
+        self.max_guard_formula_size <= max_guard_budget(baseline.max_guard_formula_size, removed)
+    }
+}
+
+fn max_guard_budget(baseline_max: usize, removed_gotos: usize) -> usize {
+    // One eliminated transfer may expose at most two predicate terms in the
+    // largest condition. A term needs an atom, an optional negation, and a
+    // binary connector: three expression nodes, or six for both terms. Larger
+    // growth means reaching paths are being concentrated into one condition
+    // instead of exchanging a transfer for a local decision.
+    const MAX_GUARD_NODES_PER_REMOVED_GOTO: usize = 6;
+    baseline_max.saturating_add(removed_gotos.saturating_mul(MAX_GUARD_NODES_PER_REMOVED_GOTO))
 }
 
 fn guard_budget(baseline_size: usize, removed_gotos: usize) -> usize {
@@ -127,7 +155,7 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
                 else_body,
                 cond,
             } => {
-                q.guard_formula_size += expr_size(cond);
+                add_guard(q, cond);
                 if then_body.is_empty() && else_body.is_empty() {
                     q.empty_if_shells += 1;
                 }
@@ -141,7 +169,7 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
                 cases,
                 default,
             } => {
-                q.guard_formula_size += expr_size(expr);
+                add_guard(q, expr);
                 q.switches += 1;
                 let inner = depth + 1;
                 q.nesting_depth = q.nesting_depth.max(inner);
@@ -151,14 +179,14 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
                 walk(default, inner, q);
             }
             PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
-                q.guard_formula_size += expr_size(cond);
+                add_guard(q, cond);
                 let inner = depth + 1;
                 q.nesting_depth = q.nesting_depth.max(inner);
                 walk(body, inner, q);
             }
             PreHirStmt::For { cond, body, .. } => {
                 if let Some(cond) = cond {
-                    q.guard_formula_size += expr_size(cond);
+                    add_guard(q, cond);
                 }
                 let inner = depth + 1;
                 q.nesting_depth = q.nesting_depth.max(inner);
@@ -168,6 +196,12 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
             _ => {}
         }
     }
+}
+
+fn add_guard(q: &mut StructuringQuality, guard: &PreHirExpr) {
+    let size = expr_size(guard);
+    q.guard_formula_size = q.guard_formula_size.saturating_add(size);
+    q.max_guard_formula_size = q.max_guard_formula_size.max(size);
 }
 
 /// Total size of every guard in a body, counted in expression nodes.
@@ -332,7 +366,10 @@ mod tests {
             vec![goto("x")],
             vec![],
         )]))]);
-        assert_eq!(q.nesting_depth, 1, "the block itself is not a nesting level");
+        assert_eq!(
+            q.nesting_depth, 1,
+            "the block itself is not a nesting level"
+        );
     }
 
     #[test]
@@ -407,6 +444,27 @@ mod tests {
                 .regressions_against(&baseline)
                 .contains(&"guard_formula_size")
         );
+    }
+
+    #[test]
+    fn one_guard_cannot_absorb_more_than_two_terms_per_removed_jump() {
+        let baseline = measure(&[if_stmt(vec![goto("a"), goto("b")], vec![])]);
+
+        let affordable = measure(&[PreHirStmt::If {
+            cond: doubled_cond(2), // Seven nodes: baseline one plus six.
+            then_body: Rc::new(vec![goto("a")]),
+            else_body: Rc::new(Vec::new()),
+        }]);
+        assert!(affordable.improves_on(&baseline));
+        assert!(affordable.has_proportional_max_guard_growth(&baseline));
+
+        let concentrated = measure(&[PreHirStmt::If {
+            cond: doubled_cond(3), // Fifteen nodes for the same one-jump saving.
+            then_body: Rc::new(vec![goto("a")]),
+            else_body: Rc::new(Vec::new()),
+        }]);
+        assert!(concentrated.improves_on(&baseline));
+        assert!(!concentrated.has_proportional_max_guard_growth(&baseline));
     }
 
     #[test]
