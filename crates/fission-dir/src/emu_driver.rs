@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use fission_emulator::{
     ArchInfo, Emulator, LinuxEnv, MachineState, OsEnvironment, RunOutcome, WindowsEnv,
 };
+use fission_emulator::pcode::page_map::prot;
 use fission_loader::loader::LoadedBinary;
 use std::path::Path;
 
@@ -51,6 +52,8 @@ pub struct EmulatorHarness {
     emu: Emulator,
     baseline_state: MachineState,
     baseline_pc: u64,
+    /// Address of the scratch buffer, once installed.
+    scratch: Option<u64>,
 }
 
 impl EmulatorHarness {
@@ -118,7 +121,45 @@ impl EmulatorHarness {
             emu,
             baseline_state,
             baseline_pc,
+            scratch: None,
         })
+    }
+
+    /// Map a readable/writable scratch buffer and fill it, returning its
+    /// address.
+    ///
+    /// Exists so a pointer parameter can be given something real to point at.
+    /// Without it, a boundary-value sweep hands a function like `list_sum` the
+    /// integers `0`, `1`, `-1`: every one but null faults the call outright,
+    /// and null returns before the loop body runs. The function grounds on one
+    /// sample of seven and none of its control flow is ever exercised, which
+    /// is why this tier could not see a structuring bug.
+    ///
+    /// The buffer becomes part of the restored baseline, so its contents are
+    /// identical for every call rather than carrying one sample's writes into
+    /// the next. The caller is responsible for placing the same bytes at the
+    /// same address in whatever evaluates the decompiled side -- the two
+    /// memories only agree because both are told the same thing.
+    pub fn install_scratch(&mut self, contents: &[u8]) -> Result<u64> {
+        if let Some(addr) = self.scratch {
+            return Ok(addr);
+        }
+        let len = contents.len().max(1) as u64;
+        let addr = self
+            .emu
+            .state
+            .page_map
+            .mmap_anon(len, prot::READ | prot::WRITE);
+        let ram = self.emu.state.ram_space();
+        self.emu
+            .state
+            .write_space(ram, addr, contents)
+            .context("failed to fill the scratch buffer")?;
+        // Re-baseline so every later call sees the buffer, and sees it
+        // unmodified.
+        self.baseline_state = self.emu.state.clone();
+        self.scratch = Some(addr);
+        Ok(addr)
     }
 
     /// Call `address` with `args` (in declared-parameter order, restricted

@@ -1,45 +1,40 @@
 //! Ground truth across the corpus, not one function.
 //!
-//! Runs [`phase2_ground_truth`]'s check -- evaluate the decompiled body, run
-//! the real machine code, compare -- over many corpus functions instead of one
-//! hand-picked case.
+//! Evaluate the decompiled body, run the real machine code, compare -- over
+//! the corpus's own functions rather than one hand-picked case.
 //!
-//! # It does not yet guard structuring, and the reason is now specific
+//! # It now has teeth against structuring, and it took three tries to get there
 //!
-//! It was built to, on the reasoning that structuring is semantics-preserving
-//! by definition and so should be checkable by execution. Two sabotages were
-//! injected to test that -- `while` emitted where `do`/`while` was correct,
-//! and **every `if` condition in every function negated** -- and neither was
-//! caught.
+//! Structuring is semantics-preserving by definition, so it should be
+//! checkable by execution. Twice it was not, and both diagnoses were wrong:
 //!
-//! An earlier version of this file blamed the concrete tier's lack of a memory
-//! model, and concluded the groundable functions were "close to exactly the
-//! functions structuring does not affect". **That was wrong, and measuring it
-//! properly says something more useful.** A memory model was added
-//! (`eval::Memory`) and coverage did not move at all. Of the functions that do
-//! ground, a third *do* contain loops and conditionals -- `list_sum` grounds
-//! with one `if` and two loops.
+//! 1. Blamed on the concrete tier having no memory model. One was added
+//!    (`eval::Memory`) and coverage did not move by a single function.
+//! 2. Blamed on the groundable functions being ones structuring does not
+//!    affect. Also false -- `list_sum` grounds with an `if` and two loops.
 //!
-//! What stops the sabotage being caught is the **arguments**. `default_samples`
-//! offers integers -- `0`, `1`, `-1`, `i32::MIN` -- and a function like
-//! `list_sum` takes a pointer. Every sample but the null one fails the
-//! emulator call outright, and the null one returns before the loop body ever
-//! runs, so negating its guard changes nothing observable. `list_sum` grounds
-//! on exactly one sample of seven.
+//! The actual cause was the **arguments**. `default_samples` sweeps integers,
+//! and a function like `list_sum` takes a pointer, so every sample but null
+//! faulted the emulator call and null returned before the body ran: one
+//! degenerate sample of seven, no control flow exercised.
 //!
-//! **The prerequisite is a buffer that exists at the same address in both the
-//! emulator and `eval::Memory`, passed as the pointer argument.** The
-//! interpreter half of that is what the memory model is for; the emulator half
-//! is not built. Until it is, `structuring_quality` and the unit tests remain
-//! the only guard on structuring correctness, covering only failures already
-//! seen.
+//! `EmulatorHarness::install_scratch` now maps a buffer, the same bytes are
+//! placed in `eval::Memory`, and a pointer parameter gets its address. With
+//! that, injecting "negate every `if` condition in every function" is caught
+//! -- four `list_sum` divergences across optimisation levels, the machine
+//! returning 1 where the sabotaged body returns 0.
 //!
-//! # What it does cover
+//! **Confirm any change here still catches that.** A check that passes proves
+//! nothing until you have watched it fail.
 //!
-//! The arithmetic and type pipeline against real machine code, on the corpus's
-//! own functions rather than one. Getting it running turned up two real
-//! defects in the checker itself (see `ground_truth.rs` and `eval.rs`), which
-//! is the usual return on actually executing something.
+//! # Reach
+//!
+//! Twelve functions. Enough for a bug in condition handling anywhere in the
+//! pipeline; not enough for one confined to a path those twelve do not take
+//! -- emitting `while` where `do`/`while` is correct is still missed, because
+//! none of them reach that rule. Widening reach means more of the interpreter:
+//! roughly 230 of 900 unfiltered attempts bail on an indirect or unmodelled
+//! call and 212 on a raw register or global read.
 
 use fission_dir::report::VerifyOutcome;
 use fission_dir::{EmulatorHarness, check_ground_truth, decompile_one, default_samples};

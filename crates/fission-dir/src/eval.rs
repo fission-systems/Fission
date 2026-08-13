@@ -641,6 +641,24 @@ macro_rules! define_interp {
                     .position(|s| matches!(s, $Stmt::Label(l) if l == label))
             }
 
+            /// Interpret with a preloaded memory image: `(address, bytes)`
+            /// placed before execution starts.
+            ///
+            /// For grounding a function that takes a pointer. The emulator is
+            /// given the same bytes at the same address
+            /// (`EmulatorHarness::install_scratch`); the two memories agree
+            /// only because both were told the same thing, so these must be
+            /// kept in step.
+            pub fn interpret_with_memory(
+                body: &[$Stmt],
+                params: &[$Binding],
+                locals: &[$Binding],
+                args: &[i64],
+                image: &[(u64, u8)],
+            ) -> Result<Option<Value>> {
+                interpret_inner(body, params, locals, args, image)
+            }
+
             /// Interpret `body` with `args` bound to `params` in order and
             /// `locals` seeded from their initializer expression when they
             /// have one -- an uninitialized local stays unbound, so reading it
@@ -654,16 +672,30 @@ macro_rules! define_interp {
                 locals: &[$Binding],
                 args: &[i64],
             ) -> Result<Option<Value>> {
+                interpret_inner(body, params, locals, args, &[])
+            }
+
+            fn interpret_inner(
+                body: &[$Stmt],
+                params: &[$Binding],
+                locals: &[$Binding],
+                args: &[i64],
+                image: &[(u64, u8)],
+            ) -> Result<Option<Value>> {
                 anyhow::ensure!(
                     args.len() == params.len(),
                     "interp: {} args given, function has {} params",
                     args.len(),
                     params.len()
                 );
+                let mut mem = Memory::default();
+                for (addr, byte) in image {
+                    mem.bytes.insert(*addr, *byte);
+                }
                 let mut env = Env {
                     values: HashMap::new(),
                     types: HashMap::new(),
-                    mem: Memory::default(),
+                    mem,
                 };
                 for (p, a) in params.iter().zip(args) {
                     env.types.insert(p.name.clone(), p.ty.clone());
@@ -736,4 +768,6 @@ define_interp!(
 );
 
 pub use hir::interpret as interpret_hir;
+pub use hir::interpret_with_memory as interpret_hir_with_memory;
 pub use prehir::interpret as interpret_prehir;
+pub use prehir::interpret_with_memory as interpret_prehir_with_memory;

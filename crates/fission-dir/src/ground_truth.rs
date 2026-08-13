@@ -11,12 +11,32 @@
 //! real machine. A three-way result -- `{emulator, dir_eval, hir_eval}` --
 //! catches that class of bug.
 
-use fission_midend_core::ir::HirFunction;
+use fission_midend_core::ir::{HirFunction, NirType};
 use fission_midend_prehir::PreHirFunction;
 
 use crate::emu_driver::{CallOutcome, EmulatorHarness};
-use crate::eval::{interpret_hir, interpret_prehir, normalize, width_of};
+use crate::eval::{
+    interpret_hir_with_memory, interpret_prehir_with_memory, normalize, width_of,
+};
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
+
+/// Bytes the scratch buffer is filled with.
+///
+/// Zero, except the first four bytes of every sixteen. Zeros make any
+/// pointer-sized field a null terminator, so a linked structure walked from
+/// here ends rather than chasing garbage into unmapped memory and faulting the
+/// call; the non-zero words give the arithmetic something to do so a body that
+/// reads a field is not just returning zero either.
+///
+/// A heuristic about layout, deliberately a mild one, and it costs nothing if
+/// wrong -- both sides read the same bytes regardless.
+fn scratch_contents() -> Vec<u8> {
+    let mut bytes = vec![0u8; 256];
+    for (chunk, slot) in bytes.chunks_mut(16).enumerate() {
+        slot[..4].copy_from_slice(&((chunk as u32) + 1).to_le_bytes());
+    }
+    bytes
+}
 
 /// For each `args` tuple, evaluate `prehir`/`hir` concretely and call the real
 /// emulator at `address` with the same arguments, then compare all three.
@@ -32,14 +52,54 @@ pub fn check_ground_truth(
     hir: &HirFunction,
     samples: &[Vec<i64>],
 ) -> VerifyOutcome {
+    // Give any pointer parameter something real to point at, in both
+    // memories at once. Without it a boundary-value sweep hands a pointer the
+    // integers 0/1/-1: all but null fault the call, and null returns before
+    // the body does anything, so the function grounds on one degenerate sample
+    // and its control flow is never exercised.
+    let scratch = if hir.params.iter().any(|p| matches!(p.ty, NirType::Ptr(_))) {
+        let contents = scratch_contents();
+        match harness.install_scratch(&contents) {
+            Ok(addr) => Some((addr, contents)),
+            Err(err) => {
+                tracing::debug!("scratch buffer unavailable: {err}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let image: Vec<(u64, u8)> = scratch
+        .as_ref()
+        .map(|(addr, bytes)| {
+            bytes
+                .iter()
+                .enumerate()
+                .map(|(i, b)| (addr.wrapping_add(i as u64), *b))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let return_bits = width_of(&hir.return_type).clamp(1, 64);
     let mut divergences = Vec::new();
     let mut checked = 0usize;
     let mut emulator_errors = 0usize;
 
     for args in samples {
-        let prehir_r = interpret_prehir(&prehir.body, &prehir.params, &prehir.locals, args);
-        let hir_r = interpret_hir(&hir.body, &hir.params, &hir.locals, args);
+        // A pointer parameter takes the buffer's address rather than the
+        // sweep's integer, which would be an invalid address on both sides.
+        let args: Vec<i64> = args
+            .iter()
+            .zip(&hir.params)
+            .map(|(v, p)| match (&p.ty, &scratch) {
+                (NirType::Ptr(_), Some((addr, _))) => *addr as i64,
+                _ => *v,
+            })
+            .collect();
+        let args = &args;
+        let prehir_r =
+            interpret_prehir_with_memory(&prehir.body, &prehir.params, &prehir.locals, args, &image);
+        let hir_r = interpret_hir_with_memory(&hir.body, &hir.params, &hir.locals, args, &image);
         let (Ok(Some(prehir_val)), Ok(Some(hir_val))) = (&prehir_r, &hir_r) else {
             // Not this tier's job to explain an unmodeled construct or a
             // void return -- `diff_prehir_hir` already reports that. Skip.
@@ -78,7 +138,7 @@ pub fn check_ground_truth(
         checked += 1;
         if prehir_val != emulator_val || hir_val != emulator_val {
             divergences.push(Divergence {
-                args: args.clone(),
+                args: args.to_vec(),
                 prehir_result: Some(prehir_val),
                 hir_result: Some(hir_val),
                 emulator_result: Some(emulator_val),
