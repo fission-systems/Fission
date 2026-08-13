@@ -362,16 +362,17 @@ pub(crate) fn condition_towards(
     let Some(node) = graph.node(entry) else {
         return Ok(None);
     };
-    // Only a leaf still carries a real terminator; a folded region's exit is
-    // already expressed by its body.
-    if node.body.is_some() {
+    // A leaf is governed by its own terminator; a folded region only by the
+    // one its body left unexpressed (see `CollapseNode::governing_block`).
+    // Anything else has no decision left to recover.
+    let Some(governing) = node.governing_block else {
         return Ok(None);
-    }
+    };
     let LoweredTerminator::Cond {
         cond,
         true_target,
         false_target,
-    } = host.lower_block_terminator(node.entry_block)?
+    } = host.lower_block_terminator(governing)?
     else {
         return Ok(None);
     };
@@ -465,21 +466,39 @@ pub(crate) fn lower_shape(
             let Some(cond) = condition_towards(host, graph, n, inner, exit)? else {
                 return Ok(None);
             };
-            // The test block's own statements run every iteration, so they
-            // belong inside the loop, ahead of the condition -- which only
-            // reads correctly when the test block contributes nothing.
             let (Some(test_stmts), Some(body)) = (
                 node_statements(host, graph, n)?,
                 node_statements(host, graph, inner)?,
             ) else {
                 return Ok(None);
             };
-            if !test_stmts.is_empty() {
-                return Ok(None);
+            if test_stmts.is_empty() {
+                return Ok(Some(vec![PreHirStmt::While {
+                    cond,
+                    body: std::rc::Rc::new(body),
+                }]));
             }
+            // The test block computes something every iteration, so it belongs
+            // *inside* the loop, ahead of the test -- which a `while (cond)`
+            // header cannot express, because the header runs before the body.
+            // `while (true) { S; if (!cond) break; B; }` puts each part where
+            // it actually runs.
+            //
+            // Declining this instead was the second largest reason the DREAM
+            // driver could not reduce a graph, on 25 of the 106 functions it
+            // refused for a surviving cycle. Real loop tests compute their
+            // comparison, so "the test block contributes nothing" is the
+            // uncommon case, not the common one.
+            let mut loop_body = test_stmts;
+            loop_body.push(PreHirStmt::If {
+                cond: negate_expr(cond),
+                then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+                else_body: std::rc::Rc::new(Vec::new()),
+            });
+            loop_body.extend(body);
             Ok(Some(vec![PreHirStmt::While {
-                cond,
-                body: std::rc::Rc::new(body),
+                cond: crate::reaching_conditions::always(),
+                body: std::rc::Rc::new(loop_body),
             }]))
         }
         ShapeKind::DoWhile => {

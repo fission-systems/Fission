@@ -346,11 +346,35 @@ fn fold_every_cycle(
         let Some(body) = lower_shape(host, graph, &shape)? else {
             return Ok(());
         };
-        if graph.collapse(&shape.members, shape.entry, body).is_err() {
+        // Read before folding: `collapse` retires the member nodes, so the
+        // last member's governing block is unreachable afterwards.
+        let governing = governing_block_after(graph, &shape);
+        let Ok(folded) = graph.collapse(&shape.members, shape.entry, body) else {
             return Ok(());
-        }
+        };
+        graph.set_governing_block(folded, governing);
     }
     Ok(())
+}
+
+/// Which block's terminator still decides where a folded region goes.
+///
+/// Only a `Sequence` keeps one. Its last member's branch was never turned
+/// into a statement -- the graph edge carried it -- so the region still leaves
+/// through that terminator and a later rule can recover the condition. Every
+/// other shape ends with its exit expressed by the body it emitted, so there
+/// is nothing left to ask, and `None` makes the next rule decline rather than
+/// read a terminator whose decision has already been written down.
+fn governing_block_after(graph: &CollapseGraph, shape: &Shape) -> Option<usize> {
+    if shape.kind != ShapeKind::Sequence {
+        return None;
+    }
+    let last = *shape.members.last()?;
+    graph_member_governing(graph, last)
+}
+
+fn graph_member_governing(graph: &CollapseGraph, id: NodeId) -> Option<usize> {
+    graph.node(id).and_then(|n| n.governing_block)
 }
 
 fn graph_has_cycle(graph: &CollapseGraph) -> bool {

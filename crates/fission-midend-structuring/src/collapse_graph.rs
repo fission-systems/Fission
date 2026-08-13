@@ -75,6 +75,19 @@ pub struct CollapseNode {
     /// Structured statements, present once the node is a collapsed region.
     /// A freshly built leaf carries `None` and is lowered on demand.
     pub body: Option<Vec<PreHirStmt>>,
+    /// The block whose terminator still decides where this node goes.
+    ///
+    /// A leaf is governed by its own block. A folded region usually is not
+    /// governed by anything -- its exit is unconditional and its body says so
+    /// -- but a folded `Sequence` still leaves through its last member's
+    /// branch, which no statement in the body captured. Recording that is what
+    /// lets a later shape recover a condition from a node that has already
+    /// been folded; without it, folding one region blinds every rule that
+    /// would have used the next.
+    ///
+    /// `None` means "ask no further", and is the safe default: a caller that
+    /// finds no governing terminator declines rather than guesses.
+    pub governing_block: Option<usize>,
 }
 
 /// A live CFG that shrinks as regions are folded into single nodes.
@@ -96,6 +109,8 @@ impl CollapseGraph {
                     members: BlockOwnership::single(idx),
                     entry_block: idx,
                     body: None,
+                    // A leaf still has its own terminator.
+                    governing_block: Some(idx),
                 })
             })
             .collect();
@@ -192,6 +207,16 @@ impl CollapseGraph {
     /// out-edges become its successors; edges wholly inside the region are
     /// dropped, which is what retires a structured loop's back edge. The
     /// surviving node reuses `entry`'s id so predecessors keep their target.
+    /// Record which block's terminator decides where `id` goes next.
+    ///
+    /// Set by the caller that knows the shape, since only it can say whether
+    /// the emitted body already expressed the region's exit.
+    pub fn set_governing_block(&mut self, id: NodeId, block: Option<usize>) {
+        if let Some(node) = self.nodes.get_mut(id).and_then(|n| n.as_mut()) {
+            node.governing_block = block;
+        }
+    }
+
     pub fn collapse(
         &mut self,
         members: &[NodeId],
@@ -246,6 +271,9 @@ impl CollapseGraph {
             members: merged,
             entry_block,
             body: Some(body),
+            // Nothing until the caller says otherwise; see
+            // `set_governing_block`.
+            governing_block: None,
         });
         self.live += 1;
         for s in out {
