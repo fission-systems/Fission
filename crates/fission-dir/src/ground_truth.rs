@@ -16,7 +16,7 @@ use fission_midend_prehir::PreHirFunction;
 
 use crate::emu_driver::{CallOutcome, EmulatorHarness};
 use crate::eval::{
-    interpret_hir_with_memory, interpret_prehir_with_memory, normalize, width_of,
+    hir_free_names, interpret_hir_with_state, interpret_prehir_with_state, normalize, width_of,
 };
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
 
@@ -80,6 +80,11 @@ pub fn check_ground_truth(
         })
         .unwrap_or_default();
 
+    // Registers the body reads without ever writing -- caller state the
+    // interpreter has no other way to know. Taken from the machine that is
+    // about to run the same call, so both sides see the same thing.
+    let bound = harness.entry_registers(&hir_free_names(hir));
+
     let return_bits = width_of(&hir.return_type).clamp(1, 64);
     let mut divergences = Vec::new();
     let mut checked = 0usize;
@@ -97,9 +102,16 @@ pub fn check_ground_truth(
             })
             .collect();
         let args = &args;
-        let prehir_r =
-            interpret_prehir_with_memory(&prehir.body, &prehir.params, &prehir.locals, args, &image);
-        let hir_r = interpret_hir_with_memory(&hir.body, &hir.params, &hir.locals, args, &image);
+        let prehir_r = interpret_prehir_with_state(
+            &prehir.body,
+            &prehir.params,
+            &prehir.locals,
+            args,
+            &image,
+            &bound,
+        );
+        let hir_r =
+            interpret_hir_with_state(&hir.body, &hir.params, &hir.locals, args, &image, &bound);
         let (Ok(Some(prehir_val)), Ok(Some(hir_val))) = (&prehir_r, &hir_r) else {
             // Not this tier's job to explain an unmodeled construct or a
             // void return -- `diff_prehir_hir` already reports that. Skip.

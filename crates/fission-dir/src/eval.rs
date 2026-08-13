@@ -656,7 +656,49 @@ macro_rules! define_interp {
                 args: &[i64],
                 image: &[(u64, u8)],
             ) -> Result<Option<Value>> {
-                interpret_inner(body, params, locals, args, image)
+                interpret_inner(body, params, locals, args, image, &[])
+            }
+
+            /// As [`interpret_with_memory`], plus named values pre-bound in the
+            /// environment -- machine registers the body reads without ever
+            /// writing, taken from the emulator that is about to run the same
+            /// call.
+            pub fn interpret_with_state(
+                body: &[$Stmt],
+                params: &[$Binding],
+                locals: &[$Binding],
+                args: &[i64],
+                image: &[(u64, u8)],
+                bound: &[(String, Value)],
+            ) -> Result<Option<Value>> {
+                interpret_inner(body, params, locals, args, image, bound)
+            }
+
+            /// Every name the body reads that nothing declares or assigns --
+            /// the set worth asking the machine about.
+            ///
+            /// Deliberately over-inclusive: a name already bound is simply
+            /// overwritten by the declaration, and one the machine does not
+            /// recognise is dropped.
+            pub fn free_names(func: &$Function) -> Vec<String> {
+                let rendered = format!("{:?}", func.body);
+                let mut out: Vec<String> = Vec::new();
+                let mut rest = rendered.as_str();
+                while let Some(i) = rest.find("Var(") {
+                    rest = &rest[i + 4..];
+                    let Some(start) = rest.find('"') else { break };
+                    let Some(end) = rest[start + 1..].find('"') else { break };
+                    let name = &rest[start + 1..start + 1 + end];
+                    if !name.is_empty() && !out.iter().any(|n| n == name) {
+                        out.push(name.to_string());
+                    }
+                    rest = &rest[start + 1 + end..];
+                }
+                out.retain(|n| {
+                    !func.params.iter().any(|p| &p.name == n)
+                        && !func.locals.iter().any(|l| &l.name == n)
+                });
+                out
             }
 
             /// Interpret `body` with `args` bound to `params` in order and
@@ -672,7 +714,7 @@ macro_rules! define_interp {
                 locals: &[$Binding],
                 args: &[i64],
             ) -> Result<Option<Value>> {
-                interpret_inner(body, params, locals, args, &[])
+                interpret_inner(body, params, locals, args, &[], &[])
             }
 
             fn interpret_inner(
@@ -681,6 +723,7 @@ macro_rules! define_interp {
                 locals: &[$Binding],
                 args: &[i64],
                 image: &[(u64, u8)],
+                bound: &[(String, Value)],
             ) -> Result<Option<Value>> {
                 anyhow::ensure!(
                     args.len() == params.len(),
@@ -697,6 +740,11 @@ macro_rules! define_interp {
                     types: HashMap::new(),
                     mem,
                 };
+                // Machine state first, so a real declaration below wins.
+                for (name, v) in bound {
+                    env.types.insert(name.clone(), PTR_TY);
+                    env.values.insert(name.clone(), *v);
+                }
                 for (p, a) in params.iter().zip(args) {
                     env.types.insert(p.name.clone(), p.ty.clone());
                     env.values.insert(p.name.clone(), normalize(*a, &p.ty));
@@ -769,5 +817,9 @@ define_interp!(
 
 pub use hir::interpret as interpret_hir;
 pub use hir::interpret_with_memory as interpret_hir_with_memory;
+pub use hir::interpret_with_state as interpret_hir_with_state;
+pub use hir::free_names as hir_free_names;
 pub use prehir::interpret as interpret_prehir;
 pub use prehir::interpret_with_memory as interpret_prehir_with_memory;
+pub use prehir::interpret_with_state as interpret_prehir_with_state;
+pub use prehir::free_names as prehir_free_names;

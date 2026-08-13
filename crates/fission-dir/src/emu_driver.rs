@@ -162,6 +162,37 @@ impl EmulatorHarness {
         Ok(addr)
     }
 
+    /// Read the machine registers a decompiled body might name, as they
+    /// stand at the start of a call.
+    ///
+    /// A decompiled body routinely reads a register the function never wrote
+    /// -- `rax`, `cf`, `rbp` -- because the value came from the caller. The
+    /// interpreter has no such state and refuses, which is right in isolation
+    /// but leaves those functions permanently uncheckable: measured on the
+    /// corpus's own functions, undeclared reads are the second largest reason
+    /// this tier says nothing, and roughly five in six of them are registers.
+    ///
+    /// So take the values from the machine and hand the interpreter the same
+    /// ones -- the same trick as the scratch buffer, and sound for the same
+    /// reason: the two sides agree because both were told what the *emulator*
+    /// is about to do, not because either guessed.
+    ///
+    /// Call after [`Self::install_scratch`] and before [`Self::call`]; the
+    /// values come from the restored baseline, which is what every call
+    /// starts from.
+    pub fn entry_registers(&mut self, names: &[String]) -> Vec<(String, i64)> {
+        self.emu.state = self.baseline_state.clone();
+        names
+            .iter()
+            .filter_map(|n| {
+                self.emu
+                    .read_register_u64(n)
+                    .ok()
+                    .map(|v| (n.clone(), v as i64))
+            })
+            .collect()
+    }
+
     /// Call `address` with `args` (in declared-parameter order, restricted
     /// by the caller to `Bool`/`Int`-typed parameters -- see this crate's
     /// scope notes), and read back the real return value. Restores the

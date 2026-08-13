@@ -27,14 +27,25 @@
 //! **Confirm any change here still catches that.** A check that passes proves
 //! nothing until you have watched it fail.
 //!
-//! # Reach
+//! # Reach, and its ceiling
 //!
 //! Twelve functions. Enough for a bug in condition handling anywhere in the
 //! pipeline; not enough for one confined to a path those twelve do not take
 //! -- emitting `while` where `do`/`while` is correct is still missed, because
-//! none of them reach that rule. Widening reach means more of the interpreter:
-//! roughly 230 of 900 unfiltered attempts bail on an indirect or unmodelled
-//! call and 212 on a raw register or global read.
+//! none of them reach that rule.
+//!
+//! Widening it was tried. Machine registers a body reads without writing were
+//! the second largest blocker, and `EmulatorHarness::entry_registers` now
+//! supplies them from the machine about to run the same call. It works, and it
+//! bought **no coverage at all**: the sixteen functions it unblocked stop at
+//! the very next construct, a call. Undeclared reads fell from 61 to 56 while
+//! unmodelled call targets rose from 15 to 31.
+//!
+//! That is the ceiling. What remains is 72 indirect dispatches through
+//! `__fission_dispatcher_indirect` and 31 calls into real library code.
+//! Interpreting those means resolving indirect targets and executing callees
+//! -- which is being an emulator, and there already is one. Reach beyond here
+//! is not a matter of a few more expression forms.
 
 use fission_dir::report::VerifyOutcome;
 use fission_dir::{EmulatorHarness, check_ground_truth, decompile_one, default_samples};
