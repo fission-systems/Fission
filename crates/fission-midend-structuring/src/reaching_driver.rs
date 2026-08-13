@@ -102,6 +102,18 @@ impl DeclineReason {
 /// Ceiling on loop-folding rounds, proportional to graph size.
 const MAX_ROUNDS_PER_NODE: usize = 8;
 
+/// How many edges may be conceded to a jump to break a cycle nothing matches.
+///
+/// angr's `_last_resort_refinement`, with a budget. Conceding is not free --
+/// each one is a `goto` in the result -- but it is not measured against zero
+/// either: `structuring_quality` compares against whatever the existing path
+/// produced for the same function, and these are precisely the functions it
+/// leaves badly unstructured. Two jumps beating ten is a win.
+///
+/// Small, because a fold that needs many concessions is describing a graph
+/// this driver has no real grip on, and the comparator would reject it anyway.
+const MAX_CONCESSIONS: usize = 3;
+
 /// How many decisions a region may contain and still be worth describing this
 /// way.
 ///
@@ -331,14 +343,25 @@ fn fold_every_cycle(
     graph: &mut CollapseGraph,
 ) -> Result<(), MlilPreviewError> {
     let budget = graph.node_capacity().saturating_mul(MAX_ROUNDS_PER_NODE);
+    let mut concessions = 0usize;
     for _ in 0..budget {
         if !graph_has_cycle(graph) {
             return Ok(());
         }
         // Prefer a loop shape when one matches, so a loop is closed as soon as
         // its body is reducible rather than after unrelated folding.
-        let Some(shape) = find_cyclic_shape(graph).or_else(|| find_shape(graph)) else {
-            return Ok(());
+        let shape = match find_cyclic_shape(graph).or_else(|| find_shape(graph)) {
+            Some(shape) => shape,
+            None => {
+                // Nothing matches and a cycle remains. Concede one edge to a
+                // jump so the next round faces a different graph, rather than
+                // abandoning a function the existing path will structure worse.
+                if concessions >= MAX_CONCESSIONS || !concede_one_edge(host, graph)? {
+                    return Ok(());
+                }
+                concessions += 1;
+                continue;
+            }
         };
         if !fold_accounts_for_every_internal_edge(graph, &shape) {
             return Ok(());
@@ -375,6 +398,87 @@ fn governing_block_after(graph: &CollapseGraph, shape: &Shape) -> Option<usize> 
 
 fn graph_member_governing(graph: &CollapseGraph, id: NodeId) -> Option<usize> {
     graph.node(id).and_then(|n| n.governing_block)
+}
+
+/// Turn one edge into a `goto`/`label` pair and remove it from the graph.
+///
+/// The edge stops being control flow the shapes have to account for and
+/// becomes a statement instead, which is the only way a cycle nothing matches
+/// can be broken. Prefers a back edge -- the classic unstructured jump, and the
+/// one a reader least minds seeing.
+///
+/// Both ends are materialised: the source's body gains the jump (guarded by
+/// its own condition when it was a two-way branch, so the remaining edge still
+/// means what it meant), and the target's gains the label. After this the
+/// source's decision is written down rather than pending, so it stops
+/// governing anything.
+fn concede_one_edge(
+    host: &mut impl StructuringHost,
+    graph: &mut CollapseGraph,
+) -> Result<bool, MlilPreviewError> {
+    let Some((from, to)) = pick_conceded_edge(graph) else {
+        return Ok(false);
+    };
+    let Some(entry_block) = graph.node(to).map(|n| n.entry_block) else {
+        return Ok(false);
+    };
+    let label = format!("dream_L{entry_block}");
+
+    let outs: Vec<NodeId> = graph.successors(from).to_vec();
+    let Some(mut source) = node_statements(host, graph, from)? else {
+        return Ok(false);
+    };
+    match outs.len() {
+        1 => source.push(PreHirStmt::Goto(label.clone())),
+        2 => {
+            let Some(other) = outs.iter().copied().find(|s| *s != to) else {
+                return Ok(false);
+            };
+            let Some(cond) = condition_towards(host, graph, from, to, other)? else {
+                return Ok(false);
+            };
+            source.push(PreHirStmt::If {
+                cond,
+                then_body: std::rc::Rc::new(vec![PreHirStmt::Goto(label.clone())]),
+                else_body: std::rc::Rc::new(Vec::new()),
+            });
+        }
+        _ => return Ok(false),
+    }
+
+    let Some(mut target) = node_statements(host, graph, to)? else {
+        return Ok(false);
+    };
+    target.insert(0, PreHirStmt::Label(label));
+    let target_governing = graph.node(to).and_then(|n| n.governing_block);
+
+    graph.set_body(from, source);
+    // The branch is now a statement, so there is no decision left to read off
+    // this node's terminator.
+    graph.set_governing_block(from, None);
+    graph.set_body(to, target);
+    graph.set_governing_block(to, target_governing);
+    Ok(graph.virtualize_edge(from, to))
+}
+
+/// The edge to give up, preferring a back edge.
+fn pick_conceded_edge(graph: &CollapseGraph) -> Option<(NodeId, NodeId)> {
+    let live: Vec<NodeId> = graph.live_nodes().collect();
+    for &u in &live {
+        for &v in graph.successors(u) {
+            if v <= u && graph.successors(u).len() <= 2 {
+                return Some((u, v));
+            }
+        }
+    }
+    for &u in &live {
+        if graph.successors(u).len() <= 2 {
+            if let Some(&v) = graph.successors(u).first() {
+                return Some((u, v));
+            }
+        }
+    }
+    None
 }
 
 fn graph_has_cycle(graph: &CollapseGraph) -> bool {

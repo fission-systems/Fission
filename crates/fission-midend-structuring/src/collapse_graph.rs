@@ -217,6 +217,17 @@ impl CollapseGraph {
         }
     }
 
+    /// Replace a node's statements, leaving its membership and edges alone.
+    ///
+    /// For materialising a leaf whose body must now carry something the graph
+    /// no longer says -- a jump conceded to break a cycle, or the label it
+    /// lands on.
+    pub fn set_body(&mut self, id: NodeId, body: Vec<PreHirStmt>) {
+        if let Some(node) = self.nodes.get_mut(id).and_then(|n| n.as_mut()) {
+            node.body = Some(body);
+        }
+    }
+
     pub fn collapse(
         &mut self,
         members: &[NodeId],
