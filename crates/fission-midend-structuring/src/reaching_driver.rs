@@ -49,21 +49,35 @@ const MAX_ROUNDS_PER_NODE: usize = 8;
 /// way.
 ///
 /// A node's reaching condition is a formula over every decision on the paths
-/// that reach it, so both the formulas and the nesting they produce grow with
-/// this number -- and so does what the rest of the pipeline then has to chew
-/// through. Measured: a 51-block region with ~50 decisions was structured in
-/// 141ms and cost **45 seconds downstream**, against 3.1s for the same
-/// function on the existing path. The driver was not slow; what it emitted
-/// was.
+/// that reach it, so the formulas grow with this number -- and so does what
+/// the rest of the pipeline then has to chew through. Measured: a 51-block
+/// region was structured in 141ms and cost **45 seconds downstream**, against
+/// 3.1s for the same function on the existing path. The driver was not slow;
+/// what it emitted was.
+///
+/// This is the safety valve, and it is the *only* one of the two caps that
+/// protects anything: raising it to 32 changed the corpus not at all, and 48
+/// brought the timeout back. The breaking region therefore has between 33 and
+/// 48 decisions, which leaves 32 no margin at all -- so 16 stands, at a little
+/// over 2x. The eleven gotos 32 would have bought are not worth a binary that
+/// fails to decompile.
 const MAX_DECISIONS: usize = 16;
 
-/// How deeply the emitted body may nest.
+/// Backstop on how deeply the emitted body may nest.
 ///
-/// DREAM nests by construction -- that is the well-known cost of trading
-/// jumps for conditions, and it is visible in this corpus (a 9-goto function
-/// came back 9 levels deep). Past some depth a reader is better served by the
-/// jump, so a body this deep is declined rather than shipped.
-const MAX_NESTING_DEPTH: usize = 8;
+/// This used to be 8, and it was the binding constraint on the whole driver:
+/// **every goto the cap relaxation bought came from raising it**, and none
+/// from the decision count. That is because depth is not really this
+/// driver's call to make. `structuring_quality` compares the candidate
+/// against the structuring it would replace and allows one level per jump
+/// removed, which is the same judgement made with the baseline actually in
+/// hand -- so once that comparator exists, a fixed number here can only be
+/// wrong in one direction or the other.
+///
+/// So it is deliberately far above where the comparator bites, and stays only
+/// as a backstop against a pathological body reaching the rest of the
+/// pipeline at all.
+const MAX_NESTING_DEPTH: usize = 64;
 
 /// On by default; opt out with `FISSION_DREAM=0`.
 ///
