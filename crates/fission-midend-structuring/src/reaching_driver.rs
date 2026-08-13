@@ -55,13 +55,27 @@ const MAX_ROUNDS_PER_NODE: usize = 8;
 /// 3.1s for the same function on the existing path. The driver was not slow;
 /// what it emitted was.
 ///
-/// This is the safety valve, and it is the *only* one of the two caps that
-/// protects anything: raising it to 32 changed the corpus not at all, and 48
-/// brought the timeout back. The breaking region therefore has between 33 and
-/// 48 decisions, which leaves 32 no margin at all -- so 16 stands, at a little
-/// over 2x. The eleven gotos 32 would have bought are not worth a binary that
-/// fails to decompile.
-const MAX_DECISIONS: usize = 16;
+/// It is a *proxy*, though, and a poor one: the region that caused the 45
+/// seconds has only 39 decisions and nests 9 deep -- both unremarkable --
+/// while its guards total 160,423 expression nodes. Capping decisions low
+/// enough to exclude it also excluded healthy regions with twice the decisions
+/// and a four-hundredth of the guard weight. `MAX_GUARD_FORMULA_SIZE` bounds
+/// the real quantity, so this can sit high and only stop a region from being
+/// described at all.
+const MAX_DECISIONS: usize = 64;
+
+/// How large the guards of an emitted body may total, in expression nodes.
+///
+/// The bound on what condition-based structuring actually costs, replacing two
+/// proxies that could not see it. Measured across every candidate this driver
+/// produced on the corpus: healthy ones run from 2 to 2,008 nodes, and the one
+/// that cost 45 seconds downstream is **160,423** -- eighty times the largest
+/// healthy case. There is no ambiguity to tune against, unlike the decision
+/// count whose good and bad cases overlapped between 33 and 48.
+///
+/// 8,000 sits four times above the largest healthy candidate and twenty times
+/// below the pathological one.
+const MAX_GUARD_FORMULA_SIZE: usize = 8_000;
 
 /// Backstop on how deeply the emitted body may nest.
 ///
@@ -191,6 +205,10 @@ fn structure_acyclic_remainder(
         bodies.get(&n).cloned().unwrap_or_default()
     });
     if nesting_depth(&body) > MAX_NESTING_DEPTH {
+        return Ok(None);
+    }
+    // The real cost bound: what the rest of the pipeline has to carry.
+    if crate::structuring_quality::guard_formula_size(&body) > MAX_GUARD_FORMULA_SIZE {
         return Ok(None);
     }
     // Most guards are consumed by the `if` directly after them; folding those

@@ -25,7 +25,7 @@
 //! than by how a particular corpus happens to score, which is what lets the
 //! drivers run at all.
 
-use fission_midend_prehir::PreHirStmt;
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
 /// What a structuring is worth, on every axis measurement has shown to matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -130,10 +130,85 @@ fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
     }
 }
 
+/// Total size of every guard in a body, counted in expression nodes.
+///
+/// The honest measure of what condition-based structuring costs. Depth and
+/// decision count are both proxies for it: a node's reaching condition is a
+/// formula over the decisions on the paths that reach it, and it is the
+/// *formulas* that the rest of the pipeline has to carry, simplify, and type.
+/// A region that produced 45 seconds of downstream work did so by emitting
+/// guards, not by being tall.
+///
+/// Counting them directly means a bound can be placed on the thing that
+/// actually costs, rather than on a stand-in that excludes large functions
+/// whether or not their guards are big.
+pub fn guard_formula_size(body: &[PreHirStmt]) -> usize {
+    let mut total = 0;
+    guards(body, &mut total);
+    total
+}
+
+fn guards(body: &[PreHirStmt], total: &mut usize) {
+    for stmt in body {
+        match stmt {
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                *total += expr_size(cond);
+                guards(then_body, total);
+                guards(else_body, total);
+            }
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+                *total += expr_size(cond);
+                guards(body, total);
+            }
+            PreHirStmt::For { cond, body, .. } => {
+                if let Some(cond) = cond {
+                    *total += expr_size(cond);
+                }
+                guards(body, total);
+            }
+            PreHirStmt::Switch { expr, cases, default } => {
+                *total += expr_size(expr);
+                for case in cases {
+                    guards(&case.body, total);
+                }
+                guards(default, total);
+            }
+            PreHirStmt::Block(inner) => guards(inner, total),
+            _ => {}
+        }
+    }
+}
+
+/// Expression nodes in `e`, counting every operand.
+pub fn expr_size(e: &PreHirExpr) -> usize {
+    match e {
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => 1,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => 1 + expr_size(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => 1 + expr_size(lhs) + expr_size(rhs),
+        PreHirExpr::Index { base, index, .. } => 1 + expr_size(base) + expr_size(index),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => 1 + expr_size(cond) + expr_size(then_expr) + expr_size(else_expr),
+        PreHirExpr::Call { args, .. } => 1 + args.iter().map(expr_size).sum::<usize>(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_midend_prehir::{PreHirExpr, PreHirSwitchCase};
+    use fission_midend_prehir::PreHirSwitchCase;
     use std::rc::Rc;
 
     fn goto(n: &str) -> PreHirStmt {
@@ -255,5 +330,41 @@ mod tests {
             vec![],
         )]))]);
         assert_eq!(q.nesting_depth, 1, "the block itself is not a nesting level");
+    }
+
+    #[test]
+    fn guard_size_counts_every_operand_of_every_guard() {
+        let big = PreHirExpr::Binary {
+            op: fission_midend_prehir::PreHirBinaryOp::LogicalAnd,
+            lhs: Box::new(cond()),
+            rhs: Box::new(cond()),
+            ty: fission_midend_core::ir::NirType::Bool,
+        };
+        assert_eq!(expr_size(&big), 3, "the and plus both operands");
+
+        let body = vec![PreHirStmt::If {
+            cond: big.clone(),
+            then_body: Rc::new(vec![PreHirStmt::If {
+                cond: big,
+                then_body: Rc::new(Vec::new()),
+                else_body: Rc::new(Vec::new()),
+            }]),
+            else_body: Rc::new(Vec::new()),
+        }];
+        assert_eq!(guard_formula_size(&body), 6, "nested guards both count");
+    }
+
+    #[test]
+    fn a_body_without_guards_costs_nothing() {
+        assert_eq!(guard_formula_size(&[goto("a"), goto("b")]), 0);
+    }
+
+    #[test]
+    fn guard_size_sees_depth_and_breadth_the_same_way() {
+        // Two shallow guards and two nested ones cost the same, which is the
+        // point: depth was only ever a proxy for the formulas being carried.
+        let flat = vec![if_stmt(vec![], vec![]), if_stmt(vec![], vec![])];
+        let nested = vec![if_stmt(vec![if_stmt(vec![], vec![])], vec![])];
+        assert_eq!(guard_formula_size(&flat), guard_formula_size(&nested));
     }
 }
