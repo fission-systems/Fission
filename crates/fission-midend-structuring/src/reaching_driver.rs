@@ -102,17 +102,31 @@ impl DeclineReason {
 /// Ceiling on loop-folding rounds, proportional to graph size.
 const MAX_ROUNDS_PER_NODE: usize = 8;
 
-/// How many edges may be conceded to a jump to break a cycle nothing matches.
+/// Backstop on how many edges may be conceded to a jump to break a cycle
+/// nothing matches.
 ///
-/// angr's `_last_resort_refinement`, with a budget. Conceding is not free --
-/// each one is a `goto` in the result -- but it is not measured against zero
-/// either: `structuring_quality` compares against whatever the existing path
-/// produced for the same function, and these are precisely the functions it
-/// leaves badly unstructured. Two jumps beating ten is a win.
+/// angr's `_last_resort_refinement`. Conceding is not free -- each one is a
+/// `goto` -- but it is not measured against zero either: `structuring_quality`
+/// compares against whatever the existing path produced for the same function,
+/// and these are precisely the functions it leaves badly unstructured. Two
+/// jumps beating ten is a win.
 ///
-/// Small, because a fold that needs many concessions is describing a graph
-/// this driver has no real grip on, and the comparator would reject it anyway.
-const MAX_CONCESSIONS: usize = 3;
+/// This started at 3 on the reasoning that a fold needing many concessions is
+/// describing a graph the driver has no grip on. Measured, that reasoning was
+/// protecting against something the comparator already handles:
+///
+/// | budget | 3 | 8 | 24 | 128 | none |
+/// |---|---|---|---|---|---|
+/// | corpus | -175 | -221 | -232 | -244 | -244 |
+///
+/// One file regresses at every setting, the same one, for a reason downstream
+/// of structuring entirely -- so the extra concessions cost nothing and the
+/// comparator turns down the folds that would. Runtime is flat throughout.
+///
+/// 128 is where the corpus stops changing, and removing the cap does not move
+/// it. It stays finite as a bound on a graph unlike anything measured here;
+/// the fold loop is separately bounded by `MAX_ROUNDS_PER_NODE`.
+const MAX_CONCESSIONS: usize = 128;
 
 /// How many decisions a region may contain and still be worth describing this
 /// way.
