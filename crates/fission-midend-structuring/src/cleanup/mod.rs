@@ -5,6 +5,7 @@ use crate::HashMap;
 use crate::HashSet;
 
 
+pub mod sink_span;
 mod goto;
 pub use goto::eliminate_redundant_gotos;
 
@@ -50,6 +51,7 @@ pub fn finalize_post_layout_body(
 ) -> Vec<PreHirStmt> {
     let (body, _) = eliminate_nonfallthrough_label_aliases(body, protected);
     let (body, _) = duplicate_terminal_tails(body, protected);
+    let (body, _) = sink_span::sink_spans_into_if_arms(body, protected);
     let (body, _) = invert_forward_guard_gotos(body, protected);
     let (body, _) = relocate_jump_only_joins(body, protected);
     let body = finalize_structured_body(protected, body);
