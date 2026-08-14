@@ -619,4 +619,53 @@ mod tests {
         let (_, removed) = duplicate_terminal_tails(body, &HashSet::default());
         assert_eq!(removed, 0, "over-referenced tail must not be duplicated");
     }
+
+    #[test]
+    fn post_finalize_terminal_tail_catches_tail_exposed_by_first_duplication() {
+        // L is not initially duplicable: two predecessors target it and its
+        // region ends in `goto R`. The first pass duplicates R's return into
+        // L, and finalization makes that new terminal shape canonical. A
+        // second bounded pass can then duplicate L without relaxing any
+        // admission rule.
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::If {
+                cond: var("d"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            expr_stmt("x"),
+            PreHirStmt::Goto("R".into()),
+            PreHirStmt::Label("R".into()),
+            PreHirStmt::Return(Some(var("b"))),
+        ];
+
+        let protected = HashSet::default();
+        let (body, first_removed) = duplicate_terminal_tails(body, &protected);
+        assert_eq!(first_removed, 1, "only the inner R tail is ready initially");
+        assert_eq!(count_gotos(&body), 2);
+
+        let body = super::super::finalize_structured_body(&protected, body);
+        let (body, second_removed) = duplicate_terminal_tails(body, &protected);
+        let body = super::super::finalize_structured_body(&protected, body);
+
+        assert_eq!(second_removed, 2, "the newly terminal L tail is now ready");
+        assert_eq!(count_gotos(&body), 0);
+        assert!(!body.iter().any(|stmt| matches!(stmt, PreHirStmt::Label(_))));
+        assert!(matches!(
+            body.as_slice(),
+            [
+                PreHirStmt::If { then_body: first, .. },
+                PreHirStmt::If { then_body: second, .. },
+                PreHirStmt::Return(_),
+            ] if first.as_slice() == [expr_stmt("x"), PreHirStmt::Return(Some(var("b")))]
+                && second.as_slice() == first.as_slice()
+        ));
+    }
 }

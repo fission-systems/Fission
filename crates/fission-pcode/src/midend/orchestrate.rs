@@ -268,6 +268,16 @@ pub fn render_mlil_preview_with_binary_and_context(
     // sees the final layout, then prune labels made unreferenced by any of the
     // post-layout rewrites.
     let body = fission_midend_structuring::cleanup::finalize_structured_body(&protected, body);
+    // Finalization can expose another bounded terminal tail: for example, the
+    // first duplication may retire an inner shared return label, making its
+    // predecessor a complete return tail only after the surrounding residual
+    // labels and fallthroughs are finalized. Give the existing proof one more
+    // chance, then remove labels made dead by that second rewrite. This stays
+    // builder-free and uses the same terminality, loop-control, label, and
+    // growth admission as the first invocation.
+    let (body, _) =
+        fission_midend_structuring::cleanup::duplicate_terminal_tails(body, &protected);
+    let body = fission_midend_structuring::cleanup::finalize_structured_body(&protected, body);
     hir.body = body;
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to
