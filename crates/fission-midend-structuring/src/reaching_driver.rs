@@ -963,6 +963,22 @@ fn compact_live_cfg(graph: &CollapseGraph) -> CompactLiveCfg {
 /// chain. A real block frontier forms an ordinary SESE region; a synthetic
 /// frontier proves that every terminal in the region reaches `VirtualExit`.
 fn find_acyclic_region(graph: &CollapseGraph) -> Option<AcyclicRegion> {
+    find_acyclic_region_filtered(graph, false)
+}
+
+/// Smallest closed single-entry acyclic region, optionally restricted to those
+/// with a real block frontier.
+///
+/// The restriction matters because a `VirtualExit` frontier is not a region
+/// this decomposition can fold -- it is the outer multi-terminal region, which
+/// the schema loop handles. Without the filter the caller stops at the first
+/// one it meets, and every foldable region elsewhere in the graph goes
+/// unexamined. Measured, that left residual formulas of 26,000 to 458,000
+/// nodes on the worst functions, against a viable bound of 8,000.
+fn find_acyclic_region_filtered(
+    graph: &CollapseGraph,
+    block_frontier_only: bool,
+) -> Option<AcyclicRegion> {
     let compact = compact_live_cfg(graph);
     let order = topological_order(&compact.successors)?;
     let postdom = ImmPostDomTree::compute(&compact.successors, &compact.predecessors);
@@ -1001,6 +1017,12 @@ fn find_acyclic_region(graph: &CollapseGraph) -> Option<AcyclicRegion> {
                         }
                         CommonPostdominator::VirtualExit => AcyclicRegionFrontier::VirtualExit,
                     };
+                    // Not foldable here, and the postdominator chain ends at
+                    // the virtual exit -- move to the next head rather than
+                    // abandoning the whole search.
+                    if block_frontier_only && frontier == AcyclicRegionFrontier::VirtualExit {
+                        break;
+                    }
                     let candidate = AcyclicRegion {
                         head,
                         frontier,
@@ -1057,12 +1079,7 @@ fn fold_acyclic_sese_regions(
     let budget = graph.node_capacity();
     let mut folded_count = 0usize;
     for _ in 0..budget {
-        let Some(region) = find_acyclic_region(graph) else {
-            break;
-        };
-        let AcyclicRegionFrontier::Block(_) = region.frontier else {
-            // The outer multi-terminal region is handled by the recursive
-            // schema driver, not by one global reaching formula.
+        let Some(region) = find_acyclic_region_filtered(graph, true) else {
             break;
         };
         // Lowering is still effectful even after the graph proof. Run the
