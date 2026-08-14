@@ -84,9 +84,35 @@ pub fn invert_forward_guard_gotos(
         protected,
         &global_refs,
         &definition_counts,
+        &[],
         &mut removed,
     );
     (body, removed)
+}
+
+/// Labels control reaches by running off the end of `stmts[idx + 1..]`.
+///
+/// A guard inside a nested body can be inverted against a label that sits
+/// *after* the body's container, because falling out of the body arrives there
+/// anyway. Without this the pass only ever saw labels in its own statement
+/// list, and the commonest remaining forward jump was exactly the shape it
+/// could not reach: `if (c) { goto L; } TAIL }` with `L:` in the parent.
+fn fallthrough_labels_after(
+    stmts: &[PreHirStmt],
+    idx: usize,
+    inherited: &[String],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for stmt in &stmts[idx + 1..] {
+        match stmt {
+            PreHirStmt::Label(l) => out.push(l.clone()),
+            _ => return out,
+        }
+    }
+    // Nothing but labels followed, so the enclosing list's own fall-through
+    // is reached too.
+    out.extend_from_slice(inherited);
+    out
 }
 
 fn invert_in_place(
@@ -94,6 +120,7 @@ fn invert_in_place(
     protected: &HashSet<String>,
     global_refs: &HashMap<String, usize>,
     definition_counts: &HashMap<String, usize>,
+    falls_through_to: &[String],
     removed: &mut usize,
 ) {
     let mut idx = 0usize;
@@ -114,6 +141,7 @@ fn invert_in_place(
                             protected,
                             global_refs,
                             definition_counts,
+                            falls_through_to,
                             removed,
                         );
                     }
@@ -135,6 +163,7 @@ fn invert_in_place(
                             protected,
                             global_refs,
                             definition_counts,
+                            falls_through_to,
                             removed,
                         );
                         invert_in_place(
@@ -142,13 +171,21 @@ fn invert_in_place(
                             protected,
                             global_refs,
                             definition_counts,
+                            falls_through_to,
                             removed,
                         );
                     }
                     idx += 1;
                     continue;
                 }
-                if let Some(label_idx) = forward_label_index(stmts, idx, &target) {
+                let label_idx = forward_label_index(stmts, idx, &target).or_else(|| {
+                    // Not in this list, but running off its end arrives there.
+                    falls_through_to
+                        .iter()
+                        .any(|l| *l == target)
+                        .then_some(stmts.len())
+                });
+                if let Some(label_idx) = label_idx {
                     if span_is_invertible(&stmts[idx + 1..label_idx]) {
                         let PreHirStmt::If { cond, .. } = &stmts[idx] else {
                             unreachable!("guard_goto_target matched an If");
@@ -169,6 +206,7 @@ fn invert_in_place(
                                 protected,
                                 global_refs,
                                 definition_counts,
+                                falls_through_to,
                                 removed,
                             );
                         }
@@ -178,12 +216,23 @@ fn invert_in_place(
                 }
             }
         }
+        // A loop body falls back to its own head, not past the loop, so only
+        // straight-line containers inherit anything.
+        let inherited = if matches!(
+            stmts[idx],
+            PreHirStmt::If { .. } | PreHirStmt::Block(_)
+        ) {
+            fallthrough_labels_after(stmts, idx, falls_through_to)
+        } else {
+            Vec::new()
+        };
         for seq in child_sequences_mut(&mut stmts[idx]) {
             invert_in_place(
                 seq,
                 protected,
                 global_refs,
                 definition_counts,
+                &inherited,
                 removed,
             );
         }
