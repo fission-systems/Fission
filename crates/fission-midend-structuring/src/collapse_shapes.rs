@@ -201,48 +201,76 @@ pub fn match_ring_loop(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
         .find_map(|follow| ring_with_follow(g, n, follow))
 }
 
+/// A block that exists only to be passed through on the way out of a ring.
+///
+/// One predecessor, which is the ring member leaving through it, and one
+/// successor, which is the ring's follow. It belongs to the loop's exit rather
+/// than to the code after it, so absorbing it lets a ring whose members leave
+/// to *different* places still have one follow. `bin_186` is exactly this: a
+/// two-node ring where one member leaves straight to the follow and the other
+/// leaves through a single block that then reaches it.
+pub fn ring_exit_vestibule(
+    g: &CollapseGraph,
+    member: NodeId,
+    candidate: NodeId,
+    follow: NodeId,
+) -> bool {
+    candidate != follow
+        && g.predecessors(candidate) == [member]
+        && g.successors(candidate) == [follow]
+}
+
 fn ring_with_follow(g: &CollapseGraph, n: NodeId, follow: NodeId) -> Option<Shape> {
-    let mut members = vec![n];
+    let mut ring = vec![n];
+    let mut vestibules: Vec<NodeId> = Vec::new();
     let mut current = n;
     loop {
-        // Everything that is not the follow must be the single way onward.
+        // Everything that is not a way out -- the follow itself, or a block
+        // that exists only to reach it -- must be the single way onward.
         let onward: Vec<NodeId> = g
             .successors(current)
             .iter()
             .copied()
-            .filter(|&s| s != follow)
+            .filter(|&s| s != follow && !ring_exit_vestibule(g, current, s, follow))
             .collect();
         let [next] = onward[..] else {
             return None;
         };
+        for &s in g.successors(current) {
+            if s != follow && s != next && !vestibules.contains(&s) {
+                vestibules.push(s);
+            }
+        }
         if next == n {
             break;
         }
-        if members.contains(&next) {
+        if ring.contains(&next) {
             // A chord, not a ring: an inner decision the ordinary shapes fold
             // first.
             return None;
         }
-        members.push(next);
+        ring.push(next);
         current = next;
-        if members.len() > g.live_count() {
+        if ring.len() > g.live_count() {
             return None;
         }
     }
-    if members.len() < 2 || members.contains(&follow) {
+    if ring.len() < 2 || ring.contains(&follow) {
         return None;
     }
-    // Single entry: only the head may be reached from outside.
-    for &m in &members[1..] {
+    // Single entry: only the head may be reached from outside the region.
+    let mut members = ring.clone();
+    members.extend(vestibules.iter().copied());
+    for &m in &members {
+        if m == n {
+            continue;
+        }
         if g.predecessors(m).iter().any(|p| !members.contains(p)) {
             return None;
         }
     }
     // At least one member must actually leave, or this is an `InfLoop`.
-    if !members
-        .iter()
-        .any(|&m| g.successors(m).contains(&follow))
-    {
+    if !members.iter().any(|&m| g.successors(m).contains(&follow)) {
         return None;
     }
     Some(Shape {

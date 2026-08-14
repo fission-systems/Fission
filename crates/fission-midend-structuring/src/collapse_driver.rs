@@ -189,11 +189,10 @@ fn expected_internal_edges(shape: &Shape) -> Option<Vec<(NodeId, NodeId)>> {
         (ShapeKind::DoWhile, &[n, cond]) => vec![(n, cond), (cond, n)],
         (ShapeKind::SelfLoop, &[n]) => vec![(n, n)],
         (ShapeKind::InfLoop, &[n]) => vec![(n, n)],
-        (ShapeKind::RingLoop, members) if members.len() >= 2 => members
-            .iter()
-            .enumerate()
-            .map(|(i, &m)| (m, members[(i + 1) % members.len()]))
-            .collect(),
+        // A ring's internal edges depend on which members are vestibules, so
+        // they are derived from the graph in
+        // `fold_accounts_for_every_internal_edge` instead.
+        (ShapeKind::RingLoop, _) => return None,
         (ShapeKind::InfLoop, &[n, s]) => vec![(n, s), (s, n)],
         _ => return None,
     })
@@ -214,7 +213,11 @@ fn expected_internal_edges(shape: &Shape) -> Option<Vec<(NodeId, NodeId)>> {
 /// cycle did not. Checking membership alone reports that fold as sound, which
 /// is why this check exists separately.
 pub(crate) fn fold_accounts_for_every_internal_edge(graph: &CollapseGraph, shape: &Shape) -> bool {
-    let Some(mut expected) = expected_internal_edges(shape) else {
+    let expected = match shape.kind {
+        ShapeKind::RingLoop => ring_internal_edges(graph, shape),
+        _ => expected_internal_edges(shape),
+    };
+    let Some(mut expected) = expected else {
         return false;
     };
     let set: crate::HashSet<NodeId> = shape.members.iter().copied().collect();
@@ -231,6 +234,51 @@ pub(crate) fn fold_accounts_for_every_internal_edge(graph: &CollapseGraph, shape
     expected.sort_unstable();
     expected.dedup();
     actual == expected
+}
+
+/// The edges a `RingLoop`'s emitted body accounts for: each step round the
+/// ring, and each member's edge into the vestibule it leaves through.
+///
+/// Derived from the graph rather than from the member list, because the list
+/// carries the ring and its vestibules together and only the graph says which
+/// is which.
+fn ring_internal_edges(graph: &CollapseGraph, shape: &Shape) -> Option<Vec<(NodeId, NodeId)>> {
+    let follow = shape.follow?;
+    let mut edges = Vec::new();
+    let mut current = shape.entry;
+    let mut seen = vec![shape.entry];
+    loop {
+        let onward: Vec<NodeId> = graph
+            .successors(current)
+            .iter()
+            .copied()
+            .filter(|&s| {
+                s != follow
+                    && !crate::collapse_shapes::ring_exit_vestibule(graph, current, s, follow)
+            })
+            .collect();
+        let [next] = onward[..] else {
+            return None;
+        };
+        edges.push((current, next));
+        for &s in graph.successors(current) {
+            if s != follow && s != next {
+                edges.push((current, s));
+            }
+        }
+        if next == shape.entry {
+            break;
+        }
+        if seen.contains(&next) {
+            return None;
+        }
+        seen.push(next);
+        current = next;
+        if seen.len() > shape.members.len() {
+            return None;
+        }
+    }
+    Some(edges)
 }
 
 /// Blocks reachable from the function entry, which is always block 0.
@@ -556,25 +604,76 @@ pub(crate) fn lower_shape(
             let Some(follow) = shape.follow else {
                 return Ok(None);
             };
+            // Re-derive the ring from the graph: members carry the ring in
+            // order followed by the vestibules, and lowering needs to know
+            // which is which.
+            let mut ring: Vec<NodeId> = vec![shape.entry];
+            let mut current = shape.entry;
+            loop {
+                let onward: Vec<NodeId> = graph
+                    .successors(current)
+                    .iter()
+                    .copied()
+                    .filter(|&s| {
+                        s != follow
+                            && !crate::collapse_shapes::ring_exit_vestibule(
+                                graph, current, s, follow,
+                            )
+                    })
+                    .collect();
+                let [next] = onward[..] else {
+                    return Ok(None);
+                };
+                if next == shape.entry {
+                    break;
+                }
+                if ring.contains(&next) {
+                    return Ok(None);
+                }
+                ring.push(next);
+                current = next;
+                if ring.len() > shape.members.len() {
+                    return Ok(None);
+                }
+            }
+
             let mut loop_body = Vec::new();
-            for (i, &m) in shape.members.iter().enumerate() {
+            for (i, &m) in ring.iter().enumerate() {
                 let Some(stmts) = node_statements(host, graph, m)? else {
                     return Ok(None);
                 };
                 loop_body.extend(stmts);
-                // A member that can leave gets its exit written as a `break`,
-                // which is why the region needs no jump: every way out lands on
-                // the same follow.
-                if !graph.successors(m).contains(&follow) {
+                let next = ring[(i + 1) % ring.len()];
+                // Where this member goes when it does not go round again.
+                let exit = graph
+                    .successors(m)
+                    .iter()
+                    .copied()
+                    .find(|&s| s != next)
+                    .filter(|&s| {
+                        s == follow
+                            || crate::collapse_shapes::ring_exit_vestibule(graph, m, s, follow)
+                    });
+                let Some(exit) = exit else {
                     continue;
-                }
-                let next = shape.members[(i + 1) % shape.members.len()];
-                let Some(cond) = condition_towards(host, graph, m, follow, next)? else {
+                };
+                let Some(cond) = condition_towards(host, graph, m, exit, next)? else {
                     return Ok(None);
                 };
+                // A vestibule runs on the way out, inside the loop, before the
+                // break -- it belongs to the exit, not to the code after.
+                let mut taken = if exit == follow {
+                    Vec::new()
+                } else {
+                    match node_statements(host, graph, exit)? {
+                        Some(stmts) => stmts,
+                        None => return Ok(None),
+                    }
+                };
+                taken.push(PreHirStmt::Break);
                 loop_body.push(PreHirStmt::If {
                     cond,
-                    then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+                    then_body: std::rc::Rc::new(taken),
                     else_body: std::rc::Rc::new(Vec::new()),
                 });
             }
