@@ -35,7 +35,8 @@ use crate::collapse_driver::{
 };
 use crate::collapse_graph::{CollapseGraph, NodeId};
 use crate::collapse_shapes::{
-    Shape, ShapeKind, find_shape, match_do_while, match_inf_loop, match_self_loop, match_while_do,
+    Shape, ShapeKind, find_shape, match_do_while, match_inf_loop, match_ring_loop,
+    match_self_loop, match_while_do,
 };
 use crate::host::StructuringHost;
 use crate::linear_types::LoweredTerminator;
@@ -1174,12 +1175,14 @@ fn find_cyclic_shape(graph: &CollapseGraph) -> Option<Shape> {
     graph.live_nodes().find_map(|n| {
         match_inf_loop(graph, n)
             .or_else(|| match_self_loop(graph, n))
+            .or_else(|| match_ring_loop(graph, n))
             .or_else(|| match_while_do(graph, n))
             .or_else(|| match_do_while(graph, n))
             .filter(|s| {
                 matches!(
                     s.kind,
                     ShapeKind::InfLoop
+                        | ShapeKind::RingLoop
                         | ShapeKind::SelfLoop
                         | ShapeKind::WhileDo
                         | ShapeKind::DoWhile

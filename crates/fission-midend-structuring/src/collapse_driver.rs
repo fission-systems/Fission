@@ -189,6 +189,11 @@ fn expected_internal_edges(shape: &Shape) -> Option<Vec<(NodeId, NodeId)>> {
         (ShapeKind::DoWhile, &[n, cond]) => vec![(n, cond), (cond, n)],
         (ShapeKind::SelfLoop, &[n]) => vec![(n, n)],
         (ShapeKind::InfLoop, &[n]) => vec![(n, n)],
+        (ShapeKind::RingLoop, members) if members.len() >= 2 => members
+            .iter()
+            .enumerate()
+            .map(|(i, &m)| (m, members[(i + 1) % members.len()]))
+            .collect(),
         (ShapeKind::InfLoop, &[n, s]) => vec![(n, s), (s, n)],
         _ => return None,
     })
@@ -545,6 +550,37 @@ pub(crate) fn lower_shape(
             Ok(Some(vec![PreHirStmt::DoWhile {
                 body: std::rc::Rc::new(body),
                 cond,
+            }]))
+        }
+        ShapeKind::RingLoop => {
+            let Some(follow) = shape.follow else {
+                return Ok(None);
+            };
+            let mut loop_body = Vec::new();
+            for (i, &m) in shape.members.iter().enumerate() {
+                let Some(stmts) = node_statements(host, graph, m)? else {
+                    return Ok(None);
+                };
+                loop_body.extend(stmts);
+                // A member that can leave gets its exit written as a `break`,
+                // which is why the region needs no jump: every way out lands on
+                // the same follow.
+                if !graph.successors(m).contains(&follow) {
+                    continue;
+                }
+                let next = shape.members[(i + 1) % shape.members.len()];
+                let Some(cond) = condition_towards(host, graph, m, follow, next)? else {
+                    return Ok(None);
+                };
+                loop_body.push(PreHirStmt::If {
+                    cond,
+                    then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+                    else_body: std::rc::Rc::new(Vec::new()),
+                });
+            }
+            Ok(Some(vec![PreHirStmt::While {
+                cond: crate::reaching_conditions::always(),
+                body: std::rc::Rc::new(loop_body),
             }]))
         }
         ShapeKind::InfLoop => {

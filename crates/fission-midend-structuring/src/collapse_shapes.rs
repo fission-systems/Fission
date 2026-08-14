@@ -28,6 +28,8 @@ use crate::collapse_graph::{CollapseGraph, NodeId};
 pub enum ShapeKind {
     /// A cycle with no exit at all.
     InfLoop,
+    /// A ring of nodes that all leave to the same follow.
+    RingLoop,
     /// `a; b` -- Ghidra `ruleBlockCat`.
     Sequence,
     /// `if (c) { t }` -- Ghidra `ruleBlockProperIf`.
@@ -175,6 +177,82 @@ pub fn match_if_then_else(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
 }
 
 /// A node that branches to itself: `while (1) { n }`.
+/// A ring of nodes whose every way out leads to the same place.
+///
+/// `while (true) { S; if (d) break; T; }` -- a loop with more than one exit,
+/// which none of the two-node loop shapes match because they require the body
+/// to have exactly one successor, the head. Real loops break out of the middle
+/// all the time, so this was the single most common reason a cycle survived
+/// folding: 15 functions, and on the smallest of them the whole live graph is
+/// four nodes.
+///
+/// The shape is a ring reachable from `n`, each member carrying at most one
+/// successor outside it, and every such successor being the same node. That
+/// follow is what each `break` goes to, so the region needs no jump at all.
+///
+/// Deliberately a plain ring: a member with two internal successors is a
+/// nested decision that the ordinary shapes fold first, and once folded the
+/// ring is visible here.
+pub fn match_ring_loop(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
+    // The follow is whichever successor of the head is not the way onward.
+    g.successors(n)
+        .iter()
+        .copied()
+        .find_map(|follow| ring_with_follow(g, n, follow))
+}
+
+fn ring_with_follow(g: &CollapseGraph, n: NodeId, follow: NodeId) -> Option<Shape> {
+    let mut members = vec![n];
+    let mut current = n;
+    loop {
+        // Everything that is not the follow must be the single way onward.
+        let onward: Vec<NodeId> = g
+            .successors(current)
+            .iter()
+            .copied()
+            .filter(|&s| s != follow)
+            .collect();
+        let [next] = onward[..] else {
+            return None;
+        };
+        if next == n {
+            break;
+        }
+        if members.contains(&next) {
+            // A chord, not a ring: an inner decision the ordinary shapes fold
+            // first.
+            return None;
+        }
+        members.push(next);
+        current = next;
+        if members.len() > g.live_count() {
+            return None;
+        }
+    }
+    if members.len() < 2 || members.contains(&follow) {
+        return None;
+    }
+    // Single entry: only the head may be reached from outside.
+    for &m in &members[1..] {
+        if g.predecessors(m).iter().any(|p| !members.contains(p)) {
+            return None;
+        }
+    }
+    // At least one member must actually leave, or this is an `InfLoop`.
+    if !members
+        .iter()
+        .any(|&m| g.successors(m).contains(&follow))
+    {
+        return None;
+    }
+    Some(Shape {
+        kind: ShapeKind::RingLoop,
+        entry: n,
+        members,
+        follow: Some(follow),
+    })
+}
+
 /// A cycle with no way out: `while (true) { .. }`.
 ///
 /// Ghidra's `ruleBlockInfLoop`, and nothing here covered it. A two-node cycle
