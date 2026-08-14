@@ -229,6 +229,17 @@ pub fn ring_exit_vestibule(g: &CollapseGraph, candidate: NodeId, follow: NodeId)
     candidate != follow && g.successors(candidate) == [follow]
 }
 
+/// A ring exit that ends the function rather than continuing after the loop.
+///
+/// It has no successors, so there is nothing to jump *to*: writing its
+/// statements at the exit site is the whole of it, and the loop keeps one
+/// follow even though control can leave two ways. `bin_129` is that shape --
+/// a four-member ring where two members leave to the follow and two leave to
+/// a block that returns.
+pub fn ring_terminal_exit(g: &CollapseGraph, candidate: NodeId, follow: NodeId) -> bool {
+    candidate != follow && g.successors(candidate).is_empty()
+}
+
 fn ring_with_follow(g: &CollapseGraph, n: NodeId, follow: NodeId) -> Option<Shape> {
     let mut ring = vec![n];
     let mut vestibules: Vec<NodeId> = Vec::new();
@@ -240,11 +251,20 @@ fn ring_with_follow(g: &CollapseGraph, n: NodeId, follow: NodeId) -> Option<Shap
             .successors(current)
             .iter()
             .copied()
-            .filter(|&s| s != follow && !ring_exit_vestibule(g, s, follow))
+            .filter(|&s| {
+                s != follow
+                    && !ring_exit_vestibule(g, s, follow)
+                    && !ring_terminal_exit(g, s, follow)
+            })
             .collect();
         let [next] = onward[..] else {
             return None;
         };
+        // One way onward and at most one way out keeps the emitted loop a
+        // straight sequence of member-then-exit.
+        if g.successors(current).len() > 2 {
+            return None;
+        }
         for &s in g.successors(current) {
             if s != follow && s != next && !vestibules.contains(&s) {
                 vestibules.push(s);

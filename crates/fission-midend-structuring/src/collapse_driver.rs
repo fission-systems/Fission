@@ -253,7 +253,9 @@ fn ring_internal_edges(graph: &CollapseGraph, shape: &Shape) -> Option<Vec<(Node
             .iter()
             .copied()
             .filter(|&s| {
-                s != follow && !crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
+                s != follow
+                    && !crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
+                    && !crate::collapse_shapes::ring_terminal_exit(graph, s, follow)
             })
             .collect();
         let [next] = onward[..] else {
@@ -616,6 +618,7 @@ pub(crate) fn lower_shape(
                     .filter(|&s| {
                         s != follow
                             && !crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
+                            && !crate::collapse_shapes::ring_terminal_exit(graph, s, follow)
                     })
                     .collect();
                 let [next] = onward[..] else {
@@ -648,7 +651,9 @@ pub(crate) fn lower_shape(
                     .copied()
                     .find(|&s| s != next)
                     .filter(|&s| {
-                        s == follow || crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
+                        s == follow
+                            || crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
+                            || crate::collapse_shapes::ring_terminal_exit(graph, s, follow)
                     });
                 let Some(exit) = exit else {
                     continue;
@@ -658,6 +663,7 @@ pub(crate) fn lower_shape(
                 };
                 // A vestibule runs on the way out, inside the loop, before the
                 // break -- it belongs to the exit, not to the code after.
+                let terminal_exit = crate::collapse_shapes::ring_terminal_exit(graph, exit, follow);
                 let mut taken = if exit == follow {
                     Vec::new()
                 } else {
