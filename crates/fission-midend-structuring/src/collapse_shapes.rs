@@ -225,15 +225,8 @@ pub fn match_ring_loop(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
 /// to *different* places still have one follow. `bin_186` is exactly this: a
 /// two-node ring where one member leaves straight to the follow and the other
 /// leaves through a single block that then reaches it.
-pub fn ring_exit_vestibule(
-    g: &CollapseGraph,
-    member: NodeId,
-    candidate: NodeId,
-    follow: NodeId,
-) -> bool {
-    candidate != follow
-        && g.predecessors(candidate) == [member]
-        && g.successors(candidate) == [follow]
+pub fn ring_exit_vestibule(g: &CollapseGraph, candidate: NodeId, follow: NodeId) -> bool {
+    candidate != follow && g.successors(candidate) == [follow]
 }
 
 fn ring_with_follow(g: &CollapseGraph, n: NodeId, follow: NodeId) -> Option<Shape> {
@@ -247,7 +240,7 @@ fn ring_with_follow(g: &CollapseGraph, n: NodeId, follow: NodeId) -> Option<Shap
             .successors(current)
             .iter()
             .copied()
-            .filter(|&s| s != follow && !ring_exit_vestibule(g, current, s, follow))
+            .filter(|&s| s != follow && !ring_exit_vestibule(g, s, follow))
             .collect();
         let [next] = onward[..] else {
             return None;

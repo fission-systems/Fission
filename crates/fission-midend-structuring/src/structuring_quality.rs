@@ -51,6 +51,14 @@ pub struct StructuringQuality {
     pub guard_formula_size: usize,
     /// Largest single guard expression, in expression nodes.
     pub max_guard_formula_size: usize,
+    /// Statements in the body, counted through every nested construct.
+    ///
+    /// The axis that catches a structuring paying for its jumps with text.
+    /// Nothing else here sees duplication: a copied exit block adds no guard,
+    /// no nesting and no jump, so every other measure reports it as free.
+    /// Measured, relaxing what a loop may absorb removed twenty jumps and grew
+    /// the corpus output by 23% -- a trade no axis could refuse.
+    pub statements: usize,
 }
 
 impl StructuringQuality {
@@ -83,6 +91,7 @@ impl StructuringQuality {
             && self.empty_if_shells <= baseline.empty_if_shells
             && self.nesting_depth <= baseline.nesting_depth + removed
             && self.guard_formula_size <= guard_budget
+            && self.statements <= statement_budget(baseline.statements, removed)
     }
 
     /// The axes on which `self` is worse than `baseline`, for diagnostics.
@@ -101,6 +110,9 @@ impl StructuringQuality {
         let guard_budget = guard_budget(baseline.guard_formula_size, removed);
         if self.guard_formula_size > guard_budget {
             out.push("guard_formula_size");
+        }
+        if self.statements > statement_budget(baseline.statements, removed) {
+            out.push("statements");
         }
         out
     }
@@ -142,6 +154,20 @@ fn max_guard_budget(baseline_max: usize, removed_gotos: usize) -> usize {
     baseline_max.saturating_add(removed_gotos.saturating_mul(MAX_GUARD_NODES_PER_REMOVED_GOTO))
 }
 
+/// How much text a structuring may add for the jumps it removes.
+///
+/// Duplication is the one trade the other axes cannot see, and it is a real
+/// trade rather than a defect: copying a short exit block into its jump sites
+/// is how the jump disappears. So it gets a budget, like nesting, rather than a
+/// ban.
+fn statement_budget(baseline_statements: usize, removed_gotos: usize) -> usize {
+    // A jump replaced by a copied block costs that block. Sixteen statements
+    // per jump is well past the six-statement ceiling `cleanup::tail_dup` uses
+    // for the same trade, so this refuses only the runaway case.
+    const MAX_STATEMENTS_PER_REMOVED_GOTO: usize = 16;
+    baseline_statements.saturating_add(removed_gotos.saturating_mul(MAX_STATEMENTS_PER_REMOVED_GOTO))
+}
+
 fn guard_budget(baseline_size: usize, removed_gotos: usize) -> usize {
     // The 2,008-node envelope this started from described the candidates a
     // weaker driver produced. Region identification and hierarchical reaching
@@ -165,6 +191,7 @@ pub fn measure(body: &[PreHirStmt]) -> StructuringQuality {
 
 fn walk(body: &[PreHirStmt], depth: usize, q: &mut StructuringQuality) {
     for stmt in body {
+        q.statements += 1;
         match stmt {
             PreHirStmt::Goto(_) => q.gotos += 1,
             PreHirStmt::If {

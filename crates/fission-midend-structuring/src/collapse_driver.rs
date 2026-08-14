@@ -253,8 +253,7 @@ fn ring_internal_edges(graph: &CollapseGraph, shape: &Shape) -> Option<Vec<(Node
             .iter()
             .copied()
             .filter(|&s| {
-                s != follow
-                    && !crate::collapse_shapes::ring_exit_vestibule(graph, current, s, follow)
+                s != follow && !crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
             })
             .collect();
         let [next] = onward[..] else {
@@ -616,9 +615,7 @@ pub(crate) fn lower_shape(
                     .copied()
                     .filter(|&s| {
                         s != follow
-                            && !crate::collapse_shapes::ring_exit_vestibule(
-                                graph, current, s, follow,
-                            )
+                            && !crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
                     })
                     .collect();
                 let [next] = onward[..] else {
@@ -651,8 +648,7 @@ pub(crate) fn lower_shape(
                     .copied()
                     .find(|&s| s != next)
                     .filter(|&s| {
-                        s == follow
-                            || crate::collapse_shapes::ring_exit_vestibule(graph, m, s, follow)
+                        s == follow || crate::collapse_shapes::ring_exit_vestibule(graph, s, follow)
                     });
                 let Some(exit) = exit else {
                     continue;
