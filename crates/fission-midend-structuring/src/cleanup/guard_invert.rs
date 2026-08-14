@@ -45,7 +45,7 @@
 //! conditional does not introduce a loop, so any `break`/`continue` in the
 //! span still binds to the same enclosing loop it did before.
 
-use fission_midend_prehir::PreHirStmt;
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 use fission_midend_prehir::util::negate_expr;
 use crate::HashMap;
 use crate::HashSet;
@@ -76,8 +76,16 @@ pub fn invert_forward_guard_gotos(
     // stale-high count only makes the single-reference test decline -- the
     // safe direction.
     let global_refs = super::collect_referenced_label_counts(&body);
+    let mut definition_counts = HashMap::default();
+    super::collect_defined_label_counts_in(&body, &mut definition_counts);
     let mut removed = 0usize;
-    invert_in_place(&mut body, protected, &global_refs, &mut removed);
+    invert_in_place(
+        &mut body,
+        protected,
+        &global_refs,
+        &definition_counts,
+        &mut removed,
+    );
     (body, removed)
 }
 
@@ -85,12 +93,33 @@ fn invert_in_place(
     stmts: &mut Vec<PreHirStmt>,
     protected: &HashSet<String>,
     global_refs: &HashMap<String, usize>,
+    definition_counts: &HashMap<String, usize>,
     removed: &mut usize,
 ) {
     let mut idx = 0usize;
     while idx < stmts.len() {
         if let Some(target) = guard_goto_target(&stmts[idx]) {
             if !protected.contains(&target) {
+                if let Some(consumed) = fold_guard_chain_into_labeled_if(
+                    stmts,
+                    idx,
+                    &target,
+                    global_refs,
+                    definition_counts,
+                ) {
+                    *removed += consumed;
+                    if let PreHirStmt::If { then_body, .. } = &mut stmts[idx] {
+                        invert_in_place(
+                            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                            protected,
+                            global_refs,
+                            definition_counts,
+                            removed,
+                        );
+                    }
+                    idx += 1;
+                    continue;
+                }
                 // Try the richer if/else shape first: it retires both the
                 // guard's jump and the then-arm's jump to the join.
                 if recover_if_else(stmts, idx, &target, protected, global_refs) {
@@ -105,12 +134,14 @@ fn invert_in_place(
                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                             protected,
                             global_refs,
+                            definition_counts,
                             removed,
                         );
                         invert_in_place(
                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                             protected,
                             global_refs,
+                            definition_counts,
                             removed,
                         );
                     }
@@ -137,6 +168,7 @@ fn invert_in_place(
                                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                                 protected,
                                 global_refs,
+                                definition_counts,
                                 removed,
                             );
                         }
@@ -147,10 +179,83 @@ fn invert_in_place(
             }
         }
         for seq in child_sequences_mut(&mut stmts[idx]) {
-            invert_in_place(seq, protected, global_refs, removed);
+            invert_in_place(
+                seq,
+                protected,
+                global_refs,
+                definition_counts,
+                removed,
+            );
         }
         idx += 1;
     }
+}
+
+fn fold_guard_chain_into_labeled_if(
+    stmts: &mut Vec<PreHirStmt>,
+    idx: usize,
+    target: &str,
+    global_refs: &HashMap<String, usize>,
+    definition_counts: &HashMap<String, usize>,
+) -> Option<usize> {
+    if definition_counts.get(target).copied() != Some(1) {
+        return None;
+    }
+
+    let mut conditions = Vec::new();
+    let mut cursor = idx;
+    while let Some(PreHirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    }) = stmts.get(cursor)
+    {
+        if !else_body.is_empty() || sole_goto_target(then_body) != Some(target) {
+            break;
+        }
+        conditions.push(cond.clone());
+        cursor += 1;
+    }
+    if conditions.is_empty()
+        || global_refs.get(target).copied() != Some(conditions.len())
+    {
+        return None;
+    }
+
+    let Some(PreHirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    }) = stmts.get(cursor)
+    else {
+        return None;
+    };
+    if !else_body.is_empty()
+        || !matches!(then_body.first(), Some(PreHirStmt::Label(label)) if label == target)
+    {
+        return None;
+    }
+
+    conditions.push(cond.clone());
+    let combined = conditions
+        .into_iter()
+        .reduce(|lhs, rhs| PreHirExpr::Binary {
+            op: fission_midend_prehir::PreHirBinaryOp::LogicalOr,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: fission_midend_core::ir::NirType::Bool,
+        })?;
+    let body = then_body.iter().skip(1).cloned().collect::<Vec<_>>();
+    let consumed = cursor - idx;
+    stmts.splice(
+        idx..=cursor,
+        std::iter::once(PreHirStmt::If {
+            cond: combined,
+            then_body: body.into(),
+            else_body: Vec::new().into(),
+        }),
+    );
+    Some(consumed)
 }
 
 /// `Some(L)` when `stmt` is `if (cond) { goto L; }` with no `else`.
@@ -371,6 +476,90 @@ mod tests {
             then_body: vec![PreHirStmt::Goto(target.into())].into(),
             else_body: Vec::new().into(),
         }
+    }
+
+    fn labeled_if(target: &str) -> PreHirStmt {
+        PreHirStmt::If {
+            cond: var("tail_cond"),
+            then_body: vec![
+                PreHirStmt::Label(target.into()),
+                expr_stmt("body"),
+            ]
+            .into(),
+            else_body: Vec::new().into(),
+        }
+    }
+
+    #[test]
+    fn folds_guard_into_labeled_if_as_short_circuit_or() {
+        let (out, removed) = invert_forward_guard_gotos(
+            vec![guard("L"), labeled_if("L")],
+            &HashSet::default(),
+        );
+        assert_eq!(removed, 1);
+        assert_eq!(out.len(), 1);
+        let PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = &out[0]
+        else {
+            panic!("expected folded if");
+        };
+        assert!(matches!(
+            cond,
+            PreHirExpr::Binary {
+                op: fission_midend_prehir::PreHirBinaryOp::LogicalOr,
+                ..
+            }
+        ));
+        assert_eq!(then_body.as_slice(), &[expr_stmt("body")]);
+        assert!(else_body.is_empty());
+    }
+
+    #[test]
+    fn folds_multiple_same_target_guards_in_order() {
+        let (out, removed) = invert_forward_guard_gotos(
+            vec![guard("L"), guard("L"), labeled_if("L")],
+            &HashSet::default(),
+        );
+        assert_eq!(removed, 2);
+        assert_eq!(out.len(), 1);
+        assert!(!declares_label(&out[0]));
+    }
+
+    #[test]
+    fn labeled_if_fold_refuses_external_reference_and_protected_label() {
+        let external = vec![
+            guard("L"),
+            labeled_if("L"),
+            PreHirStmt::If {
+                cond: var("external"),
+                then_body: vec![PreHirStmt::Goto("L".into())].into(),
+                else_body: Vec::new().into(),
+            },
+        ];
+        let (out, _) = invert_forward_guard_gotos(external, &HashSet::default());
+        assert!(out.iter().any(|stmt| declares_label(stmt)));
+
+        let protected: HashSet<String> = ["L".to_string()].into_iter().collect();
+        let body = vec![guard("L"), labeled_if("L")];
+        let (out, removed) = invert_forward_guard_gotos(body.clone(), &protected);
+        assert_eq!(removed, 0);
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn labeled_if_fold_requires_label_at_arm_entry() {
+        let labeled = PreHirStmt::If {
+            cond: var("tail_cond"),
+            then_body: vec![expr_stmt("prefix"), PreHirStmt::Label("L".into())].into(),
+            else_body: Vec::new().into(),
+        };
+        let body = vec![guard("L"), labeled];
+        let (out, removed) = invert_forward_guard_gotos(body.clone(), &HashSet::default());
+        assert_eq!(removed, 0);
+        assert_eq!(out, body);
     }
 
     #[test]
