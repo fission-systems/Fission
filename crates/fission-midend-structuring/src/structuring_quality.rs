@@ -119,22 +119,39 @@ impl StructuringQuality {
 }
 
 fn max_guard_budget(baseline_max: usize, removed_gotos: usize) -> usize {
-    // One eliminated transfer exposes one predicate term. A materialised term
-    // needs a boolean atom, an optional negation, and a binary connector:
-    // three expression nodes. Four leaves one node of slack without allowing
-    // independent paths to be concentrated into a single condition.
-    const MAX_GUARD_NODES_PER_REMOVED_GOTO: usize = 4;
+    // This began at four, on the reasoning that one eliminated transfer
+    // exposes one predicate term -- an atom, an optional negation, and a
+    // connector -- so four nodes leave a little slack without letting
+    // independent paths concentrate into one condition.
+    //
+    // Measured, that reasoning was refusing the largest wins available.
+    // Candidates removing 20 to 39 jumps concentrate guards exactly that way,
+    // and the corpus rejected 622 jumps' worth of them on the guard axes
+    // alone: `bin_009` 39 to 0 and `bin_146` 38 to 0, both reaching none at
+    // all. Sweeping the constant: 4 = 928 jumps, 64 = 846, 512 = 821, and
+    // 8192 = 821, so 512 is the plateau. Wall clock moved 5m20s to 5m40s
+    // across the whole corpus and the worst single function is 7.0s against a
+    // 45s harness timeout.
+    //
+    // The concern the small number encoded -- a formula so large it costs more
+    // downstream than the jumps were worth -- is real and was measured at
+    // 160,423 nodes and 45 seconds. It is bounded by
+    // `reaching_driver::MAX_GUARD_FORMULA_SIZE`, which is where it belongs:
+    // an absolute ceiling on what reaches the pipeline, not a per-jump rate.
+    const MAX_GUARD_NODES_PER_REMOVED_GOTO: usize = 512;
     baseline_max.saturating_add(removed_gotos.saturating_mul(MAX_GUARD_NODES_PER_REMOVED_GOTO))
 }
 
 fn guard_budget(baseline_size: usize, removed_gotos: usize) -> usize {
-    // Full-corpus measurement before this comparator found every healthy
-    // reaching-condition candidate at or below 2,008 nodes. Newly unlocked
-    // candidates at 2,755..4,974 nodes visibly duplicated guard trees, while
-    // the populations did not overlap. Keep the measured envelope, then make
-    // the budget relative so already-large functions are judged at their own
-    // scale instead of by a universal cap.
-    const MEASURED_HEALTHY_GUARD_ENVELOPE: usize = 2_008;
+    // The 2,008-node envelope this started from described the candidates a
+    // weaker driver produced. Region identification and hierarchical reaching
+    // conditions produce larger, denser formulas that are worth their size:
+    // the ones between 2,000 and 8,000 nodes are the ones taking functions to
+    // zero jumps. The envelope now matches
+    // `reaching_driver::MAX_GUARD_FORMULA_SIZE`, so a candidate is refused for
+    // its guards in one place rather than two, and the relative term still
+    // judges an already-large function at its own scale.
+    const MEASURED_HEALTHY_GUARD_ENVELOPE: usize = 8_000;
     MEASURED_HEALTHY_GUARD_ENVELOPE
         .max(baseline_size.saturating_mul(removed_gotos.saturating_add(1)))
 }
@@ -422,19 +439,22 @@ mod tests {
     }
 
     #[test]
-    fn guard_formulas_stay_inside_the_healthy_or_proportional_budget() {
+    fn guard_formulas_stay_inside_the_measured_envelope() {
         let baseline = measure(&[if_stmt(vec![goto("a"), goto("b")], vec![])]);
         assert_eq!(baseline.guard_formula_size, 1);
 
+        // 4,095 nodes for one jump was over budget under the 2,008-node
+        // envelope, which described a weaker driver's output. Candidates in
+        // this range are the ones now reaching zero jumps.
         let inside_envelope = measure(&[PreHirStmt::If {
-            cond: doubled_cond(9), // 1,023 expression nodes.
+            cond: doubled_cond(11), // 4,095 expression nodes.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
         assert!(inside_envelope.improves_on(&baseline));
 
         let over_budget = measure(&[PreHirStmt::If {
-            cond: doubled_cond(11), // 4,095 nodes for the same one-jump saving.
+            cond: doubled_cond(14), // 32,767 nodes for the same one-jump saving.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
@@ -447,24 +467,28 @@ mod tests {
     }
 
     #[test]
-    fn one_guard_cannot_absorb_more_than_one_term_per_removed_jump() {
+    fn one_guard_may_absorb_terms_but_not_without_limit() {
         let baseline = measure(&[if_stmt(vec![goto("a"), goto("b")], vec![])]);
 
-        let affordable = measure(&[PreHirStmt::If {
-            cond: doubled_cond(1), // Three nodes: one boolean term.
-            then_body: Rc::new(vec![goto("a")]),
-            else_body: Rc::new(Vec::new()),
-        }]);
-        assert!(affordable.improves_on(&baseline));
-        assert!(affordable.has_proportional_max_guard_growth(&baseline));
-
+        // Concentrating several terms into one guard is what taking a function
+        // to zero jumps looks like, so it has to be affordable.
         let concentrated = measure(&[PreHirStmt::If {
-            cond: doubled_cond(3), // Fifteen nodes for the same one-jump saving.
+            cond: doubled_cond(3), // Fifteen nodes for a one-jump saving.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
         assert!(concentrated.improves_on(&baseline));
-        assert!(!concentrated.has_proportional_max_guard_growth(&baseline));
+        assert!(concentrated.has_proportional_max_guard_growth(&baseline));
+
+        // A formula large enough to cost more downstream than the jump was
+        // worth is still refused -- the measured failure was 160,423 nodes and
+        // 45 seconds.
+        let runaway = measure(&[PreHirStmt::If {
+            cond: doubled_cond(14), // 32,767 nodes for the same one-jump saving.
+            then_body: Rc::new(vec![goto("a")]),
+            else_body: Rc::new(Vec::new()),
+        }]);
+        assert!(!runaway.has_proportional_max_guard_growth(&baseline));
     }
 
     #[test]
