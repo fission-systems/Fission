@@ -194,10 +194,26 @@ pub fn match_if_then_else(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
 /// nested decision that the ordinary shapes fold first, and once folded the
 /// ring is visible here.
 pub fn match_ring_loop(g: &CollapseGraph, n: NodeId) -> Option<Shape> {
-    // The follow is whichever successor of the head is not the way onward.
-    g.successors(n)
-        .iter()
-        .copied()
+    // The follow need not be a successor of the head. In `bin_186` the head
+    // leaves to a vestibule and the ring's other member leaves straight out,
+    // so the node they converge on is two steps away and trying only the
+    // head's own successors missed the shape entirely.
+    //
+    // Two steps is enough for a vestibule, which is by definition one block
+    // long, and keeps the candidate set small.
+    let mut candidates: Vec<NodeId> = Vec::new();
+    for &s in g.successors(n) {
+        if !candidates.contains(&s) {
+            candidates.push(s);
+        }
+        for &t in g.successors(s) {
+            if t != n && !candidates.contains(&t) {
+                candidates.push(t);
+            }
+        }
+    }
+    candidates
+        .into_iter()
         .find_map(|follow| ring_with_follow(g, n, follow))
 }
 
