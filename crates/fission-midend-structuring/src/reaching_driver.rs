@@ -28,6 +28,7 @@
 //! match-fold driver learned the hard way -- a jump-free body is not a correct
 //! one, and goto density scores a deleted region perfectly.
 
+use crate::cfg_analysis::{CommonPostdominator, ImmPostDomTree};
 use crate::collapse_driver::{
     blocks_reachable_from_entry, condition_towards, covers_every_reachable_block,
     fold_accounts_for_every_internal_edge, lower_shape, node_statements,
@@ -199,6 +200,18 @@ pub fn dream_driver_enabled() -> bool {
     })
 }
 
+/// On by default; opt out independently while comparing the multi-terminal
+/// candidate against the established DREAM variants.
+pub fn region_identifier_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        !matches!(
+            std::env::var("FISSION_REGION_IDENTIFIER").as_deref(),
+            Ok("0" | "false" | "off" | "no")
+        )
+    })
+}
+
 /// Structure a whole function by reaching conditions.
 ///
 /// Runs against a fork of the host and commits only on success, so a decline
@@ -264,6 +277,99 @@ pub fn preview_hierarchical_reaching_conditions_with_virtual_gotos(
     host: &mut impl StructuringHost,
 ) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
     host.lower_observed(|observed| structure_acyclic_remainder(observed, true, true))
+}
+
+/// Structure an identified multi-terminal acyclic region recursively.
+///
+/// Region discovery is pure. Statement lowering and every explicit edge
+/// concession run only inside the caller's observed/isolated host.
+pub fn structure_by_region_identifier(
+    host: &mut impl StructuringHost,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_isolated(structure_multi_terminal_region)
+}
+
+/// Price the RegionIdentifier-style candidate without committing identities.
+pub fn preview_region_identifier(
+    host: &mut impl StructuringHost,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    host.lower_observed(structure_multi_terminal_region)
+}
+
+fn structure_multi_terminal_region(
+    host: &mut impl StructuringHost,
+) -> Result<Option<ReachingCandidate>, MlilPreviewError> {
+    let successors = host.successors().to_vec();
+    if successors.is_empty() {
+        return Ok(None);
+    }
+    let reachable = blocks_reachable_from_entry(&successors);
+    let mut graph = CollapseGraph::from_cfg(&successors);
+    materialize_virtual_gotos(host, &mut graph)?;
+    fold_every_cycle(host, &mut graph)?;
+    if graph_has_cycle(&graph) {
+        return Ok(None);
+    }
+
+    let hierarchical_regions = fold_acyclic_sese_regions(host, &mut graph)?;
+    let Some(root) = find_acyclic_region(&graph) else {
+        return Ok(None);
+    };
+    let Some(entry) = live_node_owning_entry(&graph) else {
+        return Ok(None);
+    };
+    if root.frontier != AcyclicRegionFrontier::VirtualExit
+        || root.members.len() != graph.live_count()
+        || root.head != entry
+    {
+        return Ok(None);
+    }
+
+    let budget = graph.node_capacity().saturating_mul(MAX_ROUNDS_PER_NODE);
+    let mut concessions = 0usize;
+    for _ in 0..budget {
+        if let Some(sole) = graph.sole_live_node() {
+            if !covers_every_live_block(&graph, &reachable) {
+                return Ok(None);
+            }
+            let Some(node) = graph.node(sole) else {
+                return Ok(None);
+            };
+            let body = node.body.clone().unwrap_or_default();
+            if crate::linear_types::structuring_diag_enabled() {
+                eprintln!(
+                    "[DIAG] RegionIdentifier offered: stmts={} subregions={} concessions={concessions}",
+                    body.len(),
+                    hierarchical_regions
+                );
+            }
+            return Ok(Some(ReachingCandidate {
+                body,
+                used_hierarchical_regions: true,
+            }));
+        }
+
+        let mut progressed = false;
+        if let Some(shape) = find_shape(&graph) {
+            if fold_accounts_for_every_internal_edge(&graph, &shape) {
+                if let Some(body) = lower_shape(host, &graph, &shape)? {
+                    let governing = governing_block_after(&graph, &shape);
+                    if let Ok(folded) = graph.collapse(&shape.members, shape.entry, body) {
+                        graph.set_governing_block(folded, governing);
+                        progressed = true;
+                    }
+                }
+            }
+        }
+        if progressed {
+            continue;
+        }
+        if concessions >= MAX_CONCESSIONS || !concede_one_edge(host, &mut graph)? {
+            return Ok(None);
+        }
+        concessions += 1;
+    }
+    Ok(None)
 }
 
 fn structure_acyclic_remainder(
@@ -724,7 +830,9 @@ fn concede_one_edge(
     let Some(mut target) = node_statements(host, graph, to)? else {
         return Ok(false);
     };
-    target.insert(0, PreHirStmt::Label(label));
+    if !matches!(target.first(), Some(PreHirStmt::Label(existing)) if *existing == label) {
+        target.insert(0, PreHirStmt::Label(label));
+    }
     let target_governing = graph.node(to).and_then(|n| n.governing_block);
 
     graph.set_body(from, source);
@@ -733,7 +841,14 @@ fn concede_one_edge(
     graph.set_governing_block(from, None);
     graph.set_body(to, target);
     graph.set_governing_block(to, target_governing);
-    Ok(graph.virtualize_edge(from, to))
+    let removed = graph.virtualize_edge(from, to);
+    if removed && crate::linear_types::structuring_diag_enabled() {
+        eprintln!(
+            "[DIAG] explicit edge concession: {from} -> {to} remaining_succ={:?}",
+            graph.successors(from)
+        );
+    }
+    Ok(removed)
 }
 
 /// The edge to give up.
@@ -800,114 +915,138 @@ fn graph_has_cycle(graph: &CollapseGraph) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AcyclicSeseRegion {
+struct AcyclicRegion {
     head: NodeId,
-    follow: NodeId,
+    frontier: AcyclicRegionFrontier,
     members: Vec<NodeId>,
 }
 
-/// Find the smallest branch-headed, single-entry/single-exit acyclic region.
-///
-/// A real follow (rather than a virtual function exit) is required: after the
-/// members have been emitted, control can then leave the collapsed node along
-/// its one remaining graph edge. Terminal regions stay for the outer emitter,
-/// which already knows how to place returns and unsupported transfers.
-fn find_acyclic_sese_region(graph: &CollapseGraph) -> Option<AcyclicSeseRegion> {
-    let dense = dense_successors(graph);
-    let order = topological_order(&dense)?;
-    let position: crate::HashMap<NodeId, usize> = order
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcyclicRegionFrontier {
+    Block(NodeId),
+    VirtualExit,
+}
+
+struct CompactLiveCfg {
+    nodes: Vec<NodeId>,
+    successors: Vec<Vec<usize>>,
+    predecessors: Vec<Vec<usize>>,
+}
+
+fn compact_live_cfg(graph: &CollapseGraph) -> CompactLiveCfg {
+    let nodes = graph.live_nodes().collect::<Vec<_>>();
+    let dense_by_node: crate::HashMap<NodeId, usize> = nodes
         .iter()
         .copied()
         .enumerate()
-        .map(|(i, n)| (n, i))
+        .map(|(dense, node)| (node, dense))
         .collect();
-    let mut best: Option<AcyclicSeseRegion> = None;
+    let mut successors = vec![Vec::new(); nodes.len()];
+    let mut predecessors = vec![Vec::new(); nodes.len()];
+    for (dense, &node) in nodes.iter().enumerate() {
+        for succ in graph.successors(node) {
+            let Some(&succ_dense) = dense_by_node.get(succ) else {
+                continue;
+            };
+            successors[dense].push(succ_dense);
+            predecessors[succ_dense].push(dense);
+        }
+    }
+    CompactLiveCfg {
+        nodes,
+        successors,
+        predecessors,
+    }
+}
 
-    for head in graph.live_nodes() {
-        let outs = graph.successors(head);
-        if outs.len() != 2 {
+/// Find the smallest closed, single-entry acyclic region on a postdominator
+/// chain. A real block frontier forms an ordinary SESE region; a synthetic
+/// frontier proves that every terminal in the region reaches `VirtualExit`.
+fn find_acyclic_region(graph: &CollapseGraph) -> Option<AcyclicRegion> {
+    let compact = compact_live_cfg(graph);
+    let order = topological_order(&compact.successors)?;
+    let postdom = ImmPostDomTree::compute(&compact.successors, &compact.predecessors);
+    let mut best: Option<AcyclicRegion> = None;
+
+    // Reverse topological order approximates angr's deterministic DFS
+    // postorder and exposes the innermost region before its parents.
+    for &head_dense in order.iter().rev() {
+        if compact.successors[head_dense].is_empty() {
             continue;
         }
-        let left = reachable_nodes(graph, outs[0]);
-        let right = reachable_nodes(graph, outs[1]);
-        let mut follows: Vec<NodeId> = left
-            .intersection(&right)
-            .copied()
-            .filter(|n| graph.is_live(*n) && *n != head)
-            .collect();
-        follows.sort_by_key(|n| (position.get(n).copied().unwrap_or(usize::MAX), *n));
-
-        for follow in follows {
-            let members_set = reachable_without(graph, head, follow);
-            if members_set.len() < 2 || members_set.contains(&follow) {
-                continue;
-            }
-            // A closed region cannot terminate early or leave anywhere except
-            // its one proven follow.
-            if members_set.iter().any(|&n| {
-                graph.successors(n).is_empty()
-                    || graph
-                        .successors(n)
-                        .iter()
-                        .any(|s| !members_set.contains(s) && *s != follow)
-            }) {
-                continue;
-            }
-            let mut members: Vec<NodeId> = members_set.into_iter().collect();
-            members.sort_by_key(|n| (position.get(n).copied().unwrap_or(usize::MAX), *n));
-            if graph.check_single_entry(&members, head).is_err() {
-                continue;
-            }
-            let candidate = AcyclicSeseRegion {
-                head,
-                follow,
-                members,
+        let head = compact.nodes[head_dense];
+        let mut frontier = postdom.immediate_postdominator_target(head_dense);
+        while let Some(target) = frontier {
+            let stop = match target {
+                CommonPostdominator::Block(block) => Some(block),
+                CommonPostdominator::VirtualExit => None,
             };
-            let key = (
-                candidate.members.len(),
-                position.get(&candidate.head).copied().unwrap_or(usize::MAX),
-                candidate.head,
-                candidate.follow,
-            );
-            let better = best.as_ref().is_none_or(|current| {
-                key < (
-                    current.members.len(),
-                    position.get(&current.head).copied().unwrap_or(usize::MAX),
-                    current.head,
-                    current.follow,
-                )
-            });
-            if better {
-                best = Some(candidate);
+            let members_dense = reachable_without_dense(&compact.successors, head_dense, stop);
+            if members_dense.len() >= 2 {
+                let member_dense_set: crate::HashSet<usize> =
+                    members_dense.iter().copied().collect();
+                let members = members_dense
+                    .iter()
+                    .map(|&dense| compact.nodes[dense])
+                    .collect::<Vec<_>>();
+                let closed = members_dense.iter().all(|&node| {
+                    compact.successors[node]
+                        .iter()
+                        .all(|succ| member_dense_set.contains(succ) || Some(*succ) == stop)
+                });
+                if closed && graph.check_single_entry(&members, head).is_ok() {
+                    let frontier = match target {
+                        CommonPostdominator::Block(block) => {
+                            AcyclicRegionFrontier::Block(compact.nodes[block])
+                        }
+                        CommonPostdominator::VirtualExit => AcyclicRegionFrontier::VirtualExit,
+                    };
+                    let candidate = AcyclicRegion {
+                        head,
+                        frontier,
+                        members,
+                    };
+                    let key = (candidate.members.len(), head_dense, head);
+                    let better = best.as_ref().is_none_or(|current| {
+                        let current_dense = compact
+                            .nodes
+                            .iter()
+                            .position(|node| *node == current.head)
+                            .unwrap_or(usize::MAX);
+                        key < (current.members.len(), current_dense, current.head)
+                    });
+                    if better {
+                        best = Some(candidate);
+                    }
+                    break;
+                }
             }
-            break;
+            frontier = match target {
+                CommonPostdominator::Block(block) => postdom.immediate_postdominator_target(block),
+                CommonPostdominator::VirtualExit => None,
+            };
         }
     }
     best
 }
 
-fn reachable_nodes(graph: &CollapseGraph, start: NodeId) -> crate::HashSet<NodeId> {
-    let mut seen = crate::HashSet::default();
+fn reachable_without_dense(
+    successors: &[Vec<usize>],
+    start: usize,
+    stop: Option<usize>,
+) -> Vec<usize> {
+    let mut seen = vec![false; successors.len()];
+    let mut members = Vec::new();
     let mut stack = vec![start];
     while let Some(n) = stack.pop() {
-        if !graph.is_live(n) || !seen.insert(n) {
+        if Some(n) == stop || n >= seen.len() || seen[n] {
             continue;
         }
-        stack.extend(graph.successors(n).iter().copied());
+        seen[n] = true;
+        members.push(n);
+        stack.extend(successors[n].iter().copied());
     }
-    seen
-}
-
-fn reachable_without(graph: &CollapseGraph, start: NodeId, stop: NodeId) -> crate::HashSet<NodeId> {
-    let mut seen = crate::HashSet::default();
-    let mut stack = vec![start];
-    while let Some(n) = stack.pop() {
-        if n == stop || !graph.is_live(n) || !seen.insert(n) {
-            continue;
-        }
-        stack.extend(graph.successors(n).iter().copied());
-    }
-    seen
+    members
 }
 
 /// Abstract closed acyclic regions until no further proof succeeds.
@@ -918,7 +1057,12 @@ fn fold_acyclic_sese_regions(
     let budget = graph.node_capacity();
     let mut folded_count = 0usize;
     for _ in 0..budget {
-        let Some(region) = find_acyclic_sese_region(graph) else {
+        let Some(region) = find_acyclic_region(graph) else {
+            break;
+        };
+        let AcyclicRegionFrontier::Block(_) = region.frontier else {
+            // The outer multi-terminal region is handled by the recursive
+            // schema driver, not by one global reaching formula.
             break;
         };
         // Lowering is still effectful even after the graph proof. Run the
@@ -1149,10 +1293,10 @@ mod tests {
     fn a_closed_diamond_is_an_acyclic_sese_region() {
         let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![3], vec![3], vec![]]);
         assert_eq!(
-            find_acyclic_sese_region(&g),
-            Some(AcyclicSeseRegion {
+            find_acyclic_region(&g),
+            Some(AcyclicRegion {
                 head: 0,
-                follow: 3,
+                frontier: AcyclicRegionFrontier::Block(3),
                 members: vec![0, 2, 1],
             })
         );
@@ -1165,8 +1309,11 @@ mod tests {
         // formulas.
         let g =
             CollapseGraph::from_cfg(&[vec![1, 4], vec![2, 3], vec![4], vec![4], vec![5], vec![]]);
-        let region = find_acyclic_sese_region(&g).expect("inner region");
-        assert_eq!((region.head, region.follow), (1, 4));
+        let region = find_acyclic_region(&g).expect("inner region");
+        assert_eq!(
+            (region.head, region.frontier),
+            (1, AcyclicRegionFrontier::Block(4))
+        );
         assert_eq!(region.members.len(), 3);
     }
 
@@ -1174,14 +1321,37 @@ mod tests {
     fn a_side_entry_prevents_acyclic_region_abstraction() {
         // Node 1 looks like a diamond head, but 0 enters one arm directly.
         let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![2, 3], vec![4], vec![4], vec![]]);
-        let region = find_acyclic_sese_region(&g).expect("the enclosing region is still valid");
+        let region = find_acyclic_region(&g).expect("the enclosing region is still valid");
         assert_ne!(region.head, 1, "the side-entered inner region is rejected");
     }
 
     #[test]
-    fn branches_with_distinct_exits_are_not_a_closed_region() {
+    fn branches_with_distinct_exits_form_a_virtual_exit_region() {
         let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![], vec![]]);
-        assert!(find_acyclic_sese_region(&g).is_none());
+        assert_eq!(
+            find_acyclic_region(&g),
+            Some(AcyclicRegion {
+                head: 0,
+                frontier: AcyclicRegionFrontier::VirtualExit,
+                members: vec![0, 2, 1],
+            })
+        );
+    }
+
+    #[test]
+    fn retired_slots_are_not_virtual_exit_terminals() {
+        let mut g = CollapseGraph::from_cfg(&[vec![1], vec![2], vec![]]);
+        g.collapse(&[0, 1], 0, Vec::new()).expect("fold sequence");
+        let compact = compact_live_cfg(&g);
+        assert_eq!(compact.nodes, vec![0, 2]);
+        assert_eq!(
+            compact
+                .successors
+                .iter()
+                .filter(|successors| successors.is_empty())
+                .count(),
+            1
+        );
     }
 
     #[test]

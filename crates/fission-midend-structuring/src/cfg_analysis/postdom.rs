@@ -4,8 +4,8 @@ use super::util::{
     compute_postdominator_sets_for_exit, compute_rpo, cooper_intersect, nearest_common_from_sets,
     reverse_reachable_from,
 };
-use fission_midend_core::fast_hash::FastMap as HashMap;
 use crate::HashSet;
+use fission_midend_core::fast_hash::FastMap as HashMap;
 
 /// Typed nearest-common-postdominator result. A virtual exit represents the
 /// unique function-level join of multiple real return/exit blocks and must not
@@ -232,8 +232,25 @@ impl ImmPostDomTree {
     /// Immediate postdominator of `n`, or `None` if `n` has no strict postdominator
     /// (i.e. `n` is an exit node or part of a disconnected loop).
     pub fn immediate_postdominator(&self, n: usize) -> Option<usize> {
+        match self.immediate_postdominator_target(n)? {
+            CommonPostdominator::Block(block) => Some(block),
+            CommonPostdominator::VirtualExit => None,
+        }
+    }
+
+    /// Immediate postdominator while preserving the analysis-only virtual
+    /// exit used to unify multiple real terminals.
+    pub fn immediate_postdominator_target(&self, n: usize) -> Option<CommonPostdominator> {
         let ipdom = self.idom.get(n).copied()?;
-        if ipdom == n || ipdom >= self.node_count { None } else { Some(ipdom) }
+        if ipdom == n {
+            None
+        } else if Some(ipdom) == self.virtual_exit {
+            Some(CommonPostdominator::VirtualExit)
+        } else if ipdom < self.node_count {
+            Some(CommonPostdominator::Block(ipdom))
+        } else {
+            None
+        }
     }
 
     /// Nearest common postdominator of a set of nodes (LCA in the idom tree).
@@ -343,6 +360,10 @@ mod tests {
         assert_eq!(tree.nearest_common_postdominator(&[1, 2]), None);
         assert_eq!(tree.immediate_postdominator(1), Some(3));
         assert_eq!(tree.immediate_postdominator(3), None);
+        assert_eq!(
+            tree.immediate_postdominator_target(0),
+            Some(CommonPostdominator::VirtualExit)
+        );
     }
 
     #[test]

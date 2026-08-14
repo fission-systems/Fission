@@ -238,36 +238,26 @@ pub fn render_mlil_preview_with_binary_and_context(
     // not exist at structuring time. Retarget its function-scoped predecessors
     // before crossing the canonical PreHIR -> HIR boundary.
     let protected = builder.lsda_landing_pad_labels();
-    let (body, _) = fission_midend_structuring::cleanup::eliminate_nonfallthrough_label_aliases(
-        std::mem::take(&mut hir.body),
-        &protected,
-    );
+    let body = std::mem::take(&mut hir.body);
     // Shared terminal tails (bare epilogues, abort handlers, cleanup-and-return
     // blocks) are emitted once with every other predecessor reaching them by
     // `goto`. Copying a *terminal* tail into its jump sites is behaviour-
     // preserving and removes the jump -- the AST-level analog of Ghidra's
     // `ActionReturnSplit` / angr SAILR's `ReturnDuplicatorHigh`. Runs after the
     // alias pass so aliased labels are already canonicalized to one target.
-    let (body, _) =
-        fission_midend_structuring::cleanup::duplicate_terminal_tails(body, &protected);
     // A forward `if (cond) { goto L; } SPAN; L:` says "run SPAN when cond is
     // false". Inverting the guard states that directly and drops the jump.
-    let (body, _) =
-        fission_midend_structuring::cleanup::invert_forward_guard_gotos(body, &protected);
     // A join block can be lexically adjacent to only one predecessor, so
     // `sum(P - 1)` jumps are structural -- but a block every predecessor
     // *jumps* to is paying one more than that. Relocating it after one of them
     // claims that free adjacency, the same ordering-before-goto-marking
     // principle as Ghidra's `orderBlocks` in `ActionFinalStructure`.
-    let (body, _) =
-        fission_midend_structuring::cleanup::relocate_jump_only_joins(body, &protected);
     // The layout rewrites above run after normalize and can create new
     // structured fallthroughs. In particular, guard inversion may wrap a span
     // ending in `goto L` inside an `if` immediately followed by `L`. Re-run the
     // idempotent structuring finalizer so its parent-successor-aware goto rule
     // sees the final layout, then prune labels made unreferenced by any of the
     // post-layout rewrites.
-    let body = fission_midend_structuring::cleanup::finalize_structured_body(&protected, body);
     // Finalization can expose another bounded terminal tail: for example, the
     // first duplication may retire an inner shared return label, making its
     // predecessor a complete return tail only after the surrounding residual
@@ -275,9 +265,7 @@ pub fn render_mlil_preview_with_binary_and_context(
     // chance, then remove labels made dead by that second rewrite. This stays
     // builder-free and uses the same terminality, loop-control, label, and
     // growth admission as the first invocation.
-    let (body, _) =
-        fission_midend_structuring::cleanup::duplicate_terminal_tails(body, &protected);
-    let body = fission_midend_structuring::cleanup::finalize_structured_body(&protected, body);
+    let body = fission_midend_structuring::cleanup::finalize_post_layout_body(&protected, body);
     hir.body = body;
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to

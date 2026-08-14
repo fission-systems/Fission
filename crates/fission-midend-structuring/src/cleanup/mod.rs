@@ -39,6 +39,24 @@ pub fn finalize_structured_body(protected: &HashSet<String>, mut body: Vec<PreHi
     body
 }
 
+/// Run the builder-free layout cleanup that follows structuring.
+///
+/// Candidate admission must use the same sequence as the emitted function:
+/// terminal-tail duplication and guard/join layout can change goto counts in
+/// opposite directions for two otherwise comparable bodies.
+pub fn finalize_post_layout_body(
+    protected: &HashSet<String>,
+    body: Vec<PreHirStmt>,
+) -> Vec<PreHirStmt> {
+    let (body, _) = eliminate_nonfallthrough_label_aliases(body, protected);
+    let (body, _) = duplicate_terminal_tails(body, protected);
+    let (body, _) = invert_forward_guard_gotos(body, protected);
+    let (body, _) = relocate_jump_only_joins(body, protected);
+    let body = finalize_structured_body(protected, body);
+    let (body, _) = duplicate_terminal_tails(body, protected);
+    finalize_structured_body(protected, body)
+}
+
 /// Remove `Label(alias); Goto(target)` from a sequential list when its
 /// preceding sibling proves that ordinary control cannot fall into `alias`.
 /// Goto rewriting is function-wide because C labels are function-scoped.

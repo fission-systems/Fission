@@ -282,6 +282,41 @@ impl<'a> PreviewBuilder<'a> {
             .is_some_and(|binary| binary.entry_point != 0 && binary.entry_point == address)
     }
 
+    /// Build the function-level normalization context used to compare
+    /// alternative structured bodies. The returned shell is detached from
+    /// builder state; callers replace `body` on a clone for each candidate.
+    pub(crate) fn quality_function_shell(&self) -> PreHirFunction {
+        PreHirFunction {
+            name: self.current_function_name.clone().unwrap_or_default(),
+            params: self.params.values().cloned().collect(),
+            locals: self
+                .locals
+                .iter()
+                .map(|(offset, slot)| PreHirBinding {
+                    name: slot.name.clone(),
+                    ty: slot.ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(match slot.origin {
+                        NirBindingOrigin::StackOffset(_)
+                        | NirBindingOrigin::HomeSlot(_)
+                        | NirBindingOrigin::OutgoingArgSlot(_)
+                        | NirBindingOrigin::VaRegion
+                        | NirBindingOrigin::ReturnScaffold => slot.origin,
+                        _ => NirBindingOrigin::StackOffset(*offset),
+                    }),
+                    initializer: None,
+                })
+                .chain(self.temps.values().cloned())
+                .collect(),
+            body: Vec::new(),
+            calling_convention: self.options.calling_convention,
+            int_param_offsets: self.options.cspec_param_offsets.clone().unwrap_or_default(),
+            is_64bit: self.options.is_64bit,
+            suppress_entry_register_params: self.suppress_entry_register_params,
+            ..PreHirFunction::default()
+        }
+    }
+
     pub(super) fn build_hir(
         &mut self,
         name: &str,
@@ -331,8 +366,7 @@ impl<'a> PreviewBuilder<'a> {
                     true_target,
                     false_target,
                 } => {
-                    self_referencing |=
-                        true_target == own_addr || false_target == Some(own_addr);
+                    self_referencing |= true_target == own_addr || false_target == Some(own_addr);
                     body.push(PreHirStmt::If {
                         cond,
                         then_body: vec![PreHirStmt::Goto(block_label(true_target))].into(),

@@ -228,15 +228,28 @@ fn try_alternative_structurings(
     // structuring -- so a candidate can win on this bench and lose in the
     // shipped output, which is where the regressions come from.
     let protected = ir.builder.lsda_landing_pad_labels();
-    let shipped = |body: &Vec<PreHirStmt>| {
+    let quality_shell = ir.builder.quality_function_shell();
+    let normalized = |body: &Vec<PreHirStmt>| {
         let mut cleaned =
             crate::midend::structuring::finalize_structured_body(&protected, body.clone());
         fission_midend_normalize::normalize_function_body(&mut cleaned);
         measure(&cleaned)
     };
+    let post_layout = |body: &Vec<PreHirStmt>| {
+        let mut function = quality_shell.clone();
+        function.body =
+            crate::midend::structuring::finalize_structured_body(&protected, body.clone());
+        fission_midend_normalize::normalize_hir_function(&mut function);
+        let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut function.body);
+        let cleaned = fission_midend_structuring::cleanup::finalize_post_layout_body(
+            &protected,
+            function.body,
+        );
+        measure(&cleaned)
+    };
 
     let baseline_quality = measure(&baseline);
-    let baseline_shipped = shipped(&baseline);
+    let baseline_normalized = normalized(&baseline);
     // Nothing to win: the existing path already left no jumps.
     if baseline_quality.gotos == 0 {
         if diag {
@@ -252,10 +265,12 @@ fn try_alternative_structurings(
         DreamVirtualGotos,
         DreamHierarchical,
         DreamHierarchicalVirtualGotos,
+        RegionIdentifier,
     }
 
     let mut best_quality = baseline_quality;
-    let mut best_shipped = baseline_shipped;
+    let mut best_normalized = baseline_normalized;
+    let mut best_body = baseline.clone();
     let mut winner = None;
 
     struct OfferedCandidate {
@@ -268,7 +283,9 @@ fn try_alternative_structurings(
                     name: &str,
                     candidate: Result<Option<OfferedCandidate>, MlilPreviewError>,
                     best_quality: &mut Q,
-                    best_shipped: &mut Q,
+                    best_normalized: &mut Q,
+                    best_body: &mut Vec<PreHirStmt>,
+                    require_post_layout: bool,
                     winner: &mut Option<AlternativeDriver>| {
         let candidate = match candidate {
             Ok(Some(candidate)) => candidate,
@@ -288,33 +305,48 @@ fn try_alternative_structurings(
         // reverse downstream: measured, using the cleaned figure alone removed
         // every regression and 88 of the gains with it.
         let quality = measure(&candidate.body);
-        let candidate_shipped = shipped(&candidate.body);
+        let candidate_normalized = normalized(&candidate.body);
+        let post_layout_pair =
+            require_post_layout.then(|| (post_layout(best_body), post_layout(&candidate.body)));
         let max_guard_required =
             candidate.hierarchical || matches!(admission, AlternativeAdmission::LinearFallback);
         let max_guard_admitted = !max_guard_required
             || (quality.has_proportional_max_guard_growth(best_quality)
-                && candidate_shipped.has_proportional_max_guard_growth(best_shipped));
+                && candidate_normalized.has_proportional_max_guard_growth(best_normalized));
         if quality.improves_on(best_quality)
-            && candidate_shipped.gotos <= best_shipped.gotos
+            && candidate_normalized.gotos <= best_normalized.gotos
+            && post_layout_pair
+                .as_ref()
+                .is_none_or(|(best, candidate)| candidate.gotos <= best.gotos)
             && max_guard_admitted
         {
             if diag {
+                let post_layout_note = post_layout_pair
+                    .as_ref()
+                    .map(|(best, candidate)| {
+                        format!("; post-layout gotos {} -> {}", best.gotos, candidate.gotos)
+                    })
+                    .unwrap_or_default();
                 eprintln!(
-                    "[DIAG] {name} admitted: gotos {} -> {}, guards {} -> {} max {} -> {} (cleaned {} -> {}, max {} -> {})",
+                    "[DIAG] {name} admitted: gotos {} -> {}, guards {} -> {} max {} -> {} (normalized gotos {} -> {}, guards {} -> {}, max {} -> {}{})",
                     best_quality.gotos,
                     quality.gotos,
                     best_quality.guard_formula_size,
                     quality.guard_formula_size,
                     best_quality.max_guard_formula_size,
                     quality.max_guard_formula_size,
-                    best_shipped.guard_formula_size,
-                    candidate_shipped.guard_formula_size,
-                    best_shipped.max_guard_formula_size,
-                    candidate_shipped.max_guard_formula_size,
+                    best_normalized.gotos,
+                    candidate_normalized.gotos,
+                    best_normalized.guard_formula_size,
+                    candidate_normalized.guard_formula_size,
+                    best_normalized.max_guard_formula_size,
+                    candidate_normalized.max_guard_formula_size,
+                    post_layout_note,
                 );
             }
             *best_quality = quality;
-            *best_shipped = candidate_shipped;
+            *best_normalized = candidate_normalized;
+            *best_body = candidate.body.clone();
             *winner = Some(driver);
         } else if diag {
             eprintln!(
@@ -329,6 +361,12 @@ fn try_alternative_structurings(
                     let mut regressions = quality.regressions_against(best_quality);
                     if !max_guard_admitted {
                         regressions.push("max_guard_formula_size");
+                    }
+                    if post_layout_pair
+                        .as_ref()
+                        .is_some_and(|(best, candidate)| candidate.gotos > best.gotos)
+                    {
+                        regressions.push("post_layout_gotos");
                     }
                     regressions
                 }
@@ -350,7 +388,9 @@ fn try_alternative_structurings(
             "match-fold",
             c,
             &mut best_quality,
-            &mut best_shipped,
+            &mut best_normalized,
+            &mut best_body,
+            false,
             &mut winner,
         );
     }
@@ -368,7 +408,9 @@ fn try_alternative_structurings(
             "DREAM",
             c,
             &mut best_quality,
-            &mut best_shipped,
+            &mut best_normalized,
+            &mut best_body,
+            false,
             &mut winner,
         );
         let c = fission_midend_structuring::reaching_driver::preview_reaching_conditions_with_virtual_gotos(
@@ -385,7 +427,9 @@ fn try_alternative_structurings(
             "DREAM+virtual-gotos",
             c,
             &mut best_quality,
-            &mut best_shipped,
+            &mut best_normalized,
+            &mut best_body,
+            false,
             &mut winner,
         );
         let c =
@@ -403,7 +447,9 @@ fn try_alternative_structurings(
             "DREAM-hierarchical",
             c,
             &mut best_quality,
-            &mut best_shipped,
+            &mut best_normalized,
+            &mut best_body,
+            false,
             &mut winner,
         );
         let c = fission_midend_structuring::reaching_driver::preview_hierarchical_reaching_conditions_with_virtual_gotos(
@@ -420,9 +466,31 @@ fn try_alternative_structurings(
             "DREAM-hierarchical+virtual-gotos",
             c,
             &mut best_quality,
-            &mut best_shipped,
+            &mut best_normalized,
+            &mut best_body,
+            false,
             &mut winner,
         );
+        if fission_midend_structuring::reaching_driver::region_identifier_enabled() {
+            let c =
+                fission_midend_structuring::reaching_driver::preview_region_identifier(ir.builder)
+                    .map(|candidate| {
+                        candidate.map(|candidate| OfferedCandidate {
+                            body: candidate.body,
+                            hierarchical: true,
+                        })
+                    });
+            consider(
+                AlternativeDriver::RegionIdentifier,
+                "RegionIdentifier",
+                c,
+                &mut best_quality,
+                &mut best_normalized,
+                &mut best_body,
+                true,
+                &mut winner,
+            );
+        }
     }
 
     let (name, committed) = match winner {
@@ -454,6 +522,13 @@ fn try_alternative_structurings(
         Some(AlternativeDriver::DreamHierarchicalVirtualGotos) => (
             "DREAM-hierarchical+virtual-gotos",
             fission_midend_structuring::reaching_driver::structure_by_hierarchical_reaching_conditions_with_virtual_gotos(
+                ir.builder,
+            )
+            .map(|candidate| candidate.map(|candidate| candidate.body)),
+        ),
+        Some(AlternativeDriver::RegionIdentifier) => (
+            "RegionIdentifier",
+            fission_midend_structuring::reaching_driver::structure_by_region_identifier(
                 ir.builder,
             )
             .map(|candidate| candidate.map(|candidate| candidate.body)),
