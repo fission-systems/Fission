@@ -1200,6 +1200,41 @@ mod tests {
     }
 
     #[test]
+    fn post_layout_finalization_removes_fallthrough_created_by_guard_inversion() {
+        let body = vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("skip".to_string()),
+                then_body: vec![PreHirStmt::Goto("join".to_string())].into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("inner".to_string()),
+                then_body: vec![
+                    PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+                    PreHirStmt::Goto("join".to_string()),
+                ]
+                .into(),
+                else_body: Vec::new().into(),
+            },
+            PreHirStmt::Label("join".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let (inverted, removed) = invert_forward_guard_gotos(body, &HashSet::default());
+        assert_eq!(removed, 1);
+        assert!(
+            collect_referenced_labels(&inverted).contains("join"),
+            "guard inversion should first create the nested fallthrough goto"
+        );
+
+        let finalized = finalize_structured_body(&HashSet::default(), inverted);
+        assert!(
+            !collect_referenced_labels(&finalized).contains("join"),
+            "post-layout finalization should remove the nested fallthrough goto"
+        );
+    }
+
+    #[test]
     fn goto_elim_keeps_loop_tail_goto_to_enclosing_label() {
         let stmts = vec![
             PreHirStmt::While {
