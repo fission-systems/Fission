@@ -191,7 +191,7 @@ fn invert_in_place(
                         .then_some(stmts.len())
                 });
                 if let Some(label_idx) = label_idx {
-                    if span_is_invertible(&stmts[idx + 1..label_idx]) {
+                    if span_is_invertible(&stmts[idx + 1..label_idx], global_refs) {
                         let PreHirStmt::If { cond, .. } = &stmts[idx] else {
                             unreachable!("guard_goto_target matched an If");
                         };
@@ -350,8 +350,46 @@ fn forward_label_index(stmts: &[PreHirStmt], from: usize, target: &str) -> Optio
 
 /// A span may be pulled into a conditional only when it declares no label
 /// anywhere and stays inside the size bound.
-fn span_is_invertible(span: &[PreHirStmt]) -> bool {
-    span.iter().all(|stmt| !declares_label(stmt)) && span_within_bound(span)
+fn span_is_invertible(span: &[PreHirStmt], global_refs: &HashMap<String, usize>) -> bool {
+    span_labels_are_private(span, global_refs) && span_within_bound(span)
+}
+
+/// Whether every label the span defines is only jumped to from inside it.
+///
+/// Inversion moves the span into the guard's body, so a label it carries moves
+/// with it. That is fine when the only jumps to that label move too, and wrong
+/// when something outside still targets it -- the jump would then have to
+/// enter an `if` it may not be executing.
+///
+/// This used to refuse any label at all. Measured across the corpus, a label
+/// in the span is the reason 82 otherwise-invertible guards are declined, and
+/// asking who references it is the whole difference between refusing those and
+/// breaking the ones that matter.
+fn span_labels_are_private(span: &[PreHirStmt], global_refs: &HashMap<String, usize>) -> bool {
+    let mut defined = Vec::new();
+    for stmt in span {
+        collect_defined_labels(stmt, &mut defined);
+    }
+    if defined.is_empty() {
+        return true;
+    }
+    let inside = super::collect_referenced_label_counts(span);
+    defined.iter().all(|label| {
+        let outside_total = global_refs.get(label).copied().unwrap_or(0);
+        let within = inside.get(label).copied().unwrap_or(0);
+        outside_total == within
+    })
+}
+
+fn collect_defined_labels(stmt: &PreHirStmt, out: &mut Vec<String>) {
+    if let PreHirStmt::Label(name) = stmt {
+        out.push(name.clone());
+    }
+    for seq in child_sequences(stmt) {
+        for inner in seq {
+            collect_defined_labels(inner, out);
+        }
+    }
 }
 
 fn span_within_bound(span: &[PreHirStmt]) -> bool {
@@ -411,7 +449,7 @@ fn recover_if_else(
     if lend == lelse || protected.contains(&lend) {
         return false;
     }
-    if !span_is_invertible(then_span) {
+    if !span_is_invertible(then_span, global_refs) {
         return false;
     }
     let Some(lend_idx) = stmts
@@ -424,7 +462,7 @@ fn recover_if_else(
         return false;
     };
     let else_span = &stmts[le_idx + 1..lend_idx];
-    if !span_is_invertible(else_span) {
+    if !span_is_invertible(else_span, global_refs) {
         return false;
     }
 
@@ -673,14 +711,16 @@ mod tests {
     }
 
     #[test]
-    fn refuses_span_containing_a_label() {
-        // `goto M` from elsewhere would become a jump into the new if body.
+    fn refuses_a_span_label_something_outside_jumps_to() {
+        // The `goto M` below the label would become a jump into the new if
+        // body, which the guard may not be executing.
         let body = vec![
             guard("L"),
             expr_stmt("a"),
             PreHirStmt::Label("M".into()),
             expr_stmt("b"),
             PreHirStmt::Label("L".into()),
+            PreHirStmt::Goto("M".into()),
         ];
         let (out, removed) = invert_forward_guard_gotos(body.clone(), &HashSet::default());
         assert_eq!(removed, 0);
@@ -688,11 +728,26 @@ mod tests {
     }
 
     #[test]
-    fn refuses_nested_label_in_span() {
+    fn allows_a_span_label_only_the_span_jumps_to() {
+        // Every jump to `M` moves into the if body along with `M` itself, so
+        // nothing is left outside that could reach it.
+        let body = vec![
+            guard("L"),
+            PreHirStmt::Label("M".into()),
+            expr_stmt("a"),
+            PreHirStmt::Goto("M".into()),
+            PreHirStmt::Label("L".into()),
+        ];
+        let (_, removed) = invert_forward_guard_gotos(body, &HashSet::default());
+        assert_eq!(removed, 1, "a label private to the span travels with it");
+    }
+
+    fn refuses_a_nested_span_label_reached_from_outside() {
         let body = vec![
             guard("L"),
             PreHirStmt::Block(vec![PreHirStmt::Label("M".into())].into()),
             PreHirStmt::Label("L".into()),
+            PreHirStmt::Goto("M".into()),
         ];
         let (out, removed) = invert_forward_guard_gotos(body.clone(), &HashSet::default());
         assert_eq!(removed, 0);
@@ -810,7 +865,7 @@ mod tests {
     }
 
     #[test]
-    fn if_else_recovery_refuses_label_in_else_span() {
+    fn if_else_recovery_refuses_an_else_label_reached_from_outside() {
         let body = vec![
             guard("Lelse"),
             expr_stmt("then1"),
@@ -819,9 +874,10 @@ mod tests {
             PreHirStmt::Label("Inner".into()),
             expr_stmt("else1"),
             PreHirStmt::Label("Lend".into()),
+            PreHirStmt::Goto("Inner".into()),
         ];
         let (_, removed) = invert_forward_guard_gotos(body, &HashSet::default());
-        assert_ne!(removed, 2, "label inside ELSE must block if/else recovery");
+        assert_ne!(removed, 2, "a label the outside jumps to must block recovery");
     }
 
     #[test]
