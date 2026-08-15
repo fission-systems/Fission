@@ -49,15 +49,34 @@ pub fn finalize_post_layout_body(
     protected: &HashSet<String>,
     body: Vec<PreHirStmt>,
 ) -> Vec<PreHirStmt> {
-    let (body, _) = eliminate_nonfallthrough_label_aliases(body, protected);
-    let (body, _) = duplicate_terminal_tails(body, protected);
-    let (body, _) = sink_span::sink_spans_into_if_arms(body, protected);
-    let (body, _) = invert_forward_guard_gotos(body, protected);
-    let (body, _) = relocate_jump_only_joins(body, protected);
-    let body = finalize_structured_body(protected, body);
-    let (body, _) = duplicate_terminal_tails(body, protected);
-    finalize_structured_body(protected, body)
+    // Each rewrite can expose the shape another one matches: the finalizer's
+    // goto rule and terminal-tail duplication both reshape the layout after
+    // guard inversion has already run, and the guards they leave behind used
+    // to survive simply because nothing looked again. Repeat until the body
+    // stops changing.
+    let mut body = body;
+    for _ in 0..MAX_LAYOUT_ROUNDS {
+        let before = crate::count_explicit_gotos(&body);
+        let (next, _) = eliminate_nonfallthrough_label_aliases(body, protected);
+        let (next, _) = duplicate_terminal_tails(next, protected);
+        let (next, _) = sink_span::sink_spans_into_if_arms(next, protected);
+        let (next, _) = invert_forward_guard_gotos(next, protected);
+        let (next, _) = relocate_jump_only_joins(next, protected);
+        let next = finalize_structured_body(protected, next);
+        let (next, _) = duplicate_terminal_tails(next, protected);
+        body = finalize_structured_body(protected, next);
+        if crate::count_explicit_gotos(&body) == before {
+            break;
+        }
+    }
+    body
 }
+
+/// How many times the layout group may be repeated before giving up on a
+/// fixpoint. Each round is cheap relative to structuring itself, and the
+/// count only ever falls, so this bounds a pathological body rather than a
+/// normal one.
+const MAX_LAYOUT_ROUNDS: usize = 8;
 
 /// Remove `Label(alias); Goto(target)` from a sequential list when its
 /// preceding sibling proves that ordinary control cannot fall into `alias`.
