@@ -54,15 +54,20 @@ use crate::HashSet;
 /// inverted guard body.
 ///
 /// Bounded so an inversion cannot swallow an arbitrarily large region and
-/// re-indent it wholesale; 103 of the 154 candidates measured on the DecBench
-/// sample set have spans of ten statements or fewer. Raising this to 400 was
-/// measured: NIR improves slightly (-113 vs -109 gotos) but a second HIR file
-/// regresses, because a larger span is more likely to be the richer
+/// re-indent it wholesale.
+///
+/// This was 24, on a measurement that raising it to 400 regressed a second HIR
+/// file: a larger span is likelier to be the richer
 /// `if (C) goto Lelse; THEN; goto Lend; Lelse: ELSE;` shape that the HIR
-/// presentation layer recovers as a full if/else (see
-/// `render/presentation/mod.rs`, `if_is_single_goto`). Staying tight leaves
-/// those to the owner that handles them better.
-pub const MAX_SPAN_STMTS: usize = 24;
+/// presentation layer recovers as a full if/else. Re-measured after this
+/// round's structuring changes, that no longer happens -- 96 improves NIR
+/// 639 to 636 and HIR 637 to 634 with **nothing regressing on either layer**,
+/// including the one file that had been.
+///
+/// 512 was also measured and buys one further jump. It is not taken: a span
+/// that long wrapped in an `if` is harder to read than the jump it replaced,
+/// which is the thing this bound exists to prevent.
+pub const MAX_SPAN_STMTS: usize = 96;
 
 /// Rewrite forward `if (cond) { goto L; } SPAN; L:` into `if (!cond) { SPAN }`.
 ///
