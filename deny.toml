@@ -91,6 +91,17 @@ ignore = [
     "RUSTSEC-2024-0384", # instant unmaintained (transitive via Dioxus/tao)
     "RUSTSEC-2024-0429", # glib unsound VariantStrIter advisory (transitive via Dioxus/wry GTK stack)
     "RUSTSEC-2026-0097", # rand unsound custom logger advisory (transitive via Dioxus/wry CSS stack)
+    # `im` cluster. `im` is a *direct* dependency of fission-emulator (persistent
+    # maps for snapshot/fork state); `bitmaps` and `sized-chunks` are its own deps.
+    # The whole family was marked unmaintained upstream in 2026-08 with no fixed
+    # version and no drop-in successor, so these are ignored rather than patched.
+    # Migrating fission-emulator off `im` is the real fix and is not a release-time
+    # change -- track it separately.
+    "RUSTSEC-2026-0248", # im unmaintained (direct dep of fission-emulator)
+    "RUSTSEC-2023-0126", # im OrdSet insertion aliasing violation (no fixed version)
+    "RUSTSEC-2026-0247", # bitmaps unmaintained (via im)
+    "RUSTSEC-2026-0251", # sized-chunks unmaintained (via im)
+    "RUSTSEC-2026-0249", # smartstring unmaintained (transitive via rhai/fission-script)
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
