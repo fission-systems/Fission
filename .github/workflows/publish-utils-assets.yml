@@ -2,16 +2,16 @@
 # and external installs. Prefer attaching fission-utils.tar.gz to SemVer releases
 # via cd.yml; use this workflow to update the long-lived assets-v* pin.
 #
-# Default assets_tag: assets-v2 (matches .github/actions/setup-utils).
+# Default assets_tag: assets-v3 (matches .github/actions/setup-utils).
 name: Publish Utils Assets
 
 on:
   workflow_dispatch:
     inputs:
       assets_tag:
-        description: "Release tag to create/update (e.g. assets-v2 or assets-v3)"
+        description: "Release tag to create/update (e.g. assets-v3 or assets-v4)"
         required: true
-        default: "assets-v2"
+        default: "assets-v3"
         type: string
       ref:
         description: "Git ref to package utils from (branch or SHA)"
@@ -41,7 +41,7 @@ jobs:
         uses: ./.github/actions/setup-utils
         with:
           # Bootstrap from the long-lived pin when the ref's LFS tree is incomplete.
-          assets_tag: assets-v2
+          assets_tag: assets-v3
 
       - name: Package
         shell: bash

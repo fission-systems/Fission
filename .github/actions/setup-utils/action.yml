@@ -4,7 +4,7 @@ inputs:
   assets_tag:
     description: "GitHub Release tag hosting fission-utils.tar.gz"
     required: false
-    default: "assets-v2"
+    default: "assets-v3"
 runs:
   using: "composite"
   steps:

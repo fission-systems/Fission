@@ -21,7 +21,7 @@ on:
       assets_tag:
         type: string
         required: false
-        default: "assets-v2"
+        default: "assets-v3"
 
 env:
   CARGO_TERM_COLOR: always
