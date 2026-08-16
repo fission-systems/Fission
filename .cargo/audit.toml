@@ -21,6 +21,15 @@ ignore = [
   "RUSTSEC-2025-0057",
   "RUSTSEC-2025-0141",
   "RUSTSEC-2026-0097",
+  # `im` family + smartstring, all marked unmaintained upstream 2026-08 with no
+  # fixed version. See deny.toml for the full rationale; `im` is a direct
+  # fission-emulator dependency and migrating off it is the real fix.
+  "RUSTSEC-2026-0247", # bitmaps unmaintained (via im)
+  "RUSTSEC-2026-0248", # im unmaintained (direct dep of fission-emulator)
+  "RUSTSEC-2026-0249", # smartstring unmaintained (via rhai/fission-script)
+  "RUSTSEC-2026-0251", # sized-chunks unmaintained (via im)
+  "RUSTSEC-2026-0255", # sized-chunks unsound (via im; no fixed version)
+  "RUSTSEC-2023-0126", # im OrdSet insertion aliasing violation (no fixed version)
 ]
 
 [yanked]
