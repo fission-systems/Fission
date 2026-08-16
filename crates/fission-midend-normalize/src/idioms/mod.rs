@@ -8,7 +8,7 @@ mod subflow;
 pub use branch_hoist::apply_branch_prefix_hoist_pass;
 pub use prologue::{
     remove_callee_save_prologue_epilogue, remove_dead_callee_saved_param_loads,
-    remove_entry_stack_scaffold_stores,
+    remove_entry_register_spills, remove_entry_stack_scaffold_stores,
 };
 pub use split_flow::apply_split_flow_pass;
 pub use subflow::apply_subflow_pruning;

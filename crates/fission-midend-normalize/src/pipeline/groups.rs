@@ -35,7 +35,7 @@ use super::super::global_opt::{
 use super::super::idioms::{
     apply_branch_prefix_hoist_pass, apply_split_flow_pass, apply_subflow_pruning,
     remove_callee_save_prologue_epilogue, remove_dead_callee_saved_param_loads,
-    remove_entry_stack_scaffold_stores,
+    remove_entry_register_spills, remove_entry_stack_scaffold_stores,
 };
 use super::super::subvar_flow::apply_subvar_flow_pass;
 use super::super::memory::{apply_constant_ptr_recovery_pass, apply_ptr_arith_recovery_pass};
@@ -296,6 +296,16 @@ pub fn build_normalize_pipeline() -> Pipeline {
                     "remove_dead_callee_param_loads",
                     concept,
                     remove_dead_callee_saved_param_loads,
+                ))
+                // The other direction: `local = rbp` where rbp is never
+                // defined and the local is overwritten before it is read.
+                // clang -O0 / gcc -m32 -O0 spill the frame pointer into a
+                // slot that ends up named as an ordinary local, so the
+                // save/restore pass above never sees a pair to match.
+                .pass(fn_pass(
+                    "remove_entry_register_spills",
+                    concept,
+                    remove_entry_register_spills,
                 ))
                 // Join-variable coalescing: unify parallel temporaries
                 // assigned in both branches of an if-else (SSA out-of-SSA

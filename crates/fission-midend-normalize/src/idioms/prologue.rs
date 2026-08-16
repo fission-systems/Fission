@@ -920,6 +920,198 @@ fn remove_dead_callee_assigns_from_stmts(
     }
 }
 
+/// Remove the entry spill of a callee-saved register into a local that is
+/// overwritten before it is ever read:
+///
+/// ```text
+/// local_8 = rbp;      // rbp is never assigned anywhere -- this is its
+///                     // entry value, i.e. the caller's frame pointer
+/// local_8 = 0;        // overwrites it before any read
+/// ```
+///
+/// `clang -O0` and `gcc -m32 -O0` write the frame-pointer save this way: into
+/// a slot that normalization later names as an ordinary local rather than as
+/// the stack scaffold `remove_callee_save_prologue_epilogue` recognizes. That
+/// pass needs a matching `reg = *p` restore to fire; there is none here,
+/// because the value is dead rather than restored, so the store survives into
+/// the output and reads a register the function never defines.
+///
+/// Removal is sound because both halves are unobservable: the value read is
+/// the register's entry value (undefined within this function's own
+/// semantics), and the local it lands in is reassigned before anything reads
+/// it. `defuse_dead_assignment_pass` does not cover this because it only
+/// considers temp-like names, and these destinations are named locals.
+pub fn remove_entry_register_spills(func: &mut PreHirFunction) -> bool {
+    // Callee-saved registers with no definition anywhere: their only value is
+    // the one they held on entry.
+    let mut undefined_regs: HashSet<String> = HashSet::default();
+    for b in &func.locals {
+        if is_callee_saved(&b.name) && count_var_definitions(&func.body, &b.name) == 0 {
+            undefined_regs.insert(b.name.clone());
+        }
+    }
+    if undefined_regs.is_empty() {
+        return false;
+    }
+    // A parameter is a real value even if it shares a register's name.
+    for p in &func.params {
+        undefined_regs.remove(&p.name);
+    }
+    if undefined_regs.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    remove_entry_register_spills_in_stmts(&mut func.body, &undefined_regs, &mut changed);
+
+    if changed {
+        // Drop register bindings that no longer appear anywhere.
+        func.locals.retain(|b| {
+            !undefined_regs.contains(&b.name) || count_ptr_var_rvalue_uses(&func.body, &b.name) > 0
+        });
+    }
+    changed
+}
+
+/// Does `stmt` assign `name` before reading it, reading it, or neither?
+enum DstFate {
+    /// Overwritten here without being read first -- the earlier value is dead.
+    Overwritten,
+    /// Read here -- the earlier value is live.
+    Read,
+    /// Untouched.
+    Untouched,
+}
+
+fn dst_fate_in_stmt(stmt: &PreHirStmt, dst: &str) -> DstFate {
+    match stmt {
+        // `dst = expr`: the RHS is evaluated first, so a use there wins.
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } if name == dst => {
+            if count_ptr_in_expr(rhs, dst) > 0 {
+                DstFate::Read
+            } else {
+                DstFate::Overwritten
+            }
+        }
+        // `for (dst = ...; ...)`: the initializer runs before the condition,
+        // the update, and the body, so it kills whatever came before.
+        PreHirStmt::For { init: Some(init), .. } => {
+            if matches!(dst_fate_in_stmt(init, dst), DstFate::Overwritten) {
+                DstFate::Overwritten
+            } else if count_ptr_in_stmt(stmt, dst) > 0 {
+                DstFate::Read
+            } else {
+                DstFate::Untouched
+            }
+        }
+        _ => {
+            if count_ptr_in_stmt(stmt, dst) > 0 || count_var_defs_in_stmt(stmt, dst) > 0 {
+                // Anything else that touches `dst` is treated as a read; this
+                // pass never removes a store whose value might be observed.
+                DstFate::Read
+            } else {
+                DstFate::Untouched
+            }
+        }
+    }
+}
+
+fn remove_entry_register_spills_in_stmts(
+    stmts: &mut Vec<PreHirStmt>,
+    undefined_regs: &HashSet<String>,
+    changed: &mut bool,
+) {
+    let mut dead_idx: Vec<usize> = Vec::new();
+    for (i, stmt) in stmts.iter().enumerate() {
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(dst),
+            rhs,
+        } = stmt
+        else {
+            continue;
+        };
+        // The RHS must be nothing but a read of an undefined callee-saved
+        // register (possibly through a cast) -- never an address computation
+        // such as `rbp - 24`, which is a real stack address.
+        let Some(reg) = var_name_through_cast(rhs) else {
+            continue;
+        };
+        if dst == reg || !undefined_regs.contains(reg) {
+            continue;
+        }
+        // `dst` must not be observed before it is overwritten.
+        let mut dead = true;
+        for later in &stmts[i + 1..] {
+            match dst_fate_in_stmt(later, dst) {
+                DstFate::Overwritten => break,
+                DstFate::Read => {
+                    dead = false;
+                    break;
+                }
+                DstFate::Untouched => {}
+            }
+        }
+        if dead {
+            dead_idx.push(i);
+        }
+    }
+
+    if !dead_idx.is_empty() {
+        let mut i = 0usize;
+        stmts.retain(|_| {
+            let keep = !dead_idx.contains(&i);
+            i += 1;
+            keep
+        });
+        *changed = true;
+    }
+
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                remove_entry_register_spills_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    undefined_regs,
+                    changed,
+                );
+                remove_entry_register_spills_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    undefined_regs,
+                    changed,
+                );
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => {
+                remove_entry_register_spills_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), undefined_regs, changed);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases.iter_mut() {
+                    remove_entry_register_spills_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        undefined_regs,
+                        changed,
+                    );
+                }
+                remove_entry_register_spills_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    undefined_regs,
+                    changed,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -951,6 +1143,137 @@ mod tests {
             },
             rhs: PreHirExpr::Var(rhs.to_owned()),
         }
+    }
+
+
+    fn spill_assign(dst: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(dst.to_owned()),
+            rhs,
+        }
+    }
+
+    fn reg_binding(name: &str) -> PreHirBinding {
+        PreHirBinding {
+            name: name.to_owned(),
+            ty: u64_ty(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }
+    }
+
+    /// `local_8 = rbp; local_8 = 0;` -- rbp is never defined, and the value it
+    /// lands in is overwritten before any read. This is the clang -O0 frame
+    /// pointer save that reached the corpus output as an undefined read.
+    #[test]
+    fn removes_entry_frame_register_spill_overwritten_before_read() {
+        let mut func = PreHirFunction {
+            name: "count_bits".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("rbp"), reg_binding("local_8")],
+            body: vec![
+                spill_assign("local_8", PreHirExpr::Var("rbp".to_owned())),
+                spill_assign("local_8", PreHirExpr::Const(0, u32_ty())),
+                PreHirStmt::Return(Some(PreHirExpr::Var("local_8".to_owned()))),
+            ],
+            ..Default::default()
+        };
+        assert!(remove_entry_register_spills(&mut func));
+        assert_eq!(func.body.len(), 2, "spill statement should be gone: {:?}", func.body);
+        assert!(
+            !func.locals.iter().any(|b| b.name == "rbp"),
+            "the undefined register binding should be dropped too"
+        );
+    }
+
+    /// The same spill, but the destination is read before it is reassigned.
+    /// Removing it would change what the output says, so it must stay.
+    #[test]
+    fn keeps_entry_register_spill_whose_destination_is_read() {
+        let mut func = PreHirFunction {
+            name: "keeps".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("rbp"), reg_binding("local_8")],
+            body: vec![
+                spill_assign("local_8", PreHirExpr::Var("rbp".to_owned())),
+                PreHirStmt::Return(Some(PreHirExpr::Var("local_8".to_owned()))),
+            ],
+            ..Default::default()
+        };
+        assert!(!remove_entry_register_spills(&mut func));
+        assert_eq!(func.body.len(), 2);
+    }
+
+    /// `xVar10 = rbp - 24` is a real frame-relative address, not a spill of the
+    /// register's own value, and must survive even when its destination is dead.
+    #[test]
+    fn keeps_frame_relative_address_computation() {
+        let mut func = PreHirFunction {
+            name: "addr".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("rbp"), reg_binding("xVar10")],
+            body: vec![
+                spill_assign(
+                    "xVar10",
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Sub,
+                        lhs: Box::new(PreHirExpr::Var("rbp".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(24, u64_ty())),
+                        ty: u64_ty(),
+                    },
+                ),
+                spill_assign("xVar10", PreHirExpr::Const(0, u32_ty())),
+                PreHirStmt::Return(Some(PreHirExpr::Var("xVar10".to_owned()))),
+            ],
+            ..Default::default()
+        };
+        assert!(!remove_entry_register_spills(&mut func));
+        assert_eq!(func.body.len(), 3);
+    }
+
+    /// A register the function actually writes is a normal value, not an entry
+    /// spill, so its store is left alone.
+    #[test]
+    fn keeps_spill_of_a_register_the_function_defines() {
+        let mut func = PreHirFunction {
+            name: "defined".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("rbx"), reg_binding("local_8")],
+            body: vec![
+                spill_assign("rbx", PreHirExpr::Const(7, u32_ty())),
+                spill_assign("local_8", PreHirExpr::Var("rbx".to_owned())),
+                spill_assign("local_8", PreHirExpr::Const(0, u32_ty())),
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+        assert!(!remove_entry_register_spills(&mut func));
+        assert_eq!(func.body.len(), 4);
+    }
+
+    /// `for (local_4 = 0; ...)` kills the earlier value the same way a plain
+    /// assignment does -- the initializer runs before condition, body, update.
+    #[test]
+    fn treats_a_for_initializer_as_an_overwrite() {
+        let mut func = PreHirFunction {
+            name: "loop_init".to_owned(),
+            int_param_offsets: Vec::new(),
+            locals: vec![reg_binding("ebp"), reg_binding("local_4")],
+            body: vec![
+                spill_assign("local_4", PreHirExpr::Var("ebp".to_owned())),
+                PreHirStmt::For {
+                    init: Some(Box::new(spill_assign("local_4", PreHirExpr::Const(0, u32_ty())))),
+                    cond: Some(PreHirExpr::Var("local_4".to_owned())),
+                    update: None,
+                    body: std::rc::Rc::new(Vec::new()),
+                },
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+        assert!(remove_entry_register_spills(&mut func));
+        assert_eq!(func.body.len(), 2, "{:?}", func.body);
     }
 
     #[test]
