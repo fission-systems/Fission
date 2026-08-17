@@ -1021,6 +1021,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#4b-second-attempt-narrowed-to-the-exact-trigger-cause-still-unfound" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4b. Second attempt: narrowed to the exact trigger, cause still unfound
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#5-where-to-look-next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1184,19 +1195,47 @@ appears twice, once true and once false). The phi output ids are simply not
 present in <code>operation_inputs</code>, so neither the narrow nor the wide test can
 see a consumer. Whatever route resolves the primary return register to
 <code>xVar16</code> is not this gate.</p>
+<h2 id="4b-second-attempt-narrowed-to-the-exact-trigger-cause-still-unfound">4b. Second attempt: narrowed to the exact trigger, cause still unfound<a class="headerlink" href="#4b-second-attempt-narrowed-to-the-exact-trigger-cause-still-unfound" title="Permanent link">&para;</a></h2>
+<p>Instrumenting <code>live_primary_return_register_expr</code> to dump <code>materialized_vns</code>
+alongside each answer shows the flip precisely. The failing call is block 4
+(the join), <code>ret_vn = sp4:off0x0:sz8</code> (RAX), and the entries for that varnode
+across the three calls are:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>call 1: [&quot;def@0x14000153f:10-&gt;rax&quot;]                                   =&gt; Const(0)
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>call 2: [&quot;def@0x14000153f:10-&gt;rax&quot;, &quot;def@0x140001544:17-&gt;rax&quot;]        =&gt; Const(0)
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>call 3: [... , &quot;def@0x140001550:41-&gt;xVar16&quot;, ...]                     =&gt; Var(&quot;xVar16&quot;)
+</span></code></pre></div>
+<p>One entry appears between calls 2 and 3 — <code>def@0x140001550 seq 41 -&gt; xVar16</code>
+— and <code>lower_varnode</code> trusts it from then on. So the trigger is exact: <strong>a
+<code>materialized_vns</code> entry exists whose name has no binding written into the
+body.</strong> Block 2's own answer stays <code>Var("rax")</code> throughout; only the join
+flips.</p>
+<p>Who writes that entry is still unknown. Both production insert sites were
+instrumented for this specific name and neither fired:</p>
+<ul>
+<li><code>builder/mod.rs:888</code>, the name-minting path — no output.</li>
+<li><code>structuring/host_impl.rs:36</code>, the isolated-lowering identity commit — no
+  output (it only logs when the key is genuinely new, so an existing key
+  passes silently).</li>
+</ul>
+<p><code>PreviewBuilder::clone()</code> gives an isolated fork the whole map, which is the
+remaining candidate: a name minted inside a fork can reach the host without
+either instrumented line reporting it.</p>
 <h2 id="5-where-to-look-next">5. Where to look next<a class="headerlink" href="#5-where-to-look-next" title="Permanent link">&para;</a></h2>
-<p>The next step is to find what makes the <em>third</em> <code>lower_wrapped_varnode</code> call
-answer differently from the first two — that is the whole defect, and the
-anchor row reproduces it in seventeen lines. Candidates, in order of how
-cheaply they can be ruled out:</p>
+<p><strong>Stop guessing insert sites.</strong> Three hypotheses were formed by reading the
+code — the phi consumption gate, the minting path, the isolation commit — and
+all three were wrong. The anchor reproduces in seventeen lines and the
+trigger is now exactly known, so the missing information is <em>who writes the
+entry</em>, and that should be observed rather than deduced: wrap
+<code>materialized_vns</code> in a type that records every write with a backtrace, or
+snapshot the map around each pass and diff. Either answers the question in
+one run.</p>
+<p>Once the writer is known, the fix is likely one of:</p>
 <ol>
-<li><code>materialized_vns</code> / <code>temps</code> state written by the intervening merge
-   synthesis, which is what <code>lower_wrapped_varnode</code> consults.</li>
-<li>The duplicate phis on one storage slot (<code>sp4:off0x0:sz4</code> twice in block 2)
-   — if the second shadows the first, the name minted for it can outlive its
-   own definition.</li>
-<li><code>resolve_ssa_value_to_expr</code>, which the phi path uses to build operand
-   expressions and which can return a name without emitting its binding.</li>
+<li>refusing to record a <code>materialized_vns</code> entry whose binding was never
+   written, or</li>
+<li>emitting the binding the entry promises, or</li>
+<li>dropping fork-local entries at commit unless their statements came with
+   them.</li>
 </ol>
 <p>An invariant worth asserting once the cause is known, independent of the fix:
 <strong>every name that appears in rendered output has a definition in that
