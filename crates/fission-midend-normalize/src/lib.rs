@@ -72,6 +72,9 @@ pub use types::is_known_api_signature;
 
 /// Pure `x = x` / adjacent-duplicate assign cleanup (nested Block/If safe).
 pub use cleanup::eliminate_redundant_var_assigns;
+pub use analysis::defuse::constant_folding_pass;
+pub use cleanup::propagate_copies_in_runs;
+pub use cleanup::prune_unobservable_scratch;
 
 #[allow(dead_code)]
 pub fn normalize_function_body(body: &mut Vec<prelude::PreHirStmt>) {

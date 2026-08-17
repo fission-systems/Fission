@@ -234,6 +234,32 @@ pub fn render_mlil_preview_with_binary_and_context(
     // Structuring may wrap/rearrange after normalize; drop pure identity
     // assigns that only become adjacent post-layout.
     let _ = fission_midend_normalize::eliminate_redundant_var_assigns(&mut hir.body);
+    // Scratch values that cannot reach anything the function observes. This
+    // runs here rather than inside normalize because a whole-function
+    // definition count -- all normalize has before structuring -- cannot
+    // retire a closed dataflow cycle such as `a = b; ... b = a + 1`, where
+    // every name has a reader but the graph only feeds itself. Reachability
+    // backwards from conditions, stores, calls, returns, and writes to named
+    // bindings can. See docs/proposals/2026-08-17-ast-stage-copy-propagation.md.
+    let _ = fission_midend_normalize::prune_unobservable_scratch(&mut hir);
+    // Fold the copies that survive. A structured statement list is a
+    // straight-line run, so a copy carried only inside one list -- dropped at
+    // every nested construct, label, goto, and call -- needs no dataflow proof.
+    // That is the argument the pre-structuring pass cannot make, which is why
+    // it needs a whole-function definition count and a TempPreserved veto.
+    // Fold, propagate, fold again. Constant folding turns `x = 200 + 100` into
+    // `x = 300`, which only then is a pure copyable the run-scoped pass can
+    // carry; and moving an expression to its consumer can in turn put two
+    // constants next to each other that were separated when folding last ran
+    // before structuring. Two folds bracket the propagation for that reason.
+    let _ = fission_midend_normalize::constant_folding_pass(&mut hir.body);
+    let _ = fission_midend_normalize::propagate_copies_in_runs(&mut hir);
+    let _ = fission_midend_normalize::constant_folding_pass(&mut hir.body);
+    // Folding can turn a computed definition into a constant one, which is only
+    // then a pure copyable the run-scoped pass can carry. Propagate once more so
+    // the group reaches a fixpoint instead of stopping one step short.
+    let _ = fission_midend_normalize::propagate_copies_in_runs(&mut hir);
+    let _ = fission_midend_normalize::prune_unobservable_scratch(&mut hir);
     // The dead/identity cleanup above can expose an alias-only block that did
     // not exist at structuring time. Retarget its function-scoped predecessors
     // before crossing the canonical PreHIR -> HIR boundary.

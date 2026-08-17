@@ -227,3 +227,64 @@ is this defect. angr on the same functions:
 Vectorisation is not the obstacle; folding is. A separate group of 41
 functions already has the right node count and differs only in statement
 content (GED 2-12) -- smaller, and not addressed here.
+
+## 7. Measured outcome
+
+Landed as two passes in `fission-midend-normalize/src/cleanup/`, wired after
+`run_structuring_pipeline` in `orchestrate.rs`:
+
+```text
+prune_unobservable_scratch      (scratch_liveness.rs)
+  -> constant_folding
+  -> propagate_copies_in_runs   (run_copy_prop.rs)
+  -> constant_folding
+  -> propagate_copies_in_runs
+  -> prune_unobservable_scratch
+```
+
+Measured on 465 corpus functions against the commit before them:
+
+| axis | before | after |
+|---|---|---|
+| bare compile | 363 | **371 (+8, zero newly broken)** |
+| output lines | 20,363 | **15,655 (-23%)** |
+| gotos | 38 | 37 |
+| `overlap_move` clang -O2 | 511 lines | 318 lines |
+| execution differential | 26/26 | 26/26 |
+| workspace | — | 2,533 passing |
+| the seven builder-stage tests | green | **green** |
+| **GED exact structural match** | 93/368 | **93/368 (+0)** |
+
+**Section 3 point 4 held.** The seven builder-stage invariant tests stayed
+green with `should_preserve_materialized_expr` untouched, which is what the
+rejected experiment could not do. Folding at AST stage rather than at the
+marker is the whole difference: same -23% line reduction, but bare compile
+went +8 instead of -5.
+
+**The appendix's priority claim was wrong.** It argued the ten catastrophic
+blowups carried the mean and were all this defect. The blowups did shrink --
+`overlap_move` 511 -> 318 lines, `classify_range` 27 -> 22 CFG nodes -- and
+exact structural match moved by zero, at every optimisation level. Fewer nodes
+is not the same property as matching the source's nodes. `signum`
+gcc-aarch64 -O2 went 5 -> 1 nodes and its GED got *worse*, 8 -> 14: folded
+past the source rather than toward it.
+
+Kept anyway, on the other axes: eight more functions compile, output is a
+quarter shorter, semantics are unchanged, and nothing regressed. No claim is
+made that this moves the leaderboard's structural axis, because it was
+measured and it does not.
+
+Three things the design did not anticipate, each caught by measurement:
+
+1. A resolved global symbol is registered with `origin: Temp`. `is_temp_like()`
+   alone would have deleted a store to `0x2000` as a dead value; the scratch
+   set is now restricted to names `next_temp_name` actually mints
+   (`bVar`/`iVar`/`uVar`/`xVar` + digits).
+2. A pointer-typed temp carries type information its defining expression does
+   not: folding `xVar12: uchar *` into `(ulonglong)xVar12` makes the cast look
+   redundant, and dropping it yields `ptr + ptr`. Expression folding is
+   restricted to non-pointer temps -- the untyped half of what
+   `propagate_adjacent_typed_promoted_values` splits in two.
+3. Copy propagation exposes dead stores, exactly as Glaurung's `dead_store_runs`
+   documents, and constant folding then exposes new aliases -- hence the second
+   propagation pass.
