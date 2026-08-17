@@ -292,12 +292,35 @@ So promotion, classification, and resolution all work for EDX exactly as they
 do for EAX: the builder knows the load's right-hand side is `param_3`. The
 assignment is lost somewhere after that, and the cmov path is not involved.
 
-Still unknown, and now much better bounded: what happens to op_idx 18 between
-`build_replacement_value_plan` returning a resolved RHS and the emitted body.
-The two loads differ in nothing the observations have reached yet, so the next
-instrument belongs downstream of the plan — at whatever consumes it — not at
-the parameter, promotion, or cmov machinery, all three of which are now ruled
-out by measurement rather than by reading.
+Instrumenting `maybe_materialize_output_stmt`'s return value closes the
+builder half:
+
+```text
+[EMIT] addr=0x4016fc op_idx=18 -> Assign { lhs: Var("edx"),   rhs: Var("param_3") }
+[EMIT] addr=0x4016ff op_idx=21 -> Assign { lhs: Var("uVar7"), rhs: Var("param_2") }
+```
+
+**The builder emits `edx = param_3;` correctly.** Both statements exist when
+it hands the body on. In the final output `uVar7 = param_2;` survives and
+`edx = param_3;` is gone, so a normalize pass removes it.
+
+The asymmetry that decides which one survives is the **name**: EAX's
+materialization took a fresh builder temp (`uVar7`), EDX's took the raw
+hardware name (`edx`). A pass that retires assignments to raw register names
+would drop one and keep the other, which is exactly the observed shape.
+
+So the defect has two candidate owners and they need different fixes:
+
+1. the naming choice — why does one materialization pick a temp and the other
+   a hardware register name for two symmetric parameter loads?
+2. the normalize pass that drops `edx = param_3` while its value is still
+   read.
+
+Ruled out by measurement, not by reading: parameter classification,
+parameter promotion, RHS resolution, and the guarded-cmov refusal. The
+remaining question is which normalize pass removes the statement, and the
+same anchor answers it — snapshot the body before and after normalize and
+diff, rather than reading passes and guessing which one it is.
 
 Note that a false lead was ruled out on the way: the
 `[DIAG] param_pointer_roles` line lists only parameters with an inferred
