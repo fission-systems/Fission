@@ -1451,12 +1451,30 @@ both resolve:</p>
 <p>So promotion, classification, and resolution all work for EDX exactly as they
 do for EAX: the builder knows the load's right-hand side is <code>param_3</code>. The
 assignment is lost somewhere after that, and the cmov path is not involved.</p>
-<p>Still unknown, and now much better bounded: what happens to op_idx 18 between
-<code>build_replacement_value_plan</code> returning a resolved RHS and the emitted body.
-The two loads differ in nothing the observations have reached yet, so the next
-instrument belongs downstream of the plan — at whatever consumes it — not at
-the parameter, promotion, or cmov machinery, all three of which are now ruled
-out by measurement rather than by reading.</p>
+<p>Instrumenting <code>maybe_materialize_output_stmt</code>'s return value closes the
+builder half:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>[EMIT] addr=0x4016fc op_idx=18 -&gt; Assign { lhs: Var(&quot;edx&quot;),   rhs: Var(&quot;param_3&quot;) }
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>[EMIT] addr=0x4016ff op_idx=21 -&gt; Assign { lhs: Var(&quot;uVar7&quot;), rhs: Var(&quot;param_2&quot;) }
+</span></code></pre></div>
+<p><strong>The builder emits <code>edx = param_3;</code> correctly.</strong> Both statements exist when
+it hands the body on. In the final output <code>uVar7 = param_2;</code> survives and
+<code>edx = param_3;</code> is gone, so a normalize pass removes it.</p>
+<p>The asymmetry that decides which one survives is the <strong>name</strong>: EAX's
+materialization took a fresh builder temp (<code>uVar7</code>), EDX's took the raw
+hardware name (<code>edx</code>). A pass that retires assignments to raw register names
+would drop one and keep the other, which is exactly the observed shape.</p>
+<p>So the defect has two candidate owners and they need different fixes:</p>
+<ol>
+<li>the naming choice — why does one materialization pick a temp and the other
+   a hardware register name for two symmetric parameter loads?</li>
+<li>the normalize pass that drops <code>edx = param_3</code> while its value is still
+   read.</li>
+</ol>
+<p>Ruled out by measurement, not by reading: parameter classification,
+parameter promotion, RHS resolution, and the guarded-cmov refusal. The
+remaining question is which normalize pass removes the statement, and the
+same anchor answers it — snapshot the body before and after normalize and
+diff, rather than reading passes and guessing which one it is.</p>
 <p>Note that a false lead was ruled out on the way: the
 <code>[DIAG] param_pointer_roles</code> line lists only parameters with an inferred
 <em>role</em>, so <code>param_3</code> missing from it means nothing about whether it is a
