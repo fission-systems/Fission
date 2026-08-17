@@ -1439,10 +1439,24 @@ then <code>cmovge</code> from R8 collapsing to <code>max(lo, value)</code>). Tha
 the cmov's <em>output</em>. Here the unresolved name is an <strong>input</strong> to the cmov,
 defined before the guard, and refusing to resolve it does not protect
 anything — it just leaves the reader an undefined name.</p>
-<p>Not yet established: which of the two refusals actually strands <code>edx</code>, and
-whether distinguishing "op inside the body" from "value merely read by the
-body" is sufficient. Both are one instrumented run away, on this 25-line
-anchor.</p>
+<p><strong>That hypothesis is wrong.</strong> Instrumenting both refusal sites: only one
+fires, <code>plan_incomplete</code> at <code>0x401704</code> (the <code>cmovbe</code> itself) for
+<code>sp4:off0x0:sz4</code> — EAX, the cmov's <em>output</em>, which is exactly what the
+refusal is for. EDX never reaches either site.</p>
+<p>Instrumenting the two loads instead shows they are perfectly symmetric, and
+both resolve:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>[LOAD] addr=0x4016fc op_idx=18 out=sp4:off0x8:sz4 rhs=Var(&quot;param_3&quot;)   EDX
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>[LOAD] addr=0x4016ff op_idx=21 out=sp4:off0x0:sz4 rhs=Var(&quot;param_2&quot;)   EAX
+</span></code></pre></div>
+<p>So promotion, classification, and resolution all work for EDX exactly as they
+do for EAX: the builder knows the load's right-hand side is <code>param_3</code>. The
+assignment is lost somewhere after that, and the cmov path is not involved.</p>
+<p>Still unknown, and now much better bounded: what happens to op_idx 18 between
+<code>build_replacement_value_plan</code> returning a resolved RHS and the emitted body.
+The two loads differ in nothing the observations have reached yet, so the next
+instrument belongs downstream of the plan — at whatever consumes it — not at
+the parameter, promotion, or cmov machinery, all three of which are now ruled
+out by measurement rather than by reading.</p>
 <p>Note that a false lead was ruled out on the way: the
 <code>[DIAG] param_pointer_roles</code> line lists only parameters with an inferred
 <em>role</em>, so <code>param_3</code> missing from it means nothing about whether it is a
