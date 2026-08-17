@@ -113,20 +113,55 @@ present in `operation_inputs`, so neither the narrow nor the wide test can
 see a consumer. Whatever route resolves the primary return register to
 `xVar16` is not this gate.
 
+## 4b. Second attempt: narrowed to the exact trigger, cause still unfound
+
+Instrumenting `live_primary_return_register_expr` to dump `materialized_vns`
+alongside each answer shows the flip precisely. The failing call is block 4
+(the join), `ret_vn = sp4:off0x0:sz8` (RAX), and the entries for that varnode
+across the three calls are:
+
+```text
+call 1: ["def@0x14000153f:10->rax"]                                   => Const(0)
+call 2: ["def@0x14000153f:10->rax", "def@0x140001544:17->rax"]        => Const(0)
+call 3: [... , "def@0x140001550:41->xVar16", ...]                     => Var("xVar16")
+```
+
+One entry appears between calls 2 and 3 — `def@0x140001550 seq 41 -> xVar16`
+— and `lower_varnode` trusts it from then on. So the trigger is exact: **a
+`materialized_vns` entry exists whose name has no binding written into the
+body.** Block 2's own answer stays `Var("rax")` throughout; only the join
+flips.
+
+Who writes that entry is still unknown. Both production insert sites were
+instrumented for this specific name and neither fired:
+
+- `builder/mod.rs:888`, the name-minting path — no output.
+- `structuring/host_impl.rs:36`, the isolated-lowering identity commit — no
+  output (it only logs when the key is genuinely new, so an existing key
+  passes silently).
+
+`PreviewBuilder::clone()` gives an isolated fork the whole map, which is the
+remaining candidate: a name minted inside a fork can reach the host without
+either instrumented line reporting it.
+
 ## 5. Where to look next
 
-The next step is to find what makes the *third* `lower_wrapped_varnode` call
-answer differently from the first two — that is the whole defect, and the
-anchor row reproduces it in seventeen lines. Candidates, in order of how
-cheaply they can be ruled out:
+**Stop guessing insert sites.** Three hypotheses were formed by reading the
+code — the phi consumption gate, the minting path, the isolation commit — and
+all three were wrong. The anchor reproduces in seventeen lines and the
+trigger is now exactly known, so the missing information is *who writes the
+entry*, and that should be observed rather than deduced: wrap
+`materialized_vns` in a type that records every write with a backtrace, or
+snapshot the map around each pass and diff. Either answers the question in
+one run.
 
-1. `materialized_vns` / `temps` state written by the intervening merge
-   synthesis, which is what `lower_wrapped_varnode` consults.
-2. The duplicate phis on one storage slot (`sp4:off0x0:sz4` twice in block 2)
-   — if the second shadows the first, the name minted for it can outlive its
-   own definition.
-3. `resolve_ssa_value_to_expr`, which the phi path uses to build operand
-   expressions and which can return a name without emitting its binding.
+Once the writer is known, the fix is likely one of:
+
+1. refusing to record a `materialized_vns` entry whose binding was never
+   written, or
+2. emitting the binding the entry promises, or
+3. dropping fork-local entries at commit unless their statements came with
+   them.
 
 An invariant worth asserting once the cause is known, independent of the fix:
 **every name that appears in rendered output has a definition in that
