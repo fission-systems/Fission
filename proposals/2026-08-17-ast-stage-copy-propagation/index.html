@@ -1053,6 +1053,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#7-measured-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Measured outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1336,6 +1347,99 @@ is this defect. angr on the same functions:</p>
 <p>Vectorisation is not the obstacle; folding is. A separate group of 41
 functions already has the right node count and differs only in statement
 content (GED 2-12) -- smaller, and not addressed here.</p>
+<h2 id="7-measured-outcome">7. Measured outcome<a class="headerlink" href="#7-measured-outcome" title="Permanent link">&para;</a></h2>
+<p>Landed as two passes in <code>fission-midend-normalize/src/cleanup/</code>, wired after
+<code>run_structuring_pipeline</code> in <code>orchestrate.rs</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>prune_unobservable_scratch      (scratch_liveness.rs)
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  -&gt; constant_folding
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  -&gt; propagate_copies_in_runs   (run_copy_prop.rs)
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  -&gt; constant_folding
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  -&gt; propagate_copies_in_runs
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>  -&gt; prune_unobservable_scratch
+</span></code></pre></div>
+<p>Measured on 465 corpus functions against the commit before them:</p>
+<table>
+<thead>
+<tr>
+<th>axis</th>
+<th>before</th>
+<th>after</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bare compile</td>
+<td>363</td>
+<td><strong>371 (+8, zero newly broken)</strong></td>
+</tr>
+<tr>
+<td>output lines</td>
+<td>20,363</td>
+<td><strong>15,655 (-23%)</strong></td>
+</tr>
+<tr>
+<td>gotos</td>
+<td>38</td>
+<td>37</td>
+</tr>
+<tr>
+<td><code>overlap_move</code> clang -O2</td>
+<td>511 lines</td>
+<td>318 lines</td>
+</tr>
+<tr>
+<td>execution differential</td>
+<td>26/26</td>
+<td>26/26</td>
+</tr>
+<tr>
+<td>workspace</td>
+<td>—</td>
+<td>2,533 passing</td>
+</tr>
+<tr>
+<td>the seven builder-stage tests</td>
+<td>green</td>
+<td><strong>green</strong></td>
+</tr>
+<tr>
+<td><strong>GED exact structural match</strong></td>
+<td>93/368</td>
+<td><strong>93/368 (+0)</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Section 3 point 4 held.</strong> The seven builder-stage invariant tests stayed
+green with <code>should_preserve_materialized_expr</code> untouched, which is what the
+rejected experiment could not do. Folding at AST stage rather than at the
+marker is the whole difference: same -23% line reduction, but bare compile
+went +8 instead of -5.</p>
+<p><strong>The appendix's priority claim was wrong.</strong> It argued the ten catastrophic
+blowups carried the mean and were all this defect. The blowups did shrink --
+<code>overlap_move</code> 511 -&gt; 318 lines, <code>classify_range</code> 27 -&gt; 22 CFG nodes -- and
+exact structural match moved by zero, at every optimisation level. Fewer nodes
+is not the same property as matching the source's nodes. <code>signum</code>
+gcc-aarch64 -O2 went 5 -&gt; 1 nodes and its GED got <em>worse</em>, 8 -&gt; 14: folded
+past the source rather than toward it.</p>
+<p>Kept anyway, on the other axes: eight more functions compile, output is a
+quarter shorter, semantics are unchanged, and nothing regressed. No claim is
+made that this moves the leaderboard's structural axis, because it was
+measured and it does not.</p>
+<p>Three things the design did not anticipate, each caught by measurement:</p>
+<ol>
+<li>A resolved global symbol is registered with <code>origin: Temp</code>. <code>is_temp_like()</code>
+   alone would have deleted a store to <code>0x2000</code> as a dead value; the scratch
+   set is now restricted to names <code>next_temp_name</code> actually mints
+   (<code>bVar</code>/<code>iVar</code>/<code>uVar</code>/<code>xVar</code> + digits).</li>
+<li>A pointer-typed temp carries type information its defining expression does
+   not: folding <code>xVar12: uchar *</code> into <code>(ulonglong)xVar12</code> makes the cast look
+   redundant, and dropping it yields <code>ptr + ptr</code>. Expression folding is
+   restricted to non-pointer temps -- the untyped half of what
+   <code>propagate_adjacent_typed_promoted_values</code> splits in two.</li>
+<li>Copy propagation exposes dead stores, exactly as Glaurung's <code>dead_store_runs</code>
+   documents, and constant folding then exposes new aliases -- hence the second
+   propagation pass.</li>
+</ol>
 
 
 
