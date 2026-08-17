@@ -1076,6 +1076,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#what-the-anchors-observation-established" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the anchor's observation established
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1404,6 +1415,38 @@ predates every change in this session.</p>
 <p>The Go <code>rsp</code>/<code>r14</code> group and the rustc <code>home_N</code> group are almost certainly
 separate again — Go uses its own register ABI and <code>r14</code> is its goroutine
 pointer. Each branch needs its own observation.</p>
+<h3 id="what-the-anchors-observation-established">What the anchor's observation established<a class="headerlink" href="#what-the-anchors-observation-established" title="Permanent link">&para;</a></h3>
+<p><code>param_3</code> is a fully recovered parameter — <code>func.params</code> carries
+<code>("param_3", ParamIndex(2))</code> — so parameter classification is not the defect.
+The <code>[EBP+0xc]</code> load folds into its uses as <code>param_2</code> and the <code>[EBP+0x10]</code>
+load does not fold, leaving <code>edx</code> raw:</p>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">uVar7</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">param_2</span><span class="p">;</span><span class="w">                                  </span><span class="c1">// eax load folded</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">xVar14</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">param_2</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">edx</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">edx</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">param_2</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">    </span><span class="c1">// edx left raw</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">xVar14</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">uVar7</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">edx</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p>The two loads differ in what consumes them. <code>cmovbe EAX, EDX</code> puts EDX inside
+a <strong>guarded cmov body</strong>, and <code>materialize/mod.rs</code> refuses replacement there on
+purpose, twice:</p>
+<ul>
+<li><code>output_replacement_is_complete</code> returns <code>false</code> for any op inside a
+  same-block-forward CBranch skip range;</li>
+<li><code>build_replacement_value_plan</code> returns <code>incomplete</code> with
+  <code>ConsumerRequiresStableRepresentative</code> for the same range.</li>
+</ul>
+<p>Both carry the same reasoning: completing the replacement would let later uses
+see the taken-path value unconditionally (the x64 clamp case, <code>cmovle</code> into R8
+then <code>cmovge</code> from R8 collapsing to <code>max(lo, value)</code>). That reasoning is about
+the cmov's <em>output</em>. Here the unresolved name is an <strong>input</strong> to the cmov,
+defined before the guard, and refusing to resolve it does not protect
+anything — it just leaves the reader an undefined name.</p>
+<p>Not yet established: which of the two refusals actually strands <code>edx</code>, and
+whether distinguishing "op inside the body" from "value merely read by the
+body" is sufficient. Both are one instrumented run away, on this 25-line
+anchor.</p>
+<p>Note that a false lead was ruled out on the way: the
+<code>[DIAG] param_pointer_roles</code> line lists only parameters with an inferred
+<em>role</em>, so <code>param_3</code> missing from it means nothing about whether it is a
+parameter. Reading that line as a parameter list costs an hour.</p>
 
 
 
