@@ -365,3 +365,31 @@ Excluding the Go rows, the remaining undefined names are roughly: `rbp` 7 and
 `ebp` 4 (frame pointer, the other half of what `949d92001` fixed), `home_N`
 15 (all rustc -O0), `r9`/`r8`/`rax` 10, builder temps 8, `local_N` 4. The
 frame-pointer group is the most likely next branch to be a real single cause.
+
+### The frame-pointer group is my own pass declining, correctly but too bluntly
+
+`rbp` 7 + `ebp` 4 are the same `local_N = rbp` shape `949d92001` was written
+for, and that pass *sees* them: on `matrix_multiply` at gcc -O0 it reports
+`undefined_regs=["rbp"]`, finds the candidate, and judges `dead=false`.
+
+The reason is its own conservatism. `dst_fate_in_stmt`'s catch-all arm returns
+`Read` for any statement that mentions the destination anywhere, including
+inside a nested construct. Here the overwrite is nested:
+
+```text
+[SPILL] local_8: read-verdict from
+  While { cond: Const(1, Bool), body: [ ... local_8 = 0 ... ] }
+```
+
+At normalize time — before structuring turns this into
+`for (local_8 = 0; ...)` — the initialiser sits inside a `While`, so "this
+construct mentions `local_8`" is true and the pass declines rather than
+reasoning about whether the mention is a read or a write.
+
+That conservatism is correct as written: a nested construct may read the
+value on one path and write it on another, and treating it as a write would
+delete a live definition. Extending it safely means asking whether the
+construct's *first* touch of the destination is a write on every path into
+it, which is a real analysis rather than a match-arm tweak. Worth doing —
+it is 11 of the remaining 54 non-Go occurrences — but it is not the one-line
+change the shape suggests.
