@@ -275,10 +275,29 @@ the cmov's *output*. Here the unresolved name is an **input** to the cmov,
 defined before the guard, and refusing to resolve it does not protect
 anything — it just leaves the reader an undefined name.
 
-Not yet established: which of the two refusals actually strands `edx`, and
-whether distinguishing "op inside the body" from "value merely read by the
-body" is sufficient. Both are one instrumented run away, on this 25-line
-anchor.
+**That hypothesis is wrong.** Instrumenting both refusal sites: only one
+fires, `plan_incomplete` at `0x401704` (the `cmovbe` itself) for
+`sp4:off0x0:sz4` — EAX, the cmov's *output*, which is exactly what the
+refusal is for. EDX never reaches either site.
+
+Instrumenting the two loads instead shows they are perfectly symmetric, and
+both resolve:
+
+```text
+[LOAD] addr=0x4016fc op_idx=18 out=sp4:off0x8:sz4 rhs=Var("param_3")   EDX
+[LOAD] addr=0x4016ff op_idx=21 out=sp4:off0x0:sz4 rhs=Var("param_2")   EAX
+```
+
+So promotion, classification, and resolution all work for EDX exactly as they
+do for EAX: the builder knows the load's right-hand side is `param_3`. The
+assignment is lost somewhere after that, and the cmov path is not involved.
+
+Still unknown, and now much better bounded: what happens to op_idx 18 between
+`build_replacement_value_plan` returning a resolved RHS and the emitted body.
+The two loads differ in nothing the observations have reached yet, so the next
+instrument belongs downstream of the plan — at whatever consumes it — not at
+the parameter, promotion, or cmov machinery, all three of which are now ruled
+out by measurement rather than by reading.
 
 Note that a false lead was ruled out on the way: the
 `[DIAG] param_pointer_roles` line lists only parameters with an inferred
