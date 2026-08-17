@@ -245,3 +245,42 @@ predates every change in this session.
 The Go `rsp`/`r14` group and the rustc `home_N` group are almost certainly
 separate again — Go uses its own register ABI and `r14` is its goroutine
 pointer. Each branch needs its own observation.
+
+### What the anchor's observation established
+
+`param_3` is a fully recovered parameter — `func.params` carries
+`("param_3", ParamIndex(2))` — so parameter classification is not the defect.
+The `[EBP+0xc]` load folds into its uses as `param_2` and the `[EBP+0x10]`
+load does not fold, leaving `edx` raw:
+
+```c
+uVar7 = param_2;                                  // eax load folded
+xVar14 = param_2 <= edx && edx - param_2 != 0;    // edx left raw
+if (!xVar14) { uVar7 = edx; }
+```
+
+The two loads differ in what consumes them. `cmovbe EAX, EDX` puts EDX inside
+a **guarded cmov body**, and `materialize/mod.rs` refuses replacement there on
+purpose, twice:
+
+- `output_replacement_is_complete` returns `false` for any op inside a
+  same-block-forward CBranch skip range;
+- `build_replacement_value_plan` returns `incomplete` with
+  `ConsumerRequiresStableRepresentative` for the same range.
+
+Both carry the same reasoning: completing the replacement would let later uses
+see the taken-path value unconditionally (the x64 clamp case, `cmovle` into R8
+then `cmovge` from R8 collapsing to `max(lo, value)`). That reasoning is about
+the cmov's *output*. Here the unresolved name is an **input** to the cmov,
+defined before the guard, and refusing to resolve it does not protect
+anything — it just leaves the reader an undefined name.
+
+Not yet established: which of the two refusals actually strands `edx`, and
+whether distinguishing "op inside the body" from "value merely read by the
+body" is sufficient. Both are one instrumented run away, on this 25-line
+anchor.
+
+Note that a false lead was ruled out on the way: the
+`[DIAG] param_pointer_roles` line lists only parameters with an inferred
+*role*, so `param_3` missing from it means nothing about whether it is a
+parameter. Reading that line as a parameter list costs an hour.
