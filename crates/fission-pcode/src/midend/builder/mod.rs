@@ -874,10 +874,32 @@ impl<'a> PreviewBuilder<'a> {
                 .materialization
                 .materialization_stabilized_count += 1;
         }
+        if std::env::var_os("FISSION_KEYDBG").is_some() {
+            eprintln!(
+                "[MINT] def@{:#x}:{} <- {:?}  (prev={:?})",
+                key.def_addr,
+                key.def_seq,
+                name,
+                self.materialized_vns.get(&key)
+            );
+        }
         self.materialized_vns.insert(key, name.clone());
         self.invalidate_materialization_dependent_caches();
         self.temps.insert(name, binding.clone());
         binding
+    }
+
+    /// A name already chosen for this varnode's merge in some other block.
+    ///
+    /// Merge bindings are keyed by `(block, varnode)`, but the *value* they
+    /// stand for is the varnode. Two blocks merging the same storage must not
+    /// disagree about what to call it.
+    fn existing_merge_binding_name_for_varnode(&self, output: &Varnode) -> Option<String> {
+        let want = VarnodeKey::from(output);
+        self.explicit_merge_bindings
+            .iter()
+            .find(|((_, vn), name)| *vn == want && self.temps.contains_key(*name))
+            .map(|(_, name)| name.clone())
     }
 
     pub(super) fn ensure_explicit_merge_binding_for_block(
@@ -926,6 +948,16 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 hw
             }
+        } else if let Some(existing) = self.existing_merge_binding_name_for_varnode(output) {
+            // The hardware-name promotion above only fires on a loop head, so the
+            // *same* varnode merged again at a join block would otherwise mint a
+            // second, different name for it. Return recovery lowers the primary
+            // return register at the join and picks up whichever name is current,
+            // and this path registers a name without emitting its assignment --
+            // so the second name reaches the output undefined. `list_sum` at
+            // gcc -O1 is the minimal case: RAX became "rax" at the loop head and
+            // "xVar16" at the join, and the function returned xVar16.
+            existing
         } else {
             self.next_unused_temp_binding_name(&ty)
         };

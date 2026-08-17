@@ -3420,3 +3420,33 @@ fn sat_o2_cmov_tail_renders_int_min_through_epilogue() {
         "INT_MIN must assign to eax (not a dead temp): {dump}"
     );
 }
+
+/// Merge bindings are keyed by `(block, varnode)`, but the value they stand
+/// for is the varnode: two blocks merging the same storage must agree on the
+/// name. The hardware-name promotion only fires on a loop head, so a join
+/// block merging the same register used to mint a second name -- registered
+/// without an assignment, and picked up by return recovery. `list_sum` at
+/// gcc -O1 returned `xVar16`, a declared local with no definition anywhere,
+/// instead of the accumulator it had already named `rax`.
+#[test]
+fn a_varnode_merged_in_two_blocks_keeps_one_name() {
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 8);
+    let block = block(vec![op(
+        0,
+        PcodeOpcode::Copy,
+        Some(rax.clone()),
+        vec![constant(0)],
+    )]);
+    let pcode = pcode_function(vec![block]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+    let first = builder.ensure_explicit_merge_binding_for_block(0, &rax);
+    let second = builder.ensure_explicit_merge_binding_for_block(1, &rax);
+
+    assert_eq!(
+        first.name, second.name,
+        "the same varnode merged at two blocks must keep one name, got {:?} then {:?}",
+        first.name, second.name
+    );
+}
