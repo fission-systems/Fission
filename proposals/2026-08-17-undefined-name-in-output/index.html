@@ -1602,86 +1602,60 @@ it is 11 of the remaining 54 non-Go occurrences — but it is not the one-line
 change the shape suggests.</p>
 <h2 id="9-a-measurement-error-underneath-all-of-this">9. A measurement error underneath all of this<a class="headerlink" href="#9-a-measurement-error-underneath-all-of-this" title="Permanent link">&para;</a></h2>
 <p>Checking every row's decompiled signature against the name its manifest gives
-— the check that exposed the Go group — turns out to matter far beyond Go.
-<strong>90 of 464 corpus rows (19%) decompile a different function than the
-manifest names.</strong></p>
+— the check that exposed the Go group — turns out to matter beyond Go, but
+most of what it flags is not a defect. Of 464 rows, 90 name something other
+than the manifest, and they fall into three kinds:</p>
 <table>
 <thead>
 <tr>
-<th>compiler</th>
-<th>wrong function</th>
+<th>kind</th>
 <th>rows</th>
-<th>example</th>
+<th>verdict</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>gcc</td>
-<td>27</td>
-<td>223</td>
-<td><code>count_bits</code> -&gt; <code>FUN_0x140001530</code></td>
+<td>stripped binaries (<code>+strip</code> variants): gcc 27, gcc-m32 22</td>
+<td>49</td>
+<td><strong>correct behaviour</strong> — no symbol to recover</td>
 </tr>
 <tr>
-<td>gcc-m32</td>
-<td>22</td>
-<td>104</td>
-<td><code>count_bits</code> -&gt; <code>sub_4015b0</code></td>
+<td>wrong manifest address: go 15, g++ 13, rustc 13</td>
+<td>41</td>
+<td><strong>corpus defect</strong></td>
 </tr>
 <tr>
-<td>go</td>
-<td>15</td>
-<td>15</td>
-<td><code>go_add_ints</code> -&gt; <code>duffzero</code></td>
-</tr>
-<tr>
-<td>g++</td>
-<td>13</td>
-<td>13</td>
-<td><code>cpp_add_ints</code> -&gt; <code>cpp_cstr_len</code></td>
-</tr>
-<tr>
-<td>rustc</td>
-<td>13</td>
-<td>16</td>
-<td><code>rust_add_ints</code> -&gt; <code>rust_cstr_len</code></td>
-</tr>
-<tr>
-<td>clang</td>
-<td><strong>0</strong></td>
-<td>82</td>
-<td></td>
-</tr>
-<tr>
-<td>gcc-elf / gcc-aarch64</td>
-<td><strong>0</strong></td>
-<td>11</td>
-<td></td>
+<td>clang, gcc-elf, gcc-aarch64</td>
+<td>0</td>
+<td>clean</td>
 </tr>
 </tbody>
 </table>
-<p>Two shapes are mixed here and they are not the same problem:</p>
-<ul>
-<li><strong>no name recovered</strong> (<code>FUN_0x…</code>, <code>sub_…</code>) — the address is right, the
-  symbol is not resolved. gcc and gcc-m32 are mostly this.</li>
-<li><strong>a different function entirely</strong> (<code>rust_add_ints</code> -&gt; <code>rust_cstr_len</code>,
-  <code>go_add_ints</code> -&gt; <code>duffzero</code>) — go, g++, rustc are this, and it means the
-  row is measuring something other than what it claims.</li>
-</ul>
-<p>Of the 50 rows counted as reading an undefined name, <strong>21 are wrong-function
-rows</strong>, so the genuine figure is <strong>29</strong>, not 50.</p>
-<p>This is worth stating plainly: this document has now been wrong about its own
-headline number twice. Section 2 said 93 when 32 were a regression I had just
-committed; the corrected 57 counted rows that were not measuring the function
-they named. Every number here is a count over rows, and a row is only evidence
-if it decompiled the function it claims to.</p>
-<p>Two corrections are needed before the remaining branches are worth chasing:</p>
-<ol>
-<li>The comparison must tolerate legitimate decoration. 32-bit PE / cdecl
-   prefixes an underscore, so a naive check reported 104/104 gcc-m32 rows as
-   mismatched; the real figure is 22.</li>
-<li>The undefined-name axis, and any other per-row axis, should exclude
-   wrong-function rows rather than count them.</li>
-</ol>
+<p>The 49 gcc/gcc-m32 rows are all <code>-O0+strip</code> / <code>-O2+strip</code>, where
+<code>FUN_0x140001530</code> / <code>sub_4015b0</code> is the right answer. Comparing names on a
+stripped binary measures nothing.</p>
+<p>The 41 go/g++/rustc rows are a real corpus problem, and the symbol table
+settles which side is wrong:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>manifest        rust_add_ints @ 0x140001920
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>symbol table    rust_add_ints @ 0x140001840
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>                rust_cstr_len @ 0x140001900 - 0x1400019b0
+</span></code></pre></div>
+<p><code>0x140001920</code> is inside <code>rust_cstr_len</code>. Fission resolved the address to the
+function containing it, which is correct; the manifest address is wrong.
+Those rows measure something other than the function they name, in
+fission-benchmark rather than in Fission.</p>
+<p>Of the 50 rows counted as reading an undefined name, 21 are wrong-function
+rows, so the genuine figure is <strong>29</strong>, not 50.</p>
+<p>This document has now been wrong about its own headline number twice — 93
+when 32 were a regression I had just committed, then 57 counting rows that
+were not measuring their named function. A row is evidence only if it
+decompiled the function it claims to, and that filter belongs in every
+per-row axis.</p>
+<p>The check needs the same care as the thing it checks. Two false readings
+happened while building it: 32-bit PE prefixes an underscore, so a naive
+comparison called all 104 gcc-m32 rows mismatched when 22 are; and the first
+example printed for gcc was a stripped row, which made a clean <code>-O0</code> result
+look like a naming failure.</p>
 
 
 
