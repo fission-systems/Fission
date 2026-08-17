@@ -1115,6 +1115,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#the-frame-pointer-group-is-my-own-pass-declining-correctly-but-too-bluntly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The frame-pointer group is my own pass declining, correctly but too bluntly
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1557,6 +1568,27 @@ a corpus/function-discovery question and belongs to whoever owns the Go rows.</p
 <code>ebp</code> 4 (frame pointer, the other half of what <code>949d92001</code> fixed), <code>home_N</code>
 15 (all rustc -O0), <code>r9</code>/<code>r8</code>/<code>rax</code> 10, builder temps 8, <code>local_N</code> 4. The
 frame-pointer group is the most likely next branch to be a real single cause.</p>
+<h3 id="the-frame-pointer-group-is-my-own-pass-declining-correctly-but-too-bluntly">The frame-pointer group is my own pass declining, correctly but too bluntly<a class="headerlink" href="#the-frame-pointer-group-is-my-own-pass-declining-correctly-but-too-bluntly" title="Permanent link">&para;</a></h3>
+<p><code>rbp</code> 7 + <code>ebp</code> 4 are the same <code>local_N = rbp</code> shape <code>949d92001</code> was written
+for, and that pass <em>sees</em> them: on <code>matrix_multiply</code> at gcc -O0 it reports
+<code>undefined_regs=["rbp"]</code>, finds the candidate, and judges <code>dead=false</code>.</p>
+<p>The reason is its own conservatism. <code>dst_fate_in_stmt</code>'s catch-all arm returns
+<code>Read</code> for any statement that mentions the destination anywhere, including
+inside a nested construct. Here the overwrite is nested:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>[SPILL] local_8: read-verdict from
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>  While { cond: Const(1, Bool), body: [ ... local_8 = 0 ... ] }
+</span></code></pre></div>
+<p>At normalize time — before structuring turns this into
+<code>for (local_8 = 0; ...)</code> — the initialiser sits inside a <code>While</code>, so "this
+construct mentions <code>local_8</code>" is true and the pass declines rather than
+reasoning about whether the mention is a read or a write.</p>
+<p>That conservatism is correct as written: a nested construct may read the
+value on one path and write it on another, and treating it as a write would
+delete a live definition. Extending it safely means asking whether the
+construct's <em>first</em> touch of the destination is a write on every path into
+it, which is a real analysis rather than a match-arm tweak. Worth doing —
+it is 11 of the remaining 54 non-Go occurrences — but it is not the one-line
+change the shape suggests.</p>
 
 
 
