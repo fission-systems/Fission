@@ -164,6 +164,38 @@ cargo check -p fission-cli
 
 Future: differential execution against a **separate** offline oracle harness is allowed for CI measurement only — never linked into `fission-emulator`. SRD is the in-tree multi-run contract language for policy/commit comparisons (not a vendor oracle).
 
+## Known-failing diagnostic lane
+
+Four `diag_*` tests fail on `x64_static_printf_malloc.elf`, all at the same
+point:
+
+```text
+diag_alloc_meta::probe_alloc_meta_globals
+diag_alloc_meta::probe_meta_object_fields
+diag_livelock::dump_state_at_malloc_hot
+diag_expand_stall::past_sizeclass_freeable_or_bin_progress
+```
+
+The panic reads `Decode/lift failed at 0x1007C8D: sleigh parser path: ...
+DecodeNoMatch in subtable addr64`, and has been described in commit messages
+and release notes as a "SLEIGH decode failure". **That name is wrong and sends
+the next investigation to the wrong crate.**
+
+`0x1007C8D` is in `.data` (0x1007C00, 244 bytes, not executable). The bytes
+there are `ff ff ff ff 0a 00 00 00` — `-1` followed by `10`. Sleigh is working
+correctly; it is refusing to decode data as an instruction. The defect is that
+execution reached a non-executable address at all, which makes this an
+emulator control-flow failure and `fission-emulator` its owner.
+
+All four die after the same syscall sequence (`mmap`, `brk`x2, `arch_prctl`,
+`set_tid_address`) around musl mallocng init, last good PCs in the
+`0x1002C8B`–`0x100357A` range.
+
+Not being chased down now: the execution engine is scheduled to change, and a
+control-flow bug in the current backend is likely to move or vanish with it.
+These four are the acceptance criterion for that work — a backend that walks
+mallocng init without leaving `.text` is what makes them pass.
+
 ## Anti-patterns
 
 - Restoring a P-Code interpreter as execution engine
