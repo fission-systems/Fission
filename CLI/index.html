@@ -3083,7 +3083,7 @@ runtime wrapper so batch throughput reflects user-facing functions rather than C
 <h2 id="inventory-function-facts">Inventory Function Facts<a class="headerlink" href="#inventory-function-facts" title="Permanent link">&para;</a></h2>
 <p>This subcommand emits whole-binary function facts as JSONL plus an optional summary JSON.</p>
 <h3 id="basic-example">Basic example<a class="headerlink" href="#basic-example" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>
@@ -3091,12 +3091,12 @@ runtime wrapper so batch throughput reflects user-facing functions rather than C
 <code>register_frame_ctor</code> runtime wrapper. Use <code>--include-nonuser-functions</code> when you intentionally
 want full compatibility/forensics coverage.</p>
 <h3 id="restrict-to-one-address">Restrict to one address<a class="headerlink" href="#restrict-to-one-address" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="w">  </span>--addr<span class="w"> </span>0x140001000<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>
 <h3 id="address-file-input">Address file input<a class="headerlink" href="#address-file-input" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span>--addresses-file<span class="w"> </span>addrs.txt<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-33-4"><a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
@@ -3197,7 +3197,7 @@ want full compatibility/forensics coverage.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-39-1"><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--limit<span class="w"> </span><span class="m">10</span><span class="w"> </span>--json
 </span></code></pre></div>
 <h3 id="operator-inventory-workflow">Operator inventory workflow<a class="headerlink" href="#operator-inventory-workflow" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span><span class="k">function</span>-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>fission_cli<span class="w"> </span>inventory<span class="w"> </span>function-facts<span class="w"> </span>app.exe<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="w">  </span>--output-jsonl<span class="w"> </span>rows.jsonl<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-40-3"><a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a><span class="w">  </span>--summary-json<span class="w"> </span>summary.json
 </span></code></pre></div>

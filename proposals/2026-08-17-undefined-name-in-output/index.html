@@ -1092,6 +1092,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#8-third-branch-closed-and-one-that-is-not-a-fission-defect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Third branch closed, and one that is not a Fission defect
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Third branch closed, and one that is not a Fission defect">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-go-group-is-a-corpus-address-problem-not-this-defect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Go group is a corpus address problem, not this defect
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1198,9 +1226,9 @@ argument. The primary argument is that the output is wrong.</p>
 <h2 id="3-what-is-established">3. What is established<a class="headerlink" href="#3-what-is-established" title="Permanent link">&para;</a></h2>
 <p><code>FISSION_PREVIEW_DIAG=1</code> on the anchor row prints return recovery three
 times for the same block, on the same code path, with two different answers:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>[DIAG] return recovery: block=3 path=epilogue_join_live_primary expr=Var(&quot;rax&quot;)
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>[DIAG] return recovery: block=3 path=epilogue_join_live_primary expr=Var(&quot;rax&quot;)
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>[DIAG] return recovery: block=3 path=epilogue_join_live_primary expr=Var(&quot;xVar16&quot;)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>[DIAG] return recovery: block=3 path=epilogue_join_live_primary expr=Var("rax")
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>[DIAG] return recovery: block=3 path=epilogue_join_live_primary expr=Var("rax")
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>[DIAG] return recovery: block=3 path=epilogue_join_live_primary expr=Var("xVar16")
 </span></code></pre></div>
 <p><code>live_primary_return_register_expr</code>
 (<code>builder/control/terminator.rs:1177</code>) lowers the primary return register
@@ -1239,9 +1267,9 @@ see a consumer. Whatever route resolves the primary return register to
 alongside each answer shows the flip precisely. The failing call is block 4
 (the join), <code>ret_vn = sp4:off0x0:sz8</code> (RAX), and the entries for that varnode
 across the three calls are:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>call 1: [&quot;def@0x14000153f:10-&gt;rax&quot;]                                   =&gt; Const(0)
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>call 2: [&quot;def@0x14000153f:10-&gt;rax&quot;, &quot;def@0x140001544:17-&gt;rax&quot;]        =&gt; Const(0)
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>call 3: [... , &quot;def@0x140001550:41-&gt;xVar16&quot;, ...]                     =&gt; Var(&quot;xVar16&quot;)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>call 1: ["def@0x14000153f:10-&gt;rax"]                                   =&gt; Const(0)
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>call 2: ["def@0x14000153f:10-&gt;rax", "def@0x140001544:17-&gt;rax"]        =&gt; Const(0)
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>call 3: [... , "def@0x140001550:41-&gt;xVar16", ...]                     =&gt; Var("xVar16")
 </span></code></pre></div>
 <p>One entry appears between calls 2 and 3 — <code>def@0x140001550 seq 41 -&gt; xVar16</code>
 — and <code>lower_varnode</code> trusts it from then on. So the trigger is exact: <strong>a
@@ -1445,16 +1473,16 @@ fires, <code>plan_incomplete</code> at <code>0x401704</code> (the <code>cmovbe</
 refusal is for. EDX never reaches either site.</p>
 <p>Instrumenting the two loads instead shows they are perfectly symmetric, and
 both resolve:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>[LOAD] addr=0x4016fc op_idx=18 out=sp4:off0x8:sz4 rhs=Var(&quot;param_3&quot;)   EDX
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>[LOAD] addr=0x4016ff op_idx=21 out=sp4:off0x0:sz4 rhs=Var(&quot;param_2&quot;)   EAX
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>[LOAD] addr=0x4016fc op_idx=18 out=sp4:off0x8:sz4 rhs=Var("param_3")   EDX
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>[LOAD] addr=0x4016ff op_idx=21 out=sp4:off0x0:sz4 rhs=Var("param_2")   EAX
 </span></code></pre></div>
 <p>So promotion, classification, and resolution all work for EDX exactly as they
 do for EAX: the builder knows the load's right-hand side is <code>param_3</code>. The
 assignment is lost somewhere after that, and the cmov path is not involved.</p>
 <p>Instrumenting <code>maybe_materialize_output_stmt</code>'s return value closes the
 builder half:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>[EMIT] addr=0x4016fc op_idx=18 -&gt; Assign { lhs: Var(&quot;edx&quot;),   rhs: Var(&quot;param_3&quot;) }
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>[EMIT] addr=0x4016ff op_idx=21 -&gt; Assign { lhs: Var(&quot;uVar7&quot;), rhs: Var(&quot;param_2&quot;) }
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>[EMIT] addr=0x4016fc op_idx=18 -&gt; Assign { lhs: Var("edx"),   rhs: Var("param_3") }
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>[EMIT] addr=0x4016ff op_idx=21 -&gt; Assign { lhs: Var("uVar7"), rhs: Var("param_2") }
 </span></code></pre></div>
 <p><strong>The builder emits <code>edx = param_3;</code> correctly.</strong> Both statements exist when
 it hands the body on. In the final output <code>uVar7 = param_2;</code> survives and
@@ -1479,6 +1507,56 @@ diff, rather than reading passes and guessing which one it is.</p>
 <code>[DIAG] param_pointer_roles</code> line lists only parameters with an inferred
 <em>role</em>, so <code>param_3</code> missing from it means nothing about whether it is a
 parameter. Reading that line as a parameter list costs an hour.</p>
+<h2 id="8-third-branch-closed-and-one-that-is-not-a-fission-defect">8. Third branch closed, and one that is not a Fission defect<a class="headerlink" href="#8-third-branch-closed-and-one-that-is-not-a-fission-defect" title="Permanent link">&para;</a></h2>
+<p><code>363ef6369</code> closed the copy-chain branch: <code>copy_propagation_pass</code> admitted
+<code>edx &lt;- param_3</code> and <code>uVar8 &lt;- edx</code> together, removed every entry's defining
+copy, then substituted once — so replacing <code>uVar8</code> with <code>edx</code> reintroduced a
+name whose definition had just been deleted. <code>resolve_copy_chains</code> walks each
+target to its root first; cycles are dropped rather than resolved arbitrarily.</p>
+<p>Running total on 464 corpus functions:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>undefined fns</th>
+<th>occurrences</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>session start (true pre-existing)</td>
+<td>57</td>
+<td>90</td>
+</tr>
+<tr>
+<td>after the <code>a1e90d24a</code> regression</td>
+<td>89</td>
+<td>142</td>
+</tr>
+<tr>
+<td>now</td>
+<td><strong>50</strong></td>
+<td><strong>80</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-go-group-is-a-corpus-address-problem-not-this-defect">The Go group is a corpus address problem, not this defect<a class="headerlink" href="#the-go-group-is-a-corpus-address-problem-not-this-defect" title="Permanent link">&para;</a></h3>
+<p><code>rsp</code> (13), <code>r14</code> (8) and <code>rdi</code> (5) — 26 of the remaining 80 — are all Go
+rows, and they are not Fission reading an undefined value. <strong>Nine of the
+fifteen Go rows decompile a different function than the manifest names:</strong></p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>manifest go_add_ints   -&gt; runtime.duffzero
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>manifest (8 more rows) -&gt; syscall.compileCallback
+</span></code></pre></div>
+<p><code>runtime.duffzero</code> is a Go runtime fragment entered at a computed offset with
+<code>rdi</code> (destination) and <code>xmm15</code> (zero) already established by its caller.
+Reading those without defining them is what the routine <em>is</em>; there is no
+defect in the output. The defect, if any, is that the manifest address
+resolves to a runtime helper instead of the user function it names, which is
+a corpus/function-discovery question and belongs to whoever owns the Go rows.</p>
+<p>Excluding the Go rows, the remaining undefined names are roughly: <code>rbp</code> 7 and
+<code>ebp</code> 4 (frame pointer, the other half of what <code>949d92001</code> fixed), <code>home_N</code>
+15 (all rustc -O0), <code>r9</code>/<code>r8</code>/<code>rax</code> 10, builder temps 8, <code>local_N</code> 4. The
+frame-pointer group is the most likely next branch to be a real single cause.</p>
 
 
 

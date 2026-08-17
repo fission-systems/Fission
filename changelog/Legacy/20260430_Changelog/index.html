@@ -1702,7 +1702,7 @@
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>npm run build
 </span></code></pre></div>
 <p>Audit:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>rg &quot;vendor/Detect-It-Easy-master|Detect-It-Easy-master&quot; crates utils Cargo.toml Cargo.lock -g&#39;!*detect-it-easy/*&#39;
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>rg "vendor/Detect-It-Easy-master|Detect-It-Easy-master" crates utils Cargo.toml Cargo.lock -g'!*detect-it-easy/*'
 </span></code></pre></div>
 <p>Result: no active references outside the checked-in DIE resource mirror.</p>
 <p>Observed warnings during Rust checks are existing workspace warnings in downstream crates and are not introduced by this loader metadata change.</p>
