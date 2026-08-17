@@ -1991,27 +1991,104 @@ fn wrapping_narrow_op(op: PreHirBinaryOp) -> bool {
     )
 }
 
+/// Single-statement-level definitions of plain variables, for
+/// [`collect_wrapping_narrow_return_vars`] to see through.
+///
+/// A name maps to its defining expression only if the whole body assigns it
+/// exactly once; a second assignment removes it, so the map never claims a
+/// definition that some other path overwrites.
+fn collect_single_var_defs<'a>(
+    stmts: &'a [PreHirStmt],
+    defs: &mut HashMap<String, Option<&'a PreHirExpr>>,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs,
+            } => match defs.entry(name.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut slot) => {
+                    slot.insert(None);
+                }
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(Some(rhs));
+                }
+            },
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_single_var_defs(body, defs),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_single_var_defs(then_body, defs);
+                collect_single_var_defs(else_body, defs);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_single_var_defs(&case.body, defs);
+                }
+                collect_single_var_defs(default, defs);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// What [`collect_wrapping_narrow_return_vars`] needs to see through a
+/// returned temporary: the single definition of each name, and how many times
+/// the whole body uses it.
+struct WrappingNarrowCtx<'a> {
+    single_defs: &'a HashMap<String, Option<&'a PreHirExpr>>,
+    all_uses: &'a HashMap<String, usize>,
+}
+
 fn collect_wrapping_narrow_return_vars(
     expr: &PreHirExpr,
     context_bits: u32,
     out: &mut HashMap<String, usize>,
+    ctx: Option<&WrappingNarrowCtx<'_>>,
+    seen: &mut Vec<String>,
 ) {
     match expr {
         PreHirExpr::Var(name) | PreHirExpr::AddressOfGlobal(name) => {
+            // `return rax` after `rax = (int)(param_1 + param_2)` constrains the
+            // params exactly as `return (int)(param_1 + param_2)` does, but the
+            // params are not in the return expression, so without following the
+            // definition they look unconstrained and stay 64-bit.
+            //
+            // Only a name the body uses ONCE may be followed. A second use is a
+            // second consumer that this walk does not see, and it could observe
+            // the operands at full width -- the truncation guarding this one
+            // read is no evidence about that one.
+            if let Some(ctx) = ctx {
+                if ctx.all_uses.get(name).copied().unwrap_or(0) == 1
+                    && !seen.iter().any(|s| s == name)
+                {
+                    if let Some(Some(def)) = ctx.single_defs.get(name) {
+                        seen.push(name.clone());
+                        collect_wrapping_narrow_return_vars(def, context_bits, out, Some(ctx), seen);
+                        seen.pop();
+                        return;
+                    }
+                }
+            }
             *out.entry(name.clone()).or_default() += 1;
         }
         PreHirExpr::Cast { ty, expr } => {
             let bits = nir_type_bits(ty).unwrap_or(context_bits).min(context_bits);
-            collect_wrapping_narrow_return_vars(expr, bits, out);
+            collect_wrapping_narrow_return_vars(expr, bits, out, ctx, seen);
         }
         PreHirExpr::Unary {
             op: PreHirUnaryOp::Neg,
             expr,
             ..
-        } => collect_wrapping_narrow_return_vars(expr, context_bits, out),
+        } => collect_wrapping_narrow_return_vars(expr, context_bits, out, ctx, seen),
         PreHirExpr::Binary { op, lhs, rhs, .. } if wrapping_narrow_op(*op) => {
-            collect_wrapping_narrow_return_vars(lhs, context_bits, out);
-            collect_wrapping_narrow_return_vars(rhs, context_bits, out);
+            collect_wrapping_narrow_return_vars(lhs, context_bits, out, ctx, seen);
+            collect_wrapping_narrow_return_vars(rhs, context_bits, out, ctx, seen);
         }
         PreHirExpr::Const(_, _)
         | PreHirExpr::Unary { .. }
@@ -2030,28 +2107,31 @@ fn collect_wrapping_narrow_return_vars_stmt(
     stmt: &PreHirStmt,
     return_bits: u32,
     out: &mut HashMap<String, usize>,
+    ctx: Option<&WrappingNarrowCtx<'_>>,
 ) {
     match stmt {
-        PreHirStmt::Return(Some(expr)) => collect_wrapping_narrow_return_vars(expr, return_bits, out),
+        PreHirStmt::Return(Some(expr)) => {
+            collect_wrapping_narrow_return_vars(expr, return_bits, out, ctx, &mut Vec::new())
+        }
         PreHirStmt::Block(stmts)
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. }
         | PreHirStmt::For { body: stmts, .. } => {
-            collect_wrapping_narrow_return_vars_stmts(stmts, return_bits, out)
+            collect_wrapping_narrow_return_vars_stmts(stmts, return_bits, out, ctx)
         }
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            collect_wrapping_narrow_return_vars_stmts(then_body, return_bits, out);
-            collect_wrapping_narrow_return_vars_stmts(else_body, return_bits, out);
+            collect_wrapping_narrow_return_vars_stmts(then_body, return_bits, out, ctx);
+            collect_wrapping_narrow_return_vars_stmts(else_body, return_bits, out, ctx);
         }
         PreHirStmt::Switch { cases, default, .. } => {
             for case in cases {
-                collect_wrapping_narrow_return_vars_stmts(&case.body, return_bits, out);
+                collect_wrapping_narrow_return_vars_stmts(&case.body, return_bits, out, ctx);
             }
-            collect_wrapping_narrow_return_vars_stmts(default, return_bits, out);
+            collect_wrapping_narrow_return_vars_stmts(default, return_bits, out, ctx);
         }
         _ => {}
     }
@@ -2061,9 +2141,10 @@ fn collect_wrapping_narrow_return_vars_stmts(
     stmts: &[PreHirStmt],
     return_bits: u32,
     out: &mut HashMap<String, usize>,
+    ctx: Option<&WrappingNarrowCtx<'_>>,
 ) {
     for stmt in stmts {
-        collect_wrapping_narrow_return_vars_stmt(stmt, return_bits, out);
+        collect_wrapping_narrow_return_vars_stmt(stmt, return_bits, out, ctx);
     }
 }
 
@@ -2084,7 +2165,21 @@ fn narrow_integer_params_from_wrapping_return_uses(func: &mut PreHirFunction) ->
     let mut all_uses = HashMap::default();
     count_var_uses_stmts(&func.body, &mut all_uses);
     let mut constrained_uses = HashMap::default();
-    collect_wrapping_narrow_return_vars_stmts(&func.body, return_bits, &mut constrained_uses);
+    {
+        // Borrows of the body end before `func.params` is written below.
+        let mut single_defs = HashMap::default();
+        collect_single_var_defs(&func.body, &mut single_defs);
+        let ctx = WrappingNarrowCtx {
+            single_defs: &single_defs,
+            all_uses: &all_uses,
+        };
+        collect_wrapping_narrow_return_vars_stmts(
+            &func.body,
+            return_bits,
+            &mut constrained_uses,
+            Some(&ctx),
+        );
+    }
 
     let mut changed = false;
     for binding in &mut func.params {
