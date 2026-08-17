@@ -81,6 +81,13 @@ pub fn copy_propagation_pass(func: &mut PreHirFunction) -> bool {
                     y_def_count <= 1
                 });
 
+                // Both `edx = param_3` and `uVar8 = edx` can be in the map at
+                // once. Every entry's definition is removed, but substitution
+                // runs once, so replacing `uVar8` with `edx` re-introduces a
+                // name whose own definition has just gone -- `bounded_checksum`
+                // at gcc-m32 -O0 ended up returning an undefined `edx`.
+                // Resolve each target to the end of its chain first.
+                resolve_copy_chains(&mut copy_map);
                 if !copy_map.is_empty() {
                     remove_copy_assigns(&mut func.body, &copy_map, &mut changed);
                     substitute_copies_in_stmts(&mut func.body, &copy_map, &mut changed);
@@ -123,6 +130,36 @@ pub fn copy_propagation_pass(func: &mut PreHirFunction) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// `edx = param_3` and `uVar8 = edx` can both be admitted at once. Every
+    /// entry's defining copy is removed, but substitution runs once, so
+    /// replacing `uVar8` with `edx` used to re-introduce a name whose own
+    /// definition had just gone. `bounded_checksum` at gcc-m32 -O0 returned an
+    /// undefined `edx` that way.
+    #[test]
+    fn a_copy_chain_resolves_to_its_root_before_substitution() {
+        let mut m: HashMap<String, String> = HashMap::default();
+        m.insert("edx".to_string(), "param_3".to_string());
+        m.insert("uVar8".to_string(), "edx".to_string());
+        resolve_copy_chains(&mut m);
+        assert_eq!(m.get("edx").map(String::as_str), Some("param_3"));
+        assert_eq!(
+            m.get("uVar8").map(String::as_str),
+            Some("param_3"),
+            "uVar8 must skip the copy that is being removed with it"
+        );
+    }
+
+    /// A cycle has no root; those entries are dropped rather than resolved to
+    /// whichever element the iteration happened to stop on.
+    #[test]
+    fn a_copy_cycle_is_dropped_rather_than_resolved_arbitrarily() {
+        let mut m: HashMap<String, String> = HashMap::default();
+        m.insert("a".to_string(), "b".to_string());
+        m.insert("b".to_string(), "a".to_string());
+        resolve_copy_chains(&mut m);
+        assert!(m.is_empty(), "cyclic copies must not be substituted: {m:?}");
+    }
     use super::*;
 // prelude via parent
     use crate::analysis::preservation::preserved_binding_origin;
@@ -558,6 +595,35 @@ fn remove_copy_assigns_nested(
 
 /// Substitute every rvalue occurrence of `x` (keys of copy_map) with its
 /// source `y` (values of copy_map) throughout all expressions.
+/// Follow `x <- y <- z` to `x <- z`, so one substitution pass cannot leave a
+/// name behind whose own defining copy is being removed in the same step.
+///
+/// A cycle (`a <- b`, `b <- a`) has no root; those entries are dropped rather
+/// than iterated forever or resolved arbitrarily.
+fn resolve_copy_chains(copy_map: &mut HashMap<String, String>) {
+    let snapshot: HashMap<String, String> = copy_map.clone();
+    let mut cyclic: Vec<String> = Vec::new();
+    for (dst, src) in copy_map.iter_mut() {
+        let mut seen: HashSet<String> = HashSet::default();
+        seen.insert(dst.clone());
+        let mut cursor = src.clone();
+        loop {
+            if !seen.insert(cursor.clone()) {
+                cyclic.push(dst.clone());
+                break;
+            }
+            match snapshot.get(&cursor) {
+                Some(next) => cursor = next.clone(),
+                None => break,
+            }
+        }
+        *src = cursor;
+    }
+    for dst in cyclic {
+        copy_map.remove(&dst);
+    }
+}
+
 fn substitute_copies_in_stmts(
     stmts: &mut Vec<PreHirStmt>,
     copy_map: &HashMap<String, String>,
