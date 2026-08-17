@@ -326,3 +326,42 @@ Note that a false lead was ruled out on the way: the
 `[DIAG] param_pointer_roles` line lists only parameters with an inferred
 *role*, so `param_3` missing from it means nothing about whether it is a
 parameter. Reading that line as a parameter list costs an hour.
+
+## 8. Third branch closed, and one that is not a Fission defect
+
+`363ef6369` closed the copy-chain branch: `copy_propagation_pass` admitted
+`edx <- param_3` and `uVar8 <- edx` together, removed every entry's defining
+copy, then substituted once — so replacing `uVar8` with `edx` reintroduced a
+name whose definition had just been deleted. `resolve_copy_chains` walks each
+target to its root first; cycles are dropped rather than resolved arbitrarily.
+
+Running total on 464 corpus functions:
+
+| | undefined fns | occurrences |
+|---|---|---|
+| session start (true pre-existing) | 57 | 90 |
+| after the `a1e90d24a` regression | 89 | 142 |
+| now | **50** | **80** |
+
+### The Go group is a corpus address problem, not this defect
+
+`rsp` (13), `r14` (8) and `rdi` (5) — 26 of the remaining 80 — are all Go
+rows, and they are not Fission reading an undefined value. **Nine of the
+fifteen Go rows decompile a different function than the manifest names:**
+
+```text
+manifest go_add_ints   -> runtime.duffzero
+manifest (8 more rows) -> syscall.compileCallback
+```
+
+`runtime.duffzero` is a Go runtime fragment entered at a computed offset with
+`rdi` (destination) and `xmm15` (zero) already established by its caller.
+Reading those without defining them is what the routine *is*; there is no
+defect in the output. The defect, if any, is that the manifest address
+resolves to a runtime helper instead of the user function it names, which is
+a corpus/function-discovery question and belongs to whoever owns the Go rows.
+
+Excluding the Go rows, the remaining undefined names are roughly: `rbp` 7 and
+`ebp` 4 (frame pointer, the other half of what `949d92001` fixed), `home_N`
+15 (all rustc -O0), `r9`/`r8`/`rax` 10, builder temps 8, `local_N` 4. The
+frame-pointer group is the most likely next branch to be a real single cause.
