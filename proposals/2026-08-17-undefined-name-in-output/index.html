@@ -1053,6 +1053,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#7-fixed-so-far-and-what-the-remainder-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Fixed so far, and what the remainder is
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Fixed so far, and what the remainder is">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#anchor-for-the-argument-register-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anchor for the argument-register branch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1250,6 +1278,132 @@ proposal exists because nothing checks it today.</p>
   obvious reading of the code and the next person will otherwise spend the
   same time on it.</li>
 </ul>
+<h2 id="7-fixed-so-far-and-what-the-remainder-is">7. Fixed so far, and what the remainder is<a class="headerlink" href="#7-fixed-so-far-and-what-the-remainder-is" title="Permanent link">&para;</a></h2>
+<p>Two branches closed:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>447832f0a</code></td>
+<td>one merge name per varnode — <code>explicit_merge_bindings</code> is keyed by <code>(block, varnode)</code> and the hardware-name promotion only fires on a loop head, so a join minted a second name for the same register and registered it without an assignment</td>
+</tr>
+<tr>
+<td><code>8113d39dd</code></td>
+<td>a run-local read count retired a definition that an enclosing <code>for</code> header reads — <strong>a regression this document's own author introduced in <code>a1e90d24a</code></strong></td>
+</tr>
+</tbody>
+</table>
+<p>Measured across 465 corpus functions:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>undefined fns</th>
+<th>occurrences</th>
+<th>bare compile</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>before <code>a1e90d24a</code></td>
+<td>57</td>
+<td>90</td>
+<td>363</td>
+</tr>
+<tr>
+<td>with the regression</td>
+<td>89</td>
+<td>142</td>
+<td>371</td>
+</tr>
+<tr>
+<td>now</td>
+<td><strong>53</strong></td>
+<td><strong>84</strong></td>
+<td>370</td>
+</tr>
+</tbody>
+</table>
+<p>Note what that table says about section 2's numbers. This document originally
+reported 93 functions as a pre-existing defect and set priorities from it; 32
+of those were a regression committed the previous day. The correct
+pre-existing figure was 57. Comparing against the immediately preceding state
+before calling anything "pre-existing" is not optional.</p>
+<p>The remaining 84 occurrences are <strong>not one cause</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>kind</th>
+<th>count</th>
+<th>note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>callee-saved / frame registers</td>
+<td>22</td>
+<td><code>rsp</code> 13 (all Go), <code>r14</code> 8 (all Go), <code>rbp</code> 7, <code>ebp</code> 4</td>
+</tr>
+<tr>
+<td>argument-passing registers</td>
+<td>15</td>
+<td><code>rdi</code>, <code>r9</code>, <code>r8</code>, <code>edx</code></td>
+</tr>
+<tr>
+<td><code>home_N</code> stack slots</td>
+<td>15</td>
+<td>all rustc -O0</td>
+</tr>
+<tr>
+<td>other registers</td>
+<td>18</td>
+<td></td>
+</tr>
+<tr>
+<td>builder temps</td>
+<td>10</td>
+<td></td>
+</tr>
+<tr>
+<td><code>local_N</code></td>
+<td>4</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Read context: 70 on the right-hand side of an assignment, 9 in a condition,
+4 in a return, 1 in a <code>for</code> header.</p>
+<h3 id="anchor-for-the-argument-register-branch">Anchor for the argument-register branch<a class="headerlink" href="#anchor-for-the-argument-register-branch" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Binary: <code>corpus/dev/binaries/c/advanced_patterns_gcc-m32_O0.exe</code></li>
+<li>Function: <code>bounded_checksum</code> at <code>0x4016ef</code>, 25 lines, one bad name (<code>edx</code>)</li>
+<li>Source: <code>size_t n = len &lt; max_take ? len : max_take;</code></li>
+</ul>
+<div class="language-asm highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="err">0</span><span class="nf">x4016fc</span><span class="w">  </span><span class="no">mov</span><span class="w"> </span><span class="no">EDX</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="no">EBP</span><span class="err">+</span><span class="mi">0x10</span><span class="p">]</span><span class="w">   </span><span class="c1">; max_take -&gt; param_3</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="err">0</span><span class="nf">x4016ff</span><span class="w">  </span><span class="no">mov</span><span class="w"> </span><span class="no">EAX</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="no">EBP</span><span class="err">+</span><span class="mi">0xc</span><span class="p">]</span><span class="w">    </span><span class="c1">; len      -&gt; param_2</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="err">0</span><span class="nf">x401702</span><span class="w">  </span><span class="no">cmp</span><span class="w"> </span><span class="no">EDX</span><span class="p">,</span><span class="w"> </span><span class="no">EAX</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="err">0</span><span class="nf">x401704</span><span class="w">  </span><span class="no">cmovbe</span><span class="w"> </span><span class="no">EAX</span><span class="p">,</span><span class="w"> </span><span class="no">EDX</span>
+</span></code></pre></div>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">uVar7</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">param_2</span><span class="p">;</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">xVar14</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">param_2</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">edx</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">edx</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">param_2</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w">   </span><span class="c1">// edx never assigned</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">xVar14</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">uVar7</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">edx</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p>Both loads are cdecl stack arguments and both parameters are recovered — the
+signature is <code>(uchar *param_1, int param_2, uint param_3)</code>. <code>[EBP+0xc]</code> folded
+into its uses as <code>param_2</code>; <code>[EBP+0x10]</code> left <code>edx</code> raw and dropped the
+assignment that would have defined it. <code>incoming_stack_argument_index</code>
+(<code>midend/abi.rs:213</code>) computes index 2 for <code>+0x10</code> correctly, so the defect is
+not classification but whatever connects a promoted parameter to the register
+that loaded it. NIR carries it, so it is at or before the builder, and it
+predates every change in this session.</p>
+<p>The Go <code>rsp</code>/<code>r14</code> group and the rustc <code>home_N</code> group are almost certainly
+separate again — Go uses its own register ABI and <code>r14</code> is its goroutine
+pointer. Each branch needs its own observation.</p>
 
 
 
