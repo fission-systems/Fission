@@ -24,9 +24,13 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 | [`crates/fission-signatures`](../crates/fission-signatures) | Signature datasets / lookup |
 | [`crates/fission-static`](../crates/fission-static) | Static facts, orchestration helpers, analysis services (`analysis`, `utils`) |
 | [`crates/fission-dynamic`](../crates/fission-dynamic) | Dynamic analysis support |
+| [`crates/fission-emulator`](../crates/fission-emulator) | P-code execution engine and OS high-level emulation; backs the execution differential |
+| [`crates/fission-solver`](../crates/fission-solver) | Native SMT/SAT stack (AST, AIG, CNF, SAT, theory) used by symbolic and concolic paths |
 | [`crates/fission-ttd`](../crates/fission-ttd) | Time-travel / trace-adjacent support |
 | [`crates/fission-plugin`](../crates/fission-plugin) | Plugin contracts (`contracts`), manager/loader/hooks (`interactive_runtime`) |
 | [`crates/fission-cli`](../crates/fission-cli) | CLI product (`fission_cli`) |
+| [`crates/fission-script`](../crates/fission-script) | Rust-native embedded scripting (Rhai) for read-only binary automation |
+| [`crates/fission-ai`](../crates/fission-ai) | AI agent platform: multi-provider pipeline, OAuth, interactive session |
 | [`crates/fission-decompiler`](../crates/fission-decompiler) | Decompilation orchestration, Rust-Sleigh bridge, routing/workers |
 | [`crates/fission-sleigh`](../crates/fission-sleigh) | Sleigh decode/lift; CFG skeleton |
 | [`crates/fission-tui`](../crates/fission-tui) | Terminal UI (ratatui-based AI chat interface) |
