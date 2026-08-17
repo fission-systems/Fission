@@ -1,0 +1,1584 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/architecture/DYNAMIC_ANALYSIS/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Dynamic analysis: emulator, TTD, symbolic execution, concolic exploration - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dynamic-analysis-emulator-ttd-symbolic-execution-concolic-exploration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Dynamic analysis: emulator, TTD, symbolic execution, concolic exploration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.1.5/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#dynamic-analysis-and-emulator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic Analysis and Emulator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dynamic Analysis and Emulator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operating-system-hle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operating System HLE
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#calling-convention-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calling Convention Support
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#time-travel-debugging-ttd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time-Travel Debugging (TTD)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Time-Travel Debugging (TTD)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-ttd-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How TTD Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ttd-data-structures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TTD Data Structures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#symbolic-execution-and-taint-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symbolic Execution and Taint Engine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Symbolic Execution and Taint Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#two-layer-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Layer Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#symexpr-ast-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SymExpr AST Nodes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shadow-memory-taint-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shadow Memory (Taint State)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#taint-propagation-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Taint Propagation Table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#taint-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Taint Sources
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#concolic-path-exploration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concolic Path Exploration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Concolic Path Exploration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#symbolicexecutor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SymbolicExecutor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#future-full-symbolic-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future: Full Symbolic Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="dynamic-analysis-emulator-ttd-symbolic-execution-concolic-exploration">Dynamic analysis: emulator, TTD, symbolic execution, concolic exploration<a class="headerlink" href="#dynamic-analysis-emulator-ttd-symbolic-execution-concolic-exploration" title="Permanent link">&para;</a></h1>
+<p>Moved out of <code>README.md</code> when that file was reduced to an orientation
+document. This is the reference for Fission's dynamic side: the emulator,
+time-travel debugging, the symbolic/taint engine, and concolic path
+exploration.</p>
+<h2 id="dynamic-analysis-and-emulator">Dynamic Analysis and Emulator<a class="headerlink" href="#dynamic-analysis-and-emulator" title="Permanent link">&para;</a></h2>
+<p>Fission includes a pure-Rust dynamic analysis engine (<code>fission-emulator</code>) capable of executing arbitrary x86/x86-64 P-Code sequences produced by Sleigh, without requiring any external runtime like QEMU or Unicorn.</p>
+<p>The emulator is a core pillar for future dynamic reasoning capabilities:
+- <strong>Tracing and Differential Analysis</strong> — Execute binaries with a full instruction trace and diff the output against expected behavior.
+- <strong>Time-Travel Debugging (TTD)</strong> — Record/replay execution with memory and register delta snapshots.
+- <strong>Concolic Execution</strong> — Use TTD snapshots to fork execution at unexplored conditional branches.
+- <strong>Symbolic Taint Tracking</strong> — Propagate symbolic expressions through P-Code operations and track tainted data flows from inputs (e.g. <code>stdin</code>) through memory and registers.</p>
+<h3 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>fission-emulator
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  ├── core.rs          — Emulator state, main run loop, register I/O, TTD hooks
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  ├── pcode/
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  │   ├── eval.rs      — P-Code opcode evaluator (taint-aware)
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  │   └── state.rs     — MachineState: address spaces + shadow memory
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  ├── arch/            — Architecture descriptors, calling conventions
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  ├── os/
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  │   ├── linux/       — Linux syscall HLE (read, write, mmap, brk, exit, ...)
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  │   ├── windows/     — Windows HLE stubs
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  │   └── bare_metal/  — No-OS / embedded HLE
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  ├── sym/
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>  │   └── mod.rs       — SymbolicExecutor: TTD-backed concolic path exploration
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>  ├── trace.rs         — TraceLog: per-instruction audit trail
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>  ├── snapshot.rs      — Lightweight snapshot helpers
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>  └── loader.rs        — Binary loading bridge for the emulator
+</span></code></pre></div>
+<h3 id="cli-integration">CLI Integration<a class="headerlink" href="#cli-integration" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Emulate a binary (default: auto-detect OS, no limits)</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>fission_cli<span class="w"> </span>run<span class="w"> </span>&lt;binary&gt;
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Limit to N instructions</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>fission_cli<span class="w"> </span>run<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--max-inst<span class="w"> </span><span class="m">10000</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Provide stdin mock data</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>fission_cli<span class="w"> </span>run<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--stdin<span class="w"> </span><span class="s2">&quot;hello\n&quot;</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Emit full instruction trace (JSON)</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>fission_cli<span class="w"> </span>run<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--trace<span class="w"> </span>--json
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Enable TTD recording (snapshot every 1000 instructions)</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>fission_cli<span class="w"> </span>run<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--ttd-record<span class="w"> </span><span class="m">1000</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c1"># Seek TTD to step N (rewind and replay from that point)</span>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>fission_cli<span class="w"> </span>run<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--ttd-record<span class="w"> </span><span class="m">1000</span><span class="w"> </span>--ttd-seek<span class="w"> </span><span class="m">5000</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1"># Enable concolic path exploration</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>fission_cli<span class="w"> </span>run<span class="w"> </span>&lt;binary&gt;<span class="w"> </span>--ttd-record<span class="w"> </span><span class="m">500</span><span class="w"> </span>--sym-explore
+</span></code></pre></div>
+<h3 id="operating-system-hle">Operating System HLE<a class="headerlink" href="#operating-system-hle" title="Permanent link">&para;</a></h3>
+<p>The emulator uses High-Level Emulation (HLE) rather than emulating an actual OS kernel. Each architecture+OS pair has its own HLE handler:</p>
+<table>
+<thead>
+<tr>
+<th>OS</th>
+<th>HLE Handler</th>
+<th>Key syscalls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux x86-64</td>
+<td><code>os/linux/mod.rs</code></td>
+<td><code>read</code>, <code>write</code>, <code>mmap</code>, <code>brk</code>, <code>exit_group</code>, <code>open</code>, <code>close</code>, <code>fstat</code>, <code>stat</code></td>
+</tr>
+<tr>
+<td>Windows x86-64</td>
+<td><code>os/windows/hle.rs</code></td>
+<td><code>VirtualAlloc</code>, <code>HeapAlloc</code>, <code>WriteFile</code>, <code>ExitProcess</code>, and common NT stubs</td>
+</tr>
+<tr>
+<td>Bare Metal</td>
+<td><code>os/bare_metal/mod.rs</code></td>
+<td>Minimal: <code>semihosting</code> stubs only</td>
+</tr>
+</tbody>
+</table>
+<p>HLE handlers can intercept function calls by name (via PLT/IAT hooks) or by recognized calling patterns.</p>
+<h3 id="calling-convention-support">Calling Convention Support<a class="headerlink" href="#calling-convention-support" title="Permanent link">&para;</a></h3>
+<p>The <code>arch/</code> subsystem provides architecture-agnostic calling convention helpers:</p>
+<ul>
+<li><code>Emulator::read_arg(n)</code> — read the nth integer argument per the current ABI</li>
+<li><code>Emulator::write_return_val(v)</code> — write to the return register</li>
+<li><code>Emulator::simulate_return()</code> — pop the stack or read the link register and set PC</li>
+</ul>
+<p>Currently supported: <strong>System V AMD64 ABI</strong> (Linux x86-64), <strong>Microsoft x64</strong> (Windows), and a stub for <strong>ARM AArch64</strong>.</p>
+<hr />
+<h2 id="time-travel-debugging-ttd">Time-Travel Debugging (TTD)<a class="headerlink" href="#time-travel-debugging-ttd" title="Permanent link">&para;</a></h2>
+<p>The <code>fission-ttd</code> crate provides a deterministic execution recorder and replayer. It is the backbone for all forms of non-linear execution analysis.</p>
+<h3 id="how-ttd-works">How TTD Works<a class="headerlink" href="#how-ttd-works" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Recording Phase</strong> — As the <code>Emulator</code> executes, every N instructions (configurable via <code>--ttd-record &lt;N&gt;</code>) it captures:</li>
+<li>Complete CPU register state (<code>RegisterState</code>)</li>
+<li>Memory write deltas: <code>(address, old_bytes, new_bytes)</code></li>
+<li>
+<p>Shadow state (taint) deltas: <code>(space_id, address, old_node_id, new_node_id)</code></p>
+</li>
+<li>
+<p><strong>Snapshot Storage</strong> — Snapshots are stored in a bounded ring buffer (<code>TTDRecorder</code>) with configurable capacity. Older snapshots are evicted when capacity is reached.</p>
+</li>
+<li>
+<p><strong>Seeking / Rewinding</strong> — <code>Emulator::ttd_seek(step)</code> locates the most recent snapshot at or before <code>step</code>, then restores:</p>
+</li>
+<li>All GP registers from <code>RegisterState</code></li>
+<li>All memory bytes from <code>MemoryDelta</code> records</li>
+<li>
+<p>All symbolic taint mappings from <code>ShadowDelta</code> records</p>
+</li>
+<li>
+<p><strong>Replay</strong> — After rewinding, <code>emulator.run()</code> continues forward from the restored state.</p>
+</li>
+</ol>
+<h3 id="ttd-data-structures">TTD Data Structures<a class="headerlink" href="#ttd-data-structures" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Crate</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TTDRecorder</code></td>
+<td><code>fission-ttd</code></td>
+<td>Manages the ring buffer of <code>ExecutionSnapshot</code>s</td>
+</tr>
+<tr>
+<td><code>ExecutionSnapshot</code></td>
+<td><code>fission-ttd</code></td>
+<td>Single-point snapshot: registers + memory + shadow deltas</td>
+</tr>
+<tr>
+<td><code>MemoryDelta</code></td>
+<td><code>fission-ttd</code></td>
+<td>Before/after memory diff for one address range</td>
+</tr>
+<tr>
+<td><code>ShadowDelta</code></td>
+<td><code>fission-ttd</code></td>
+<td>Before/after taint AST node diff for one byte position</td>
+</tr>
+<tr>
+<td><code>RegisterState</code></td>
+<td><code>fission-ttd</code></td>
+<td>Full x86-64 GP register snapshot</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="symbolic-execution-and-taint-engine">Symbolic Execution and Taint Engine<a class="headerlink" href="#symbolic-execution-and-taint-engine" title="Permanent link">&para;</a></h2>
+<p>Fission's taint and symbolic engine is a pure-Rust implementation — no Z3 bindings, no C++ FFI, no external SMT dependencies. It is designed for long-term maintainability and architecture-agnostic reasoning.</p>
+<h3 id="two-layer-architecture">Two-Layer Architecture<a class="headerlink" href="#two-layer-architecture" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>fission-solver            — Pure-Rust SMT/Constraint engine
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  ├── ast.rs              — SymExpr: the symbolic expression AST
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  └── solver.rs           — Solver: node registry, path conditions, SAT stub
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>fission-emulator          — Concrete + Symbolic execution
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  └── pcode/
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>      ├── state.rs        — MachineState: shadow_memory (taint map)
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>      └── eval.rs         — Evaluator: taint propagation per P-Code opcode
+</span></code></pre></div>
+<h3 id="symexpr-ast-nodes"><code>SymExpr</code> AST Nodes<a class="headerlink" href="#symexpr-ast-nodes" title="Permanent link">&para;</a></h3>
+<p>Every symbolic value is represented as a node in the <code>SymExpr</code> tree:</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Const { val, size }</code></td>
+<td>Concrete bitvector constant</td>
+</tr>
+<tr>
+<td><code>Var { id, name, size }</code></td>
+<td>Named symbolic variable (e.g. <code>stdin_0x4000</code>)</td>
+</tr>
+<tr>
+<td><code>Add(a, b)</code> / <code>Sub(a, b)</code> / <code>Mul(a, b)</code></td>
+<td>Integer arithmetic</td>
+</tr>
+<tr>
+<td><code>And(a, b)</code> / <code>Or(a, b)</code> / <code>Xor(a, b)</code></td>
+<td>Bitwise operations</td>
+</tr>
+<tr>
+<td><code>Shl(a, b)</code> / <code>Lshr(a, b)</code></td>
+<td>Shift operations</td>
+</tr>
+<tr>
+<td><code>Eq(a, b)</code> / <code>Neq(a, b)</code> / <code>Ult(a, b)</code> / <code>Ule(a, b)</code></td>
+<td>Comparisons (return 1-bit)</td>
+</tr>
+<tr>
+<td><code>Ite { cond, t, f }</code></td>
+<td>If-then-else</td>
+</tr>
+<tr>
+<td><code>Extract { expr, lsb, size }</code></td>
+<td>Bit extraction</td>
+</tr>
+<tr>
+<td><code>Concat(a, b)</code></td>
+<td>Bitvector concatenation</td>
+</tr>
+</tbody>
+</table>
+<h3 id="shadow-memory-taint-state">Shadow Memory (Taint State)<a class="headerlink" href="#shadow-memory-taint-state" title="Permanent link">&para;</a></h3>
+<p>The <code>MachineState</code> holds a parallel "shadow" layer alongside the concrete memory:</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1">// shadow_memory: (space_id, byte_address) -&gt; SymNodeId</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">pub</span><span class="w"> </span><span class="n">shadow_memory</span><span class="p">:</span><span class="w"> </span><span class="nc">HashMap</span><span class="o">&lt;</span><span class="p">(</span><span class="kt">u64</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">),</span><span class="w"> </span><span class="kt">u32</span><span class="o">&gt;</span>
+</span></code></pre></div>
+<ul>
+<li><code>space_id = 2</code> → CPU registers (Sleigh register address space)</li>
+<li><code>space_id = 3</code> → RAM (Sleigh ram address space)</li>
+</ul>
+<p>When a concrete byte is written, its shadow entry is cleared. When a symbolic value is written, its shadow entry is updated with the corresponding AST node ID.</p>
+<h3 id="taint-propagation-table">Taint Propagation Table<a class="headerlink" href="#taint-propagation-table" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>P-Code Op</th>
+<th>Taint Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>COPY</code></td>
+<td>Propagate source shadow to destination</td>
+</tr>
+<tr>
+<td><code>LOAD</code></td>
+<td>Propagate shadow from RAM byte to output varnode</td>
+</tr>
+<tr>
+<td><code>STORE</code></td>
+<td>Propagate shadow from source varnode to RAM byte</td>
+</tr>
+<tr>
+<td><code>INT_ADD</code></td>
+<td>If either input is tainted, build <code>SymExpr::Add(a, b)</code> and store new node</td>
+</tr>
+<tr>
+<td><code>INT_SUB</code></td>
+<td>Similar: build <code>SymExpr::Sub</code></td>
+</tr>
+<tr>
+<td>Other ops</td>
+<td>Currently concrete-only (no taint propagation yet)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="taint-sources">Taint Sources<a class="headerlink" href="#taint-sources" title="Permanent link">&para;</a></h3>
+<p>The primary taint source is <code>stdin</code>. In <code>os/linux/mod.rs</code>, the <code>sys_read(fd=0, ...)</code> handler:
+1. Reads bytes from <code>stdin_buffer</code> (the <code>--stdin</code> mock).
+2. Writes them into RAM as concrete bytes.
+3. For each byte, calls <code>solver.register_var("stdin_&lt;addr&gt;", 1)</code> to create a <code>SymExpr::Var</code>.
+4. Tags the corresponding <code>shadow_memory</code> entries with the new node ID.</p>
+<p>From that point forward, any P-Code operation that reads those bytes will propagate the taint forward into new <code>SymExpr</code> constraint trees.</p>
+<hr />
+<h2 id="concolic-path-exploration">Concolic Path Exploration<a class="headerlink" href="#concolic-path-exploration" title="Permanent link">&para;</a></h2>
+<p>Concolic (concrete + symbolic) execution combines real execution with symbolic state to explore multiple code paths automatically.</p>
+<h3 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h3>
+<ol>
+<li>The emulator runs normally in <strong>concrete mode</strong>, recording TTD snapshots along the way.</li>
+<li>Every <code>CBranch</code> (conditional branch) P-Code instruction emits a <code>SymBranch</code> event containing:</li>
+<li>The TTD step index at the branch point</li>
+<li>The current PC value</li>
+<li>Whether the branch was taken or not</li>
+<li>The alternate target (address or relative P-Code index)</li>
+<li>After the current path terminates, the <code>SymbolicExecutor</code> pops unexplored branches from a queue.</li>
+<li>It rewinds the emulator to the snapshot closest to the branch step via <code>ttd_seek()</code>.</li>
+<li>It forces the PC (or P-Code index) to the <strong>alternate</strong> target and resumes execution.</li>
+<li>This continues until the exploration queue is empty.</li>
+</ol>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Path 1:  [A] → [B] → [D] → halt        (branch at B taken = true)
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Rewind to B
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Path 2:  [A] → [B] → [C] → [E] → halt  (branch at B taken = false)
+</span></code></pre></div>
+<h3 id="symbolicexecutor"><code>SymbolicExecutor</code><a class="headerlink" href="#symbolicexecutor" title="Permanent link">&para;</a></h3>
+<p>The <code>SymbolicExecutor</code> (<code>sym/mod.rs</code>) is the exploration driver:</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">SymbolicExecutor</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">emu</span><span class="p">:</span><span class="w"> </span><span class="nc">Emulator</span><span class="p">,</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">queue</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">SymBranch</span><span class="o">&gt;</span><span class="p">,</span><span class="w">  </span><span class="c1">// unexplored branch events</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>It calls <code>emu.run()</code> in a loop, drains <code>emu.sym_events</code> into the queue, and rewinds to the next unexplored branch. Each new execution path may reveal additional branches, which are added to the queue.</p>
+<h3 id="future-full-symbolic-mode">Future: Full Symbolic Mode<a class="headerlink" href="#future-full-symbolic-mode" title="Permanent link">&para;</a></h3>
+<p>The current implementation is <strong>concolic scaffolding</strong>: it explores paths by forcing PC values, but does not yet invert branch conditions symbolically via the <code>Solver</code>. The planned evolution:</p>
+<ol>
+<li>When a <code>CBranch</code> is encountered and a taint variable is used in the branch condition, add the negated constraint <code>!condition</code> to <code>solver.assertions</code>.</li>
+<li>Call <code>solver.check_sat()</code> to verify the alternate path is feasible.</li>
+<li>Use <code>solver.get_value(var_id)</code> to obtain a concrete input that triggers the alternate path.</li>
+<li>Replay with that concrete input instead of forcing PC.</li>
+</ol>
+<p>This requires implementing the DPLL/CDCL bit-blasting core inside <code>fission-solver</code>, which is the next development milestone.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

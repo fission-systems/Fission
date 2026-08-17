@@ -1,0 +1,3113 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/contributing/FIELD_GUIDE_AND_PLAYBOOKS/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Contributor field guide and playbooks - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contributor-field-guide-and-playbooks" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Contributor field guide and playbooks
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.1.5/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#field-guide-practical-rules-by-area" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Field Guide: Practical Rules by Area
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Field Guide: Practical Rules by Area">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#01-p-code-parity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        01. P-code parity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#02-nir-materialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        02. NIR materialization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#03-hir-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        03. HIR cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#04-type-hints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        04. Type hints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#05-stack-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        05. Stack recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#06-pointer-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        06. Pointer recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#07-array-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        07. Array recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#08-struct-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        08. Struct recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#09-calling-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        09. Calling convention
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-loop-structuring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Loop structuring
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11-switch-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Switch recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-goto-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Goto fallback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-printer-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Printer formatting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-loader-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Loader identity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#15-resource-lookup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Resource lookup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#16-automation-reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Automation reports
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#17-ci-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. CI gates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#18-release-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        18. Release tags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#19-vendor-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19. Vendor reference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#20-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        20. Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contributor-playbooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contributor Playbooks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Contributor Playbooks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#01-fixing-a-raw-p-code-mismatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        01. Fixing a raw p-code mismatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#02-fixing-an-nir-materialization-bug" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        02. Fixing an NIR materialization bug
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#03-improving-hir-readability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        03. Improving HIR readability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#04-changing-structuring-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        04. Changing structuring logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#05-adding-a-new-nir-pass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        05. Adding a new NIR pass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#06-debugging-an-if-else-recovery-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        06. Debugging an if-else recovery failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#07-debugging-a-loop-recovery-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        07. Debugging a loop recovery failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#08-debugging-a-switch-recovery-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        08. Debugging a switch recovery failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#09-cleaning-unnecessary-temporaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        09. Cleaning unnecessary temporaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-recovering-function-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Recovering function parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11-recovering-local-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Recovering local variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-recovering-return-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Recovering return values
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-recovering-pointer-arithmetic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Recovering pointer arithmetic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-recovering-arrays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Recovering arrays
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#15-recovering-struct-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Recovering struct fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#16-changing-loader-format-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Changing loader format detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#17-adding-loader-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. Adding loader provenance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#18-changing-import-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        18. Changing import handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#19-changing-export-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19. Changing export handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#20-changing-resource-lookup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        20. Changing resource lookup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#21-changing-utility-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        21. Changing utility manifests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-changing-signature-lookup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        22. Changing signature lookup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-changing-automation-reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        23. Changing automation reports
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-changing-json-report-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        24. Changing JSON report contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-changing-cli-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        25. Changing CLI output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#26-changing-cli-command-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        26. Changing CLI command parsing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#27-changing-tui-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        27. Changing TUI behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#28-changing-dioxus-gui-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        28. Changing Dioxus GUI behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#29-changing-ai-integration-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        29. Changing AI integration surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#30-changing-plugin-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        30. Changing plugin contracts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#31-changing-dynamic-analysis-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        31. Changing dynamic-analysis support
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-changing-time-travel-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        32. Changing time-travel support
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-adding-a-new-test-fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        33. Adding a new test fixture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-adding-a-regression-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        34. Adding a regression test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-updating-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        35. Updating snapshots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-investigating-benchmark-movement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        36. Investigating benchmark movement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-investigating-a-pass-count-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        37. Investigating a pass-count change
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-investigating-a-size-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        38. Investigating a size change
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-investigating-a-ci-only-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        39. Investigating a CI-only failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#40-investigating-a-resource-missing-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        40. Investigating a resource-missing failure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#41-investigating-a-panic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        41. Investigating a panic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-investigating-non-determinism" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        42. Investigating non-determinism
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-changing-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        43. Changing dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-consulting-ghidra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        44. Consulting Ghidra
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-consulting-retdec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        45. Consulting RetDec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-touching-vendor-trees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        46. Touching vendor trees
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#47-touching-utils" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        47. Touching utils/
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#48-writing-architecture-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        48. Writing architecture docs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#49-writing-user-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        49. Writing user docs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#50-writing-troubleshooting-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        50. Writing troubleshooting docs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#51-writing-release-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        51. Writing release notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-preparing-a-commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        52. Preparing a commit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-preparing-a-pr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        53. Preparing a PR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-reviewing-a-pr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        54. Reviewing a PR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-refactoring-shared-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        55. Refactoring shared code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-adding-an-abstraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        56. Adding an abstraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-deleting-legacy-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        57. Deleting legacy code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#58-changing-telemetry-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        58. Changing telemetry names
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#59-changing-public-structs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        59. Changing public structs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#60-changing-error-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        60. Changing error types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#61-changing-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        61. Changing logging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-changing-performance-sensitive-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        62. Changing performance-sensitive paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-changing-memory-heavy-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        63. Changing memory-heavy paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-changing-parser-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        64. Changing parser code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-changing-graph-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        65. Changing graph algorithms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-changing-dataflow-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        66. Changing dataflow analysis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-changing-fixed-point-loops" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        67. Changing fixed-point loops
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#68-changing-type-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        68. Changing type inference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#69-changing-abi-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        69. Changing ABI handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#70-changing-x86-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        70. Changing x86 behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#71-changing-non-x86-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        71. Changing non-x86 behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-changing-docs-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        72. Changing docs only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-changing-logo-or-readme-assets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        73. Changing logo or README assets
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#review-question-bank" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review Question Bank
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#maintainer-handoff-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maintainer Handoff Template
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="contributor-field-guide-and-playbooks">Contributor field guide and playbooks<a class="headerlink" href="#contributor-field-guide-and-playbooks" title="Permanent link">&para;</a></h1>
+<p>Moved out of <code>README.md</code> when that file was reduced to an orientation
+document for people arriving at the repository. Nothing here changed; this is
+the long-form contributor material — field guide, per-area playbooks, the
+review question bank, and the maintainer handoff template.</p>
+<p>Start with <a href="../../AGENTS.md"><code>AGENTS.md</code></a> for the working rules and the
+decompiler quality loop. This document is the depth behind them.</p>
+<h2 id="field-guide-practical-rules-by-area">Field Guide: Practical Rules by Area<a class="headerlink" href="#field-guide-practical-rules-by-area" title="Permanent link">&para;</a></h2>
+<h3 id="01-p-code-parity">01. P-code parity<a class="headerlink" href="#01-p-code-parity" title="Permanent link">&para;</a></h3>
+<p>Verify instruction semantics before diagnosing decompiler output.</p>
+<ul>
+<li>Owner check: identify the crate that owns p-code parity before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="02-nir-materialization">02. NIR materialization<a class="headerlink" href="#02-nir-materialization" title="Permanent link">&para;</a></h3>
+<p>Preserve source behavior even when output is temporarily verbose.</p>
+<ul>
+<li>Owner check: identify the crate that owns nir materialization before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="03-hir-cleanup">03. HIR cleanup<a class="headerlink" href="#03-hir-cleanup" title="Permanent link">&para;</a></h3>
+<p>Improve readability only after the semantic basis is correct.</p>
+<ul>
+<li>Owner check: identify the crate that owns hir cleanup before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="04-type-hints">04. Type hints<a class="headerlink" href="#04-type-hints" title="Permanent link">&para;</a></h3>
+<p>Promote evidence-backed types and keep provenance inspectable.</p>
+<ul>
+<li>Owner check: identify the crate that owns type hints before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="05-stack-recovery">05. Stack recovery<a class="headerlink" href="#05-stack-recovery" title="Permanent link">&para;</a></h3>
+<p>Model stack slots consistently across calls, locals, and spills.</p>
+<ul>
+<li>Owner check: identify the crate that owns stack recovery before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="06-pointer-recovery">06. Pointer recovery<a class="headerlink" href="#06-pointer-recovery" title="Permanent link">&para;</a></h3>
+<p>Prefer data-flow-backed pointer reasoning over text substitution.</p>
+<ul>
+<li>Owner check: identify the crate that owns pointer recovery before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="07-array-recovery">07. Array recovery<a class="headerlink" href="#07-array-recovery" title="Permanent link">&para;</a></h3>
+<p>Recover indexed forms when stride and base evidence are present.</p>
+<ul>
+<li>Owner check: identify the crate that owns array recovery before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="08-struct-recovery">08. Struct recovery<a class="headerlink" href="#08-struct-recovery" title="Permanent link">&para;</a></h3>
+<p>Recover field access only when layout evidence supports it.</p>
+<ul>
+<li>Owner check: identify the crate that owns struct recovery before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="09-calling-convention">09. Calling convention<a class="headerlink" href="#09-calling-convention" title="Permanent link">&para;</a></h3>
+<p>Derive parameters and returns from ABI facts and observed uses.</p>
+<ul>
+<li>Owner check: identify the crate that owns calling convention before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="10-loop-structuring">10. Loop structuring<a class="headerlink" href="#10-loop-structuring" title="Permanent link">&para;</a></h3>
+<p>Use SCC and dominance facts before emitting structured loops.</p>
+<ul>
+<li>Owner check: identify the crate that owns loop structuring before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="11-switch-recovery">11. Switch recovery<a class="headerlink" href="#11-switch-recovery" title="Permanent link">&para;</a></h3>
+<p>Use jump-table evidence and bounds before emitting switch syntax.</p>
+<ul>
+<li>Owner check: identify the crate that owns switch recovery before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="12-goto-fallback">12. Goto fallback<a class="headerlink" href="#12-goto-fallback" title="Permanent link">&para;</a></h3>
+<p>Use explicit fallback when legal structure is not proven.</p>
+<ul>
+<li>Owner check: identify the crate that owns goto fallback before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="13-printer-formatting">13. Printer formatting<a class="headerlink" href="#13-printer-formatting" title="Permanent link">&para;</a></h3>
+<p>Render the model; do not create semantic facts.</p>
+<ul>
+<li>Owner check: identify the crate that owns printer formatting before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="14-loader-identity">14. Loader identity<a class="headerlink" href="#14-loader-identity" title="Permanent link">&para;</a></h3>
+<p>Attach evidence without changing parse semantics.</p>
+<ul>
+<li>Owner check: identify the crate that owns loader identity before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="15-resource-lookup">15. Resource lookup<a class="headerlink" href="#15-resource-lookup" title="Permanent link">&para;</a></h3>
+<p>Route through resource roots and path config.</p>
+<ul>
+<li>Owner check: identify the crate that owns resource lookup before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="16-automation-reports">16. Automation reports<a class="headerlink" href="#16-automation-reports" title="Permanent link">&para;</a></h3>
+<p>Project canonical metrics and keep outputs deterministic.</p>
+<ul>
+<li>Owner check: identify the crate that owns automation reports before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="17-ci-gates">17. CI gates<a class="headerlink" href="#17-ci-gates" title="Permanent link">&para;</a></h3>
+<p>Prefer focused reusable jobs with explicit inputs.</p>
+<ul>
+<li>Owner check: identify the crate that owns ci gates before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="18-release-tags">18. Release tags<a class="headerlink" href="#18-release-tags" title="Permanent link">&para;</a></h3>
+<p>Tag only after successful push CI for the exact commit.</p>
+<ul>
+<li>Owner check: identify the crate that owns release tags before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="19-vendor-reference">19. Vendor reference<a class="headerlink" href="#19-vendor-reference" title="Permanent link">&para;</a></h3>
+<p>Consult for invariants without copying or depending on code.</p>
+<ul>
+<li>Owner check: identify the crate that owns vendor reference before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h3 id="20-documentation">20. Documentation<a class="headerlink" href="#20-documentation" title="Permanent link">&para;</a></h3>
+<p>Keep claims grounded in current source and docs.</p>
+<ul>
+<li>Owner check: identify the crate that owns documentation before editing.</li>
+<li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
+<li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
+<li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
+<li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
+</ul>
+<h2 id="contributor-playbooks">Contributor Playbooks<a class="headerlink" href="#contributor-playbooks" title="Permanent link">&para;</a></h2>
+<p>This section expands the repository rules into concrete scenarios. It is intentionally operational: each playbook describes where to start, what to avoid, and what evidence should exist before claiming the work is done.</p>
+<h3 id="01-fixing-a-raw-p-code-mismatch">01. Fixing a raw p-code mismatch<a class="headerlink" href="#01-fixing-a-raw-p-code-mismatch" title="Permanent link">&para;</a></h3>
+<p>Start in <code>fission-sleigh</code>; compare emitted p-code before touching NIR or HIR.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="02-fixing-an-nir-materialization-bug">02. Fixing an NIR materialization bug<a class="headerlink" href="#02-fixing-an-nir-materialization-bug" title="Permanent link">&para;</a></h3>
+<p>Start in <code>fission-pcode/src/nir</code>; preserve exact source behavior before readability work.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="03-improving-hir-readability">03. Improving HIR readability<a class="headerlink" href="#03-improving-hir-readability" title="Permanent link">&para;</a></h3>
+<p>Start from correct NIR; prefer cleanup passes over printer substitutions.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="04-changing-structuring-logic">04. Changing structuring logic<a class="headerlink" href="#04-changing-structuring-logic" title="Permanent link">&para;</a></h3>
+<p>Start in <code>fission-pcode/src/nir/structuring</code>; require CFG evidence and proof completeness.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="05-adding-a-new-nir-pass">05. Adding a new NIR pass<a class="headerlink" href="#05-adding-a-new-nir-pass" title="Permanent link">&para;</a></h3>
+<p>Implement a pass with declared analysis dependencies and accurate changed status.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="06-debugging-an-if-else-recovery-failure">06. Debugging an if-else recovery failure<a class="headerlink" href="#06-debugging-an-if-else-recovery-failure" title="Permanent link">&para;</a></h3>
+<p>Inspect dominance, post-dominance, and region exits before modifying emitted syntax.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="07-debugging-a-loop-recovery-failure">07. Debugging a loop recovery failure<a class="headerlink" href="#07-debugging-a-loop-recovery-failure" title="Permanent link">&para;</a></h3>
+<p>Inspect SCCs, loop headers, latches, exits, and break or continue candidates.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="08-debugging-a-switch-recovery-failure">08. Debugging a switch recovery failure<a class="headerlink" href="#08-debugging-a-switch-recovery-failure" title="Permanent link">&para;</a></h3>
+<p>Inspect jump table evidence, bounds, case targets, and default target handling.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="09-cleaning-unnecessary-temporaries">09. Cleaning unnecessary temporaries<a class="headerlink" href="#09-cleaning-unnecessary-temporaries" title="Permanent link">&para;</a></h3>
+<p>Confirm the temporary has no semantic or ordering role before removing it.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="10-recovering-function-parameters">10. Recovering function parameters<a class="headerlink" href="#10-recovering-function-parameters" title="Permanent link">&para;</a></h3>
+<p>Use ABI facts, call uses, stack/register evidence, and type context together.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="11-recovering-local-variables">11. Recovering local variables<a class="headerlink" href="#11-recovering-local-variables" title="Permanent link">&para;</a></h3>
+<p>Tie stack slots, stores, loads, and lifetimes to stable local names.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="12-recovering-return-values">12. Recovering return values<a class="headerlink" href="#12-recovering-return-values" title="Permanent link">&para;</a></h3>
+<p>Check accumulator registers, call sites, and observed return uses.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="13-recovering-pointer-arithmetic">13. Recovering pointer arithmetic<a class="headerlink" href="#13-recovering-pointer-arithmetic" title="Permanent link">&para;</a></h3>
+<p>Prefer base plus offset or indexed forms only when data-flow evidence supports them.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="14-recovering-arrays">14. Recovering arrays<a class="headerlink" href="#14-recovering-arrays" title="Permanent link">&para;</a></h3>
+<p>Require stable stride, base object, and index expression evidence.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="15-recovering-struct-fields">15. Recovering struct fields<a class="headerlink" href="#15-recovering-struct-fields" title="Permanent link">&para;</a></h3>
+<p>Require layout evidence before rendering field access.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="16-changing-loader-format-detection">16. Changing loader format detection<a class="headerlink" href="#16-changing-loader-format-detection" title="Permanent link">&para;</a></h3>
+<p>Fail closed for unknown or unsupported families; never hide uncertainty as raw bytes.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="17-adding-loader-provenance">17. Adding loader provenance<a class="headerlink" href="#17-adding-loader-provenance" title="Permanent link">&para;</a></h3>
+<p>Attach evidence without changing parsing semantics or decompiler behavior.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="18-changing-import-handling">18. Changing import handling<a class="headerlink" href="#18-changing-import-handling" title="Permanent link">&para;</a></h3>
+<p>Keep true imports, import thunks, undefined externals, and debug-only symbols distinct.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="19-changing-export-handling">19. Changing export handling<a class="headerlink" href="#19-changing-export-handling" title="Permanent link">&para;</a></h3>
+<p>Preserve symbol provenance and loader-owned function views.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="20-changing-resource-lookup">20. Changing resource lookup<a class="headerlink" href="#20-changing-resource-lookup" title="Permanent link">&para;</a></h3>
+<p>Route through path config and resource roots; do not embed local absolute paths.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="21-changing-utility-manifests">21. Changing utility manifests<a class="headerlink" href="#21-changing-utility-manifests" title="Permanent link">&para;</a></h3>
+<p>Keep manifests deterministic and explain what data is required at runtime.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="22-changing-signature-lookup">22. Changing signature lookup<a class="headerlink" href="#22-changing-signature-lookup" title="Permanent link">&para;</a></h3>
+<p>Keep signature hits evidence-backed and separate from semantic repair.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="23-changing-automation-reports">23. Changing automation reports<a class="headerlink" href="#23-changing-automation-reports" title="Permanent link">&para;</a></h3>
+<p>Project <code>NirBuildStats</code> and other canonical counters; do not redefine metrics.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="24-changing-json-report-contracts">24. Changing JSON report contracts<a class="headerlink" href="#24-changing-json-report-contracts" title="Permanent link">&para;</a></h3>
+<p>Version or document the contract and keep output deterministic.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="25-changing-cli-output">25. Changing CLI output<a class="headerlink" href="#25-changing-cli-output" title="Permanent link">&para;</a></h3>
+<p>Keep CLI as a surface; do not fix semantics in formatting code.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="26-changing-cli-command-parsing">26. Changing CLI command parsing<a class="headerlink" href="#26-changing-cli-command-parsing" title="Permanent link">&para;</a></h3>
+<p>Separate compatibility shims from command ownership and behavior.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="27-changing-tui-behavior">27. Changing TUI behavior<a class="headerlink" href="#27-changing-tui-behavior" title="Permanent link">&para;</a></h3>
+<p>Preserve backend contracts and avoid UI-specific semantic rules.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="28-changing-dioxus-gui-behavior">28. Changing Dioxus GUI behavior<a class="headerlink" href="#28-changing-dioxus-gui-behavior" title="Permanent link">&para;</a></h3>
+<p>Consume shared contracts and avoid duplicate function filtering rules.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="29-changing-ai-integration-surfaces">29. Changing AI integration surfaces<a class="headerlink" href="#29-changing-ai-integration-surfaces" title="Permanent link">&para;</a></h3>
+<p>Keep AI assistance advisory and preserve deterministic core behavior.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="30-changing-plugin-contracts">30. Changing plugin contracts<a class="headerlink" href="#30-changing-plugin-contracts" title="Permanent link">&para;</a></h3>
+<p>Keep contracts explicit, stable, and separated from core crate internals.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="31-changing-dynamic-analysis-support">31. Changing dynamic-analysis support<a class="headerlink" href="#31-changing-dynamic-analysis-support" title="Permanent link">&para;</a></h3>
+<p>Keep dynamic evidence labeled and do not blur it with static facts.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="32-changing-time-travel-support">32. Changing time-travel support<a class="headerlink" href="#32-changing-time-travel-support" title="Permanent link">&para;</a></h3>
+<p>Keep trace-derived facts explicit and reproducible.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="33-adding-a-new-test-fixture">33. Adding a new test fixture<a class="headerlink" href="#33-adding-a-new-test-fixture" title="Permanent link">&para;</a></h3>
+<p>Document provenance, architecture, compiler, and why the fixture is useful.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="34-adding-a-regression-test">34. Adding a regression test<a class="headerlink" href="#34-adding-a-regression-test" title="Permanent link">&para;</a></h3>
+<p>Name the invariant, not just the failing sample.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="35-updating-snapshots">35. Updating snapshots<a class="headerlink" href="#35-updating-snapshots" title="Permanent link">&para;</a></h3>
+<p>Inspect semantic meaning before accepting changed text.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="36-investigating-benchmark-movement">36. Investigating benchmark movement<a class="headerlink" href="#36-investigating-benchmark-movement" title="Permanent link">&para;</a></h3>
+<p>Compare exact rows, artifacts, scores, stdout, stderr, and feature gaps.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="37-investigating-a-pass-count-change">37. Investigating a pass-count change<a class="headerlink" href="#37-investigating-a-pass-count-change" title="Permanent link">&para;</a></h3>
+<p>Trace whether the change is semantic, presentational, telemetry-only, or noise.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="38-investigating-a-size-change">38. Investigating a size change<a class="headerlink" href="#38-investigating-a-size-change" title="Permanent link">&para;</a></h3>
+<p>Inspect line count and byte count together with readability and semantics.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="39-investigating-a-ci-only-failure">39. Investigating a CI-only failure<a class="headerlink" href="#39-investigating-a-ci-only-failure" title="Permanent link">&para;</a></h3>
+<p>Check OS, LFS resources, workflow inputs, feature flags, and rust version.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="40-investigating-a-resource-missing-failure">40. Investigating a resource-missing failure<a class="headerlink" href="#40-investigating-a-resource-missing-failure" title="Permanent link">&para;</a></h3>
+<p>Check LFS pull scope, resource roots, and CLI resource status.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="41-investigating-a-panic">41. Investigating a panic<a class="headerlink" href="#41-investigating-a-panic" title="Permanent link">&para;</a></h3>
+<p>Capture command, input, backtrace, crate owner, and minimal reproducer.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="42-investigating-non-determinism">42. Investigating non-determinism<a class="headerlink" href="#42-investigating-non-determinism" title="Permanent link">&para;</a></h3>
+<p>Check map iteration, filesystem order, random seeds, timestamps, and local paths.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="43-changing-dependencies">43. Changing dependencies<a class="headerlink" href="#43-changing-dependencies" title="Permanent link">&para;</a></h3>
+<p>Justify long-term maintenance value and avoid dependency shortcuts for core semantics.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="44-consulting-ghidra">44. Consulting Ghidra<a class="headerlink" href="#44-consulting-ghidra" title="Permanent link">&para;</a></h3>
+<p>Use it for invariants and expected behavior, not copied implementation.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="45-consulting-retdec">45. Consulting RetDec<a class="headerlink" href="#45-consulting-retdec" title="Permanent link">&para;</a></h3>
+<p>Use it as reference material without creating runtime dependency.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="46-touching-vendor-trees">46. Touching vendor trees<a class="headerlink" href="#46-touching-vendor-trees" title="Permanent link">&para;</a></h3>
+<p>Do not add production links, shell-outs, bindings, or copied shortcuts.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="47-touching-utils">47. Touching <code>utils/</code><a class="headerlink" href="#47-touching-utils" title="Permanent link">&para;</a></h3>
+<p>Use existing loaders and manifests instead of bypassing resource configuration.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="48-writing-architecture-docs">48. Writing architecture docs<a class="headerlink" href="#48-writing-architecture-docs" title="Permanent link">&para;</a></h3>
+<p>State owner boundaries and avoid implying surface layers own semantics.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="49-writing-user-docs">49. Writing user docs<a class="headerlink" href="#49-writing-user-docs" title="Permanent link">&para;</a></h3>
+<p>Prefer commands and observed behavior over aspiration.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="50-writing-troubleshooting-docs">50. Writing troubleshooting docs<a class="headerlink" href="#50-writing-troubleshooting-docs" title="Permanent link">&para;</a></h3>
+<p>Map symptom to first owner and first command.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="51-writing-release-notes">51. Writing release notes<a class="headerlink" href="#51-writing-release-notes" title="Permanent link">&para;</a></h3>
+<p>Separate features, fixes, quality movement, and known limitations.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="52-preparing-a-commit">52. Preparing a commit<a class="headerlink" href="#52-preparing-a-commit" title="Permanent link">&para;</a></h3>
+<p>Stage intended hunks only and keep unrelated dirty work untouched.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="53-preparing-a-pr">53. Preparing a PR<a class="headerlink" href="#53-preparing-a-pr" title="Permanent link">&para;</a></h3>
+<p>Lead with behavior change, validation, and residual risk.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="54-reviewing-a-pr">54. Reviewing a PR<a class="headerlink" href="#54-reviewing-a-pr" title="Permanent link">&para;</a></h3>
+<p>Prioritize bugs, regressions, missing tests, and ownership drift.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="55-refactoring-shared-code">55. Refactoring shared code<a class="headerlink" href="#55-refactoring-shared-code" title="Permanent link">&para;</a></h3>
+<p>Keep behavior stable unless the refactor explicitly includes a measured semantic change.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="56-adding-an-abstraction">56. Adding an abstraction<a class="headerlink" href="#56-adding-an-abstraction" title="Permanent link">&para;</a></h3>
+<p>Add it only when it removes real duplication or encodes a real invariant.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="57-deleting-legacy-code">57. Deleting legacy code<a class="headerlink" href="#57-deleting-legacy-code" title="Permanent link">&para;</a></h3>
+<p>Prove the active path no longer depends on it and keep compatibility expectations visible.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="58-changing-telemetry-names">58. Changing telemetry names<a class="headerlink" href="#58-changing-telemetry-names" title="Permanent link">&para;</a></h3>
+<p>Check every consumer and avoid parallel meanings.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="59-changing-public-structs">59. Changing public structs<a class="headerlink" href="#59-changing-public-structs" title="Permanent link">&para;</a></h3>
+<p>Consider CLI JSON, GUI, automation, and downstream compatibility.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="60-changing-error-types">60. Changing error types<a class="headerlink" href="#60-changing-error-types" title="Permanent link">&para;</a></h3>
+<p>Keep errors typed enough for users and automation to act on.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="61-changing-logging">61. Changing logging<a class="headerlink" href="#61-changing-logging" title="Permanent link">&para;</a></h3>
+<p>Keep logs useful for debugging without making tests flaky.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="62-changing-performance-sensitive-paths">62. Changing performance-sensitive paths<a class="headerlink" href="#62-changing-performance-sensitive-paths" title="Permanent link">&para;</a></h3>
+<p>Measure before and after when the change affects common loops.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="63-changing-memory-heavy-paths">63. Changing memory-heavy paths<a class="headerlink" href="#63-changing-memory-heavy-paths" title="Permanent link">&para;</a></h3>
+<p>Check large binaries and avoid unbounded accumulation.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="64-changing-parser-code">64. Changing parser code<a class="headerlink" href="#64-changing-parser-code" title="Permanent link">&para;</a></h3>
+<p>Use structured readers and bounds checks rather than ad hoc slicing.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="65-changing-graph-algorithms">65. Changing graph algorithms<a class="headerlink" href="#65-changing-graph-algorithms" title="Permanent link">&para;</a></h3>
+<p>Prefer explicit graph facts over lexical ordering or sample-specific assumptions.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="66-changing-dataflow-analysis">66. Changing dataflow analysis<a class="headerlink" href="#66-changing-dataflow-analysis" title="Permanent link">&para;</a></h3>
+<p>Document convergence, lattice meaning, and budget behavior.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="67-changing-fixed-point-loops">67. Changing fixed-point loops<a class="headerlink" href="#67-changing-fixed-point-loops" title="Permanent link">&para;</a></h3>
+<p>Make termination, changed status, and budget behavior inspectable.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="68-changing-type-inference">68. Changing type inference<a class="headerlink" href="#68-changing-type-inference" title="Permanent link">&para;</a></h3>
+<p>Keep confidence and provenance visible; avoid overconfident names.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="69-changing-abi-handling">69. Changing ABI handling<a class="headerlink" href="#69-changing-abi-handling" title="Permanent link">&para;</a></h3>
+<p>Keep architecture and calling convention boundaries explicit.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="70-changing-x86-behavior">70. Changing x86 behavior<a class="headerlink" href="#70-changing-x86-behavior" title="Permanent link">&para;</a></h3>
+<p>Validate exact sample first, then the broader x86/x86-64 family.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="71-changing-non-x86-behavior">71. Changing non-x86 behavior<a class="headerlink" href="#71-changing-non-x86-behavior" title="Permanent link">&para;</a></h3>
+<p>Do not regress x86/x86-64 priority while expanding breadth.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="72-changing-docs-only">72. Changing docs only<a class="headerlink" href="#72-changing-docs-only" title="Permanent link">&para;</a></h3>
+<p>Do not claim semantic improvement from documentation changes.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h3 id="73-changing-logo-or-readme-assets">73. Changing logo or README assets<a class="headerlink" href="#73-changing-logo-or-readme-assets" title="Permanent link">&para;</a></h3>
+<p>Keep icon and README logo responsibilities separate.</p>
+<ul>
+<li>Owner: identify the crate and module that owns the behavior before editing.</li>
+<li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
+<li>Coverage: add or update the smallest test that captures the invariant.</li>
+<li>Validation: run the targeted check first, then the relevant crate-level check.</li>
+<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Report: separate mechanical change from quality improvement.</li>
+</ul>
+<h2 id="review-question-bank">Review Question Bank<a class="headerlink" href="#review-question-bank" title="Permanent link">&para;</a></h2>
+<p>Use these questions during code review or before handing off a quality cycle.</p>
+<ul>
+<li>[ ] 01. Which layer owns this behavior?</li>
+<li>[ ] 02. Is the change semantic, presentational, telemetry-only, or documentation-only?</li>
+<li>[ ] 03. What exact row, address, sample, command, or artifact motivated the change?</li>
+<li>[ ] 04. What invariant does the new test encode?</li>
+<li>[ ] 05. Could this patch accidentally special-case one binary?</li>
+<li>[ ] 06. Could this have been fixed lower in the pipeline?</li>
+<li>[ ] 07. Does the printer now infer facts it does not own?</li>
+<li>[ ] 08. Does automation define a metric already owned by <code>NirBuildStats</code>?</li>
+<li>[ ] 09. Does the loader fail closed on unsupported input?</li>
+<li>[ ] 10. Does resource lookup go through path configuration?</li>
+<li>[ ] 11. Are vendor files used only as reference material?</li>
+<li>[ ] 12. Is any new dependency justified by a long-term bottleneck?</li>
+<li>[ ] 13. Is output deterministic across machines?</li>
+<li>[ ] 14. Are local absolute paths absent from production code?</li>
+<li>[ ] 15. Does the CLI remain a product surface rather than a semantic owner?</li>
+<li>[ ] 16. Does GUI code consume shared function views?</li>
+<li>[ ] 17. Are errors typed enough to debug?</li>
+<li>[ ] 18. Are logs useful without being test-sensitive?</li>
+<li>[ ] 19. Are large binaries handled without unbounded memory growth?</li>
+<li>[ ] 20. Does the pass pipeline converge with accurate changed flags?</li>
+<li>[ ] 21. Are analysis dependencies declared explicitly?</li>
+<li>[ ] 22. Is fallback output honest when structure is not proven?</li>
+<li>[ ] 23. Are type hints evidence-backed?</li>
+<li>[ ] 24. Are stack slots and registers handled consistently?</li>
+<li>[ ] 25. Is ABI behavior isolated by architecture?</li>
+<li>[ ] 26. Are sample fixtures documented?</li>
+<li>[ ] 27. Were snapshots inspected before acceptance?</li>
+<li>[ ] 28. Were stale caches disabled for semantic benchmark checks?</li>
+<li>[ ] 29. Were row-level artifacts inspected?</li>
+<li>[ ] 30. Did any existing pass row regress?</li>
+<li>[ ] 31. Was the release CLI rebuilt when benchmark validation needed it?</li>
+<li>[ ] 32. Does CI pull the right LFS resources?</li>
+<li>[ ] 33. Are docs updated when public behavior changes?</li>
+<li>[ ] 34. Are limitations stated plainly?</li>
+</ul>
+<h2 id="maintainer-handoff-template">Maintainer Handoff Template<a class="headerlink" href="#maintainer-handoff-template" title="Permanent link">&para;</a></h2>
+<p>Use this template when handing off a substantial decompiler-quality change.</p>
+<ul>
+<li><strong>Problem:</strong></li>
+<li><strong>Root cause:</strong></li>
+<li><strong>Owner layer:</strong></li>
+<li><strong>Implementation summary:</strong></li>
+<li><strong>Tests run:</strong></li>
+<li><strong>Benchmarks or row checks:</strong></li>
+<li><strong>Artifacts inspected:</strong></li>
+<li><strong>Quality result:</strong></li>
+<li><strong>Regressions checked:</strong></li>
+<li><strong>Known risks:</strong></li>
+<li><strong>Follow-up work:</strong></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
