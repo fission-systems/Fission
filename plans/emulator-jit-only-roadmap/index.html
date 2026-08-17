@@ -1093,6 +1093,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#known-failing-diagnostic-lane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known-failing diagnostic lane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#anti-patterns" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1323,6 +1334,30 @@
 </span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>./target/release/fission_cli<span class="w"> </span>sandbox<span class="w"> </span>--srd-diff<span class="w"> </span>/tmp/srd_a.json<span class="w"> </span>/tmp/srd_b.json
 </span></code></pre></div>
 <p>Future: differential execution against a <strong>separate</strong> offline oracle harness is allowed for CI measurement only — never linked into <code>fission-emulator</code>. SRD is the in-tree multi-run contract language for policy/commit comparisons (not a vendor oracle).</p>
+<h2 id="known-failing-diagnostic-lane">Known-failing diagnostic lane<a class="headerlink" href="#known-failing-diagnostic-lane" title="Permanent link">&para;</a></h2>
+<p>Four <code>diag_*</code> tests fail on <code>x64_static_printf_malloc.elf</code>, all at the same
+point:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>diag_alloc_meta::probe_alloc_meta_globals
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>diag_alloc_meta::probe_meta_object_fields
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>diag_livelock::dump_state_at_malloc_hot
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>diag_expand_stall::past_sizeclass_freeable_or_bin_progress
+</span></code></pre></div>
+<p>The panic reads <code>Decode/lift failed at 0x1007C8D: sleigh parser path: ...
+DecodeNoMatch in subtable addr64</code>, and has been described in commit messages
+and release notes as a "SLEIGH decode failure". <strong>That name is wrong and sends
+the next investigation to the wrong crate.</strong></p>
+<p><code>0x1007C8D</code> is in <code>.data</code> (0x1007C00, 244 bytes, not executable). The bytes
+there are <code>ff ff ff ff 0a 00 00 00</code> — <code>-1</code> followed by <code>10</code>. Sleigh is working
+correctly; it is refusing to decode data as an instruction. The defect is that
+execution reached a non-executable address at all, which makes this an
+emulator control-flow failure and <code>fission-emulator</code> its owner.</p>
+<p>All four die after the same syscall sequence (<code>mmap</code>, <code>brk</code>x2, <code>arch_prctl</code>,
+<code>set_tid_address</code>) around musl mallocng init, last good PCs in the
+<code>0x1002C8B</code>–<code>0x100357A</code> range.</p>
+<p>Not being chased down now: the execution engine is scheduled to change, and a
+control-flow bug in the current backend is likely to move or vanish with it.
+These four are the acceptance criterion for that work — a backend that walks
+mallocng init without leaving <code>.text</code> is what makes them pass.</p>
 <h2 id="anti-patterns">Anti-patterns<a class="headerlink" href="#anti-patterns" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Restoring a P-Code interpreter as execution engine</li>
