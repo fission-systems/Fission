@@ -393,3 +393,45 @@ construct's *first* touch of the destination is a write on every path into
 it, which is a real analysis rather than a match-arm tweak. Worth doing —
 it is 11 of the remaining 54 non-Go occurrences — but it is not the one-line
 change the shape suggests.
+
+## 9. A measurement error underneath all of this
+
+Checking every row's decompiled signature against the name its manifest gives
+— the check that exposed the Go group — turns out to matter far beyond Go.
+**90 of 464 corpus rows (19%) decompile a different function than the
+manifest names.**
+
+| compiler | wrong function | rows | example |
+|---|---|---|---|
+| gcc | 27 | 223 | `count_bits` -> `FUN_0x140001530` |
+| gcc-m32 | 22 | 104 | `count_bits` -> `sub_4015b0` |
+| go | 15 | 15 | `go_add_ints` -> `duffzero` |
+| g++ | 13 | 13 | `cpp_add_ints` -> `cpp_cstr_len` |
+| rustc | 13 | 16 | `rust_add_ints` -> `rust_cstr_len` |
+| clang | **0** | 82 | |
+| gcc-elf / gcc-aarch64 | **0** | 11 | |
+
+Two shapes are mixed here and they are not the same problem:
+
+- **no name recovered** (`FUN_0x…`, `sub_…`) — the address is right, the
+  symbol is not resolved. gcc and gcc-m32 are mostly this.
+- **a different function entirely** (`rust_add_ints` -> `rust_cstr_len`,
+  `go_add_ints` -> `duffzero`) — go, g++, rustc are this, and it means the
+  row is measuring something other than what it claims.
+
+Of the 50 rows counted as reading an undefined name, **21 are wrong-function
+rows**, so the genuine figure is **29**, not 50.
+
+This is worth stating plainly: this document has now been wrong about its own
+headline number twice. Section 2 said 93 when 32 were a regression I had just
+committed; the corrected 57 counted rows that were not measuring the function
+they named. Every number here is a count over rows, and a row is only evidence
+if it decompiled the function it claims to.
+
+Two corrections are needed before the remaining branches are worth chasing:
+
+1. The comparison must tolerate legitimate decoration. 32-bit PE / cdecl
+   prefixes an underscore, so a naive check reported 104/104 gcc-m32 rows as
+   mismatched; the real figure is 22.
+2. The undefined-name axis, and any other per-row axis, should exclude
+   wrong-function rows rather than count them.
