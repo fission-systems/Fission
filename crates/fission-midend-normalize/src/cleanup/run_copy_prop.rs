@@ -423,6 +423,11 @@ fn run(
         }
     }
 
+    // What this run reads before it is rewritten, so a later comparison against
+    // the whole-function count can tell "nobody reads it" from "somebody
+    // outside this list reads it".
+    let run_reads = count_reads(stmts);
+
     let mut map: HashMap<String, PreHirExpr> = HashMap::default();
     let mut folded: HashSet<String> = HashSet::default();
 
@@ -507,6 +512,13 @@ fn run(
         if !scratch.contains(dst) || expr_has_call(rhs) {
             continue;
         }
+        // A `for` header reads names defined in its body -- `for (; ; p = t)`
+        // over a body that computes `t`. Those reads are not in this statement
+        // list, so a run-local count says zero and the definition looks dead.
+        // Anything read more than this run can see is off limits.
+        if reads.get(dst).copied().unwrap_or(0) > run_reads.get(dst).copied().unwrap_or(0) {
+            continue;
+        }
         for j in i + 1..stmts.len() {
             // Any boundary ends the window: control may not reach the
             // overwrite, so the first write is not provably dead.
@@ -558,8 +570,13 @@ fn run(
             lhs: PreHirLValue::Var(dst),
             rhs,
         } => {
+            // `after` only sees this statement list. A name this run never
+            // reads may still be read by an enclosing `for` header, so the
+            // whole-function count has to agree that it is dead.
             !(scratch.contains(dst)
                 && after.get(dst).copied().unwrap_or(0) == 0
+                && reads.get(dst).copied().unwrap_or(0)
+                    <= run_reads.get(dst).copied().unwrap_or(0)
                 && !expr_has_call(rhs))
         }
         _ => true,
@@ -761,6 +778,37 @@ mod tests {
         assert!(
             out.contains("xVar1"),
             "must not substitute the new local_4: {out}"
+        );
+    }
+
+    /// A `for` header reads names its body defines. The body is a separate
+    /// statement list, so a run-local read count sees zero for such a name and
+    /// would retire the definition out from under the loop -- which is what
+    /// happened to `list_sum` at clang -O0, where `for (; ; p = xVar26)` lost
+    /// both statements that computed `xVar26`.
+    #[test]
+    fn keeps_a_definition_that_only_the_enclosing_for_header_reads() {
+        let mut f = func(
+            vec![temp("xVar26"), local("local_18")],
+            vec![PreHirStmt::For {
+                init: Some(Box::new(set("local_18", k(1)))),
+                cond: Some(var("local_18")),
+                update: Some(Box::new(set("local_18", var("xVar26")))),
+                body: Rc::new(vec![set("xVar26", add(var("local_18"), k(8)))]),
+            }],
+        );
+        propagate_copies_in_runs(&mut f);
+        let out = render(&f);
+        assert!(
+            out.contains("xVar26"),
+            "the body's definition of xVar26 must survive: {out}"
+        );
+        let PreHirStmt::For { body, .. } = &f.body[0] else {
+            panic!("expected For");
+        };
+        assert!(
+            !body.is_empty(),
+            "loop body must still define the update's source: {out}"
         );
     }
 
