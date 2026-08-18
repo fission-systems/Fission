@@ -125,25 +125,49 @@ def parse_builtin(rec: bytes) -> Optional[dict]:
 
 def parse_pointer_table(bf: BufferFile) -> Dict[int, dict]:
     """Pointer records are fixed-length and live in LONGKEY_FIXED_REC leaf
-    nodes, which walk_all_leaves() (VAR_REC-only) never visits."""
+    nodes, which walk_all_leaves() (VAR_REC-only) never visits.
+
+    `FixedRecNode` is the leaf type for EVERY table with fixed-length records,
+    and its record length comes from the table's schema, not from the node. So
+    a node's own bytes cannot say whether it holds 17-byte pointer records; only
+    the buffers belonging to the "Pointers" table do.
+
+    Reading all of them as pointers is what went wrong: 32 candidate buffers in
+    generic_clib_64.gdt yielded 16,199 "pointers" of which 1,404 are real. The
+    rest were other tables reinterpreted at the wrong stride, and their decoded
+    pointee IDs carried 250-odd distinct kind bytes where only 0-8 exist. That
+    is worse than missing data -- it answers pointee lookups with plausible
+    nonsense, and `FILE *fopen(...)` came out `int*`.
+
+    Three properties identify a genuine pointer leaf, and together they select
+    exactly the three real ones:
+
+      * the whole key/record array fits the buffer at a 25-byte stride
+        (8-byte key + 17-byte record), which alone rejects most impostors
+      * B-tree leaf keys are strictly ascending
+      * every key is a Data Type ID of kind POINTER -- this table's keys are
+        its own IDs, so a single foreign key means a foreign table
+    """
     pointers: Dict[int, dict] = {}
-    HEADER = 13
+    HEADER = 13  # NodeType(1) | KeyCount(4) | PrevLeafId(4) | NextLeafId(4)
     entry_size = 8 + POINTER_RECORD_LENGTH
     for buf_idx in range(bf.num_user_buffers()):
         buf = bf.get_buffer(buf_idx)
         if buf is None or len(buf) < HEADER or buf[0] != NODE_LONGKEY_FIXED_REC:
             continue
         kc = _i32(buf, 1)
-        if kc <= 0 or kc > 10000:
+        if kc <= 0 or HEADER + kc * entry_size > len(buf):
             continue
-        for i in range(kc):
-            base = HEADER + i * entry_size
-            if base + entry_size > len(buf):
-                break
-            key = _i64(buf, base)
-            rec = buf[base + 8:base + 8 + POINTER_RECORD_LENGTH]
-            if len(rec) != POINTER_RECORD_LENGTH:
-                continue
+
+        keys = [_i64(buf, HEADER + i * entry_size) for i in range(kc)]
+        if any(keys[i] >= keys[i + 1] for i in range(kc - 1)):
+            continue
+        if any(split_kind(key)[0] != KIND_POINTER for key in keys):
+            continue
+
+        for i, key in enumerate(keys):
+            base = HEADER + i * entry_size + 8
+            rec = buf[base:base + POINTER_RECORD_LENGTH]
             pointee_dtid = _i64(rec, 0)
             length_byte = rec[16]
             length = length_byte - 256 if length_byte >= 128 else length_byte
