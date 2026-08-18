@@ -10,10 +10,17 @@
 # inventory reported file_count=3468 while its archive held 1048 files, so the
 # one number available to check a bundle against described something else.
 #
-# .gdt archives are excluded. They are read only by the offline extractors
-# (scripts/gdt_extract_*.py, scripts/win32_enum_groups.py) which run here, never
-# by Fission: `get_all_gdt_paths` has no callers and no `.gdt` path is opened
-# anywhere outside path_config.rs. Shipping them costs 20.7M for nothing.
+# Two kinds of file are excluded, each after checking it is unreachable.
+#
+# .gdt archives: read only by the offline extractors (scripts/gdt_extract_*.py,
+# scripts/win32_enum_groups.py) which run here, never by Fission.
+# `get_all_gdt_paths` has no callers and no `.gdt` path is opened anywhere
+# outside path_config.rs. 20.7M.
+#
+# signatures/fidb_java/: `find_fid_file` falls back from `<name>.fidbf` to
+# `<name>.fidb` only when the .fidbf is absent, and all 47 .fidb files have a
+# .fidbf sibling -- the fallback cannot fire. 64.5M, and it barely compresses
+# (1.1x) because Ghidra already stores it deflated.
 set -euo pipefail
 
 out="${1:-fission-utils.tar.gz}"
@@ -28,11 +35,13 @@ if [ "${slaspec_count}" -le 10 ]; then
   exit 1
 fi
 
-tar --exclude='*.gdt' --exclude='.DS_Store' -czf "${out}" utils
+tar --exclude='*.gdt' --exclude='.DS_Store' \
+    --exclude='utils/signatures/fidb_java' -czf "${out}" utils
 shasum -a 256 "${out}" > "${out}.sha256"
 
 archive_files=$(tar tzf "${out}" | grep -vc '/$')
-tree_files=$(find utils -type f ! -name '*.gdt' ! -name '.DS_Store' | wc -l | tr -d ' ')
+tree_files=$(find utils -type f ! -name '*.gdt' ! -name '.DS_Store' \
+  ! -path 'utils/signatures/fidb_java/*' | wc -l | tr -d ' ')
 if [ "${archive_files}" -ne "${tree_files}" ]; then
   echo "archive holds ${archive_files} files, tree has ${tree_files} -- refusing" >&2
   exit 1
@@ -45,7 +54,7 @@ fi
   echo "source_sha=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "slaspec_count=${slaspec_count}"
   echo "file_count=${archive_files}   # counted in the archive, not the tree"
-  echo "excluded=*.gdt (build-time only), .DS_Store"
+  echo "excluded=*.gdt (build-time only), signatures/fidb_java (unreachable fallback), .DS_Store"
   echo "archive_bytes=$(wc -c < "${out}" | tr -d ' ')"
   echo
   echo "archive files by top-level directory:"
