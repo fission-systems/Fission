@@ -45,21 +45,10 @@ jobs:
 
       - name: Package
         shell: bash
-        run: |
-          set -euo pipefail
-          slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')
-          echo "slaspec_count=${slaspec_count}"
-          test "${slaspec_count}" -gt 10
-          tar -czf fission-utils.tar.gz utils
-          shasum -a 256 fission-utils.tar.gz > fission-utils.tar.gz.sha256
-          {
-            echo "assets_tag=${{ inputs.assets_tag }}"
-            echo "source_ref=${{ inputs.ref }}"
-            echo "source_sha=$(git rev-parse HEAD)"
-            echo "slaspec_count=${slaspec_count}"
-            du -sh utils utils/* 2>/dev/null || true
-          } | tee fission-utils.inventory.txt
-          ls -lh fission-utils.tar.gz
+        env:
+          ASSETS_TAG: ${{ inputs.assets_tag }}
+          SOURCE_REF: ${{ inputs.ref }}
+        run: ./scripts/package_utils_bundle.sh fission-utils.tar.gz
 
       - name: Create or update GitHub Release assets
         uses: softprops/action-gh-release@v1
