@@ -246,6 +246,71 @@ impl FpkReader {
         Ok(text)
     }
 
+    /// Entries of the auxiliary hash index, or `None` when the file has none.
+    fn hash_entries(&self) -> Option<&[u8]> {
+        let len = self.map.len();
+        if len < HASH_TRAILER_LEN {
+            return None;
+        }
+        let trailer = len - HASH_TRAILER_LEN;
+        if &self.map[trailer..trailer + 4] != HASH_INDEX_MAGIC {
+            return None;
+        }
+        let count = u64_at(&self.map, trailer + 8) as usize;
+        let offset = u64_at(&self.map, trailer + 16) as usize;
+        let end = offset.checked_add(count.checked_mul(HASH_ENTRY_LEN)?)?;
+        if end > trailer {
+            return None;
+        }
+        Some(&self.map[offset..end])
+    }
+
+    pub fn has_hash_index(&self) -> bool {
+        self.hash_entries().is_some()
+    }
+
+    /// Records whose index key is `key`, decoding only the blocks they live in.
+    ///
+    /// A key that is absent costs a binary search over the mapped index and no
+    /// decompression at all, which is the common case for a FID query.
+    pub fn records_by_key(&self, key: u64) -> Result<Vec<String>, FpkError> {
+        let Some(entries) = self.hash_entries() else {
+            return Err(FpkError::Malformed("no hash index"));
+        };
+        let count = entries.len() / HASH_ENTRY_LEN;
+        let key_at = |i: usize| u64_at(entries, i * HASH_ENTRY_LEN);
+        // Leftmost entry with this key; equal keys are adjacent by construction.
+        let (mut lo, mut hi) = (0usize, count);
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if key_at(mid) < key { lo = mid + 1 } else { hi = mid }
+        }
+        let mut out = Vec::new();
+        let mut i = lo;
+        while i < count && key_at(i) == key {
+            let base = i * HASH_ENTRY_LEN;
+            let block = u32_at(entries, base + 8) as usize;
+            let row = u32_at(entries, base + 12) as usize;
+            if block >= self.blocks.len() {
+                return Err(FpkError::Corrupt(format!(
+                    "hash index points at block {block}, file has {}",
+                    self.blocks.len()
+                )));
+            }
+            let text = self.block_at(block)?;
+            match text.lines().nth(row) {
+                Some(line) => out.push(line.to_owned()),
+                None => {
+                    return Err(FpkError::Corrupt(format!(
+                        "hash index points at row {row} of block {block}"
+                    )));
+                }
+            }
+            i += 1;
+        }
+        Ok(out)
+    }
+
     /// Every record, decompressing each block once. For callers that genuinely
     /// need the whole table; a lookup should use [`FpkReader::block_for`].
     pub fn read_all(&self) -> Result<Vec<String>, FpkError> {
@@ -325,6 +390,56 @@ fn columns_from_rows(group: &[&String]) -> Vec<u8> {
     out
 }
 
+
+// ── Auxiliary hash index ────────────────────────────────────────────────────
+//
+// Appended after the block index, described by a trailer at EOF. The payload's
+// bytes are untouched: the canonical records stay exactly what `pack_with`
+// wrote, and this is derived data that lives outside them. `.fpk` already
+// carried one index beside the payload -- the sparse per-block one -- so this
+// is that idea extended to the key a caller actually queries by.
+//
+// It exists because payload order and lookup order are different problems. FID
+// records are stored in symbol-name order, which is what compresses; matching
+// asks for a `full_hash`. Without an index the only way to answer is to decode
+// and parse everything, which measured 65ms per process.
+
+const HASH_INDEX_MAGIC: &[u8; 4] = b"FIDX";
+const HASH_TRAILER_LEN: usize = 56;
+const HASH_ENTRY_LEN: usize = 16;
+
+/// One `key -> record` mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HashEntry {
+    pub key: u64,
+    pub block: u32,
+    pub row: u32,
+}
+
+/// Append a sorted `key -> locator` index to a packed image.
+///
+/// Duplicate keys are allowed and kept adjacent, because a full hash can name
+/// several functions and dropping the extras would silently narrow matching.
+pub fn append_hash_index(image: &mut Vec<u8>, mut entries: Vec<HashEntry>) {
+    entries.sort_by_key(|e| (e.key, e.block, e.row));
+    let entries_offset = image.len() as u64;
+    let mut bytes = Vec::with_capacity(entries.len() * HASH_ENTRY_LEN);
+    for entry in &entries {
+        bytes.extend_from_slice(&entry.key.to_le_bytes());
+        bytes.extend_from_slice(&entry.block.to_le_bytes());
+        bytes.extend_from_slice(&entry.row.to_le_bytes());
+    }
+    let digest = sha256(&bytes);
+    image.extend_from_slice(&bytes);
+    image.extend_from_slice(HASH_INDEX_MAGIC);
+    image.extend_from_slice(&1u16.to_le_bytes());
+    image.extend_from_slice(&0u16.to_le_bytes());
+    image.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+    image.extend_from_slice(&entries_offset.to_le_bytes());
+    image.extend_from_slice(&digest);
+    debug_assert_eq!(image.len() - entries_offset as usize, bytes.len() + HASH_TRAILER_LEN);
+}
+
 /// Pack sorted records into an `.fpk` image.
 ///
 /// Byte-for-byte the same container `scripts/fpk_pack.py` writes, so a table
@@ -358,20 +473,54 @@ pub fn pack_with(
     sort_field: usize,
     block_target: usize,
 ) -> Vec<u8> {
+    pack_with_locators(records, kind, codec, sort_field, block_target).0
+}
+
+/// Where a record ended up, so a caller can build an index into the payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Locator {
+    pub block: u32,
+    pub row: u32,
+}
+
+/// [`pack_with`], also reporting each input record's physical position.
+///
+/// `locators[i]` describes `records[i]`, in the caller's order rather than the
+/// sorted one, so a caller that knows something else about record `i` -- FID
+/// knows its `full_hash` -- can pair the two without redoing the sort.
+///
+/// This is what lets payload order and lookup order come apart. Sorting by name
+/// is worth 25.47M against 32.96M on the FID function table, and hash lookup
+/// wants a different order entirely; with locators the payload can keep the
+/// order that compresses and an index can carry the order that answers queries.
+pub fn pack_with_locators(
+    records: &[String],
+    kind: u16,
+    codec: u16,
+    sort_field: usize,
+    block_target: usize,
+) -> (Vec<u8>, Vec<Locator>) {
     use std::io::Write;
 
     let key_of = |line: &str| line.split('|').nth(sort_field).unwrap_or("").to_owned();
-    let mut sorted: Vec<&String> = records.iter().collect();
-    sorted.sort_by_key(|line| key_of(line));
+    // Indices into `records`, so the caller's ordering can be recovered.
+    let mut order: Vec<usize> = (0..records.len()).collect();
+    order.sort_by_key(|i| key_of(&records[*i]));
+    let sorted: Vec<&String> = order.iter().map(|i| &records[*i]).collect();
 
+    let mut locators = vec![Locator { block: 0, row: 0 }; records.len()];
     let mut groups: Vec<Vec<&String>> = Vec::new();
     let mut current: Vec<&String> = Vec::new();
     let mut size = 0usize;
-    for record in &sorted {
+    for (position, record) in sorted.iter().enumerate() {
         if size + record.len() + 1 > block_target && !current.is_empty() {
             groups.push(std::mem::take(&mut current));
             size = 0;
         }
+        locators[order[position]] = Locator {
+            block: groups.len() as u32,
+            row: current.len() as u32,
+        };
         current.push(record);
         size += record.len() + 1;
     }
@@ -421,7 +570,7 @@ pub fn pack_with(
     debug_assert_eq!(out.len(), HEADER_LEN);
     out.extend_from_slice(&payload);
     out.extend_from_slice(&index);
-    out
+    (out, locators)
 }
 
 /// SHA-256 of the payload, stored so a truncated or swapped body is caught.
@@ -626,6 +775,76 @@ mod tests {
             reader.read_all().unwrap(),
             vec!["1|alpha", "2|bravo", "3|charlie"]
         );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_hash_index_finds_records_without_reading_the_rest() {
+        // Sorted by column 1 so payload order and lookup order differ, which is
+        // the whole point of carrying an index.
+        let records: Vec<String> = (0..2000u64)
+            .map(|i| format!("{:016x}|name{:04}|payload", i * 2654435761, i))
+            .collect();
+        let (mut image, locators) = super::pack_with_locators(&records, 1, CODEC_ZLIB, 1, 4096);
+        let entries: Vec<HashEntry> = records
+            .iter()
+            .zip(&locators)
+            .map(|(r, l)| HashEntry {
+                key: u64::from_str_radix(r.split('|').next().unwrap(), 16).unwrap(),
+                block: l.block,
+                row: l.row,
+            })
+            .collect();
+        super::append_hash_index(&mut image, entries);
+
+        let path = write_temp(&image);
+        let reader = FpkReader::open(&path).unwrap();
+        assert!(reader.has_hash_index());
+        assert!(reader.block_count() > 1, "test needs several blocks");
+
+        for i in [0u64, 7, 1999] {
+            let key = i * 2654435761;
+            let found = reader.records_by_key(key).unwrap();
+            assert_eq!(found.len(), 1, "key {key:x}");
+            assert!(found[0].contains(&format!("name{i:04}")));
+        }
+        // A key no record holds returns nothing rather than a near miss.
+        assert!(reader.records_by_key(0xdead_beef).unwrap().is_empty());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn duplicate_keys_all_come_back() {
+        // A full hash can name several functions; keeping only one would
+        // silently narrow matching.
+        let records: Vec<String> = (0..5)
+            .map(|i| format!("dup|name{i}|payload"))
+            .collect();
+        let (mut image, locators) = super::pack_with_locators(&records, 1, CODEC_ZLIB, 1, 64);
+        let entries: Vec<HashEntry> = locators
+            .iter()
+            .map(|l| HashEntry {
+                key: 42,
+                block: l.block,
+                row: l.row,
+            })
+            .collect();
+        super::append_hash_index(&mut image, entries);
+        let path = write_temp(&image);
+        let reader = FpkReader::open(&path).unwrap();
+        assert_eq!(reader.records_by_key(42).unwrap().len(), 5);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_file_without_a_hash_index_says_so() {
+        let path = write_temp(&pack(&["a|1", "b|2"]));
+        let reader = FpkReader::open(&path).unwrap();
+        assert!(!reader.has_hash_index());
+        assert!(matches!(
+            reader.records_by_key(1),
+            Err(FpkError::Malformed(_))
+        ));
         std::fs::remove_file(&path).ok();
     }
 

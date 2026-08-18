@@ -19,7 +19,10 @@
 //! build process.
 
 use super::types::{FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfRelation, FidbfRelationType};
-use crate::fpk::{BLOCK_TARGET_BULK, CODEC_ZSTD_COLUMNAR, FpkError, FpkReader, pack_with};
+use crate::fpk::{
+    BLOCK_TARGET_BULK, CODEC_ZSTD_COLUMNAR, FpkError, FpkReader, HashEntry, append_hash_index,
+    pack_with, pack_with_locators,
+};
 use std::path::Path;
 
 pub const KIND_FID_LIBRARY: u16 = 10;
@@ -173,9 +176,32 @@ pub fn encode(db: &FidbfDatabase) -> FidFpkImages {
     let bulk = |records: &Vec<String>, kind: u16, sort_field: usize| {
         pack_with(records, kind, CODEC_ZSTD_COLUMNAR, sort_field, BLOCK_TARGET_BULK)
     };
+
+    // The function table carries a `full_hash -> record` index so a match can
+    // be answered without decoding the table. `functions[i]` was built from
+    // `db.functions[i]`, so the locator and the hash line up by position.
+    let (mut functions_image, locators) = pack_with_locators(
+        &functions,
+        KIND_FID_FUNCTION,
+        CODEC_ZSTD_COLUMNAR,
+        1,
+        BLOCK_TARGET_BULK,
+    );
+    let entries: Vec<HashEntry> = db
+        .functions
+        .iter()
+        .zip(&locators)
+        .map(|(f, l)| HashEntry {
+            key: f.full_hash,
+            block: l.block,
+            row: l.row,
+        })
+        .collect();
+    append_hash_index(&mut functions_image, entries);
+
     FidFpkImages {
         libraries: bulk(&libraries, KIND_FID_LIBRARY, 1),
-        functions: bulk(&functions, KIND_FID_FUNCTION, 1),
+        functions: functions_image,
         relations: bulk(&relations, KIND_FID_RELATION, 0),
         domain_paths: bulk(&domain_paths, KIND_FID_DOMAIN_PATH, 1),
     }
