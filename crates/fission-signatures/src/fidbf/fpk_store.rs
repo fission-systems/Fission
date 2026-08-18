@@ -18,7 +18,10 @@
 //! matches -- and that flag is set on real functions by the database's own
 //! build process.
 
-use super::types::{FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfRelation, FidbfRelationType};
+use super::types::{
+    FID_ACCEPT_THRESHOLD, FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfMatch, FidbfRelation,
+    FidbfRelationType,
+};
 use crate::fpk::{
     BLOCK_TARGET_BULK, CODEC_ZSTD_COLUMNAR, FpkError, FpkReader, HashEntry, append_hash_index,
     pack_with, pack_with_locators,
@@ -366,4 +369,141 @@ mod tests {
             assert_eq!(unesc(&esc(raw)), raw, "escaping lost {raw:?}");
         }
     }
+}
+
+// ── Lazy lookup ─────────────────────────────────────────────────────────────
+
+/// A FID database answered from its `.fpk` tables without being built.
+///
+/// `identify_by_hashes` is the only question either caller asks, and the
+/// function table's `full_hash` index answers it directly: a miss touches
+/// mapped bytes and nothing else, a hit decodes the one block its candidates
+/// live in. Building `FidbfDatabase` to answer the same question costs 65ms of
+/// decode, parse and index rebuild, per process, before the first query.
+///
+/// Library rows are small and are read once, because a match needs its family
+/// name. `domain_path` is not read at all: nothing outside the parser uses it.
+pub struct LazyFidDatabase {
+    functions: FpkReader,
+    libraries: Vec<FidbfLibrary>,
+    source_path: String,
+}
+
+impl LazyFidDatabase {
+    /// Open the tables beside `path`, or `None` when they are not all present.
+    pub fn open(path: &Path) -> Option<Self> {
+        let stem = path.file_stem()?.to_str()?;
+        let dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let table = |suffix: &str| dir.join(format!("{stem}.{suffix}.fpk"));
+        let functions = FpkReader::open(&table("fn")).ok()?;
+        if !functions.has_hash_index() {
+            return None;
+        }
+        let libraries_reader = FpkReader::open(&table("lib")).ok()?;
+        let mut libraries = Vec::new();
+        for line in libraries_reader.read_all().ok()? {
+            if let Some(library) = decode_library(&line) {
+                libraries.push(library);
+            }
+        }
+        Some(Self {
+            functions,
+            libraries,
+            source_path: path.display().to_string(),
+        })
+    }
+
+    pub fn source_path(&self) -> &str {
+        &self.source_path
+    }
+
+    /// Whether any library here matches `language_id`, the check
+    /// `discover_for_load_spec` makes before keeping a database.
+    pub fn has_language(&self, language_id: &str) -> bool {
+        self.libraries
+            .iter()
+            .any(|l| l.language_id.is_empty() || l.language_id == language_id)
+    }
+
+    /// Same contract as [`FidbfDatabase::identify_by_hashes`], including the
+    /// auto_fail / auto_pass / force_specific / force_relation rules.
+    pub fn identify_by_hashes(&self, full_hash: u64, specific_hash: u64) -> Vec<FidbfMatch> {
+        let Ok(records) = self.functions.records_by_key(full_hash) else {
+            return Vec::new();
+        };
+        let mut results: Vec<FidbfMatch> = records
+            .iter()
+            .filter_map(|line| decode_function_for_match(line))
+            .filter(|f| !f.auto_fail)
+            .filter(|f| !f.force_relation)
+            .filter(|f| !f.force_specific || f.specific_hash == specific_hash)
+            .filter_map(|f| {
+                let score = (f.code_unit_size as f32
+                    + if f.specific_hash == specific_hash { 10.0 } else { 0.0 })
+                    .min(100.0);
+                if !f.auto_pass && score < FID_ACCEPT_THRESHOLD {
+                    return None;
+                }
+                let family = self
+                    .libraries
+                    .iter()
+                    .find(|l| l.key == f.library_id)
+                    .map(|l| l.family_name.clone())
+                    .unwrap_or_default();
+                Some(FidbfMatch {
+                    name: f.name,
+                    library_family: family,
+                    score,
+                    specific_matched: f.specific_hash == specific_hash,
+                })
+            })
+            .collect();
+        results.sort_by(|a, b| b.score.total_cmp(&a.score));
+        results
+    }
+}
+
+fn decode_library(line: &str) -> Option<FidbfLibrary> {
+    let f: Vec<&str> = line.split('|').collect();
+    if f.len() < 9 {
+        return None;
+    }
+    Some(FidbfLibrary {
+        key: parse_i64_hex(f[0]),
+        family_name: unesc(f[1]),
+        version: unesc(f[2]),
+        variant: unesc(f[3]),
+        ghidra_version: unesc(f[4]),
+        language_id: unesc(f[5]),
+        language_version: f[6].parse().unwrap_or(0),
+        language_minor_version: f[7].parse().unwrap_or(0),
+        compiler_spec_id: unesc(f[8]),
+    })
+}
+
+/// The fields a match needs. `domain_path` stays an id: resolving it would mean
+/// opening another table for something no caller reads.
+fn decode_function_for_match(line: &str) -> Option<FidbfFunction> {
+    let f: Vec<&str> = line.split('|').collect();
+    if f.len() < 14 {
+        return None;
+    }
+    let forced: u8 = f[13].parse().unwrap_or(0);
+    Some(FidbfFunction {
+        key: parse_i64_hex(f[0]),
+        name: unesc(f[1]),
+        library_id: parse_i64_hex(f[2]),
+        full_hash: parse_u64_hex(f[3]),
+        specific_hash: parse_u64_hex(f[4]),
+        code_unit_size: parse_u64_hex(f[5]) as u32,
+        entry_point: parse_u64_hex(f[6]),
+        has_terminator: f[7] == "1",
+        specific_hash_additional_size: f[8].parse().unwrap_or(0),
+        domain_path: String::new(),
+        flags: f[10].parse().unwrap_or(0),
+        auto_pass: f[11] == "1",
+        auto_fail: f[12] == "1",
+        force_specific: forced & 2 != 0,
+        force_relation: forced & 1 != 0,
+    })
 }

@@ -1,3 +1,3 @@
 pub mod matcher;
 
-pub use matcher::FidDatabaseSet;
+pub use matcher::{FidDatabase, FidDatabaseSet};

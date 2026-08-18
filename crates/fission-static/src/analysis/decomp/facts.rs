@@ -5,7 +5,7 @@ use fission_loader::loader::types::{
     DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
 use fission_pcode::midend::cspec::register_model_for_language;
-use fission_signatures::FidDatabaseSet;
+use fission_signatures::{FidDatabaseSet, fid::FidDatabase};
 use fission_signatures::fidbf::FidbfDatabase;
 use fission_sleigh::runtime::{
     DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
@@ -336,7 +336,7 @@ impl FactStore {
     /// indicator isn't worth the extra database scan); see
     /// `die_engine.rs`'s confidence-scoring fix for why that threshold
     /// matters here.
-    fn discover_library_fid_databases(binary: &LoadedBinary) -> Vec<FidbfDatabase> {
+    fn discover_library_fid_databases(binary: &LoadedBinary) -> Vec<FidDatabase> {
         let detection = fission_loader::detect(binary);
         let paths = fission_core::PATHS.clone();
         let mut databases = Vec::new();
@@ -349,8 +349,12 @@ impl FactStore {
                 if !seen.insert(path.clone()) {
                     continue;
                 }
-                if let Ok(db) = fission_signatures::fidbf::parse_fidbf(&path) {
-                    databases.push(db);
+                // Same preference as `discover_for_load_spec`: packed tables
+                // answer from an index, the `.fidbf` has to be built first.
+                if let Some(lazy) = fission_signatures::fidbf::fpk_store::LazyFidDatabase::open(&path) {
+                    databases.push(FidDatabase::Lazy(lazy));
+                } else if let Ok(db) = fission_signatures::fidbf::parse_fidbf(&path) {
+                    databases.push(FidDatabase::Eager(Box::new(db)));
                 }
             }
         }
@@ -359,7 +363,7 @@ impl FactStore {
 
     /// The per-function decode/hash/lookup loop, split out from
     /// [`Self::ingest_signature_matches`] so tests can exercise it against a
-    /// synthetic, in-memory [`FidbfDatabase`] instead of needing a real
+    /// synthetic, in-memory database instead of needing a real
     /// bundled `.fidbf` file whose exact hash happens to match a real
     /// compiled binary (FID hashes are extremely build-specific -- see
     /// `PROJECT.md`'s FID entries for how brittle a real end-to-end match
@@ -367,7 +371,7 @@ impl FactStore {
     fn ingest_signature_matches_with_databases(
         &mut self,
         binary: &LoadedBinary,
-        databases: &[fission_signatures::fidbf::FidbfDatabase],
+        databases: &[FidDatabase],
     ) {
         let Some(load_spec) = binary.load_spec() else {
             return;
@@ -928,7 +932,10 @@ mod tests {
         );
 
         let mut store = FactStore::default();
-        store.ingest_signature_matches_with_databases(&binary, std::slice::from_ref(&database));
+        // The synthetic database is the eager form; matching does not care
+        // which form a database came from.
+        let databases = [FidDatabase::Eager(Box::new(database))];
+        store.ingest_signature_matches_with_databases(&binary, &databases);
 
         assert_eq!(store.resolved_name(0x401100), Some("known_prologue"));
         assert_eq!(
