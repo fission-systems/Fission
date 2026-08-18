@@ -186,6 +186,76 @@ where the local holding `fopen`'s result is now correctly `FILE*`. Propagating a
 typed local back to the parameter it was copied from is the next step, and it is
 ordinary type flow rather than library work.
 
+## Win32 constants
+
+`utils/` held three constant sources and none of them could name a literal.
+`win_api_constants.json` is a flat error-code table with no grouping and no
+`PAGE_*`, `WAIT_*` or even `ERROR_SUCCESS`. The enum list in
+`windows_vs12_*.gdt.types.json` has the names but wrong values -- `WAIT_OBJECT_0`
+2048 where it is 0, and `PAGE_NOACCESS` and `FILE_SHARE_READ` both 264 where
+both are 1, two distinct constants at one value being what shows the wrong field
+was read. `WinConstantsDb` had sixteen correct hand-written groups whose names
+do not match the ones `win_api_signatures.txt` uses.
+
+Joining group name to constants by prefix was measured and rejected.
+`PAGE_PROTECTION_FLAGS` -> `PAGE_*` works, and the same rule turns
+`PRINTER_HANDLE`, `SC_HANDLE` and `LSA_HANDLE` -- handle types, not enums --
+into groups of 137, 38 and 12 constants. 534 of 1,198 signature type names
+"resolve" that way.
+
+Three pieces closed it:
+
+`gdt_extract_enums.py` reads the enum tables Ghidra actually writes
+(`EnumDBAdapterV1` / `EnumValueDBAdapterV1`, schema order, no record header) and
+recovers 39,382 constants that agree with the MinGW headers on 99.75% of names,
+against `win_api_constants.json`'s 94.03%.
+
+`win32_enum_groups.py` takes group membership from `vendor/win32metadata`,
+already vendored and MIT licensed, which is where those group names came from.
+It is definitive in both directions: it gives `PAGE_PROTECTION_FLAGS` its
+members and says nothing about `PRINTER_HANDLE`. 745 groups list members
+outright, 309 declare a header prefix filter and are filled from the constant
+table. Result: 548 groups, 9,076 members, 726 methods with parameter mappings,
+including `{"method": "WaitForSingleObject", "parameter": "return"}`.
+
+The renderer names a literal call argument when metadata records a group for
+that parameter, and a compared literal when the variable holds a known API's
+return. The return reaches its comparison through a copy, so copies are followed
+to a fixed point. Only variables assigned once are tracked, only `==` and `!=`
+are annotated, and only flag sets decompose.
+
+The name goes in a comment, and that was measured:
+`return PAGE_EXECUTE_READWRITE;` fails to build in the recompilation harness
+where `return 0x40 /* PAGE_EXECUTE_READWRITE */;` succeeds.
+
+    VirtualAlloc(0, n, 12288 /* MEM_RESERVE | MEM_COMMIT */,
+                       64 /* PAGE_EXECUTE_READWRITE */)
+    if (local_4 == 258 /* WAIT_TIMEOUT */)
+
+`corpus/dev/source/c/win32_status.c` exists to score this: the rest of the
+corpus contains no Win32 use, and scanning 447 decompiled functions for the
+3,155 distinctive values in the constant table finds zero. It also showed why a
+magnitude gate would not work -- the real targets are 5, 8, 32, 128 and 258.
+
+## Output is not deterministic
+
+Comparing two corpus runs for regressions turned up 30 rows that changed on
+binaries with no Win32 content at all. They are not regressions and not caused by
+this work: the same function decompiled three times at `a0163d42f`, with every
+uncommitted change stashed, produces three different outputs at both the NIR and
+HIR layers.
+
+The symptom is variable naming. `p`, `ptr` and `addr` are all present in both
+outputs and attached to different variables, which is what an iteration over a
+`HashMap` of rename candidates looks like when the hasher is seeded per process.
+
+Type accuracy, goto count, line count and bare-compile are unaffected, because
+none of them matches on those names -- the type metric aligns by ABI position
+and frame offset. But "rows whose text changed" has been used as a regression
+signal throughout this work and it is not one. Golden-output comparison in CI,
+result caching, and reviewing a change by diffing two runs are all impossible
+until this is fixed.
+
 ## Not winnable on this corpus
 
 Around 40 argument mismatches are named source structs -- `Pair*`, `Kv*`,
