@@ -13,6 +13,7 @@ use fission_core::core::ghidra_no_return::{
 };
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
+use std::sync::{Arc, LazyLock, Mutex};
 use fission_loader::loader::types::DwarfLocation;
 use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
@@ -73,6 +74,45 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
         register_local_names: HashMap::new(),
         register_local_type_names: HashMap::new(),
     })
+}
+
+
+/// Per-binary memo for the parts of `NirTypeContext` that do not depend on the
+/// function being decompiled.
+///
+/// `build_nir_type_context` takes an address, but `all_target_refs` is derived
+/// from the whole program, so `build_nir_call_param_rules` produced identical
+/// output for every function in a binary and was recomputed for each one. It
+/// walks all 151,408 signatures and every one of their 835,245 parameters to
+/// arrive at ~716 rules -- 4.5ms per function, on a corpus run once per row.
+///
+/// Keyed by the binary's Blake3 hash, so two different binaries in one process
+/// do not share an entry and the same binary re-decompiled reuses one.
+static BINARY_SCOPED_RULES: LazyLock<Mutex<HashMap<String, Arc<Vec<NirCallParamRule>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn call_param_rules_for_binary(
+    binary: &LoadedBinary,
+    all_target_refs: &HashMap<u64, CallTargetRef>,
+) -> Arc<Vec<NirCallParamRule>> {
+    let key = binary.hash.clone();
+    // The lock is held across the build on purpose. Releasing it to compute and
+    // re-taking it to store lets every thread that arrives first miss: on an
+    // 79-function `--all` run, 14 workers each built the same 716 rules,
+    // 45ms apiece, and the cache saved nothing. Holding it means one build and
+    // the rest wait for it.
+    let mut cache = match BINARY_SCOPED_RULES.lock() {
+        Ok(cache) => cache,
+        // A poisoned lock means another thread panicked mid-build. Fall back to
+        // computing rather than propagating the panic.
+        Err(_) => return Arc::new(build_nir_call_param_rules(all_target_refs)),
+    };
+    if let Some(hit) = cache.get(&key) {
+        return Arc::clone(hit);
+    }
+    let rules = Arc::new(build_nir_call_param_rules(all_target_refs));
+    cache.insert(key, Arc::clone(&rules));
+    rules
 }
 
 pub(crate) fn build_nir_type_context(
@@ -189,7 +229,9 @@ pub(crate) fn build_nir_type_context(
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
         call_prototype_summaries: HashMap::new(),
-        call_param_rules: build_nir_call_param_rules(&all_target_refs),
+        call_param_rules: call_param_rules_for_binary(binary, &all_target_refs)
+            .as_ref()
+            .clone(),
         function_hints,
         struct_types: build_nir_struct_type_hints(binary),
     }
