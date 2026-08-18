@@ -3,6 +3,7 @@
 use fission_core::resources::ResourceProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -33,12 +34,39 @@ pub struct ParamInfo {
     pub enum_group: Option<String>,
 }
 
+/// Whether a signature type string names a type, or is the extractor's
+/// placeholder for "nothing was recovered".
+///
+/// The GDT extractor resolves a type ID only when it lands in the built-in
+/// table, so an unresolved typedef, composite or pointer is written `int`. That
+/// makes `int` ambiguous in this data: it is either a recovered `int` or a lost
+/// `FILE *`. Treating it as absent costs nothing for the former, because `int`
+/// is where inference lands anyway.
+pub fn type_name_is_informative(type_name: &str) -> bool {
+    !matches!(type_name.trim(), "" | "int" | "long" | "void")
+}
+
 /// Function signature with parameter and return types.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ApiSignature {
     pub name: String,
     pub return_type: String,
     pub params: Vec<ParamInfo>,
+}
+
+impl ApiSignature {
+    /// How many of this entry's type strings actually name a type.
+    ///
+    /// Used to order two entries for the same function: the one that says more
+    /// wins, so a file full of placeholders cannot erase a recovered signature.
+    pub fn informative_type_count(&self) -> usize {
+        usize::from(type_name_is_informative(&self.return_type))
+            + self
+                .params
+                .iter()
+                .filter(|p| type_name_is_informative(&p.type_name))
+                .count()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -133,14 +161,29 @@ impl ApiTypeDatabase {
                     });
                 }
             }
-            self.signatures.insert(
-                name.to_string(),
-                ApiSignature {
-                    name: name.to_string(),
-                    return_type: return_type.to_string(),
-                    params,
-                },
-            );
+            let candidate = ApiSignature {
+                name: name.to_string(),
+                return_type: return_type.to_string(),
+                params,
+            };
+            // Files merge in a fixed order and the map used to take whichever
+            // arrived last, so `mac_osx_signatures.txt` -- 3,801 entries, not
+            // one of them carrying a type -- overwrote 302 signatures that did.
+            //
+            // An entry is now replaced only by one that says at least as much.
+            // Ties still go to the later file, which is what keeps the 64-bit
+            // C library winning over the 32-bit one on the 30,998 names they
+            // share; only strictly-less-informative overwrites are refused.
+            match self.signatures.entry(name.to_string()) {
+                Entry::Occupied(mut slot) => {
+                    if candidate.informative_type_count() >= slot.get().informative_type_count() {
+                        slot.insert(candidate);
+                    }
+                }
+                Entry::Vacant(slot) => {
+                    slot.insert(candidate);
+                }
+            }
         }
         Ok(())
     }
@@ -165,6 +208,51 @@ impl ApiTypeDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn merged(files: &[&str]) -> ApiTypeDatabase {
+        let mut db = ApiTypeDatabase::default();
+        for (i, text) in files.iter().enumerate() {
+            db.merge_pipe_text(Path::new(&format!("f{i}")), text)
+                .expect("parse");
+        }
+        db
+    }
+
+    #[test]
+    fn a_typeless_entry_does_not_erase_a_typed_one() {
+        // The shape that cost 302 signatures: mac_osx_signatures.txt carries no
+        // types at all and merges last.
+        let db = merged(&[
+            "fopen|FILE*|__filename:char*,__modes:char*\n",
+            "fopen|int|__filename:int,__modes:int\n",
+        ]);
+        let sig = db.get("fopen").expect("fopen");
+        assert_eq!(sig.return_type, "FILE*");
+        assert_eq!(sig.params[0].type_name, "char*");
+    }
+
+    #[test]
+    fn a_typed_entry_replaces_a_typeless_one_whichever_order() {
+        let db = merged(&[
+            "fopen|int|__filename:int,__modes:int\n",
+            "fopen|FILE*|__filename:char*,__modes:char*\n",
+        ]);
+        assert_eq!(db.get("fopen").expect("fopen").return_type, "FILE*");
+    }
+
+    #[test]
+    fn equally_informative_entries_still_take_the_later_file() {
+        // 30,998 names are shared by the 32- and 64-bit C library files; the
+        // 64-bit one merges second and must keep winning.
+        let db = merged(&["size_t|int|void\n", "size_t|long long|void\n"]);
+        assert_eq!(db.get("size_t").expect("size_t").return_type, "long long");
+    }
+
+    #[test]
+    fn informative_type_count_ignores_placeholders() {
+        let db = merged(&["f|int|a:char*,b:int,c:FILE*\n"]);
+        assert_eq!(db.get("f").expect("f").informative_type_count(), 2);
+    }
 
     #[test]
     fn loads_utils_win_api_signatures() {

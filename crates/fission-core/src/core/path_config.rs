@@ -838,10 +838,11 @@ impl PathConfig {
 
         // Go
         if compiler.contains("go") || compiler.contains("golang") {
-            // Pick the latest golang GDT available (version-agnostic naming).
-            if let Some(p) = self.find_typeinfo_file("golang_1.25_anybit_any.gdt") {
-                paths.push(p);
-            } else if let Some(p) = self.find_typeinfo_file("golang_1.24_anybit_any.gdt") {
+            // Pick the latest golang GDT available. The two hard-coded names
+            // this used to try, 1.25 and 1.24, are the two the archive does not
+            // ship -- it carries 1.15 through 1.23 -- so a Go binary got no GDT
+            // at all. Ask what is there instead of naming versions.
+            if let Some(p) = self.latest_golang_gdt() {
                 paths.push(p);
             }
         }
@@ -854,6 +855,48 @@ impl PathConfig {
         }
 
         paths
+    }
+
+    /// Highest-versioned `golang_1.<minor>_anybit_any.gdt` present, if any.
+    ///
+    /// Versions are compared numerically on the minor component: sorting the
+    /// names as text would rank `golang_1.9` above `golang_1.23`.
+    fn latest_golang_gdt(&self) -> Option<PathBuf> {
+        let mut best: Option<(u32, PathBuf)> = None;
+        for dir in self
+            .signatures_base
+            .as_ref()
+            .map(|base| base.join("typeinfo").join("golang"))
+            .into_iter()
+            .chain(self.workspace_root.as_ref().map(|root| {
+                root.join("utils")
+                    .join("signatures")
+                    .join("typeinfo")
+                    .join("golang")
+            }))
+        {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else { continue };
+                let Some(minor) = name
+                    .strip_prefix("golang_1.")
+                    .and_then(|rest| rest.strip_suffix("_anybit_any.gdt"))
+                    .and_then(|minor| minor.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if best.as_ref().is_none_or(|(seen, _)| minor > *seen) {
+                    best = Some((minor, entry.path()));
+                }
+            }
+            if best.is_some() {
+                return best.map(|(_, path)| path);
+            }
+        }
+        best.map(|(_, path)| path)
     }
 
     /// Search all `typeinfo/` subdirectories for a specific GDT or JSON file.

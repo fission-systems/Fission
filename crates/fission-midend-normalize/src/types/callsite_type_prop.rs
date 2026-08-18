@@ -48,7 +48,10 @@ use fission_midend_core::wave_stats::{
     add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
     add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
 };
-use fission_signatures::{ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup};
+use fission_signatures::{
+    ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup,
+    type_name_is_informative,
+};
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
 /// unconstrained types (void, variadic, …).
@@ -199,32 +202,6 @@ pub fn api_signature(name: &str) -> Option<&'static ApiSignature> {
 fn api_signature_via_import_aliases(name: &str) -> Option<&'static ApiSignature> {
     api_signature(name)
         .or_else(|| symbol_for_win_api_database_lookup(name).and_then(|flat| api_signature(flat)))
-}
-
-/// Whether a signature's type string says anything, or is the extractor's
-/// "nothing recovered" placeholder.
-///
-/// The GDT signature extractor recovers parameter NAMES reliably but resolves a
-/// type ID only when it lands in the built-in table; typedefs, composites and
-/// pointers all fall through to `int`. 30,722 of 31,410 C-library entries and
-/// 96,081 of 115,900 Win32 entries come out that way, so
-/// `FILE *fopen(const char *, const char *)` is stored as
-/// `fopen|int|__filename:int,__modes:int`.
-///
-/// A placeholder is not evidence that the argument is `int` -- it is evidence
-/// that nothing was recovered, and applying it replaces whatever the decompiler
-/// inferred with a confident wrong answer. Measured on the libc corpus it
-/// turned `FILE *` and `char *` recoveries into `int`.
-///
-/// The test is per type string, not per signature: `difftime` is stored
-/// `difftime|double|_Time1:int,_Time2:int`, where the return type survived and
-/// both parameters did not. Judging the entry as a whole kept that `double` and
-/// took the two placeholders with it, retyping both `time_t` arguments `int`.
-///
-/// A genuinely `int` parameter (`abs`, `atoi`) loses nothing by being skipped:
-/// `int` is where use-driven inference lands anyway.
-fn type_name_is_informative(type_name: &str) -> bool {
-    !matches!(type_name.trim(), "" | "int" | "long" | "void")
 }
 
 /// Return the NirType implied by the API signature's return type string.
@@ -949,9 +926,15 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
         };
         let mut refined_here = false;
 
-        // A type string of `int` records that nothing was recovered -- see
-        // `type_name_is_informative`. Parameter names are unaffected, so the
-        // rename path below stays live and only the type writes are skipped.
+        // A type string of `int` records that nothing was recovered -- the GDT
+        // extractor writes it for any type ID it could not resolve, so `int` is
+        // either a recovered `int` or a lost `FILE *`. Applying it replaces
+        // inference with a confident wrong answer.
+        //
+        // The test is per type string, not per signature: `difftime` is stored
+        // `difftime|double|_Time1:int,_Time2:int`, and judging the entry whole
+        // keeps that `double` and takes both placeholders with it. Parameter
+        // names are unaffected, so the rename path below stays live.
         //
         // Resolve return type and update receiver binding.
         if let Some(ret_ty) =
