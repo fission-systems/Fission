@@ -21,6 +21,18 @@
 # `<name>.fidb` only when the .fidbf is absent, and all 47 .fidb files have a
 # .fidbf sibling -- the fallback cannot fire. 64.5M, and it barely compresses
 # (1.1x) because Ghidra already stores it deflated.
+#
+# Sources that a `.fpk` now replaces. The packed form is what the runtime reads;
+# the original is what the packer reads, and packing happens here, not on the
+# machine that installs the bundle. Each is excluded only where its `.fpk`
+# exists, so a half-converted tree ships the source rather than nothing:
+#   *.fidbf                     -> <name>.{lib,fn,rel,dom}.fpk
+#   *_signatures.txt            -> <name>_signatures.fpk
+#   {x86,arm}_ordinals.json     -> ordinals.fpk
+#
+# windows_vs12_*.gdt.types.json is excluded outright: nothing reads it, and its
+# enum values are wrong -- PAGE_NOACCESS and FILE_SHARE_READ both recorded 264
+# where both are 1. `win_enum_constants.json` carries the correct table.
 set -euo pipefail
 
 out="${1:-fission-utils.tar.gz}"
@@ -35,17 +47,42 @@ if [ "${slaspec_count}" -le 10 ]; then
   exit 1
 fi
 
-tar --exclude='*.gdt' --exclude='.DS_Store' \
-    --exclude='utils/signatures/fidb_java' -czf "${out}" utils
+# Build the exclusion list, dropping a source only when its .fpk is present.
+excludes=(--exclude='*.gdt' --exclude='.DS_Store'
+          --exclude='utils/signatures/fidb_java'
+          --exclude='*.gdt.types.json')
+for fidbf in utils/signatures/fid/*.fidbf; do
+  [ -e "${fidbf}" ] || continue
+  stem="${fidbf%.fidbf}"
+  if [ -f "${stem}.fn.fpk" ] && [ -f "${stem}.lib.fpk" ] \
+     && [ -f "${stem}.rel.fpk" ] && [ -f "${stem}.dom.fpk" ]; then
+    excludes+=(--exclude="$(basename "${fidbf}")")
+  fi
+done
+for txt in utils/signatures/typeinfo/*/*_signatures.txt; do
+  [ -e "${txt}" ] || continue
+  [ -f "${txt%.txt}.fpk" ] && excludes+=(--exclude="$(basename "${txt}")")
+done
+if [ -f utils/signatures/ordinals/ordinals.fpk ]; then
+  excludes+=(--exclude='x86_ordinals.json' --exclude='arm_ordinals.json')
+fi
+
+tar "${excludes[@]}" -czf "${out}" utils
 shasum -a 256 "${out}" > "${out}.sha256"
 
 archive_files=$(tar tzf "${out}" | grep -vc '/$')
-tree_files=$(find utils -type f ! -name '*.gdt' ! -name '.DS_Store' \
-  ! -path 'utils/signatures/fidb_java/*' | wc -l | tr -d ' ')
-if [ "${archive_files}" -ne "${tree_files}" ]; then
-  echo "archive holds ${archive_files} files, tree has ${tree_files} -- refusing" >&2
-  exit 1
-fi
+# The archive is now a subset of the tree by design, so the check is that it
+# still carries what the runtime needs rather than that the counts agree.
+for required in \
+  utils/signatures/ordinals/ordinals.fpk \
+  utils/signatures/typeinfo/win32/win_api_signatures.fpk \
+  utils/signatures/fid/vs2019_x64.fn.fpk
+do
+  if [ -e "${required}" ] && ! tar tzf "${out}" | grep -qxF "${required}"; then
+    echo "archive is missing ${required} -- refusing" >&2
+    exit 1
+  fi
+done
 
 {
   echo "fission-utils bundle inventory"
@@ -54,7 +91,7 @@ fi
   echo "source_sha=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "slaspec_count=${slaspec_count}"
   echo "file_count=${archive_files}   # counted in the archive, not the tree"
-  echo "excluded=*.gdt (build-time only), signatures/fidb_java (unreachable fallback), .DS_Store"
+  echo "excluded=*.gdt, fidb_java, *.gdt.types.json, and every source a .fpk replaces"
   echo "archive_bytes=$(wc -c < "${out}" | tr -d ' ')"
   echo
   echo "archive files by top-level directory:"
