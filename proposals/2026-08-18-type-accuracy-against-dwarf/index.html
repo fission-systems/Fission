@@ -1060,6 +1060,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#win32-constants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Win32 constants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-is-not-deterministic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output is not deterministic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#not-winnable-on-this-corpus" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1309,6 +1331,63 @@ plain GDT extraction and regenerating it would discard that.</p>
 where the local holding <code>fopen</code>'s result is now correctly <code>FILE*</code>. Propagating a
 typed local back to the parameter it was copied from is the next step, and it is
 ordinary type flow rather than library work.</p>
+<h2 id="win32-constants">Win32 constants<a class="headerlink" href="#win32-constants" title="Permanent link">&para;</a></h2>
+<p><code>utils/</code> held three constant sources and none of them could name a literal.
+<code>win_api_constants.json</code> is a flat error-code table with no grouping and no
+<code>PAGE_*</code>, <code>WAIT_*</code> or even <code>ERROR_SUCCESS</code>. The enum list in
+<code>windows_vs12_*.gdt.types.json</code> has the names but wrong values -- <code>WAIT_OBJECT_0</code>
+2048 where it is 0, and <code>PAGE_NOACCESS</code> and <code>FILE_SHARE_READ</code> both 264 where
+both are 1, two distinct constants at one value being what shows the wrong field
+was read. <code>WinConstantsDb</code> had sixteen correct hand-written groups whose names
+do not match the ones <code>win_api_signatures.txt</code> uses.</p>
+<p>Joining group name to constants by prefix was measured and rejected.
+<code>PAGE_PROTECTION_FLAGS</code> -&gt; <code>PAGE_*</code> works, and the same rule turns
+<code>PRINTER_HANDLE</code>, <code>SC_HANDLE</code> and <code>LSA_HANDLE</code> -- handle types, not enums --
+into groups of 137, 38 and 12 constants. 534 of 1,198 signature type names
+"resolve" that way.</p>
+<p>Three pieces closed it:</p>
+<p><code>gdt_extract_enums.py</code> reads the enum tables Ghidra actually writes
+(<code>EnumDBAdapterV1</code> / <code>EnumValueDBAdapterV1</code>, schema order, no record header) and
+recovers 39,382 constants that agree with the MinGW headers on 99.75% of names,
+against <code>win_api_constants.json</code>'s 94.03%.</p>
+<p><code>win32_enum_groups.py</code> takes group membership from <code>vendor/win32metadata</code>,
+already vendored and MIT licensed, which is where those group names came from.
+It is definitive in both directions: it gives <code>PAGE_PROTECTION_FLAGS</code> its
+members and says nothing about <code>PRINTER_HANDLE</code>. 745 groups list members
+outright, 309 declare a header prefix filter and are filled from the constant
+table. Result: 548 groups, 9,076 members, 726 methods with parameter mappings,
+including <code>{"method": "WaitForSingleObject", "parameter": "return"}</code>.</p>
+<p>The renderer names a literal call argument when metadata records a group for
+that parameter, and a compared literal when the variable holds a known API's
+return. The return reaches its comparison through a copy, so copies are followed
+to a fixed point. Only variables assigned once are tracked, only <code>==</code> and <code>!=</code>
+are annotated, and only flag sets decompose.</p>
+<p>The name goes in a comment, and that was measured:
+<code>return PAGE_EXECUTE_READWRITE;</code> fails to build in the recompilation harness
+where <code>return 0x40 /* PAGE_EXECUTE_READWRITE */;</code> succeeds.</p>
+<div class="language-text highlight"><pre><span></span><code>VirtualAlloc(0, n, 12288 /* MEM_RESERVE | MEM_COMMIT */,
+                   64 /* PAGE_EXECUTE_READWRITE */)
+if (local_4 == 258 /* WAIT_TIMEOUT */)
+</code></pre></div>
+<p><code>corpus/dev/source/c/win32_status.c</code> exists to score this: the rest of the
+corpus contains no Win32 use, and scanning 447 decompiled functions for the
+3,155 distinctive values in the constant table finds zero. It also showed why a
+magnitude gate would not work -- the real targets are 5, 8, 32, 128 and 258.</p>
+<h2 id="output-is-not-deterministic">Output is not deterministic<a class="headerlink" href="#output-is-not-deterministic" title="Permanent link">&para;</a></h2>
+<p>Comparing two corpus runs for regressions turned up 30 rows that changed on
+binaries with no Win32 content at all. They are not regressions and not caused by
+this work: the same function decompiled three times at <code>a0163d42f</code>, with every
+uncommitted change stashed, produces three different outputs at both the NIR and
+HIR layers.</p>
+<p>The symptom is variable naming. <code>p</code>, <code>ptr</code> and <code>addr</code> are all present in both
+outputs and attached to different variables, which is what an iteration over a
+<code>HashMap</code> of rename candidates looks like when the hasher is seeded per process.</p>
+<p>Type accuracy, goto count, line count and bare-compile are unaffected, because
+none of them matches on those names -- the type metric aligns by ABI position
+and frame offset. But "rows whose text changed" has been used as a regression
+signal throughout this work and it is not one. Golden-output comparison in CI,
+result caching, and reviewing a change by diffing two runs are all impossible
+until this is fixed.</p>
 <h2 id="not-winnable-on-this-corpus">Not winnable on this corpus<a class="headerlink" href="#not-winnable-on-this-corpus" title="Permanent link">&para;</a></h2>
 <p>Around 40 argument mismatches are named source structs -- <code>Pair*</code>, <code>Kv*</code>,
 <code>Node*</code>, <code>ConfigNode*</code> -- recovered as <code>uint *</code> or <code>int *</code>. Those names exist
