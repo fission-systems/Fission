@@ -1040,6 +1040,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The extractor itself">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#two-things-this-does-not-cover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two things this does not cover
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1212,19 +1229,86 @@ that overwrites inference with a placeholder. The test has to be per type
 string: judging <code>difftime|double|_Time1:int,_Time2:int</code> as a whole keeps the
 <code>double</code> and takes both placeholders with it.</p>
 <h2 id="the-extractor-itself">The extractor itself<a class="headerlink" href="#the-extractor-itself" title="Permanent link">&para;</a></h2>
-<p><code>resolve_type</code> in <code>gdt_extract_signatures.py</code> looks up a Data Type ID in a map
-keyed by the raw table key. The ID carries its kind in the top byte, so only
-built-ins (kind 0) ever matched and every typedef, composite and pointer fell
-through to <code>int</code>. That is the root cause of both signature files being
-typeless.</p>
-<p>Reusing the struct extractor's kind-aware <code>TypeResolver</code> was attempted and
-reverted. It does resolve scalars correctly -- <code>strlen|size_t|...</code>,
-<code>localtime|int*|__timer:time_t*</code> -- but <code>fopen</code> comes out <code>int*</code> rather than
-<code>FILE*</code>, and <code>parse_pointer_table</code>'s records decode to pointee kinds spanning
-250 distinct values where only 0-8 exist. The pointer table parse is misaligned,
-so the change would have shipped confidently wrong types in place of obviously
-absent ones. Fixing that parse is the prerequisite for any prototype work, and
-it is a binary-format problem, not a type-inference one.</p>
+<p>Two defects, one behind the other.</p>
+<p><strong><code>resolve_type</code> never decoded the kind byte.</strong> It looked up a Data Type ID in a
+map keyed by the raw table key, but the ID carries its kind in the top byte, so
+only built-ins (kind 0) ever matched and every typedef, composite and pointer
+fell through to <code>int</code>. That is why both signature files were typeless.</p>
+<p><strong><code>parse_pointer_table</code> read the wrong buffers.</strong> It walked every
+<code>LONGKEY_FIXED_REC</code> buffer and read each as an array of 17-byte pointer records.
+<code>FixedRecNode</code> is the leaf type for EVERY table with fixed-length records, and
+its record length comes from the table's schema rather than from the node, so a
+node's own bytes cannot say whether it holds pointer records. In
+<code>generic_clib_64.gdt</code> that produced 16,199 "pointers" of which 1,404 are real,
+and the decoded pointee IDs carried 250-odd distinct kind bytes where only 0-8
+exist. Fixing only <code>resolve_type</code> therefore made things worse, not better:
+<code>FILE *fopen(const char *, const char *)</code> resolved to <code>int*</code>, which looks like a
+recovered type in a way <code>int</code> does not.</p>
+<p>Three properties identify a genuine pointer leaf, and together they select
+exactly the three real ones out of 32 candidates: the key/record array fits the
+buffer at a 25-byte stride, leaf keys are strictly ascending, and every key is a
+Data Type ID of kind POINTER -- this table's keys are its own IDs, so one
+foreign key means a foreign table. Verified against Ghidra 11.4.2's
+<code>FixedRecNode</code> and <code>PointerDBAdapterV2</code>.</p>
+<p>With both fixed, the C-library prototypes resolve exactly:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>fopen|FILE*|__filename:char*,__modes:char*
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>fgets|char*|__s:char*,__n:int,__stream:FILE*
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>strlen|size_t|__s:char*
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>strtol|long|__nptr:char*,__endptr:char**,__base:int
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>localtime|tm*|__timer:time_t*
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>difftime|double|__time1:time_t,__time0:time_t
+</span></code></pre></div>
+<p>Typeless C-library entries fall from 97.8% to 79.6%. Struct extraction improves
+with the same table: 510 structs in that archive get corrected field types
+(<code>int*</code> -&gt; <code>X509_ALGOR*</code>, <code>int*</code> -&gt; <code>char*</code>) and 63 more are recovered.</p>
+<p>Measured end to end, regenerating only the two <code>generic_clib</code> signature files:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>before</th>
+<th>after</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>libc slice type accuracy</td>
+<td>19.14%</td>
+<td><strong>24.86%</strong></td>
+</tr>
+<tr>
+<td>self-contained corpus</td>
+<td>63.26%</td>
+<td>63.26%</td>
+</tr>
+<tr>
+<td>improved / regressed</td>
+<td></td>
+<td>8 / <strong>0</strong></td>
+</tr>
+<tr>
+<td>gotos, bare-compile</td>
+<td>36, 308/428</td>
+<td>36, 308/428</td>
+</tr>
+</tbody>
+</table>
+<p>Decompiled output now declares <code>FILE* __stream;</code> and <code>char* __filename;</code> where
+it declared <code>ulonglong</code>.</p>
+<h3 id="two-things-this-does-not-cover">Two things this does not cover<a class="headerlink" href="#two-things-this-does-not-cover" title="Permanent link">&para;</a></h3>
+<p>Regenerating <code>mac_osx</code> and <code>windows_vs12_{32,64}</code> was reverted. Those files went
+3,801 -&gt; 46,781 and 8,119 -&gt; 100,983 lines, and since this change cannot affect
+how many function definitions are found, the shipped files were not produced by
+this version of the script. Replacing them would mix an unrelated content change
+into a type fix. Only <code>generic_clib</code> and <code>generic_clib_64</code> were regenerated,
+where the function-name set is identical to what shipped.</p>
+<p><code>win_api_signatures.txt</code> is 82.9% typeless too but carries a header comment and
+hand-curated entries (<code>CreateFileA|HANDLE|lpFileName:PSTR,...</code>), so it is not a
+plain GDT extraction and regenerating it would discard that.</p>
+<p>The function's own parameters are still untyped -- <code>open_reader(ulonglong)</code>
+where the local holding <code>fopen</code>'s result is now correctly <code>FILE*</code>. Propagating a
+typed local back to the parameter it was copied from is the next step, and it is
+ordinary type flow rather than library work.</p>
 <h2 id="not-winnable-on-this-corpus">Not winnable on this corpus<a class="headerlink" href="#not-winnable-on-this-corpus" title="Permanent link">&para;</a></h2>
 <p>Around 40 argument mismatches are named source structs -- <code>Pair*</code>, <code>Kv*</code>,
 <code>Node*</code>, <code>ConfigNode*</code> -- recovered as <code>uint *</code> or <code>int *</code>. Those names exist
