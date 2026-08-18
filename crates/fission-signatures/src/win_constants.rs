@@ -3,6 +3,7 @@
 //! Categorized enum values for context-aware constant substitution.
 //! Each group contains constants that belong to a specific API parameter context.
 
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -15,6 +16,10 @@ pub static WIN_CONSTANTS_DB: LazyLock<WinConstantsDb> = LazyLock::new(WinConstan
 pub struct EnumGroup {
     pub name: String,
     pub values: Vec<(String, u64)>,
+    /// Whether members combine with `|`. Set from win32metadata; a flag set
+    /// resolves through [`EnumGroup::resolve_flags`], a plain enum must match a
+    /// single member exactly.
+    pub flags: bool,
 }
 
 impl EnumGroup {
@@ -22,6 +27,19 @@ impl EnumGroup {
         Self {
             name: name.to_string(),
             values: values.iter().map(|(n, v)| (n.to_string(), *v)).collect(),
+            flags: true,
+        }
+    }
+
+    /// Name for `value` in this group, honouring whether it is a flag set.
+    ///
+    /// A plain enum must match one member exactly: decomposing `WAIT_TIMEOUT`
+    /// into a sum of other wait codes would be nonsense.
+    pub fn resolve(&self, value: u64) -> Option<String> {
+        if self.flags {
+            self.resolve_flags(value)
+        } else {
+            self.get_name(value).map(str::to_owned)
         }
     }
 
@@ -64,15 +82,99 @@ impl EnumGroup {
 /// Windows API constant groups database
 pub struct WinConstantsDb {
     groups: HashMap<String, EnumGroup>,
+    /// API method -> parameter name -> group name. `"return"` is a valid
+    /// parameter name here: win32metadata records `WaitForSingleObject`'s
+    /// return as carrying `WAIT_EVENT`.
+    uses: HashMap<String, HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+struct EnumGroupsFile {
+    groups: HashMap<String, EnumGroupJson>,
+    #[serde(default)]
+    uses: HashMap<String, HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+struct EnumGroupJson {
+    #[serde(default)]
+    flags: bool,
+    /// Kept as raw JSON numbers: a 64-bit flag member reaches
+    /// `0x8000000000000000`, which is past `i64::MAX`, and members are written
+    /// signed where the SDK declares them so (`WAIT_FAILED`, `E_*`).
+    members: HashMap<String, serde_json::Value>,
+}
+
+/// Enum member value as the 64-bit pattern it denotes, whichever sign the
+/// source wrote it with.
+fn member_value(raw: &serde_json::Value) -> Option<u64> {
+    if let Some(value) = raw.as_u64() {
+        return Some(value);
+    }
+    raw.as_i64().map(|value| value as u64)
 }
 
 impl WinConstantsDb {
     pub fn new() -> Self {
         let mut db = Self {
             groups: HashMap::new(),
+            uses: HashMap::new(),
         };
         db.init_all_groups();
+        db.merge_utils_enum_groups();
         db
+    }
+
+    /// Overlay `enum_groups.json`, built offline from vendored win32metadata.
+    ///
+    /// Absent or unreadable data leaves the hand-written groups in place: this
+    /// is an enrichment, never a requirement. Loaded groups take precedence
+    /// because they carry the authoritative membership and flag-set marking,
+    /// where the hand-written table is a small curated subset.
+    fn merge_utils_enum_groups(&mut self) {
+        let Some(path) = fission_core::resources::ResourceProvider::global()
+            .win32_typeinfo_json_path("enum_groups.json")
+        else {
+            return;
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(file) = serde_json::from_str::<EnumGroupsFile>(&text) else {
+            return;
+        };
+        for (name, group) in file.groups {
+            let mut values: Vec<(String, u64)> = group
+                .members
+                .iter()
+                .filter_map(|(member, raw)| {
+                    member_value(raw).map(|value| (member.clone(), value))
+                })
+                .collect();
+            // JSON object order is arbitrary; keep output stable across runs.
+            values.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+            self.groups.insert(
+                name.clone(),
+                EnumGroup {
+                    name,
+                    values,
+                    flags: group.flags,
+                },
+            );
+        }
+        self.uses = file.uses;
+    }
+
+    /// Group carried by `parameter` of `method`, if win32metadata records one.
+    /// Use `"return"` for the return value.
+    pub fn group_for_parameter(&self, method: &str, parameter: &str) -> Option<&EnumGroup> {
+        let name = self.uses.get(method)?.get(parameter)?;
+        self.groups.get(name)
+    }
+
+    /// Constant name for `value` at `method`'s `parameter`, if one resolves.
+    pub fn resolve_parameter(&self, method: &str, parameter: &str, value: u64) -> Option<String> {
+        self.group_for_parameter(method, parameter)?.resolve(value)
     }
 
     pub fn get_group(&self, name: &str) -> Option<&EnumGroup> {
@@ -371,6 +473,47 @@ impl Default for WinConstantsDb {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn utils_enum_groups_reach_the_database() {
+        let db = &*WIN_CONSTANTS_DB;
+        // win32metadata says VirtualAlloc's flProtect carries
+        // PAGE_PROTECTION_FLAGS, a flag set.
+        assert_eq!(
+            db.resolve_parameter("VirtualAlloc", "flProtect", 0x40).as_deref(),
+            Some("PAGE_EXECUTE_READWRITE"),
+        );
+        // A combination has to decompose, since the group is a flag set.
+        assert_eq!(
+            db.resolve_parameter("VirtualAlloc", "flAllocationType", 0x1000 | 0x2000)
+                .as_deref(),
+            Some("MEM_RESERVE | MEM_COMMIT"),
+        );
+    }
+
+    #[test]
+    fn a_return_value_group_resolves_and_does_not_decompose() {
+        let db = &*WIN_CONSTANTS_DB;
+        // WAIT_EVENT is not a flag set: 0x102 is WAIT_TIMEOUT, not a sum.
+        assert_eq!(
+            db.resolve_parameter("WaitForSingleObject", "return", 0x102).as_deref(),
+            Some("WAIT_TIMEOUT"),
+        );
+        assert_eq!(
+            db.resolve_parameter("WaitForSingleObject", "return", 0x80).as_deref(),
+            Some("WAIT_ABANDONED"),
+        );
+        // A value no member holds resolves to nothing rather than a guess.
+        assert!(db.resolve_parameter("WaitForSingleObject", "return", 0x1234).is_none());
+    }
+
+    #[test]
+    fn an_unmapped_parameter_resolves_to_nothing() {
+        let db = &*WIN_CONSTANTS_DB;
+        assert!(db.resolve_parameter("VirtualAlloc", "dwSize", 0x40).is_none());
+        assert!(db.resolve_parameter("NoSuchApi", "flProtect", 0x40).is_none());
+    }
+
     use super::*;
 
     #[test]
