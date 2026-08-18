@@ -21,6 +21,10 @@ struct PrintCtx<'a> {
     inline_guard_goto: bool,
     global_names: Option<&'a HashMap<u64, String>>,
     profile: PrintProfile,
+    /// Variable -> Win32 enum group its value came from, for variables that
+    /// hold a known API's return value. Lets a later comparison against a
+    /// literal name that literal.
+    return_enum_groups: HashMap<String, String>,
     /// Every label referenced by a `Goto` anywhere in the function body.
     /// A `switch` case/default's leading `Label` must be preserved (rendered
     /// as a C label alongside the `case`) when it appears here, since `case`
@@ -32,6 +36,114 @@ struct PrintCtx<'a> {
 /// Collects every label referenced by a `Goto` (excluding the switch
 /// fallthrough sentinel, which is not a real label) anywhere in `stmts`,
 /// recursing into all nested bodies.
+/// Count statement-level assignments to each plain variable.
+fn count_var_assignments<'a>(stmts: &'a [HirStmt], out: &mut HashMap<&'a str, usize>) {
+    for_each_stmt(stmts, &mut |stmt| {
+        if let HirStmt::Assign {
+            lhs: HirLValue::Var(name),
+            ..
+        } = stmt
+        {
+            *out.entry(name.as_str()).or_default() += 1;
+        }
+    });
+}
+
+/// Apply `visit` to every statement, including nested bodies.
+fn for_each_stmt<'a>(stmts: &'a [HirStmt], visit: &mut impl FnMut(&'a HirStmt)) {
+    for stmt in stmts {
+        visit(stmt);
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                for_each_stmt(body, visit)
+            }
+            HirStmt::For {
+                init, update, body, ..
+            } => {
+                if let Some(init) = init {
+                    for_each_stmt(std::slice::from_ref(&**init), visit);
+                }
+                if let Some(update) = update {
+                    for_each_stmt(std::slice::from_ref(&**update), visit);
+                }
+                for_each_stmt(body, visit);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                for_each_stmt(then_body, visit);
+                for_each_stmt(else_body, visit);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    for_each_stmt(&case.body, visit);
+                }
+                for_each_stmt(default, visit);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Variables holding a known Win32 API's return value, mapped to the enum group
+/// win32metadata says that return carries.
+///
+/// `WaitForSingleObject`'s result reaches its comparison through a copy --
+/// `rax = WaitForSingleObject(..); local_4 = rax; if (local_4 == 258)` -- so
+/// copies are followed. Only a variable the body assigns exactly once is
+/// tracked: a second assignment means the value at the comparison need not be
+/// the one the call produced.
+fn collect_return_enum_groups(func: &HirFunction, out: &mut HashMap<String, String>) {
+    let mut assignments = HashMap::new();
+    count_var_assignments(&func.body, &mut assignments);
+    let assigned_once =
+        |name: &str| assignments.get(name).copied().unwrap_or(0) == 1;
+
+    // Copies are followed to a fixed point: the chain can be longer than one
+    // hop, and statement order does not have to agree with data flow.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for_each_stmt(&func.body, &mut |stmt| {
+            let HirStmt::Assign {
+                lhs: HirLValue::Var(dst),
+                rhs,
+            } = stmt
+            else {
+                return;
+            };
+            if !assigned_once(dst) || out.contains_key(dst.as_str()) {
+                return;
+            }
+            let group = match rhs {
+                HirExpr::Call { target, args, .. } => {
+                    let callee = if target == "__fission_callind_opaque" {
+                        args.first().and_then(callind_target_symbol)
+                    } else {
+                        Some(target.clone())
+                    };
+                    callee.and_then(|callee| {
+                        let symbol =
+                            fission_signatures::symbol_for_win_api_database_lookup(&callee)
+                                .unwrap_or(&callee);
+                        fission_signatures::WIN_CONSTANTS_DB
+                            .group_for_parameter(symbol, "return")
+                            .map(|group| group.name.clone())
+                    })
+                }
+                HirExpr::Var(src) => out.get(src.as_str()).cloned(),
+                _ => None,
+            };
+            if let Some(group) = group {
+                out.insert(dst.clone(), group);
+                changed = true;
+            }
+        });
+    }
+}
+
 fn collect_goto_targets<'a>(stmts: &'a [HirStmt], out: &mut HashSet<&'a str>) {
     for stmt in stmts {
         match stmt {
@@ -74,6 +186,19 @@ fn collect_goto_targets<'a>(stmts: &'a [HirStmt], out: &mut HashSet<&'a str>) {
 }
 
 impl<'a> PrintCtx<'a> {
+    /// Name for `constant` when `carrier` holds a known API's return value and
+    /// the constant resolves in the group that return carries.
+    fn name_compared_constant(&self, carrier: &HirExpr, constant: &HirExpr) -> Option<String> {
+        let HirExpr::Var(name) = carrier else {
+            return None;
+        };
+        let HirExpr::Const(value, _) = constant else {
+            return None;
+        };
+        let group = self.return_enum_groups.get(name.as_str())?;
+        fission_signatures::WIN_CONSTANTS_DB.resolve_in(group, *value as u64)
+    }
+
     fn build(func: &'a HirFunction) -> Self {
         Self::build_with_profile(func, PrintProfile::Nir)
     }
@@ -93,9 +218,12 @@ impl<'a> PrintCtx<'a> {
         }
         let mut goto_targets = HashSet::new();
         collect_goto_targets(&func.body, &mut goto_targets);
+        let mut return_enum_groups = HashMap::new();
+        collect_return_enum_groups(func, &mut return_enum_groups);
         Self {
             var_types,
             pointer_decl_names,
+            return_enum_groups,
             return_type: &func.return_type,
             inline_guard_goto: func.body.len() <= 6,
             global_names: None,
@@ -792,6 +920,55 @@ pub(crate) fn print_type(ty: &NirType) -> String {
     }
 }
 
+/// Callee symbol behind an opaque indirect call, when it is a named import.
+fn callind_target_symbol(fn_ptr: &HirExpr) -> Option<String> {
+    match fn_ptr {
+        HirExpr::Var(name) => Some(name.clone()),
+        HirExpr::Cast { expr, .. } => callind_target_symbol(expr),
+        _ => None,
+    }
+}
+
+/// Append the constant's Win32 name to a call argument, when win32metadata
+/// says that parameter carries an enum group and the value resolves in it.
+///
+/// The name goes in a comment rather than replacing the literal.
+/// `PAGE_EXECUTE_READWRITE` is not declared in the recompilation harness's
+/// translation unit, so emitting it bare fails to build where `0x40` builds --
+/// and recompilation is one of the three things this output is scored on.
+/// A comment keeps both.
+///
+/// Only a literal argument is annotated. A variable holding the value would
+/// need the definition chased to know what reaches the call, and guessing there
+/// would attach a name to something that is not that constant.
+fn annotate_enum_argument(
+    target: &str,
+    index: usize,
+    arg: &HirExpr,
+    printed: String,
+) -> String {
+    let HirExpr::Const(value, _) = arg else {
+        return printed;
+    };
+    // An imported call names its target `KERNEL32.dll!VirtualAlloc`; the
+    // databases are keyed by the bare symbol.
+    let target = fission_signatures::symbol_for_win_api_database_lookup(target).unwrap_or(target);
+    let Some(signature) = fission_signatures::SIGNATURE_RESOURCES.api_signature(target) else {
+        return printed;
+    };
+    let Some(param) = signature.params.get(index) else {
+        return printed;
+    };
+    match fission_signatures::WIN_CONSTANTS_DB.resolve_parameter(
+        target,
+        &param.name,
+        *value as u64,
+    ) {
+        Some(name) => format!("{printed} /* {name} */"),
+        None => printed,
+    }
+}
+
 fn print_callable_target(
     target: &str,
     args: &[HirExpr],
@@ -1014,6 +1191,19 @@ fn print_expr_prec_ctx(
             let rhs_parent_prec = binary_rhs_parent_precedence(*op, rhs, prec + 1);
             let mut rhs_str = print_expr_prec_ctx(rhs, rhs_parent_prec, depth + 1, ctx);
 
+            // `if (local_4 == 258)` where local_4 holds WaitForSingleObject's
+            // result: name the literal after the group that return carries.
+            // Only equality, because a group member is a distinct value rather
+            // than a threshold -- `< WAIT_TIMEOUT` would read as an ordering
+            // the constants do not have.
+            if matches!(*op, HirBinaryOp::Eq | HirBinaryOp::Ne) {
+                if let Some(named) = ctx.name_compared_constant(lhs, rhs) {
+                    rhs_str = format!("{rhs_str} /* {named} */");
+                } else if let Some(named) = ctx.name_compared_constant(rhs, lhs) {
+                    lhs_str = format!("{lhs_str} /* {named} */");
+                }
+            }
+
             // If both sides are pointers and the operation is Add, this is invalid in C.
             // Cast the rhs to ulonglong to avoid compilation failure.
             if *op == HirBinaryOp::Add && ctx.expr_is_pointer(lhs) && ctx.expr_is_pointer(rhs) {
@@ -1048,9 +1238,19 @@ fn print_expr_prec_ctx(
         HirExpr::Call { target, args, ty } => {
             if target == "__fission_callind_opaque" && !args.is_empty() {
                 let fn_ptr = print_expr_prec_ctx(&args[0], 0, depth + 1, ctx);
+                // `args[0]` is the callee, so the real arguments start at 1 and
+                // their parameter positions are shifted by one.
+                let callee = callind_target_symbol(&args[0]);
                 let remaining_args = args[1..]
                     .iter()
-                    .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        let printed = print_expr_prec_ctx(arg, 0, depth + 1, ctx);
+                        match callee.as_deref() {
+                            Some(callee) => annotate_enum_argument(callee, index, arg, printed),
+                            None => printed,
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 let ret_ty = match ty {
@@ -1069,10 +1269,15 @@ fn print_expr_prec_ctx(
                     120,
                 )
             } else {
+                let callee = target.clone();
                 let target = print_callable_target(target, args, ty, Some(ctx));
                 let args = args
                     .iter()
-                    .map(|arg| print_expr_prec_ctx(arg, 0, depth + 1, ctx))
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        let printed = print_expr_prec_ctx(arg, 0, depth + 1, ctx);
+                        annotate_enum_argument(&callee, index, arg, printed)
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 (format!("{target}({args})"), 120)

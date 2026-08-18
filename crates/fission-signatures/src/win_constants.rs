@@ -177,6 +177,11 @@ impl WinConstantsDb {
         self.group_for_parameter(method, parameter)?.resolve(value)
     }
 
+    /// Constant name for `value` in the named group, if one resolves.
+    pub fn resolve_in(&self, group: &str, value: u64) -> Option<String> {
+        self.groups.get(group)?.resolve(value)
+    }
+
     pub fn get_group(&self, name: &str) -> Option<&EnumGroup> {
         self.groups.get(name)
     }
@@ -505,6 +510,16 @@ mod tests {
         );
         // A value no member holds resolves to nothing rather than a guess.
         assert!(db.resolve_parameter("WaitForSingleObject", "return", 0x1234).is_none());
+    }
+
+    #[test]
+    fn resolve_in_names_a_group_member_and_nothing_else() {
+        let db = &*WIN_CONSTANTS_DB;
+        assert_eq!(db.resolve_in("WAIT_EVENT", 0x102).as_deref(), Some("WAIT_TIMEOUT"));
+        assert_eq!(db.resolve_in("WAIT_EVENT", 0).as_deref(), Some("WAIT_OBJECT_0"));
+        // Not a member, and WAIT_EVENT is not a flag set, so nothing is invented.
+        assert!(db.resolve_in("WAIT_EVENT", 0x99).is_none());
+        assert!(db.resolve_in("NO_SUCH_GROUP", 0).is_none());
     }
 
     #[test]
