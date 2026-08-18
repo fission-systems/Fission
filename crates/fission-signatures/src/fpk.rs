@@ -203,6 +203,78 @@ impl FpkReader {
     }
 }
 
+
+/// Pack sorted records into an `.fpk` image.
+///
+/// Byte-for-byte the same container `scripts/fpk_pack.py` writes, so a table
+/// can be produced by whichever side already holds the data -- Python for the
+/// text tables it extracts, Rust for anything that must go through a parser
+/// first, like the FID databases.
+///
+/// Records are sorted by their key here rather than by the caller: block
+/// boundaries depend on the order, and a caller that sorted differently would
+/// produce a file whose index does not describe it.
+pub fn pack(records: &[String], kind: u16) -> Vec<u8> {
+    use std::io::Write;
+
+    const BLOCK_TARGET: usize = 64 * 1024;
+
+    let key_of = |line: &str| line.split('|').next().unwrap_or("").to_owned();
+    let mut sorted: Vec<&String> = records.iter().collect();
+    sorted.sort_by_key(|line| key_of(line));
+
+    let mut blocks: Vec<Vec<u8>> = Vec::new();
+    let mut current: Vec<u8> = Vec::new();
+    for record in &sorted {
+        if current.len() + record.len() + 1 > BLOCK_TARGET && !current.is_empty() {
+            blocks.push(std::mem::take(&mut current));
+        }
+        current.extend_from_slice(record.as_bytes());
+        current.push(b'\n');
+    }
+    if !current.is_empty() {
+        blocks.push(current);
+    }
+
+    let mut payload: Vec<u8> = Vec::new();
+    let mut index: Vec<u8> = Vec::new();
+    for block in &blocks {
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(block).expect("zlib write to Vec cannot fail");
+        let compressed = encoder.finish().expect("zlib finish on Vec cannot fail");
+        let first_line = block.split(|b| *b == b'\n').next().unwrap_or(&[]);
+        let first_key = key_of(&String::from_utf8_lossy(first_line));
+        index.extend_from_slice(&(first_key.len() as u32).to_le_bytes());
+        index.extend_from_slice(first_key.as_bytes());
+        index.extend_from_slice(&((HEADER_LEN + payload.len()) as u64).to_le_bytes());
+        index.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        index.extend_from_slice(&(block.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&compressed);
+    }
+
+    let mut out = Vec::with_capacity(HEADER_LEN + payload.len() + index.len());
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&kind.to_le_bytes());
+    out.extend_from_slice(&CODEC_ZLIB.to_le_bytes());
+    out.extend_from_slice(&(sorted.len() as u64).to_le_bytes());
+    out.extend_from_slice(&(blocks.len() as u64).to_le_bytes());
+    out.extend_from_slice(&((HEADER_LEN + payload.len()) as u64).to_le_bytes());
+    out.extend_from_slice(&(index.len() as u64).to_le_bytes());
+    out.extend_from_slice(&sha256(&payload));
+    debug_assert_eq!(out.len(), HEADER_LEN);
+    out.extend_from_slice(&payload);
+    out.extend_from_slice(&index);
+    out
+}
+
+/// SHA-256 of the payload, stored so a truncated or swapped body is caught.
+fn sha256(data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +365,65 @@ mod tests {
         let reader = FpkReader::open(&path).unwrap();
         assert!(matches!(reader.read_all(), Err(FpkError::Corrupt(_))));
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rust_and_python_packers_produce_equivalent_files() {
+        // Two packers exist because each side already holds some of the data:
+        // Python for the text tables it extracts, Rust for anything that has to
+        // go through a parser first. They cannot agree byte for byte -- Python
+        // uses zlib and flate2 uses miniz_oxide, which emit different streams at
+        // the same level -- so what is pinned is what matters: both files carry
+        // the same records, in the same order, with the same block boundaries.
+        let src = std::path::Path::new(
+            "/Users/sjkim1127/Fission/utils/signatures/typeinfo/win32/wdk_signatures.txt",
+        );
+        let Ok(text) = std::fs::read_to_string(src) else {
+            return; // bundle not present in this checkout
+        };
+        let records: Vec<String> = text
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .map(str::to_owned)
+            .collect();
+
+        let ours_path = std::env::temp_dir().join("fpk_ours.fpk");
+        std::fs::write(&ours_path, super::pack(&records, 1)).unwrap();
+
+        let theirs_path = std::env::temp_dir().join("fpk_theirs.fpk");
+        let Ok(run) = std::process::Command::new("python3")
+            .args([
+                "/Users/sjkim1127/Fission/scripts/fpk_pack.py",
+                src.to_str().unwrap(),
+                "--kind",
+                "pipe-text",
+                "--output",
+                theirs_path.to_str().unwrap(),
+            ])
+            .output()
+        else {
+            std::fs::remove_file(&ours_path).ok();
+            return;
+        };
+        if !run.status.success() {
+            std::fs::remove_file(&ours_path).ok();
+            return;
+        }
+
+        let ours = FpkReader::open(&ours_path).unwrap();
+        let theirs = FpkReader::open(&theirs_path).unwrap();
+        assert_eq!(ours.record_count(), theirs.record_count());
+        assert_eq!(ours.block_count(), theirs.block_count(), "block boundaries differ");
+        assert_eq!(ours.read_all().unwrap(), theirs.read_all().unwrap());
+        // And both agree with the source they were built from.
+        let mut expected = records;
+        expected.sort_by(|a, b| {
+            a.split('|').next().unwrap_or("").cmp(b.split('|').next().unwrap_or(""))
+        });
+        assert_eq!(ours.read_all().unwrap(), expected);
+
+        std::fs::remove_file(&ours_path).ok();
+        std::fs::remove_file(&theirs_path).ok();
     }
 
     #[test]

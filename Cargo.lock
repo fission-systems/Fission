@@ -2901,11 +2901,13 @@ dependencies = [
  "fission-core",
  "flate2",
  "log",
+ "memmap2 0.9.11",
  "once_cell",
  "quick-xml",
  "regex",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
 ]
 
