@@ -116,20 +116,75 @@ string: judging `difftime|double|_Time1:int,_Time2:int` as a whole keeps the
 
 ## The extractor itself
 
-`resolve_type` in `gdt_extract_signatures.py` looks up a Data Type ID in a map
-keyed by the raw table key. The ID carries its kind in the top byte, so only
-built-ins (kind 0) ever matched and every typedef, composite and pointer fell
-through to `int`. That is the root cause of both signature files being
-typeless.
+Two defects, one behind the other.
 
-Reusing the struct extractor's kind-aware `TypeResolver` was attempted and
-reverted. It does resolve scalars correctly -- `strlen|size_t|...`,
-`localtime|int*|__timer:time_t*` -- but `fopen` comes out `int*` rather than
-`FILE*`, and `parse_pointer_table`'s records decode to pointee kinds spanning
-250 distinct values where only 0-8 exist. The pointer table parse is misaligned,
-so the change would have shipped confidently wrong types in place of obviously
-absent ones. Fixing that parse is the prerequisite for any prototype work, and
-it is a binary-format problem, not a type-inference one.
+**`resolve_type` never decoded the kind byte.** It looked up a Data Type ID in a
+map keyed by the raw table key, but the ID carries its kind in the top byte, so
+only built-ins (kind 0) ever matched and every typedef, composite and pointer
+fell through to `int`. That is why both signature files were typeless.
+
+**`parse_pointer_table` read the wrong buffers.** It walked every
+`LONGKEY_FIXED_REC` buffer and read each as an array of 17-byte pointer records.
+`FixedRecNode` is the leaf type for EVERY table with fixed-length records, and
+its record length comes from the table's schema rather than from the node, so a
+node's own bytes cannot say whether it holds pointer records. In
+`generic_clib_64.gdt` that produced 16,199 "pointers" of which 1,404 are real,
+and the decoded pointee IDs carried 250-odd distinct kind bytes where only 0-8
+exist. Fixing only `resolve_type` therefore made things worse, not better:
+`FILE *fopen(const char *, const char *)` resolved to `int*`, which looks like a
+recovered type in a way `int` does not.
+
+Three properties identify a genuine pointer leaf, and together they select
+exactly the three real ones out of 32 candidates: the key/record array fits the
+buffer at a 25-byte stride, leaf keys are strictly ascending, and every key is a
+Data Type ID of kind POINTER -- this table's keys are its own IDs, so one
+foreign key means a foreign table. Verified against Ghidra 11.4.2's
+`FixedRecNode` and `PointerDBAdapterV2`.
+
+With both fixed, the C-library prototypes resolve exactly:
+
+```
+fopen|FILE*|__filename:char*,__modes:char*
+fgets|char*|__s:char*,__n:int,__stream:FILE*
+strlen|size_t|__s:char*
+strtol|long|__nptr:char*,__endptr:char**,__base:int
+localtime|tm*|__timer:time_t*
+difftime|double|__time1:time_t,__time0:time_t
+```
+
+Typeless C-library entries fall from 97.8% to 79.6%. Struct extraction improves
+with the same table: 510 structs in that archive get corrected field types
+(`int*` -> `X509_ALGOR*`, `int*` -> `char*`) and 63 more are recovered.
+
+Measured end to end, regenerating only the two `generic_clib` signature files:
+
+| | before | after |
+|---|---|---|
+| libc slice type accuracy | 19.14% | **24.86%** |
+| self-contained corpus | 63.26% | 63.26% |
+| improved / regressed | | 8 / **0** |
+| gotos, bare-compile | 36, 308/428 | 36, 308/428 |
+
+Decompiled output now declares `FILE* __stream;` and `char* __filename;` where
+it declared `ulonglong`.
+
+### Two things this does not cover
+
+Regenerating `mac_osx` and `windows_vs12_{32,64}` was reverted. Those files went
+3,801 -> 46,781 and 8,119 -> 100,983 lines, and since this change cannot affect
+how many function definitions are found, the shipped files were not produced by
+this version of the script. Replacing them would mix an unrelated content change
+into a type fix. Only `generic_clib` and `generic_clib_64` were regenerated,
+where the function-name set is identical to what shipped.
+
+`win_api_signatures.txt` is 82.9% typeless too but carries a header comment and
+hand-curated entries (`CreateFileA|HANDLE|lpFileName:PSTR,...`), so it is not a
+plain GDT extraction and regenerating it would discard that.
+
+The function's own parameters are still untyped -- `open_reader(ulonglong)`
+where the local holding `fopen`'s result is now correctly `FILE*`. Propagating a
+typed local back to the parameter it was copied from is the next step, and it is
+ordinary type flow rather than library work.
 
 ## Not winnable on this corpus
 
