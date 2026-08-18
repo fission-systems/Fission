@@ -22,6 +22,7 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 
+pub mod fpk;
 pub mod api_types;
 pub mod fid;
 pub mod fidbf;
