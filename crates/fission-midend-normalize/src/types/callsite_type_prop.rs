@@ -201,6 +201,32 @@ fn api_signature_via_import_aliases(name: &str) -> Option<&'static ApiSignature>
         .or_else(|| symbol_for_win_api_database_lookup(name).and_then(|flat| api_signature(flat)))
 }
 
+/// Whether a signature's type string says anything, or is the extractor's
+/// "nothing recovered" placeholder.
+///
+/// The GDT signature extractor recovers parameter NAMES reliably but resolves a
+/// type ID only when it lands in the built-in table; typedefs, composites and
+/// pointers all fall through to `int`. 30,722 of 31,410 C-library entries and
+/// 96,081 of 115,900 Win32 entries come out that way, so
+/// `FILE *fopen(const char *, const char *)` is stored as
+/// `fopen|int|__filename:int,__modes:int`.
+///
+/// A placeholder is not evidence that the argument is `int` -- it is evidence
+/// that nothing was recovered, and applying it replaces whatever the decompiler
+/// inferred with a confident wrong answer. Measured on the libc corpus it
+/// turned `FILE *` and `char *` recoveries into `int`.
+///
+/// The test is per type string, not per signature: `difftime` is stored
+/// `difftime|double|_Time1:int,_Time2:int`, where the return type survived and
+/// both parameters did not. Judging the entry as a whole kept that `double` and
+/// took the two placeholders with it, retyping both `time_t` arguments `int`.
+///
+/// A genuinely `int` parameter (`abs`, `atoi`) loses nothing by being skipped:
+/// `int` is where use-driven inference lands anyway.
+fn type_name_is_informative(type_name: &str) -> bool {
+    !matches!(type_name.trim(), "" | "int" | "long" | "void")
+}
+
 /// Return the NirType implied by the API signature's return type string.
 /// Returns `None` when the return type is void or not mappable.
 fn resolve_return_ty(ret_type_str: &str) -> Option<NirType> {
@@ -923,8 +949,14 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
         };
         let mut refined_here = false;
 
+        // A type string of `int` records that nothing was recovered -- see
+        // `type_name_is_informative`. Parameter names are unaffected, so the
+        // rename path below stays live and only the type writes are skipped.
+        //
         // Resolve return type and update receiver binding.
-        if let Some(ret_ty) = resolve_return_ty(&sig.return_type) {
+        if let Some(ret_ty) =
+            resolve_return_ty(&sig.return_type).filter(|_| type_name_is_informative(&sig.return_type))
+        {
             if let Some(recv_name) = receiver {
                 if let Some(b) = binding_by_name_mut(&mut func.locals, recv_name)
                     .or_else(|| binding_by_name_mut(&mut func.params, recv_name))
@@ -947,11 +979,12 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
             if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
                 .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
             {
-                let tightened = win_type_name_to_nir(&param.type_name)
-                    .map(|param_ty| tighten_binding_ty(b, &param_ty))
-                    .unwrap_or(false);
-                let surface_tightened =
-                    b.surface_type_name.is_none() && !param.type_name.trim().is_empty();
+                let informative = type_name_is_informative(&param.type_name);
+                let tightened = informative
+                    && win_type_name_to_nir(&param.type_name)
+                        .map(|param_ty| tighten_binding_ty(b, &param_ty))
+                        .unwrap_or(false);
+                let surface_tightened = informative && b.surface_type_name.is_none();
                 if surface_tightened {
                     b.surface_type_name = Some(param.type_name.trim().to_string());
                 }

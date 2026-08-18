@@ -302,6 +302,20 @@ pub(super) fn parse_coff_loader_symbols(
             continue;
         }
 
+        // A COFF section symbol is `C_STAT` and carries its own section's name.
+        // Every object file linked in contributes one, and after linking it
+        // lands on that object's first byte of the merged section -- which for
+        // a static libc is the first byte of a real function. Keeping it means
+        // `.text` competes with `fopen` for 0x140002c00, and `.text` is not a
+        // name for anything: it identifies the section, not a symbol in it.
+        //
+        // A C identifier cannot start with `.`, so matching the section's own
+        // name cannot discard a real symbol.
+        if symbol.storage_class == storage_class::C_STAT && name == section.name {
+            i += u32::from(aux_count);
+            continue;
+        }
+
         symbols.push(LoaderSymbolInfo {
             address: section.virtual_address + u64::from(symbol.value),
             name: name.to_string(),
