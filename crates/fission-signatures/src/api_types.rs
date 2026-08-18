@@ -4,6 +4,7 @@ use fission_core::resources::ResourceProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::sync::{Mutex, OnceLock};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -69,9 +70,104 @@ impl ApiSignature {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+
+/// One `name|return_type|param:type,...` record.
+fn parse_record(line: &str) -> Result<ApiSignature, String> {
+    let parts: Vec<&str> = line.split('|').collect();
+    if parts.len() != 3 {
+        return Err("expected name|return_type|params".to_string());
+    }
+    let name = parts[0].trim();
+    let return_type = parts[1].trim();
+    if name.is_empty() || return_type.is_empty() {
+        return Err("name and return type must be non-empty".to_string());
+    }
+    let mut params = Vec::new();
+    let params_text = parts[2].trim();
+    if !params_text.is_empty() && params_text != "void" {
+        for param in params_text.split(',') {
+            let param = param.trim();
+            if param.is_empty() || param == "..." {
+                continue;
+            }
+            let Some((param_name, type_name)) = param.split_once(':') else {
+                return Err(format!("invalid parameter '{param}'"));
+            };
+            params.push(ParamInfo {
+                name: param_name.trim().to_string(),
+                type_name: type_name.trim().to_string(),
+                enum_group: None,
+            });
+        }
+    }
+    Ok(ApiSignature {
+        name: name.to_string(),
+        return_type: return_type.to_string(),
+        params,
+    })
+}
+
+/// Merge one record under the rule the whole database uses.
+///
+/// Sources are consulted in a fixed order and an entry is replaced only by one
+/// with at least as many informative type strings. Ties go to the later source,
+/// which is what keeps the 64-bit C library winning over the 32-bit one on the
+/// 30,998 names they share; only strictly-less-informative overwrites are
+/// refused. Before this, `mac_osx_signatures` -- 3,801 entries, not one of them
+/// carrying a type -- merged last and erased 302 signatures that did.
+fn merge_into(into: &mut HashMap<String, ApiSignature>, candidate: ApiSignature) {
+    match into.entry(candidate.name.clone()) {
+        Entry::Occupied(mut slot) => {
+            if candidate.informative_type_count() >= slot.get().informative_type_count() {
+                slot.insert(candidate);
+            }
+        }
+        Entry::Vacant(slot) => {
+            slot.insert(candidate);
+        }
+    }
+}
+
+/// Pick the winner among candidates offered in source order.
+fn merge_candidates(candidates: Vec<ApiSignature>) -> Option<ApiSignature> {
+    let mut best: Option<ApiSignature> = None;
+    for candidate in candidates {
+        match &best {
+            Some(current)
+                if candidate.informative_type_count() < current.informative_type_count() => {}
+            _ => best = Some(candidate),
+        }
+    }
+    best
+}
+
+#[derive(Default)]
 pub struct ApiTypeDatabase {
+    /// Records from sources that had no `.fpk`, merged eagerly.
     signatures: HashMap<String, ApiSignature>,
+    /// Packed sources, in merge order, read one block at a time.
+    packed: Vec<crate::fpk::FpkReader>,
+    /// Names already resolved against `packed`.
+    ///
+    /// Entries are `&'static` because the database itself is a process-lifetime
+    /// `LazyLock` -- the eager map it replaces was never freed either -- and
+    /// because `get` hands out references. Bounded by the number of distinct
+    /// names a run looks up, which is hundreds, not the 151,408 in the tables.
+    resolved: Mutex<HashMap<String, Option<&'static ApiSignature>>>,
+    /// Everything, materialised only if someone iterates.
+    materialised: OnceLock<HashMap<String, ApiSignature>>,
+}
+
+impl std::fmt::Debug for ApiTypeDatabase {
+    /// Deliberately does not materialise: formatting a database for a log
+    /// should not decompress every table.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApiTypeDatabase")
+            .field("eager_entries", &self.signatures.len())
+            .field("packed_tables", &self.packed.len())
+            .field("materialised", &self.materialised.get().is_some())
+            .finish()
+    }
 }
 
 impl ApiTypeDatabase {
@@ -112,12 +208,15 @@ impl ApiTypeDatabase {
     /// still loads, which is what keeps the two forms interchangeable while the
     /// bundle carries both.
     pub fn merge_path(&mut self, path: &Path) -> Result<(), ApiTypeError> {
-        let packed = path.with_extension("fpk");
-        if packed.exists()
-            && let Ok(reader) = crate::fpk::FpkReader::open(&packed)
-            && let Ok(records) = reader.read_all()
+        let packed_path = path.with_extension("fpk");
+        if packed_path.exists()
+            && let Ok(reader) = crate::fpk::FpkReader::open(&packed_path)
         {
-            return self.merge_pipe_text(&packed, &records.join("\n"));
+            // Kept unread. A lookup decompresses the one block that could hold
+            // the name; building the map here would spend 64.6ms to answer
+            // questions that may never be asked.
+            self.packed.push(reader);
+            return Ok(());
         }
         let content = fs::read_to_string(path).map_err(|source| ApiTypeError::Read {
             path: path.to_path_buf(),
@@ -128,94 +227,91 @@ impl ApiTypeDatabase {
 
     fn merge_pipe_text(&mut self, path: &Path, content: &str) -> Result<(), ApiTypeError> {
         for (line_idx, raw_line) in content.lines().enumerate() {
-            let line_no = line_idx + 1;
             let line = raw_line.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let parts: Vec<&str> = line.split('|').collect();
-            if parts.len() != 3 {
-                return Err(ApiTypeError::Parse {
-                    path: path.to_path_buf(),
-                    line: line_no,
-                    reason: "expected name|return_type|params".to_string(),
-                });
-            }
-            let name = parts[0].trim();
-            let return_type = parts[1].trim();
-            if name.is_empty() || return_type.is_empty() {
-                return Err(ApiTypeError::Parse {
-                    path: path.to_path_buf(),
-                    line: line_no,
-                    reason: "name and return type must be non-empty".to_string(),
-                });
-            }
-            let mut params = Vec::new();
-            let params_text = parts[2].trim();
-            if !params_text.is_empty() && params_text != "void" {
-                for param in params_text.split(',') {
-                    let param = param.trim();
-                    if param.is_empty() {
-                        continue;
-                    }
-                    if param == "..." {
-                        continue;
-                    }
-                    let Some((param_name, type_name)) = param.split_once(':') else {
-                        return Err(ApiTypeError::Parse {
-                            path: path.to_path_buf(),
-                            line: line_no,
-                            reason: format!("invalid parameter '{param}'"),
-                        });
-                    };
-                    params.push(ParamInfo {
-                        name: param_name.trim().to_string(),
-                        type_name: type_name.trim().to_string(),
-                        enum_group: None,
-                    });
-                }
-            }
-            let candidate = ApiSignature {
-                name: name.to_string(),
-                return_type: return_type.to_string(),
-                params,
-            };
-            // Files merge in a fixed order and the map used to take whichever
-            // arrived last, so `mac_osx_signatures.txt` -- 3,801 entries, not
-            // one of them carrying a type -- overwrote 302 signatures that did.
-            //
-            // An entry is now replaced only by one that says at least as much.
-            // Ties still go to the later file, which is what keeps the 64-bit
-            // C library winning over the 32-bit one on the 30,998 names they
-            // share; only strictly-less-informative overwrites are refused.
-            match self.signatures.entry(name.to_string()) {
-                Entry::Occupied(mut slot) => {
-                    if candidate.informative_type_count() >= slot.get().informative_type_count() {
-                        slot.insert(candidate);
-                    }
-                }
-                Entry::Vacant(slot) => {
-                    slot.insert(candidate);
-                }
-            }
+            let candidate = parse_record(line).map_err(|reason| ApiTypeError::Parse {
+                path: path.to_path_buf(),
+                line: line_idx + 1,
+                reason,
+            })?;
+            merge_into(&mut self.signatures, candidate);
         }
         Ok(())
     }
 
     pub fn get(&self, name: &str) -> Option<&ApiSignature> {
-        self.signatures.get(name)
+        if self.packed.is_empty() {
+            return self.signatures.get(name);
+        }
+        if let Ok(cache) = self.resolved.lock()
+            && let Some(hit) = cache.get(name)
+        {
+            return *hit;
+        }
+        let mut candidates: Vec<ApiSignature> = Vec::new();
+        if let Some(eager) = self.signatures.get(name) {
+            candidates.push(eager.clone());
+        }
+        for reader in &self.packed {
+            let Ok(Some(block)) = reader.block_for(name) else {
+                continue;
+            };
+            for line in block.lines() {
+                let Some(rest) = line.strip_prefix(name) else {
+                    continue;
+                };
+                if !rest.starts_with('|') {
+                    continue;
+                }
+                if let Ok(record) = parse_record(line) {
+                    candidates.push(record);
+                }
+                break;
+            }
+        }
+        // Leaked so `get` can hand out a reference; see `resolved`.
+        let winner: Option<&'static ApiSignature> =
+            merge_candidates(candidates).map(|s| &*Box::leak(Box::new(s)));
+        if let Ok(mut cache) = self.resolved.lock() {
+            cache.insert(name.to_string(), winner);
+        }
+        winner
+    }
+
+    /// Everything the sources hold, merged. Only for callers that genuinely
+    /// need the whole table -- a lookup should use [`ApiTypeDatabase::get`].
+    fn all(&self) -> &HashMap<String, ApiSignature> {
+        if self.packed.is_empty() {
+            return &self.signatures;
+        }
+        self.materialised.get_or_init(|| {
+            let mut merged = self.signatures.clone();
+            for reader in &self.packed {
+                let Ok(records) = reader.read_all() else {
+                    continue;
+                };
+                for line in records {
+                    if let Ok(record) = parse_record(&line) {
+                        merge_into(&mut merged, record);
+                    }
+                }
+            }
+            merged
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &ApiSignature> {
-        self.signatures.values()
+        self.all().values()
     }
 
     pub fn len(&self) -> usize {
-        self.signatures.len()
+        self.all().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.signatures.is_empty()
+        self.all().is_empty()
     }
 }
 
