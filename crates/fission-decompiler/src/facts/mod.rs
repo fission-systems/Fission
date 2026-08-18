@@ -12,3 +12,7 @@ pub(crate) use self::facts::*;
 // discovery), so it needs a real `pub` re-export -- the blanket
 // `pub(crate) use` above only reaches other modules within this crate.
 pub use self::facts::seed_whole_program_call_arity_facts;
+
+/// Exported for `bin/export_call_param_rules`: the static half of the call
+/// parameter rules, which the runtime should load rather than rediscover.
+pub use self::facts::name_keyed_call_param_rules;

@@ -104,7 +104,21 @@ impl ApiTypeDatabase {
         Ok(db)
     }
 
+    /// Merge a signature table, preferring the `.fpk` beside it.
+    ///
+    /// The packed form holds the same records -- block payloads are the
+    /// original text -- so this is a change of container, not of content. It is
+    /// preferred rather than required: a checkout with only the `.txt` present
+    /// still loads, which is what keeps the two forms interchangeable while the
+    /// bundle carries both.
     pub fn merge_path(&mut self, path: &Path) -> Result<(), ApiTypeError> {
+        let packed = path.with_extension("fpk");
+        if packed.exists()
+            && let Ok(reader) = crate::fpk::FpkReader::open(&packed)
+            && let Ok(records) = reader.read_all()
+        {
+            return self.merge_pipe_text(&packed, &records.join("\n"));
+        }
         let content = fs::read_to_string(path).map_err(|source| ApiTypeError::Read {
             path: path.to_path_buf(),
             source,

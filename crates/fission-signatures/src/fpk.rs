@@ -25,9 +25,11 @@
 //! ```
 
 use memmap2::Mmap;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 const MAGIC: &[u8; 4] = b"FPK1";
 const HEADER_LEN: usize = 72;
@@ -89,6 +91,11 @@ pub struct FpkReader {
     blocks: Vec<BlockRef>,
     record_count: u64,
     codec: u16,
+    /// Decompressed blocks, kept because lookups cluster: a function's calls
+    /// resolve names that sort near each other, so the same block answers many
+    /// of them. Without this a lazy database pays a decompress per lookup
+    /// instead of per block.
+    cache: Mutex<HashMap<usize, Arc<String>>>,
 }
 
 fn u16_at(b: &[u8], at: usize) -> u16 {
@@ -163,6 +170,7 @@ impl FpkReader {
             blocks,
             record_count,
             codec,
+            cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -209,7 +217,7 @@ impl FpkReader {
     /// Records are sorted, so the block whose first key is the last one at or
     /// before `key` is the only candidate; a key absent from that block is
     /// absent from the file.
-    pub fn block_for(&self, key: &str) -> Result<Option<String>, FpkError> {
+    pub fn block_for(&self, key: &str) -> Result<Option<Arc<String>>, FpkError> {
         if self.blocks.is_empty() || key < self.blocks[0].first_key.as_str() {
             return Ok(None);
         }
@@ -221,7 +229,21 @@ impl FpkReader {
             Err(0) => return Ok(None),
             Err(after) => after - 1,
         };
-        self.decompress(&self.blocks[index]).map(Some)
+        self.block_at(index).map(Some)
+    }
+
+    /// Decompressed block `index`, from the cache when it is already there.
+    pub fn block_at(&self, index: usize) -> Result<Arc<String>, FpkError> {
+        if let Ok(cache) = self.cache.lock()
+            && let Some(hit) = cache.get(&index)
+        {
+            return Ok(Arc::clone(hit));
+        }
+        let text = Arc::new(self.decompress(&self.blocks[index])?);
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(index, Arc::clone(&text));
+        }
+        Ok(text)
     }
 
     /// Every record, decompressing each block once. For callers that genuinely

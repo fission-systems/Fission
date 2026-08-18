@@ -1328,7 +1328,106 @@ pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
     sanitize_symbol_name(name)
 }
 
+/// The rules that depend only on the signature tables and struct layouts.
+///
+/// Both inputs are static, so this is the same list in every process and for
+/// every binary; `callee_address` is the only part that varies, and it is
+/// attached in [`build_nir_call_param_rules`] from the binary's own call
+/// targets. Exported by `bin/export_call_param_rules` so the runtime can load
+/// ~716 rules instead of walking 151,408 signatures to rediscover them.
+pub fn name_keyed_call_param_rules() -> Vec<NirCallParamRule> {
+    let mut rules = Vec::new();
+    let Ok(structures) = WindowsStructures::try_new() else {
+        return rules;
+    };
+    let Ok(signatures) = SIGNATURE_RESOURCES.api_signatures() else {
+        return rules;
+    };
+    for sig in signatures {
+        for (arg_index, param) in sig.params.iter().enumerate() {
+            let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures) else {
+                continue;
+            };
+            let Some(struct_def) = structures.get(&struct_name) else {
+                continue;
+            };
+            if struct_def.size_64 == 0 {
+                continue;
+            }
+            rules.push(NirCallParamRule {
+                callee_address: None,
+                callee_name: sig.name.clone(),
+                arg_index,
+                pointer_alias: param.type_name.clone(),
+                pointee_alias: struct_name,
+                pointer_size: 8,
+                pointee_sizes: vec![struct_def.size_64 as u32],
+            });
+        }
+    }
+    rules.sort_by(|a, b| {
+        a.callee_name
+            .cmp(&b.callee_name)
+            .then_with(|| a.arg_index.cmp(&b.arg_index))
+    });
+    rules
+}
+
+/// The precomputed rules, or `None` when the bundle does not carry them.
+///
+/// Falling back to computing them keeps a checkout without the file working;
+/// what the file buys is not having to read 151,408 signatures to rediscover
+/// 716 rules.
+static PRECOMPUTED_RULES: LazyLock<Option<Vec<NirCallParamRule>>> = LazyLock::new(|| {
+    let path = fission_core::resources::ResourceProvider::global()
+        .win32_typeinfo_json_path("call_param_rules.json")?;
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+});
+
 fn build_nir_call_param_rules(
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+) -> Vec<NirCallParamRule> {
+    if let Some(precomputed) = PRECOMPUTED_RULES.as_ref() {
+        return attach_addresses(precomputed, call_target_refs);
+    }
+    build_nir_call_param_rules_from_signatures(call_target_refs)
+}
+
+/// Expand name-keyed rules into per-address ones for this binary.
+///
+/// A rule for a callee the binary never calls is kept with no address, exactly
+/// as the signature walk produced it: `collect_call_hints_from_expr` matches on
+/// `callee_name` as well as address, so a call rendered by bare name still
+/// finds its rule.
+fn attach_addresses(
+    rules: &[NirCallParamRule],
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+) -> Vec<NirCallParamRule> {
+    let mut addresses_by_name: HashMap<&str, Vec<u64>> = HashMap::new();
+    for (address, target_ref) in call_target_refs {
+        addresses_by_name
+            .entry(target_ref.symbol.as_str())
+            .or_default()
+            .push(*address);
+    }
+    let mut out = Vec::with_capacity(rules.len());
+    for rule in rules {
+        match addresses_by_name.get(rule.callee_name.as_str()) {
+            Some(addresses) if !addresses.is_empty() => {
+                for address in addresses {
+                    let mut with_address = rule.clone();
+                    with_address.callee_address = Some(*address);
+                    out.push(with_address);
+                }
+            }
+            _ => out.push(rule.clone()),
+        }
+    }
+    out
+}
+
+fn build_nir_call_param_rules_from_signatures(
     call_target_refs: &HashMap<u64, CallTargetRef>,
 ) -> Vec<NirCallParamRule> {
     let mut call_param_rules = Vec::new();
