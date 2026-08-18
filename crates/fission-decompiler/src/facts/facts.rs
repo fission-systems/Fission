@@ -26,8 +26,9 @@ fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
     if lower == "main" || lower == "wmain" || lower == "winmain" || lower == "wwinmain" {
         return None;
     }
-    let sigs_iter = SIGNATURE_RESOURCES.api_signatures().ok()?;
-    let matched_sig = sigs_iter.into_iter().find(|sig| sig.name == name)?;
+    // The database is a map; scanning all 115,900 signatures to find one by
+    // name was doing a lookup the long way, once per function.
+    let matched_sig = SIGNATURE_RESOURCES.api_signature(name)?;
 
     let mut param_names = Vec::new();
     let mut param_type_names = HashMap::new();

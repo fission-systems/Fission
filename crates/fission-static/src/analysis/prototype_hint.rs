@@ -7,10 +7,8 @@ use serde_json::{Value, json};
 #[must_use]
 pub fn win_api_prototype_hint_json(symbol_or_import_name: &str) -> Option<Value> {
     let flat = symbol_for_win_api_database_lookup(symbol_or_import_name)?;
-    let sig = SIGNATURE_RESOURCES
-        .api_signatures()
-        .ok()?
-        .find(|s| s.name == flat)?;
+    // Was a linear scan of the whole signature table for one name.
+    let sig = SIGNATURE_RESOURCES.api_signature(flat)?;
     Some(json!({
         "win_api_flat": flat,
         "param_count": sig.params.len(),
