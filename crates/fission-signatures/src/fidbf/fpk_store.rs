@@ -361,6 +361,23 @@ mod tests {
         assert_eq!(a, b, "relation fields differ");
     }
 
+    /// The two databases that an empty relation table used to reject.
+    #[test]
+    fn a_database_with_no_relations_parses() {
+        for stem in ["gcc-MIPS.BE.32.default", "gcc-avr8.LE.16.extended"] {
+            let path = std::path::PathBuf::from(format!(
+                "/Users/sjkim1127/Fission/utils/signatures/fid/{stem}.fidbf"
+            ));
+            if !path.exists() {
+                continue; // bundle not present in this checkout
+            }
+            let db = crate::fidbf::parse_fidbf(&path)
+                .unwrap_or_else(|e| panic!("{stem} should parse: {e}"));
+            assert!(!db.functions.is_empty(), "{stem} has functions");
+            assert!(db.relations.is_empty(), "{stem} is the empty-relations case");
+        }
+    }
+
     #[test]
     fn separators_inside_names_survive() {
         // A symbol containing `|` or a newline would otherwise shift every

@@ -289,8 +289,9 @@ impl FpkReader {
         let mut i = lo;
         while i < count && key_at(i) == key {
             let base = i * HASH_ENTRY_LEN;
-            let block = u32_at(entries, base + 8) as usize;
-            let row = u32_at(entries, base + 12) as usize;
+            let locator = u32_at(entries, base + 8);
+            let block = (locator >> LOCATOR_ROW_BITS) as usize;
+            let row = (locator & LOCATOR_ROW_MASK) as usize;
             if block >= self.blocks.len() {
                 return Err(FpkError::Corrupt(format!(
                     "hash index points at block {block}, file has {}",
@@ -406,7 +407,16 @@ fn columns_from_rows(group: &[&String]) -> Vec<u8> {
 
 const HASH_INDEX_MAGIC: &[u8; 4] = b"FIDX";
 const HASH_TRAILER_LEN: usize = 56;
-const HASH_ENTRY_LEN: usize = 16;
+/// `u64` key plus a packed `u32` locator.
+///
+/// Block and row share one word because neither is large: across the FID
+/// function tables the widest is 29 blocks and 9,399 rows in a block, 5 and 14
+/// bits. Storing them as two `u32`s cost 28.0M over 1,834,901 entries where 21.0M
+/// does, and the index is the single largest thing in the packed corpus after
+/// the payload itself.
+const HASH_ENTRY_LEN: usize = 12;
+const LOCATOR_ROW_BITS: u32 = 20;
+const LOCATOR_ROW_MASK: u32 = (1 << LOCATOR_ROW_BITS) - 1;
 
 /// One `key -> record` mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,9 +435,13 @@ pub fn append_hash_index(image: &mut Vec<u8>, mut entries: Vec<HashEntry>) {
     let entries_offset = image.len() as u64;
     let mut bytes = Vec::with_capacity(entries.len() * HASH_ENTRY_LEN);
     for entry in &entries {
+        assert!(
+            entry.row <= LOCATOR_ROW_MASK,
+            "row {} does not fit the locator; lower the block target",
+            entry.row
+        );
         bytes.extend_from_slice(&entry.key.to_le_bytes());
-        bytes.extend_from_slice(&entry.block.to_le_bytes());
-        bytes.extend_from_slice(&entry.row.to_le_bytes());
+        bytes.extend_from_slice(&((entry.block << LOCATOR_ROW_BITS) | entry.row).to_le_bytes());
     }
     let digest = sha256(&bytes);
     image.extend_from_slice(&bytes);

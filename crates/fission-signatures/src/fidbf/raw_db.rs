@@ -120,6 +120,19 @@ impl<'a> RawDbHandle<'a> {
         root_buffer_id: i32,
         schema: &RawSchema,
     ) -> Result<Vec<RawRecord>, FidbfParseError> {
+        // A table Ghidra never wrote a record to has no root buffer. Its own
+        // `TableRecord` sets the column to -1 with the comment "first buffer
+        // not yet allocated", so this is an empty table and not damage.
+        //
+        // Reading it as a buffer id rejected two of the corpus's 57 databases
+        // outright -- gcc-MIPS.BE.32.default and gcc-avr8.LE.16.extended, both
+        // about 100KB where a populated one is megabytes -- and because
+        // `discover_for_load_spec` collects parse failures into `errors` rather
+        // than surfacing them, MIPS and AVR targets have simply had no FID
+        // matching.
+        if root_buffer_id < 0 {
+            return Ok(Vec::new());
+        }
         let mut out = Vec::new();
         let mut visited = HashSet::new();
         self.collect_records(root_buffer_id, schema, &mut visited, &mut out)?;
