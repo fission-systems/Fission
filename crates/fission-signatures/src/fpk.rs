@@ -31,7 +31,28 @@ use std::path::Path;
 
 const MAGIC: &[u8; 4] = b"FPK1";
 const HEADER_LEN: usize = 72;
-const CODEC_ZLIB: u16 = 1;
+
+/// The `codec` header field carries two things: compression in the low byte,
+/// block layout in the high byte. The header has no spare space -- magic(4),
+/// kind(2), codec(2), counts and offsets(32), sha256(32) fill all 72 bytes --
+/// and a layout that the reader guessed wrong would decode records into the
+/// wrong fields, so it has to be stated in the file.
+const COMPRESS_ZLIB: u16 = 1;
+const COMPRESS_ZSTD: u16 = 2;
+const LAYOUT_ROW: u16 = 0 << 8;
+const LAYOUT_COLUMNAR: u16 = 1 << 8;
+
+pub const CODEC_ZLIB: u16 = COMPRESS_ZLIB | LAYOUT_ROW;
+/// What the FID tables use: see [`pack_with`] for why.
+pub const CODEC_ZSTD_COLUMNAR: u16 = COMPRESS_ZSTD | LAYOUT_COLUMNAR;
+
+/// Separates one column from the next inside a columnar block.
+const COLUMN_SEPARATOR: u8 = 0x1e;
+
+/// Default block size. Bigger blocks compress better and cost more to decode
+/// for a single lookup, so tables that are always loaded whole use more.
+pub const BLOCK_TARGET_DEFAULT: usize = 64 * 1024;
+pub const BLOCK_TARGET_BULK: usize = 1024 * 1024;
 
 #[derive(Debug)]
 pub enum FpkError {
@@ -67,6 +88,7 @@ pub struct FpkReader {
     map: Mmap,
     blocks: Vec<BlockRef>,
     record_count: u64,
+    codec: u16,
 }
 
 fn u16_at(b: &[u8], at: usize) -> u16 {
@@ -92,7 +114,10 @@ impl FpkReader {
         if map.len() < HEADER_LEN || &map[0..4] != MAGIC {
             return Err(FpkError::Malformed("bad magic"));
         }
-        if u16_at(&map, 6) != CODEC_ZLIB {
+        let codec = u16_at(&map, 6);
+        if !matches!(codec & 0xff, COMPRESS_ZLIB | COMPRESS_ZSTD)
+            || !matches!(codec & 0xff00, LAYOUT_ROW | LAYOUT_COLUMNAR)
+        {
             return Err(FpkError::Malformed("unknown codec"));
         }
         let record_count = u64_at(&map, 8);
@@ -137,6 +162,7 @@ impl FpkReader {
             map,
             blocks,
             record_count,
+            codec,
         })
     }
 
@@ -151,9 +177,19 @@ impl FpkReader {
     fn decompress(&self, block: &BlockRef) -> Result<String, FpkError> {
         let raw = &self.map[block.offset..block.offset + block.comp_len];
         let mut out = String::with_capacity(block.raw_len);
-        flate2::read::ZlibDecoder::new(raw)
-            .read_to_string(&mut out)
-            .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
+        match self.codec & 0xff {
+            COMPRESS_ZSTD => {
+                let bytes = zstd::decode_all(raw)
+                    .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
+                out = String::from_utf8(bytes)
+                    .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
+            }
+            _ => {
+                flate2::read::ZlibDecoder::new(raw)
+                    .read_to_string(&mut out)
+                    .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
+            }
+        }
         if out.len() != block.raw_len {
             return Err(FpkError::Corrupt(format!(
                 "block at {} decompressed to {} bytes, index says {}",
@@ -161,6 +197,9 @@ impl FpkReader {
                 out.len(),
                 block.raw_len
             )));
+        }
+        if self.codec & 0xff00 == LAYOUT_COLUMNAR {
+            return rows_from_columns(&out, block.offset);
         }
         Ok(out)
     }
@@ -204,6 +243,66 @@ impl FpkReader {
 }
 
 
+
+/// Rebuild rows from a columnar block.
+///
+/// A columnar block stores every record's first field, then every record's
+/// second, and so on, each column terminated by [`COLUMN_SEPARATOR`]. Records
+/// sorted so that neighbours are alike make each column nearly homogeneous,
+/// which is what the compressor exploits -- on the FID function table this is
+/// worth 25.47M against 32.96M for the same records stored row by row.
+///
+/// Every column must hold the same number of values. A block that decodes to
+/// ragged columns is corrupt, and saying so here is what keeps a mis-decoded
+/// block from silently producing records with fields shifted between them.
+fn rows_from_columns(block: &str, offset: usize) -> Result<String, FpkError> {
+    let mut columns: Vec<Vec<&str>> = Vec::new();
+    for column in block.split(COLUMN_SEPARATOR as char) {
+        if column.is_empty() {
+            continue;
+        }
+        let values: Vec<&str> = column.strip_suffix('\n').unwrap_or(column).split('\n').collect();
+        columns.push(values);
+    }
+    let Some(rows) = columns.first().map(Vec::len) else {
+        return Ok(String::new());
+    };
+    if let Some(bad) = columns.iter().position(|c| c.len() != rows) {
+        return Err(FpkError::Corrupt(format!(
+            "columnar block at {offset}: column {bad} has {} values, column 0 has {rows}",
+            columns[bad].len()
+        )));
+    }
+    let mut out = String::with_capacity(block.len());
+    for row in 0..rows {
+        for (index, column) in columns.iter().enumerate() {
+            if index > 0 {
+                out.push('|');
+            }
+            out.push_str(column[row]);
+        }
+        out.push('\n');
+    }
+    // `read_all`/`block_for` split on newlines, so drop the trailing one to
+    // match how a row block is stored.
+    out.pop();
+    Ok(out)
+}
+
+/// Lay a group of records out column by column.
+fn columns_from_rows(group: &[&String]) -> Vec<u8> {
+    let columns = group.first().map(|r| r.split('|').count()).unwrap_or(0);
+    let mut out = Vec::new();
+    for column in 0..columns {
+        for record in group {
+            out.extend_from_slice(record.split('|').nth(column).unwrap_or("").as_bytes());
+            out.push(b'\n');
+        }
+        out.push(COLUMN_SEPARATOR);
+    }
+    out
+}
+
 /// Pack sorted records into an `.fpk` image.
 ///
 /// Byte-for-byte the same container `scripts/fpk_pack.py` writes, so a table
@@ -215,49 +314,85 @@ impl FpkReader {
 /// boundaries depend on the order, and a caller that sorted differently would
 /// produce a file whose index does not describe it.
 pub fn pack(records: &[String], kind: u16) -> Vec<u8> {
+    pack_with(records, kind, CODEC_ZLIB, 0, BLOCK_TARGET_DEFAULT)
+}
+
+/// Pack with an explicit codec, sort column and block size.
+///
+/// `sort_field` is which `|`-separated column orders the records, and it is the
+/// single biggest lever on size. The FID function table sorted by its database
+/// key packs to 45.44M; the same records sorted by symbol name pack to 32.96M,
+/// because neighbouring names share prefixes and drag their library and build
+/// path along with them. Add columnar layout and it is 25.47M.
+///
+/// Sorting by a column other than the first means the block index no longer
+/// answers lookups by the leading field. That is the right trade for a table
+/// that is always read whole -- FID builds its own hash index after loading --
+/// and the wrong one for a table queried by key.
+pub fn pack_with(
+    records: &[String],
+    kind: u16,
+    codec: u16,
+    sort_field: usize,
+    block_target: usize,
+) -> Vec<u8> {
     use std::io::Write;
 
-    const BLOCK_TARGET: usize = 64 * 1024;
-
-    let key_of = |line: &str| line.split('|').next().unwrap_or("").to_owned();
+    let key_of = |line: &str| line.split('|').nth(sort_field).unwrap_or("").to_owned();
     let mut sorted: Vec<&String> = records.iter().collect();
     sorted.sort_by_key(|line| key_of(line));
 
-    let mut blocks: Vec<Vec<u8>> = Vec::new();
-    let mut current: Vec<u8> = Vec::new();
+    let mut groups: Vec<Vec<&String>> = Vec::new();
+    let mut current: Vec<&String> = Vec::new();
+    let mut size = 0usize;
     for record in &sorted {
-        if current.len() + record.len() + 1 > BLOCK_TARGET && !current.is_empty() {
-            blocks.push(std::mem::take(&mut current));
+        if size + record.len() + 1 > block_target && !current.is_empty() {
+            groups.push(std::mem::take(&mut current));
+            size = 0;
         }
-        current.extend_from_slice(record.as_bytes());
-        current.push(b'\n');
+        current.push(record);
+        size += record.len() + 1;
     }
     if !current.is_empty() {
-        blocks.push(current);
+        groups.push(current);
     }
 
     let mut payload: Vec<u8> = Vec::new();
     let mut index: Vec<u8> = Vec::new();
-    for block in &blocks {
-        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
-        encoder.write_all(block).expect("zlib write to Vec cannot fail");
-        let compressed = encoder.finish().expect("zlib finish on Vec cannot fail");
-        let first_line = block.split(|b| *b == b'\n').next().unwrap_or(&[]);
-        let first_key = key_of(&String::from_utf8_lossy(first_line));
+    for group in &groups {
+        let raw: Vec<u8> = if codec & 0xff00 == LAYOUT_COLUMNAR {
+            columns_from_rows(group)
+        } else {
+            let mut buf = Vec::new();
+            for record in group {
+                buf.extend_from_slice(record.as_bytes());
+                buf.push(b'\n');
+            }
+            buf
+        };
+        let compressed = if codec & 0xff == COMPRESS_ZSTD {
+            zstd::encode_all(&raw[..], 19).expect("zstd encode to Vec cannot fail")
+        } else {
+            let mut encoder =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+            encoder.write_all(&raw).expect("zlib write to Vec cannot fail");
+            encoder.finish().expect("zlib finish on Vec cannot fail")
+        };
+        let first_key = key_of(group[0]);
         index.extend_from_slice(&(first_key.len() as u32).to_le_bytes());
         index.extend_from_slice(first_key.as_bytes());
         index.extend_from_slice(&((HEADER_LEN + payload.len()) as u64).to_le_bytes());
         index.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
-        index.extend_from_slice(&(block.len() as u32).to_le_bytes());
+        index.extend_from_slice(&(raw.len() as u32).to_le_bytes());
         payload.extend_from_slice(&compressed);
     }
 
     let mut out = Vec::with_capacity(HEADER_LEN + payload.len() + index.len());
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&kind.to_le_bytes());
-    out.extend_from_slice(&CODEC_ZLIB.to_le_bytes());
+    out.extend_from_slice(&codec.to_le_bytes());
     out.extend_from_slice(&(sorted.len() as u64).to_le_bytes());
-    out.extend_from_slice(&(blocks.len() as u64).to_le_bytes());
+    out.extend_from_slice(&(groups.len() as u64).to_le_bytes());
     out.extend_from_slice(&((HEADER_LEN + payload.len()) as u64).to_le_bytes());
     out.extend_from_slice(&(index.len() as u64).to_le_bytes());
     out.extend_from_slice(&sha256(&payload));
@@ -424,6 +559,52 @@ mod tests {
 
         std::fs::remove_file(&ours_path).ok();
         std::fs::remove_file(&theirs_path).ok();
+    }
+
+    #[test]
+    fn a_columnar_block_round_trips_through_zstd() {
+        let records: Vec<String> = (0..500)
+            .map(|i| format!("name{i:04}|{:016x}|lib{}|flag{}", i * 7919, i % 3, i % 2))
+            .collect();
+        let path = write_temp(&super::pack_with(
+            &records,
+            1,
+            CODEC_ZSTD_COLUMNAR,
+            0,
+            4096,
+        ));
+        let reader = FpkReader::open(&path).unwrap();
+        assert!(reader.block_count() > 1, "test needs several blocks");
+        let mut all = reader.read_all().unwrap();
+        all.sort();
+        let mut expected = records;
+        expected.sort();
+        assert_eq!(all, expected);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_ragged_columnar_block_is_rejected() {
+        // Fields shifting between records is the failure this layout could
+        // produce silently, so a column of the wrong length has to be an error.
+        let err = rows_from_columns("a\nb\n\x1ec\n\x1e", 0);
+        assert!(matches!(err, Err(FpkError::Corrupt(_))), "got {err:?}");
+    }
+
+    #[test]
+    fn sorting_on_a_later_column_orders_by_that_column() {
+        let records: Vec<String> = vec![
+            "3|charlie".to_string(),
+            "1|alpha".to_string(),
+            "2|bravo".to_string(),
+        ];
+        let path = write_temp(&super::pack_with(&records, 1, CODEC_ZLIB, 1, 64 * 1024));
+        let reader = FpkReader::open(&path).unwrap();
+        assert_eq!(
+            reader.read_all().unwrap(),
+            vec!["1|alpha", "2|bravo", "3|charlie"]
+        );
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

@@ -1,3 +1,4 @@
+pub mod fpk_store;
 pub mod loader;
 pub mod parser;
 mod raw_db;
