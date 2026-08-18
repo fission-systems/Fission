@@ -246,8 +246,8 @@ impl FpkReader {
         Ok(text)
     }
 
-    /// Entries of the auxiliary hash index, or `None` when the file has none.
-    fn hash_entries(&self) -> Option<&[u8]> {
+    /// The index directory, or `None` when the file has none.
+    fn hash_directory(&self) -> Option<&[u8]> {
         let len = self.map.len();
         if len < HASH_TRAILER_LEN {
             return None;
@@ -256,58 +256,106 @@ impl FpkReader {
         if &self.map[trailer..trailer + 4] != HASH_INDEX_MAGIC {
             return None;
         }
-        let count = u64_at(&self.map, trailer + 8) as usize;
-        let offset = u64_at(&self.map, trailer + 16) as usize;
-        let end = offset.checked_add(count.checked_mul(HASH_ENTRY_LEN)?)?;
-        if end > trailer {
+        if u16_at(&self.map, trailer + 4) != 2 {
+            return None; // an index this build does not know how to read
+        }
+        let directory_offset = u64_at(&self.map, trailer + 16) as usize;
+        if directory_offset > trailer {
             return None;
         }
-        Some(&self.map[offset..end])
+        Some(&self.map[directory_offset..trailer])
     }
 
     pub fn has_hash_index(&self) -> bool {
-        self.hash_entries().is_some()
+        self.hash_directory().is_some()
     }
 
-    /// Records whose index key is `key`, decoding only the blocks they live in.
+    /// Records whose index key is `key`, decoding only what it takes to find
+    /// them.
     ///
-    /// A key that is absent costs a binary search over the mapped index and no
-    /// decompression at all, which is the common case for a FID query.
+    /// The directory is searched in place -- it is one entry per 512 keys, a
+    /// few KB for the largest table -- and then a single index chunk and a
+    /// single payload block are decoded. A key that is absent decodes one 6KB
+    /// chunk and stops.
     pub fn records_by_key(&self, key: u64) -> Result<Vec<String>, FpkError> {
-        let Some(entries) = self.hash_entries() else {
+        let Some(directory) = self.hash_directory() else {
             return Err(FpkError::Malformed("no hash index"));
         };
-        let count = entries.len() / HASH_ENTRY_LEN;
-        let key_at = |i: usize| u64_at(entries, i * HASH_ENTRY_LEN);
-        // Leftmost entry with this key; equal keys are adjacent by construction.
-        let (mut lo, mut hi) = (0usize, count);
+        let chunks = directory.len() / HASH_DIR_LEN;
+        if chunks == 0 {
+            return Ok(Vec::new());
+        }
+        let first_key_at = |i: usize| u64_at(directory, i * HASH_DIR_LEN);
+        if key < first_key_at(0) {
+            return Ok(Vec::new());
+        }
+        // A run of equal keys can span chunks in BOTH directions: the key may
+        // be a chunk's first key while earlier copies sit at the end of the one
+        // before. Find the leftmost chunk that could hold it and scan forward
+        // from there.
+        let mut lo = 0usize;
+        let mut hi = chunks;
         while lo < hi {
             let mid = (lo + hi) / 2;
-            if key_at(mid) < key { lo = mid + 1 } else { hi = mid }
+            if first_key_at(mid) < key { lo = mid + 1 } else { hi = mid }
         }
+        // `lo` is the first chunk whose first key is >= `key`. Anything earlier
+        // in the run is in the preceding chunk, and only there, because a chunk
+        // that started below `key` and does not end on it cannot contain it.
+        let mut chunk = lo.saturating_sub(1);
+
         let mut out = Vec::new();
-        let mut i = lo;
-        while i < count && key_at(i) == key {
-            let base = i * HASH_ENTRY_LEN;
-            let locator = u32_at(entries, base + 8);
-            let block = (locator >> LOCATOR_ROW_BITS) as usize;
-            let row = (locator & LOCATOR_ROW_MASK) as usize;
-            if block >= self.blocks.len() {
+        while chunk < chunks {
+            let base = chunk * HASH_DIR_LEN;
+            let offset = u64_at(directory, base + 8) as usize;
+            let comp_len = u32_at(directory, base + 16) as usize;
+            let count = u32_at(directory, base + 20) as usize;
+            if offset.checked_add(comp_len).is_none_or(|e| e > self.map.len()) {
+                return Err(FpkError::Malformed("index chunk outside file"));
+            }
+            let raw = zstd::decode_all(&self.map[offset..offset + comp_len])
+                .map_err(|e| FpkError::Corrupt(format!("index chunk at {offset}: {e}")))?;
+            if raw.len() != count * HASH_ENTRY_LEN {
                 return Err(FpkError::Corrupt(format!(
-                    "hash index points at block {block}, file has {}",
-                    self.blocks.len()
+                    "index chunk at {offset} decoded to {} bytes, directory says {}",
+                    raw.len(),
+                    count * HASH_ENTRY_LEN
                 )));
             }
-            let text = self.block_at(block)?;
-            match text.lines().nth(row) {
-                Some(line) => out.push(line.to_owned()),
-                None => {
+            let mut found_here = false;
+            for i in 0..count {
+                if u64_at(&raw, i * HASH_ENTRY_LEN) != key {
+                    continue;
+                }
+                found_here = true;
+                let locator = u32_at(&raw, i * HASH_ENTRY_LEN + 8);
+                let block = (locator >> LOCATOR_ROW_BITS) as usize;
+                let row = (locator & LOCATOR_ROW_MASK) as usize;
+                if block >= self.blocks.len() {
                     return Err(FpkError::Corrupt(format!(
-                        "hash index points at row {row} of block {block}"
+                        "hash index points at block {block}, file has {}",
+                        self.blocks.len()
                     )));
                 }
+                let text = self.block_at(block)?;
+                match text.lines().nth(row) {
+                    Some(line) => out.push(line.to_owned()),
+                    None => {
+                        return Err(FpkError::Corrupt(format!(
+                            "hash index points at row {row} of block {block}"
+                        )));
+                    }
+                }
             }
-            i += 1;
+            // Stop once a chunk has moved past the key. A chunk with no match
+            // is only worth passing through when it ends below the key, which
+            // is the "search landed one chunk early" case.
+            let last_key = u64_at(&raw, (count - 1) * HASH_ENTRY_LEN);
+            if last_key > key {
+                break;
+            }
+            let _ = found_here;
+            chunk += 1;
         }
         Ok(out)
     }
@@ -412,9 +460,21 @@ const HASH_TRAILER_LEN: usize = 56;
 /// Block and row share one word because neither is large: across the FID
 /// function tables the widest is 29 blocks and 9,399 rows in a block, 5 and 14
 /// bits. Storing them as two `u32`s cost 28.0M over 1,834,901 entries where 21.0M
-/// does, and the index is the single largest thing in the packed corpus after
-/// the payload itself.
+/// does.
 const HASH_ENTRY_LEN: usize = 12;
+
+/// Entries per compressed index chunk.
+///
+/// The index was stored flat and uncompressed so it could be binary-searched in
+/// place, and at 21.0M it was the largest thing in the packed FID corpus after
+/// the payload. Sorted 64-bit hashes compress well despite being random -- the
+/// high bits advance slowly -- so the flat array of the largest table goes 2.48M
+/// to 0.80M under zstd.
+///
+/// Chunking keeps the lookup: a directory of first keys is searched in place,
+/// then one chunk is decoded. 512 entries costs 0.82M against 0.80M for the
+/// whole array in one piece, and decodes 6KB instead of 2.5M to answer a query.
+const HASH_CHUNK_ENTRIES: usize = 512;
 const LOCATOR_ROW_BITS: u32 = 20;
 const LOCATOR_ROW_MASK: u32 = (1 << LOCATOR_ROW_BITS) - 1;
 
@@ -432,27 +492,44 @@ pub struct HashEntry {
 /// several functions and dropping the extras would silently narrow matching.
 pub fn append_hash_index(image: &mut Vec<u8>, mut entries: Vec<HashEntry>) {
     entries.sort_by_key(|e| (e.key, e.block, e.row));
-    let entries_offset = image.len() as u64;
-    let mut bytes = Vec::with_capacity(entries.len() * HASH_ENTRY_LEN);
-    for entry in &entries {
-        assert!(
-            entry.row <= LOCATOR_ROW_MASK,
-            "row {} does not fit the locator; lower the block target",
-            entry.row
-        );
-        bytes.extend_from_slice(&entry.key.to_le_bytes());
-        bytes.extend_from_slice(&((entry.block << LOCATOR_ROW_BITS) | entry.row).to_le_bytes());
+    let chunks_offset = image.len() as u64;
+
+    let mut payload: Vec<u8> = Vec::new();
+    let mut directory: Vec<u8> = Vec::new();
+    for chunk in entries.chunks(HASH_CHUNK_ENTRIES) {
+        let mut raw = Vec::with_capacity(chunk.len() * HASH_ENTRY_LEN);
+        for entry in chunk {
+            assert!(
+                entry.row <= LOCATOR_ROW_MASK,
+                "row {} does not fit the locator; lower the block target",
+                entry.row
+            );
+            raw.extend_from_slice(&entry.key.to_le_bytes());
+            raw.extend_from_slice(&((entry.block << LOCATOR_ROW_BITS) | entry.row).to_le_bytes());
+        }
+        let compressed = zstd::encode_all(&raw[..], 19).expect("zstd encode to Vec cannot fail");
+        // first key | offset | compressed len | entry count
+        directory.extend_from_slice(&chunk[0].key.to_le_bytes());
+        directory.extend_from_slice(&((chunks_offset as usize + payload.len()) as u64).to_le_bytes());
+        directory.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        directory.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&compressed);
     }
-    let digest = sha256(&bytes);
-    image.extend_from_slice(&bytes);
+
+    let directory_offset = chunks_offset as usize + payload.len();
+    let digest = sha256(&payload);
+    image.extend_from_slice(&payload);
+    image.extend_from_slice(&directory);
     image.extend_from_slice(HASH_INDEX_MAGIC);
-    image.extend_from_slice(&1u16.to_le_bytes());
+    image.extend_from_slice(&2u16.to_le_bytes());
     image.extend_from_slice(&0u16.to_le_bytes());
     image.extend_from_slice(&(entries.len() as u64).to_le_bytes());
-    image.extend_from_slice(&entries_offset.to_le_bytes());
+    image.extend_from_slice(&(directory_offset as u64).to_le_bytes());
     image.extend_from_slice(&digest);
-    debug_assert_eq!(image.len() - entries_offset as usize, bytes.len() + HASH_TRAILER_LEN);
 }
+
+/// Directory entry length: first key, offset, compressed length, entry count.
+const HASH_DIR_LEN: usize = 24;
 
 /// Pack sorted records into an `.fpk` image.
 ///
@@ -847,6 +924,38 @@ mod tests {
         let path = write_temp(&image);
         let reader = FpkReader::open(&path).unwrap();
         assert_eq!(reader.records_by_key(42).unwrap().len(), 5);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_run_of_equal_keys_spanning_chunks_comes_back_whole() {
+        // The index is chunked, and a repeated key can straddle a boundary in
+        // both directions -- the key can be a chunk's first while earlier
+        // copies sit at the end of the one before. Searching forward from the
+        // chunk that starts with the key loses those. Enough entries here to
+        // cross several 512-entry chunks with one key repeated across a
+        // boundary.
+        let records: Vec<String> = (0..1500u64)
+            .map(|i| format!("{i:016x}|record{i:04}"))
+            .collect();
+        let (mut image, locators) = super::pack_with_locators(&records, 1, CODEC_ZLIB, 0, 4096);
+        // Key 7 is carried by 40 records straddling the first chunk boundary.
+        let entries: Vec<HashEntry> = locators
+            .iter()
+            .enumerate()
+            .map(|(i, l)| HashEntry {
+                key: if (492..532).contains(&i) { 7 } else { 1000 + i as u64 },
+                block: l.block,
+                row: l.row,
+            })
+            .collect();
+        super::append_hash_index(&mut image, entries);
+
+        let path = write_temp(&image);
+        let reader = FpkReader::open(&path).unwrap();
+        assert_eq!(reader.records_by_key(7).unwrap().len(), 40, "run split across chunks");
+        assert_eq!(reader.records_by_key(1000).unwrap().len(), 1);
+        assert!(reader.records_by_key(9_999_999).unwrap().is_empty());
         std::fs::remove_file(&path).ok();
     }
 
