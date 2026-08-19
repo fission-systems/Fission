@@ -174,10 +174,62 @@ impl SignatureDatabase {
             .clone()
     }
 
+    /// Merge the packed DIE corpus beside the mirror, if it is there.
+    ///
+    /// Returns whether it was used, so the caller can fall back to walking
+    /// `.sg` in a source tree that has the scripts but no `.fpk`.
+    fn extend_from_packed_die(&mut self, root: &Path) -> bool {
+        let packed = root.join("die_signatures.fpk");
+        let Ok(reader) = fission_signatures::fpk::FpkReader::open(&packed) else {
+            return false;
+        };
+        let Ok(lines) = reader.read_all() else {
+            return false;
+        };
+
+        let mut seen = self
+            .signatures
+            .iter()
+            .map(|sig| {
+                (
+                    sig.source_file.clone().unwrap_or_default(),
+                    sig.sig_type.clone(),
+                    sig.name.clone(),
+                )
+            })
+            .collect::<HashSet<_>>();
+
+        let mut added = 0usize;
+        for line in &lines {
+            let Ok(sig) = serde_json::from_str::<Signature>(line) else {
+                continue;
+            };
+            let key = (
+                sig.source_file.clone().unwrap_or_default(),
+                sig.sig_type.clone(),
+                sig.name.clone(),
+            );
+            if seen.insert(key) {
+                self.signatures.push(sig);
+                added += 1;
+            }
+        }
+        added > 0
+    }
+
     fn extend_from_detect_it_easy_mirror(&mut self) {
         let Some(root) = detect_it_easy_mirror_root() else {
             return;
         };
+
+        // The packed corpus is the same parse, done once offline by
+        // `bin/pack_die`. Reading it replaces opening 2,066 files, parsing
+        // each, and then re-walking the whole tree to check every source
+        // mtime against the JSON cache -- two traversals on a cold start for
+        // data that never changes between releases.
+        if self.extend_from_packed_die(&root) {
+            return;
+        }
 
         let mut sg_files = Vec::new();
         for child in ["db", "db_extra", "db_custom"] {
@@ -213,6 +265,19 @@ impl SignatureDatabase {
             }
         }
     }
+}
+
+/// Parse one `.sg` script, for the offline packer.
+///
+/// Exposed so `bin/pack_die` produces byte-identical records to what the
+/// runtime would have parsed -- the packed corpus has to be the same data,
+/// not a second implementation of it.
+pub fn parse_sg_signature_for_packing(
+    root: &Path,
+    path: &Path,
+    content: &str,
+) -> Option<Signature> {
+    parse_sg_signature(root, path, content)
 }
 
 fn parse_sg_signature(root: &Path, path: &Path, content: &str) -> Option<Signature> {
@@ -1684,5 +1749,87 @@ mod tests {
         let detections = matcher.match_binary(&binary);
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].confidence, Confidence::Low);
+    }
+}
+
+#[cfg(test)]
+mod packed_die_tests {
+    use super::*;
+
+    /// The packed corpus must be the same parse the `.sg` walk produces.
+    ///
+    /// `bin/pack_die` calls the same `parse_sg_signature`, so this is checking
+    /// that packing and reading back is lossless -- not that two parsers agree.
+    #[test]
+    fn packed_and_sg_walk_agree() {
+        let Some(root) = detect_it_easy_mirror_root() else {
+            eprintln!("skipping: no DIE mirror");
+            return;
+        };
+        if !root.join("die_signatures.fpk").exists() {
+            eprintln!("skipping: no packed corpus");
+            return;
+        }
+
+        let empty = || SignatureDatabase {
+            format_version: String::new(),
+            description: String::new(),
+            source: String::new(),
+            signatures: Vec::new(),
+        };
+
+        let mut packed = empty();
+        assert!(
+            packed.extend_from_packed_die(&root),
+            "packed corpus present but yielded nothing"
+        );
+
+        let mut walked = empty();
+        let mut sg_files = Vec::new();
+        for child in ["db", "db_extra", "db_custom"] {
+            collect_sg_files(&root.join(child), &mut sg_files);
+        }
+        sg_files.sort();
+        for path in &sg_files {
+            let Ok(content) = fs::read_to_string(path) else {
+                continue;
+            };
+            if let Some(sig) = parse_sg_signature(&root, path, &content) {
+                walked.signatures.push(sig);
+            }
+        }
+
+        if walked.signatures.is_empty() {
+            // The `.sg` scripts live in the gitignored `utils/source/`, so a
+            // normal checkout (and CI) has the packed corpus and nothing to
+            // compare it against. That is the shipped shape, not a failure.
+            eprintln!("skipping: no .sg sources to compare against");
+            return;
+        }
+        assert!(
+            walked.signatures.len() > 1000,
+            "expected the full corpus from the walk, got {}",
+            walked.signatures.len()
+        );
+        assert_eq!(
+            packed.signatures.len(),
+            walked.signatures.len(),
+            "packed and walked signature counts differ"
+        );
+
+        let key = |s: &Signature| {
+            (
+                s.source_file.clone().unwrap_or_default(),
+                s.sig_type.clone(),
+                s.name.clone(),
+                s.rules.len(),
+                s.unsupported_rule_count,
+            )
+        };
+        let mut a: Vec<_> = packed.signatures.iter().map(key).collect();
+        let mut b: Vec<_> = walked.signatures.iter().map(key).collect();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b, "packed corpus differs from the .sg walk");
     }
 }

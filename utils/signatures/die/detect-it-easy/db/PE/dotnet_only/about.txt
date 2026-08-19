@@ -1,1 +1,0 @@
-Scripts for .NET files only will be located here (PE.isNet() == true)
