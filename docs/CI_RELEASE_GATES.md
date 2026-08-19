@@ -22,7 +22,7 @@ This document is the policy source for how Fission promotes a git commit to a
 | **L1 Heavy** | [`ci-heavy.yml`](../.github/workflows/ci-heavy.yml) | Every `main` push + nightly + dispatch | **Push:** release-critical crates, platforms, NIR-check, MSRV. **Nightly/dispatch:** also full workspace tests, Miri, coverage |
 | **L2 Release E2E** | [`release-e2e.yml`](../.github/workflows/release-e2e.yml) | Before tag (and optional dispatch) | Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp |
 | **Tag** | [`release-tag.yml`](../.github/workflows/release-tag.yml) | Manual `workflow_dispatch` only | Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag |
-| **L3 CD** | [`cd.yml`](../.github/workflows/cd.yml) | Tag push `v*.*.*` / `X.Y.Z` | Multi-platform CLI archives (each includes `utils/`) + standalone **`fission-utils.tar.gz`** → GitHub Release |
+| **L3 CD** | [`cd.yml`](../.github/workflows/cd.yml) | Tag push `v*.*.*` / `X.Y.Z` | Multi-platform CLI archives (each includes `utils/`) → GitHub Release |
 
 ```text
 main push ──► L0 Fast Gate ──► L1 Heavy (async)
@@ -157,13 +157,12 @@ without anyone being able to see it.
 | Asset | How it is published | Who uses it |
 |-------|---------------------|-------------|
 | **Inside platform archives** (`fission-linux-x64.tar.gz`, …) | `cd.yml` copies a verified `utils/` into each OS package | End-user installs that unpack the full release |
-| **`fission-utils.tar.gz` on the SemVer release** | `cd.yml` job `publish-utils-bundle` (once per tag) | Offline installs; pin utils to the same version as the CLI |
 | **The `utils/` tree itself** | Committed; changed like any other source | CI — [`.github/actions/setup-utils`](../.github/actions/setup-utils) verifies the checkout rather than downloading anything |
 
 Rules:
 
 1. Platform packages **fail the release** if `utils/sleigh-specs` is missing/incomplete.
-2. Prefer **version-matched** `fission-utils.tar.gz` on the same `vX.Y.Z` release for production installs.
+2. There is no standalone resource bundle any more; `utils/` reaches consumers through the clone or through the platform archive.
 3. Regenerate packed artifacts (`.fpk`) with the scripts in [`scripts/`](../scripts) and commit them; there is no separate publish step for CI to pick them up.
 
 ## Related files

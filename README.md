@@ -61,16 +61,10 @@ git clone https://github.com/fission-systems/Fission.git
 cd Fission
 ```
 
-Real decompilation needs Sleigh specifications and signature data. `utils/`
-is not in git — pull the release bundle:
-
-```bash
-mkdir -p utils
-curl -L --fail --show-error \
-  "https://github.com/fission-systems/Fission/releases/download/assets-v3/fission-utils.tar.gz" \
-  -o /tmp/fission-utils.tar.gz
-tar -xzf /tmp/fission-utils.tar.gz -C utils --strip-components=1
-```
+Real decompilation needs Sleigh specifications and signature data. Both are
+in `utils/`, which is committed — the clone already has them, so there is
+nothing to download. (Only `utils/source/`, the inputs the packed `.fpk`
+tables are built from, stays out of git.)
 
 ```bash
 cargo build -p fission-cli --release

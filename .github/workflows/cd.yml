@@ -209,76 +209,10 @@ jobs:
           draft: false
           prerelease: false
 
-  # Standalone utils/ resource bundle on the same SemVer release (once, Linux).
-  # For offline installs that want utils pinned to the same version as the CLI.
-  publish-utils-bundle:
-    name: 📦 Publish fission-utils bundle
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Do not depend on matrix builds — packaging is platform-independent.
-    steps:
-      - name: Resolve release tag
-        id: tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          t="${RELEASE_TAG:-}"
-          t="$(echo -n "$t" | xargs)"
-          if [[ -z "$t" ]]; then
-            echo "error: empty RELEASE_TAG"
-            exit 1
-          fi
-          echo "tag=${t}" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ steps.tag.outputs.tag }}
-          submodules: recursive
-
-      - name: Setup Utils
-        uses: ./.github/actions/setup-utils
-
-      - name: Package fission-utils.tar.gz
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -d utils/sleigh-specs
-          slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')
-          echo "utils .slaspec count: ${slaspec_count}"
-          test "${slaspec_count}" -gt 10
-
-          # Archive top-level `utils/` so setup-utils can:
-          #   tar -xzf fission-utils.tar.gz -C utils --strip-components=1
-          tar -czf fission-utils.tar.gz utils
-          shasum -a 256 fission-utils.tar.gz > fission-utils.tar.gz.sha256
-          ls -lh fission-utils.tar.gz
-          cat fission-utils.tar.gz.sha256
-
-          # Inventory for release notes / debugging
-          {
-            echo "fission-utils bundle inventory"
-            echo "slaspec_count=${slaspec_count}"
-            du -sh utils utils/* 2>/dev/null || true
-            find utils -type f | wc -l | awk '{print "file_count="$1}'
-          } | tee fission-utils.inventory.txt
-
-      - name: Upload utils assets to GitHub Release
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          files: |
-            fission-utils.tar.gz
-            fission-utils.tar.gz.sha256
-            fission-utils.inventory.txt
-          draft: false
-          prerelease: false
-
   # Release validation job
   release-summary:
     name: ✅ Release Summary
-    needs: [build-and-release, publish-utils-bundle]
+    needs: [build-and-release]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -290,16 +224,11 @@ jobs:
             echo "❌ Release build failed"
             exit 1
           fi
-          if [ "${{ needs.publish-utils-bundle.result }}" != "success" ]; then
-            echo "❌ Utils bundle publish failed"
-            exit 1
-          fi
           echo "✅ Release artifacts created successfully!"
           echo ""
           echo "Tag: ${RELEASE_TAG}"
           echo "Assets include:"
           echo "  - fission-linux-x64 / macos-arm64 / windows-x64 (CLI + utils inside archive)"
-          echo "  - fission-utils.tar.gz (standalone resource bundle)"
           echo "  - fission_cli-x86_64-unknown-linux-gnu (Linux CLI only, for benchmark consumers)"
           echo "Release assets will be available at:"
           echo "https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"

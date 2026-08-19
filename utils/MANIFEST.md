@@ -14,7 +14,7 @@ That split is what makes this tree committable at all — 156M tracked instead o
 
 ## Release packaging
 
-- **SemVer releases** (`cd.yml`): platform archives embed `utils/`; the same tag publishes standalone **`fission-utils.tar.gz`** for offline installs.
+- **SemVer releases** (`cd.yml`): platform archives embed `utils/`. Nothing is published separately -- the tree reaches consumers through the clone or through the archive.
 - **CI**: [`.github/actions/setup-utils`](../.github/actions/setup-utils) downloads nothing. It verifies the checkout — slaspec, `.fpk`, and DIE `.sg` counts, one per pipeline area, so a partially-missing tree fails loudly instead of degrading one capability in silence.
 - Policy detail: [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md) § Resource bundle.
 

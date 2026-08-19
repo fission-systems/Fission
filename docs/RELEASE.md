@@ -16,7 +16,6 @@ A tagged release is eligible when:
 - Prefer creating tags only via Actions → **Release Tag (CI green)** so the above are machine-checked and the tag points at the verified SHA.
 - [`cd.yml`](../.github/workflows/cd.yml) publishes all expected **`fission-cli`** assets:
   - `fission-linux-x64` / `fission-macos-arm64` / `fission-windows-x64` (each archive includes a verified `utils/` tree)
-  - **`fission-utils.tar.gz`** (+ `.sha256`, inventory) — standalone resource bundle on the same tag
   - Linux benchmark CLI: `fission_cli-x86_64-unknown-linux-gnu` (binary-only convenience asset)
 - The **30-minute** evaluation path in [`docs/EVALUATION.md`](EVALUATION.md) passes on at least **one** Windows x64 sample binary.
 - If corpus-wide quality is claimed, attach or link `benchmark_compact_summary.json` and confirm:
