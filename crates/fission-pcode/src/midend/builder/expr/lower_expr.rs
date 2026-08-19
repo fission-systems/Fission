@@ -1533,6 +1533,10 @@ impl<'a> PreviewBuilder<'a> {
             .iter()
             .map(|input| self.lower_varnode(input, visiting))
             .collect::<Result<Vec<_>, _>>()?;
+        // fabs/sqrt/ceil/floor/round/__isnan reach here rather than the unary
+        // arm, and their operand metatype is just as real.
+        let refs: Vec<&PreHirExpr> = args.iter().collect();
+        self.note_operand_metatypes(op.opcode, &refs);
         Ok(PreHirExpr::Call {
             target: target.to_string(),
             args,
@@ -3203,6 +3207,7 @@ impl<'a> PreviewBuilder<'a> {
                     .as_ref()
                     .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
+                self.note_operand_metatypes(op.opcode, &[&expr]);
                 Ok(PreHirExpr::Unary {
                     op: PreHirUnaryOp::Neg,
                     expr: Box::new(expr),
@@ -3241,6 +3246,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             PcodeOpcode::IntNegate | PcodeOpcode::BoolNegate | PcodeOpcode::Int2Comp => {
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
+                self.note_operand_metatypes(op.opcode, &[&expr]);
                 let output = op
                     .output
                     .as_ref()
@@ -3409,6 +3415,27 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    /// Record the operand metatype `opcode` implies for whatever names its
+    /// inputs lowered to.
+    ///
+    /// Only plain variable references carry evidence: a constant has its own
+    /// type, and a compound expression's type comes from its own operator.
+    /// Evidence is recorded, never applied here -- `apply_operand_metatypes`
+    /// decides whether it beats what the binding already has.
+    fn note_operand_metatypes(&mut self, opcode: PcodeOpcode, operands: &[&PreHirExpr]) {
+        let Some(meta) = pcode_input_metatype(opcode) else {
+            return;
+        };
+        for operand in operands {
+            if let PreHirExpr::Var(name) = operand {
+                // First writer wins: a name used by two ops with conflicting
+                // metatypes is ambiguous, and picking the later one would make
+                // the result depend on lowering order.
+                self.operand_metatypes.entry(name.clone()).or_insert(meta);
+            }
+        }
+    }
+
     pub(in crate::midend) fn lower_binary_op(
         &mut self,
         op: &PcodeOp,
@@ -3460,6 +3487,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
+        self.note_operand_metatypes(op.opcode, &[&lhs, &rhs]);
         let output = op
             .output
             .as_ref()

@@ -1,5 +1,6 @@
 use super::*;
 use crate::midend::abstract_location::AbstractStackSlot;
+use crate::midend::support::pcode_util::InputMetatype;
 use fission_midend_core::util::var_rename::{
     rename_vars_in_stmts, rewrite_field_access_names_in_stmts,
 };
@@ -1150,5 +1151,51 @@ fn binding_byte_size(ty: &NirType) -> Option<u32> {
         NirType::Aggregate { size, .. } => Some(*size),
         NirType::Float { bits } => Some(bits / 8),
         NirType::Unknown => None,
+    }
+}
+
+/// Refine one type with operand-side metatype evidence, or `None` to leave it.
+///
+/// This is the `inputTypeLocal` half of Ghidra's type seeding. The output half
+/// (`pcode_output_type_from_size`) types the *result* of an op; this types the
+/// values it *reads*, which is where parameters and locals actually appear:
+/// `INT_SLESS` says its operands are signed, `FLOAT_ADD` says its operands are
+/// floating point, and none of that used to reach them.
+///
+/// Deliberately conservative about what it will overwrite:
+///
+/// * A pointer, aggregate, array or float type came from stronger evidence (a
+///   memory access shape, a library prototype), so operand metatype never
+///   touches it -- an `INT_AND` on a pointer is a masked pointer, not an
+///   integer.
+/// * Signedness is refined only on an integer of the same width; changing the
+///   width from a metatype would be guessing.
+/// * `Bool` only where the storage is one byte. Ghidra's `BOOL_*` ops are
+///   defined on any width, but a wider operand is a flag word and printing it
+///   `bool` loses that.
+pub(super) fn refine_with_operand_metatype(ty: &NirType, meta: InputMetatype) -> Option<NirType> {
+    match (ty, meta) {
+        (NirType::Int { bits, signed }, InputMetatype::Signed) if !*signed => Some(NirType::Int {
+            bits: *bits,
+            signed: true,
+        }),
+        (NirType::Int { bits, signed }, InputMetatype::Unsigned) if *signed => Some(NirType::Int {
+            bits: *bits,
+            signed: false,
+        }),
+        (NirType::Int { bits, .. }, InputMetatype::Float) if matches!(bits, 32 | 64 | 80) => {
+            Some(NirType::Float { bits: *bits })
+        }
+        (NirType::Int { bits: 8, .. }, InputMetatype::Bool) => Some(NirType::Bool),
+        (NirType::Unknown, InputMetatype::Signed) => Some(NirType::Int {
+            bits: 32,
+            signed: true,
+        }),
+        (NirType::Unknown, InputMetatype::Unsigned) => Some(NirType::Int {
+            bits: 32,
+            signed: false,
+        }),
+        (NirType::Unknown, InputMetatype::Bool) => Some(NirType::Bool),
+        _ => None,
     }
 }

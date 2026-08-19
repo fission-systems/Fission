@@ -97,6 +97,33 @@ pub(in crate::midend) fn with_discarded_register_origins<T, E>(
 /// Runs after structuring finishes (see `orchestrate.rs`'s call order) --
 /// operates on the real, final `HirFunction`, not `PreHirFunction`, despite
 /// living under `builder/` (historical location, not a PreHIR/HIR statement).
+/// A temp's name after retyping, if its prefix no longer matches.
+///
+/// `next_temp_name` derives the prefix from the type, so the name is a claim
+/// about it. Keeps the numeric suffix so the rename stays traceable.
+fn retemp_name(ty: &NirType, current: &str) -> Option<String> {
+    let want = match ty {
+        NirType::Bool => "bVar",
+        NirType::Int {
+            bits: 32,
+            signed: true,
+        } => "iVar",
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        } => "uVar",
+        _ => return None,
+    };
+    let suffix = current
+        .strip_prefix("bVar")
+        .or_else(|| current.strip_prefix("iVar"))
+        .or_else(|| current.strip_prefix("uVar"))?;
+    if current.starts_with(want) {
+        return None;
+    }
+    Some(format!("{want}{suffix}"))
+}
+
 pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
@@ -285,6 +312,96 @@ impl<'a> PreviewBuilder<'a> {
     /// Build the function-level normalization context used to compare
     /// alternative structured bodies. The returned shell is detached from
     /// builder state; callers replace `body` on a clone for each candidate.
+    /// Push operand-side metatype evidence onto the builder's own slots.
+    fn apply_operand_metatypes_to_slots(&mut self, body: &mut [PreHirStmt]) {
+        if self.operand_metatypes.is_empty() {
+            fission_midend_normalize::set_operand_metatype_names(HashSet::default());
+            return;
+        }
+        let evidence = std::mem::take(&mut self.operand_metatypes);
+        let (mut matched, mut refined) = (0usize, 0usize);
+        let (mut r_param, mut r_local, mut r_temp) = (0usize, 0usize, 0usize);
+        let mut refined_names: HashSet<String> = HashSet::default();
+        let diag = std::env::var_os("FISSION_METATYPE_DIAG").is_some();
+        for binding in self.params.values_mut() {
+            if let Some(meta) = evidence.get(&binding.name) {
+                matched += 1;
+                if let Some(ty) = type_hints::refine_with_operand_metatype(&binding.ty, *meta) {
+                    binding.ty = ty;
+                    refined += 1;
+                    r_param += 1;
+                    refined_names.insert(binding.name.clone());
+                }
+            }
+        }
+        for slot in self.locals.values_mut() {
+            if let Some(meta) = evidence.get(&slot.name) {
+                matched += 1;
+                if let Some(ty) = type_hints::refine_with_operand_metatype(&slot.ty, *meta) {
+                    slot.ty = ty;
+                    refined += 1;
+                    r_local += 1;
+                    refined_names.insert(slot.name.clone());
+                }
+            }
+        }
+        // Temporaries carry their type in their name (`next_temp_name`:
+        // `iVar`/`uVar`/`bVar`), and the name was chosen when the temp was
+        // created -- before this evidence existed. Retyping without renaming
+        // prints `int uVar57`, where the prefix contradicts the declaration.
+        // Collect renames and apply them to the body in one pass.
+        let mut renames: Vec<(String, String)> = Vec::new();
+        let mut retyped: Vec<(String, PreHirBinding)> = Vec::new();
+        for (key, binding) in self.temps.iter() {
+            let Some(meta) = evidence.get(&binding.name) else {
+                continue;
+            };
+            matched += 1;
+            let Some(ty) = type_hints::refine_with_operand_metatype(&binding.ty, *meta) else {
+                continue;
+            };
+            refined += 1;
+            r_temp += 1;
+            let mut updated = binding.clone();
+            updated.ty = ty;
+            let renamed = retemp_name(&updated.ty, &updated.name);
+            if let Some(new_name) = renamed {
+                renames.push((updated.name.clone(), new_name.clone()));
+                updated.name = new_name;
+            }
+            refined_names.insert(updated.name.clone());
+            retyped.push((key.clone(), updated));
+        }
+        for (key, updated) in retyped {
+            let renamed_key = updated.name.clone();
+            self.temps.remove(&key);
+            self.temps.insert(renamed_key, updated);
+        }
+        if !renames.is_empty() {
+            fission_midend_prehir::util::var_rename::rename_vars_in_stmts(body, &renames);
+        }
+        // Hand the refined names to the normalizer. Without this the seed
+        // enters `type_flow` indistinguishable from a width guess and can never
+        // propagate out of the temporary it landed on -- which is where 97.8%
+        // of them land, and why seeding alone moved the type metric by one
+        // variable across 24 binaries.
+        // Always set, never conditionally: an empty set has to overwrite the
+        // previous function's names, or a function with no evidence of its own
+        // inherits them.
+        fission_midend_normalize::set_operand_metatype_names(refined_names);
+        if diag {
+            eprintln!(
+                "[METATYPE] evidence={} matched={} refined={} r_param={} r_local={} r_temp={}",
+                evidence.len(),
+                matched,
+                refined,
+                r_param,
+                r_local,
+                r_temp
+            );
+        }
+    }
+
     pub(crate) fn quality_function_shell(&self) -> PreHirFunction {
         PreHirFunction {
             name: self.current_function_name.clone().unwrap_or_default(),
@@ -549,6 +666,10 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         self.apply_x86_32_stack_purge_arity_floor();
+        // Operand-side metatypes, seeded during lowering. Applied here, on the
+        // builder's own slots, because the p-code op-code they came from is
+        // gone by the time the HIR reaches `apply_preview_type_hints`.
+        self.apply_operand_metatypes_to_slots(&mut body);
 
         let callee_summaries = self
             .type_context

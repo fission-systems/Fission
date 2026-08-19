@@ -7,7 +7,7 @@ pub(super) use super::*;
 mod builder_types;
 mod emulate;
 mod expr_util;
-mod pcode_util;
+pub(crate) mod pcode_util;
 mod switch_util;
 
 pub(crate) use builder_types::*;

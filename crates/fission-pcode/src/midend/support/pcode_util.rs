@@ -115,6 +115,102 @@ pub(crate) fn pcode_output_type_from_size(opcode: PcodeOpcode, size: u32) -> Nir
     )
 }
 
+/// The C metatype an op-code's *operands* must have (Ghidra `TypeOp::metain`).
+///
+/// `pcode_output_type_from_size` is the `outputTypeLocal` half of Ghidra's
+/// `TypeOp` table; this is `inputTypeLocal`, which had no counterpart here at
+/// all. The two halves seed opposite ends of the def-use graph, and the input
+/// half is the one that reaches parameters and locals: those appear as
+/// *operands* far more often than as the output of the op that reveals their
+/// type. `INT_SLESS` says its inputs are signed, `FLOAT_ADD` says its inputs
+/// are floating point, and none of that was reaching them.
+///
+/// This has to be read at lowering time. `map_binary_op` collapses the
+/// distinction -- `IntDiv | IntSDiv | FloatDiv` all become `Div`,
+/// `IntLess | FloatLess` both become `Lt` -- so by PreHIR the evidence is gone.
+///
+/// Transcribed from `typeop.cc`'s per-op-code `TypeOp*` constructors, the same
+/// table `outputTypeLocal` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InputMetatype {
+    /// Signed integer (`TYPE_INT`).
+    Signed,
+    /// Unsigned integer (`TYPE_UINT`).
+    Unsigned,
+    /// IEEE floating point (`TYPE_FLOAT`).
+    Float,
+    /// Boolean (`TYPE_BOOL`).
+    Bool,
+}
+
+/// `metain` for `opcode`, or `None` where Ghidra records no useful metatype
+/// (control flow, `COPY`, `LOAD`/`STORE`, the pointer ops, `MULTIEQUAL`).
+pub(crate) fn pcode_input_metatype(opcode: PcodeOpcode) -> Option<InputMetatype> {
+    use InputMetatype::{Bool, Float, Signed, Unsigned};
+    Some(match opcode {
+        // Signed integer operands.
+        PcodeOpcode::IntEqual
+        | PcodeOpcode::IntNotEqual
+        | PcodeOpcode::IntSLess
+        | PcodeOpcode::IntSLessEqual
+        | PcodeOpcode::IntAdd
+        | PcodeOpcode::IntSub
+        | PcodeOpcode::IntSCarry
+        | PcodeOpcode::IntSBorrow
+        | PcodeOpcode::Int2Comp
+        | PcodeOpcode::IntLeft
+        | PcodeOpcode::IntSRight
+        | PcodeOpcode::IntMult
+        | PcodeOpcode::IntSDiv
+        | PcodeOpcode::IntSRem
+        | PcodeOpcode::IntSExt
+        // FLOAT_INT2FLOAT reads an integer and produces a float, so its input
+        // metatype is the one arm here that disagrees with its output.
+        | PcodeOpcode::FloatInt2Float => Signed,
+
+        // Unsigned integer operands.
+        PcodeOpcode::IntLess
+        | PcodeOpcode::IntLessEqual
+        | PcodeOpcode::IntCarry
+        | PcodeOpcode::IntNegate
+        | PcodeOpcode::IntXor
+        | PcodeOpcode::IntAnd
+        | PcodeOpcode::IntOr
+        | PcodeOpcode::IntRight
+        | PcodeOpcode::IntDiv
+        | PcodeOpcode::IntRem
+        | PcodeOpcode::IntZExt => Unsigned,
+
+        // Boolean operands.
+        PcodeOpcode::BoolNegate
+        | PcodeOpcode::BoolXor
+        | PcodeOpcode::BoolAnd
+        | PcodeOpcode::BoolOr => Bool,
+
+        // Floating-point operands. FLOAT_TRUNC reads a float and produces an
+        // int -- the mirror of FLOAT_INT2FLOAT above.
+        PcodeOpcode::FloatEqual
+        | PcodeOpcode::FloatNotEqual
+        | PcodeOpcode::FloatLess
+        | PcodeOpcode::FloatLessEqual
+        | PcodeOpcode::FloatNan
+        | PcodeOpcode::FloatAdd
+        | PcodeOpcode::FloatDiv
+        | PcodeOpcode::FloatMult
+        | PcodeOpcode::FloatSub
+        | PcodeOpcode::FloatNeg
+        | PcodeOpcode::FloatAbs
+        | PcodeOpcode::FloatSqrt
+        | PcodeOpcode::FloatCeil
+        | PcodeOpcode::FloatFloor
+        | PcodeOpcode::FloatRound
+        | PcodeOpcode::FloatFloat2Float
+        | PcodeOpcode::FloatTrunc => Float,
+
+        _ => return None,
+    })
+}
+
 pub(crate) fn float_type_from_size(size: u32) -> NirType {
     match size {
         4 => NirType::Float { bits: 32 },

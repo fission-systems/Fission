@@ -65,6 +65,7 @@ pub mod recovery;
 mod rule_normalizer;
 mod subvar_flow;
 mod types;
+pub use types::set_operand_metatype_names;
 
 pub use rule_normalizer::apply_rule_normalization;
 

@@ -120,6 +120,7 @@ impl<'a> PreviewBuilder<'a> {
             binary,
             type_context,
             current_function_name: None,
+            operand_metatypes: HashMap::default(),
             defs,
             def_sites,
             block_defs,

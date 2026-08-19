@@ -12,6 +12,13 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) binary: Option<&'a LoadedBinary>,
     pub(crate) type_context: Option<&'a PreviewTypeContext>,
     pub(crate) current_function_name: Option<String>,
+    /// Operand-side metatype evidence, keyed by the name the operand lowered
+    /// to. Filled during lowering because `map_binary_op` discards the
+    /// distinction (`IntDiv`/`IntSDiv`/`FloatDiv` all become `Div`), so the
+    /// op-code is the only place this is still knowable. Applied to bindings
+    /// after the body is built -- see `apply_operand_metatypes`.
+    pub(crate) operand_metatypes:
+        HashMap<String, crate::midend::support::pcode_util::InputMetatype>,
     pub(crate) defs: HashMap<VarnodeKey, DefSite<'a>>,
     pub(crate) def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,

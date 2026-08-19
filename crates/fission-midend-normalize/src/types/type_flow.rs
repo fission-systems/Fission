@@ -141,10 +141,13 @@ impl TypeFlowSolver {
             definition_counts: HashMap::default(),
             self_referential: HashSet::default(),
         };
+        let metatype_seeded = operand_metatype_names();
         for binding in func.params.iter().chain(func.locals.iter()) {
             let locked = binding.surface_type_name.is_some();
             let strength = if locked {
                 EvidenceStrength::Locked
+            } else if metatype_seeded.contains(&binding.name) {
+                EvidenceStrength::Semantic
             } else {
                 EvidenceStrength::Binding
             };
@@ -758,6 +761,39 @@ fn expr_mentions_var(expr: &PreHirExpr, name: &str) -> bool {
         }
         PreHirExpr::Call { args, .. } => args.iter().any(|arg| expr_mentions_var(arg, name)),
     }
+}
+
+thread_local! {
+    /// Names whose type came from an op-code operand metatype, set by the
+    /// p-code builder before normalization runs.
+    ///
+    /// A side channel rather than a field on `PreHirBinding`, which is built at
+    /// roughly 300 sites across the workspace -- the same reasoning (and the
+    /// same shape) as `REGISTER_ORIGINS` in the builder.
+    ///
+    /// Why this is needed at all: the seeded type reaches the solver as just
+    /// another declared binding type, at `EvidenceStrength::Binding`, which is
+    /// exactly what a width-derived guess also gets. `refine_fact` then wants
+    /// `stronger_evidence || more_specific`, and `int32` vs `uint32` is neither
+    /// -- so a correctly seeded temp could never push its signedness into the
+    /// local it flows to. Naming these lets them enter at `Semantic`, which is
+    /// what they are: evidence from what the instruction does, not from how
+    /// wide the storage is.
+    static OPERAND_METATYPE_NAMES: std::cell::RefCell<HashSet<String>> =
+        std::cell::RefCell::new(HashSet::default());
+}
+
+/// Record the names seeded from operand metatypes, for the next pass.
+pub fn set_operand_metatype_names(names: HashSet<String>) {
+    OPERAND_METATYPE_NAMES.with(|slot| *slot.borrow_mut() = names);
+}
+
+/// Read them. Deliberately a clone rather than a take: `apply_type_flow_pass`
+/// is driven to a fixed point, so taking would let only the first iteration see
+/// the seeds. The builder overwrites the channel per function, which is what
+/// keeps one function from inheriting another's names.
+fn operand_metatype_names() -> HashSet<String> {
+    OPERAND_METATYPE_NAMES.with(|slot| slot.borrow().clone())
 }
 
 pub(super) fn apply_type_flow_pass(func: &mut PreHirFunction) -> bool {
