@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://www.portaudio.com/
+meta("library", "PortAudio");
+
+function detect() {
+    if (PE.isLibraryPresentExp(/^portaudio_x(86|64)/i)) {
+        bDetected = true;
+    }
+
+    return result();
+}

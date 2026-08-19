@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Coktel Vision games
+
+// https://github.com/scummvm/scummvm/blob/master/engines/gob/inter_adibou1.cpp
+meta("format", "BOU");
+
+function detect() {
+    var appli = Binary.getString(0, 20).trim();
+
+    if (/^[CLcl]\d{2}([Cc]alcul|[Ll]ecture) \d ans/.test(appli)) {
+        if (X.isVerbose()) sOptions = appli;
+        bDetected = true;
+    }
+
+    return result();
+}

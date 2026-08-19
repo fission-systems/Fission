@@ -1,0 +1,22 @@
+// Detect It Easy: detection rule file
+
+meta("operation system", "Windows");
+
+function detect() {
+    if (PE.isVerbose()) {
+        sName = PE.getOperationSystemName();
+        sOptions = PE.getOperationSystemOptions();
+
+        bDetected = true;
+
+        var rossymSection = PE.section[".rossym"];
+
+        if (rossymSection && rossymSection.Characteristics == 0x42000802) {
+            sVersion = "React OS, 0.3+";
+        } else {
+            sVersion = PE.getOperationSystemVersion();
+        }
+    }
+
+    return result();
+}

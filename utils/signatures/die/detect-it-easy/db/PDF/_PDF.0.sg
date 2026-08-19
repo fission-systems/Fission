@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+
+meta("format", "PDF");
+
+function detect() {
+    sName = PDF.getFileFormatName();
+    sVersion = PDF.getFileFormatVersion();
+    sOptions = PDF.getFileFormatOptions();
+
+    bDetected = true;
+
+    return result();
+}

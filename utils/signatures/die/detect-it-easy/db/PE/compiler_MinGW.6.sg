@@ -1,0 +1,92 @@
+// Detect It Easy: detection rule file
+// Authors: DosX, fernandom
+
+meta("compiler", "MinGW");
+
+includeScript("FPC");
+
+function getMinGWVersion() {
+    var sResult = "";
+
+    var rdataSection = PE.section[".rdata"];
+
+    if (rdataSection) {
+        var nOffset = rdataSection.FileOffset,
+            nSize = rdataSection.FileSize,
+            nVersionOffset = PE.findString(nOffset, nSize, "GCC: ");
+
+        if (nVersionOffset != -1) {
+            sResult = PE.getString(nVersionOffset, 128);
+        }
+
+        if (!sResult) {
+            var nVersionOffset = PE.findString(nOffset, nSize, "gcc-");
+            if (nVersionOffset != -1) {
+                sResult = PE.getString(nVersionOffset);
+                sResult = sResult.substring(0, sResult.indexOf('/'));
+            }
+        }
+    }
+
+    return sResult;
+}
+
+function detect() {
+    if (PE.getMajorLinkerVersion() == 2) {
+        var minor = PE.getMinorLinkerVersion();
+
+        if (!bFPC && (minor <= 30 || minor == 36 || minor == 41 || minor == 44 || minor == 56)) {
+            if (PE.compare("'MZ'90000300000004000000FFFF0000B800000000000000400000000000000000000000000000000000000000000000000000000000000000000000800000000E1FBA0E00B409CD21B8014CCD21'This program cannot be run in DOS mode.\r\r\n$'00000000000000'PE'0000")) {
+                if (!PE.isSectionNamePresent(".rsrc")) {
+                    bDetected = true;
+                } else {
+                    var rsrcSection = PE.section[".rsrc"];
+
+                    if (rsrcSection && !PE.isSignaturePresent(rsrcSection.FileOffset + rsrcSection.FileOffset - 512, 512, "'Microsoft Corp.'")) {
+                        bDetected = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!bDetected && PE.compareEP("5589e583ec..e8$$$$$$$$5589e583ec..5383c4..68........e8........83c4..e8........e8........e8........83c4")) {
+        sVersion = "2.9X";
+        bDetected = true;
+    }
+
+    if (bDetected) {
+        sVersion = getMinGWVersion();
+    } else {
+        var buildidSection = PE.section[".buildid"],
+            rdataSection = PE.section[".rdata"];
+
+        if (rdataSection) {
+            bDetected = PE.isSignaturePresent(rdataSection.FileOffset, 256, "'mingw'")
+        }
+
+        if (!bDetected && buildidSection && rdataSection) {
+            bDetected = PE.isSignaturePresent(rdataSection.FileOffset, rdataSection.FileSize, "'Mingw'");
+        }
+    }
+
+    if (bDetected && !PE.isOverlayPresent()) {
+        sOptions = "stripped";
+    } else if (!bDetected) {
+        if (PE.isOverlayPresent()) {
+            if (PE.compareOverlay("'.file' 00 00 00")) {
+                bDetected = true;
+            }
+        } else {
+            var ehFrameSection = PE.section[".eh_frame"];
+
+            if (ehFrameSection && (ehFrameSection.Characteristics & 0x40000040)) {
+                bDetected = true;
+            }
+        }
+    }
+
+    sLang = "C/C++";
+
+    return result();
+}

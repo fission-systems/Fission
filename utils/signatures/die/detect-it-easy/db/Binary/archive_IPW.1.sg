@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://www.mobygames.com/game/8818/island-peril/
+meta("archive", "Peril WAD");
+
+function detect() {
+    if (Binary.compare("'DT1'00c3030000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

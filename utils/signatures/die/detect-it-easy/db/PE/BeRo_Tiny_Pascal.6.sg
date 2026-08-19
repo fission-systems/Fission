@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+
+meta("compiler", "BeRo Tiny Pascal");
+
+function detect() {
+    if (PE.compareEP("E9........' Compiled by: BeRoTinyPascal - (C) Copyright 2006, Benjamin '27'BeRo'27' Rosseaux '")) {
+        bDetected = true;
+    }
+
+    sLang = "Pascal";
+
+    return result();
+}

@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Created with Audiacity
+
+// https://www.filetypeadvisor.com/extension/paf
+meta("audio", "Ensoniq PARIS (.PAF)");
+
+function detect() {
+    if (Binary.compare("20'paf'00000000000000000000AC44")) {
+        bDetected = true;
+    }
+
+    return result();
+}

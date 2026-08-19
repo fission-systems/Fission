@@ -1,0 +1,12 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Lego Racers
+
+// https://github.com/JrMasterModelBuilder/JAM-Extractor
+meta("archive", "JAM");
+
+function detect() {
+    bDetected = Binary.compare("'LJAM'0000000002000000");
+
+    return result();
+}

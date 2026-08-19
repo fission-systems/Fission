@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("protector", "SecShell");
+
+function detect() {
+    bDetected =
+        APK.isArchiveRecordPresent("assets/secData0.jar") ||
+        APK.isArchiveRecordPresent("lib/armeabi/libSecShell-x86.so") ||
+        APK.isArchiveRecordPresent("lib/armeabi/libSecShell.so");
+
+    return result();
+}

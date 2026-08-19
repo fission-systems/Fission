@@ -40,9 +40,10 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SYMBOLS = os.path.join(
-    ROOT, "utils", "ghidra-data", "Ghidra", "Features", "Base", "data", "symbols"
-)
+# The XML is a packer input, so it lives under `utils/source/` and is not
+# shipped. Subdirectories are kept because win16, win32 and win64 each carry a
+# `mfc140.exports`, and flattening them silently overwrote 11 of the 37 files.
+SYMBOLS = os.path.join(ROOT, "utils", "source", "ghidra-exports")
 LIBRARY_RE = re.compile(r'<LIBRARY\s+NAME="([^"]+)"')
 EXPORT_RE = re.compile(r'ORDINAL="(-?\d+)"\s+NAME="([^"]*)"')
 

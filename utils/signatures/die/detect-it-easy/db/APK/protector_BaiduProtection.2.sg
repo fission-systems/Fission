@@ -1,0 +1,20 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+meta("protector", "BaiduProtection");
+
+function detect() {
+    bDetected =
+        APK.isArchiveRecordPresent("assets/baiduprotect.jar") ||
+        APK.isArchiveRecordPresent("assets/libbaiduprotect_x86.so") ||
+        APK.isArchiveRecordPresent("lib/armeabi-v7a/libbaiduprotect.so") ||
+        APK.isArchiveRecordPresent("lib/armeabi/libbaiduprotect.so") ||
+        APK.isArchiveRecordPresent("lib/mips/libbaiduprotect.so") ||
+        APK.isArchiveRecordPresent("lib/x86/libbaiduprotect.so");
+
+    return result();
+}

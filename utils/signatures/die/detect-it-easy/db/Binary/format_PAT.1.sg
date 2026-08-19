@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://www.gimp.org/
+meta("format", "Gimp Pattern");
+
+function detect() {
+    if (Binary.compare("000000..00000..10000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

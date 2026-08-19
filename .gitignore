@@ -209,7 +209,16 @@ __pycache__/
 !/benchmark/patch_validation_pool/**
 # vendor/ — reference code only, not committed to GitHub
 /vendor/
-/utils/
+# `utils/` is versioned. It used to be excluded and delivered through an
+# `assets-v*` release, which meant the tree a checkout had and the tree CI ran
+# against could differ -- and did: assets-v3 carried 1,048 of the 3,468 files,
+# missing signatures/die entirely, while its inventory reported 3,468 because it
+# counted the machine that built it rather than the archive it produced.
+#
+# What is versioned is what the runtime reads. Packer inputs are not: 449M of
+# `.fidbf`, `.gdt` and JSON that only `scripts/` and `bin/pack_fid` open, and
+# whose packed output is committed beside the code that reads it.
+/utils/source/
 
 # Scratch and temp files
 .scratch/

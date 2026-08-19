@@ -1,0 +1,51 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://github.com/javascript-obfuscator/javascript-obfuscator
+meta("protector", "javascript-obfuscator");
+
+function detect() {
+    // Is JS file?
+    if (isSignatureInBeginAndEndPresent("'function'") &&
+        (
+            isSignatureInBeginAndEndPresent("'var '") ||
+            isSignatureInBeginAndEndPresent("'const '") ||
+            isSignatureInBeginAndEndPresent("')();'")
+        )) {
+
+        if (isSignatureInBeginAndEndPresent("'_0x'")) {
+            if (isSignatureInBeginAndEndPresent("'_0x' .. .. .. .. '('") ||
+                isSignatureInBeginAndEndPresent("'_0x' .. .. .. .. .. '('") ||
+                isSignatureInBeginAndEndPresent("'_0x' .. .. .. .. .. .. '('")) {
+                bDetected = true;
+            }
+        }
+
+        if (isSignatureInBeginAndEndPresent("'parseInt(' .. '('")) {
+            sOptions = "mangled";
+            bDetected = true;
+        }
+
+        if (isSignatureInBeginAndEndPresent("'=[\"'") && isSignatureInBeginAndEndPresent("'\",\"'") ||
+            isSignatureInBeginAndEndPresent("'=[' 27") && isSignatureInBeginAndEndPresent("27 ',' 27")) {
+            sOptions += (sOptions.length !== 0 ? " + " : String()) + "strings array";
+        }
+    }
+
+    return result();
+}
+
+function isSignatureInBeginAndEndPresent(signature) {
+    var chunkToAnalyze = 1024 * 10;
+
+    if (chunkToAnalyze > Binary.getSize())
+        chunkToAnalyze = Binary.getSize();
+
+    if (Binary.isSignaturePresent(0, chunkToAnalyze, signature) || chunkToAnalyze != Binary.getSize()) {
+        return Binary.isSignaturePresent(Binary.getSize() - chunkToAnalyze, chunkToAnalyze, signature);
+    }
+}

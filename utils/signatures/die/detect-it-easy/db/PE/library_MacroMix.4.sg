@@ -1,0 +1,17 @@
+// Detect It Easy: detection rule file format
+// Author: BJNFNE <bjnfne@web.de>
+// Rewritten by: DosX
+
+// https://wiki.scummvm.org/index.php/Director/Games
+meta("library", "MacroMix");
+
+function detect() {
+    var macroMixSection = PE.section["MacroMix"];
+
+    if (macroMixSection && (macroMixSection.Characteristics & 0x60000020)) {
+        sOptions = "Director Engine";
+        bDetected = true;
+    }
+
+    return result();
+}

@@ -1,0 +1,21 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Nintendo Wii - BackupMii/BootMii
+
+// https://github.com/DarkMatterCore/xyzzy-mod/blob/a5139f246c4d2602c07abc0301e5917106fa4183/source/xyzzy.c#L275
+// https://wiibrew.org/wiki/BackupMii
+meta("format", "BackupMii");
+
+function detect() {
+    if (Binary.compare("'BackupMii v1'")) {
+        var consoleId = Binary.getString(25, 8).trim();
+
+        if (/^[a-z0-9]{8}$/.test(consoleId)) {
+            if (X.isVerbose()) sOptions = "ConsoleID: " + consoleId;
+            sVersion = "1.0";
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

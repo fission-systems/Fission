@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+// Authors: Kaens TG@kaens
+
+meta("~image", "Greg Ward's RGBE / Radiance HDR (.hdr, .pic, .rgbe, .xyze)");
+
+function detect() {
+    if (X.isHeuristicScan()) {
+        bDetected = (
+            X.fSig(0, 0x80, "'#?RADIANCE'0A") >= 0 ||
+            X.fSig(0, 0x80, "'#?RGBE'0A") >= 0
+        ) && X.fSig(0x0A, 0x400, "0A'FORMAT='") >= 0;
+    }
+
+    return result();
+}

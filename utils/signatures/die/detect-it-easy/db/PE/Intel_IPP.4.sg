@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: sendersu
+// If errors pls contact sendersu on cracklab.team
+
+// https://en.wikipedia.org/wiki/Integrated_Performance_Primitives
+meta("library", "Intel IPP");
+
+function detect() {
+    if (PE.isSectionNamePresent("IPPCODE") && PE.isSectionNamePresent("IPPDATA")) {
+        bDetected = true;
+    }
+
+    return result();
+}

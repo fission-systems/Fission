@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+
+meta("package", "");
+
+function detect() {
+    var _sName = APK.getAndroidManifestRecord("package");
+
+    if (_sName) {
+        sName = _sName;
+        sVersion = APK.getAndroidManifestRecord("android:versionName");
+        bDetected = true;
+    }
+
+    return result();
+}

@@ -1,0 +1,11 @@
+// Detect It Easy: detection rule file
+
+meta("cryptor", "DarkEye");
+
+function detect() {
+    if (PE.isNetObjectPresent("BasicCryptorFromDebil")) {
+        bDetected = true;
+    }
+
+    return result();
+}

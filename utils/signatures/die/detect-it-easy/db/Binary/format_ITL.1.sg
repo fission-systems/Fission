@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://home.vollink.com/gary/playlister/ituneslib.html
+meta("format", "iTunes Library");
+
+function detect() {
+    if (Binary.compare("'hdfm'00000090")) {
+        var versionNumber = Binary.getString(17, 8).trim();
+
+        if (/^[0-9/.]{8}$/.test(versionNumber)) {
+            if (X.isVerbose()) sVersion = versionNumber;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

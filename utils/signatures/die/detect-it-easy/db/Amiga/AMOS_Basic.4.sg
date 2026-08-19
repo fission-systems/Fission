@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+// https://en.wikipedia.org/wiki/AMOS_(programming_language)
+meta("compiler", "AMOS Basic");
+
+function detect() {
+    if (Amiga.compareEP("60$$49fa....397a........b07c....65..303c....3940....43ec....53..6b")) {
+        sVersion = "1.0";
+        bDetected = true;
+    } else if (Amiga.compareEP("243c........263c........49fa....294c....294f....48e7808078..7a..7c..2c78....0802")) {
+        bDetected = true;
+    }
+
+    sLang = "BASIC";
+
+    return result();
+}

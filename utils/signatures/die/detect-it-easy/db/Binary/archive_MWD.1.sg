@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Frogger
+
+// https://highwayfrogs.net/thread/40/frogger-file-information-megathread
+meta("archive", "Medievil WAD");
+
+function detect() {
+    if (Binary.compare("44 41 57 4D")) {
+        var creationDate = Binary.getString(24, 29).trim();
+
+        if (/^[A-Z][a-z]+, \d{1,2}(?:st|nd|rd|th) [A-Z][a-z]+ \d{4}$/.test(creationDate)) {
+            sOptions = "Creation date: " + creationDate;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

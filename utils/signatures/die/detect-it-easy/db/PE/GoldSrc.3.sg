@@ -1,0 +1,24 @@
+// Detect It Easy: detection rule file
+// Author: KDSS-Research
+
+// https://en.wikipedia.org/wiki/GoldSrc
+meta("library", "GoldSrc");
+
+function detect() {
+    var dataSection = PE.section[".data"];
+
+    if (dataSection) {
+        if (PE.findString(dataSection.FileOffset, dataSection.FileSize, "VENGINE_") !== -1 &&
+            PE.findString(dataSection.FileOffset, dataSection.FileSize, "VFileSystem") !== -1 &&
+            PE.findString(dataSection.FileOffset, dataSection.FileSize, "_API_VERSION")) {
+            bDetected = true;
+
+            var apiVersion = PE.findString(dataSection.FileOffset, dataSection.FileSize, "_API_VERSION");
+
+            sOptions = "API v" + PE.getString(apiVersion + 12, apiVersion + 3);
+        }
+
+    }
+
+    return result();
+}

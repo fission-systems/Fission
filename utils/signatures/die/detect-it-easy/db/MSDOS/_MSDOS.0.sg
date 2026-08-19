@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+
+meta("operation system", "MS-DOS");
+
+function detect() {
+    if (MSDOS.isVerbose()) {
+        sName = MSDOS.getOperationSystemName();
+        sVersion = MSDOS.getOperationSystemVersion();
+        sOptions = MSDOS.getOperationSystemOptions();
+
+        if (sName === "Unknown") {
+            sName = "DOS-like";
+        }
+
+        bDetected = true;
+    }
+
+    return result();
+}

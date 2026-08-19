@@ -1,0 +1,12 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+meta("format", "FST");
+
+function detect() {
+    if (Binary.compare("';Ligne de commentaires'0d0a")) {
+        bDetected = true;
+    }
+
+    return result();
+}

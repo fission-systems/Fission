@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: Jason Hood <jadoxa@yahoo.com.au>
+
+meta("camera", "");
+
+function detect() {
+    sName = Jpeg.getExifCameraName().replace(/\s{2,}/g, " ").trim();
+
+    if (sName) {
+        bDetected = true;
+    }
+
+    return result();
+}

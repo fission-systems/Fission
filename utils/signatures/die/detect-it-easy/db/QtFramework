@@ -1,0 +1,18 @@
+// Detect It Easy: DiE-JS framework file
+// Don't change anything unless you're sure about what you're doing
+
+// Qt is tested twice - as a library and as a compiler (to distinguish C from C++). Detect it once here.
+// Coauthor: sendersu
+
+var aQt, ownName;
+
+if (typeof aQt === "undefined" && typeof PE !== "undefined") {
+    ownName = PE.getFileBaseName() + "." + PE.getFileCompleteSuffix();
+    aQt = PE.isLibraryPresentExp(/^Qt(\d)?Core(d?)(\d)?/i);
+    //special case - check own name
+    if (!aQt) {
+        aQt = ownName.match(/^Qt(\d)?Core(d?)(\d)?/i)
+        if (aQt)
+            aQt[0] = ownName;
+    }
+}

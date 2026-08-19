@@ -1,0 +1,22 @@
+// Detect It Easy: detection rule file
+
+// https://marketplace.visualstudio.com/items?itemName=MikeDr.CliSecureObfuscateNETCodeProtectionTool
+meta("protector", "CliSecure");
+
+function detect() {
+    if (PE.isNet()) {
+        if (PE.isNetObjectPresent("ObfuscatedByCliSecureAttribute")) {
+            sVersion = "4.0-5.X";
+            bDetected = true;
+        } else if (PE.isNetObjectPresent("CliSecureRd.dll") || PE.isNetObjectPresent("CliSecureRd64.dll")) {
+            bDetected = true;
+        } else if (PE.isSignatureInSectionPresent(0, "'Cli'00'S'00'e'00'c'00'u'00'r'00'e'")) {
+            bDetected = true;
+        }
+    } else if (PE.compareEP("e9$$$$$$$$558bec81ec4c020000a1........33c58945f483")) {
+        sVersion = "4.5";
+        bDetected = true;
+    }
+
+    return result();
+}

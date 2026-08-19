@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://github.com/mt-code/ByteGuard
+meta("protector", "ByteGuard");
+
+function detect() {
+    if (PE.isNet() && PE.isNetGlobalCctorPresent() && (PE.section[0].Name === ".text" || PE.isSectionNamePresent("UPX")) &&
+        PE.isNetUStringPresent("C# version only supports level 1 and 3") &&
+        PE.compareOverlay("%% %% %% %% %% %% %% %% %% %% %% %% %% %% %% %% %% %% %% %%")) {
+        bDetected = true;
+    }
+
+    return result();
+}

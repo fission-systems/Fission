@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://file-extensions.com/docs/wbfs
+meta("format", "Wii Backup File System");
+
+function detect() {
+    if (Binary.compare("'WBFS'00....000915000001000000")) {
+        sOptions = File.cleanString(Binary.getString(0x00000200, 6));
+        bDetected = true;
+    }
+
+    return result();
+}

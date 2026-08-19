@@ -1,0 +1,968 @@
+{
+  "file_count": 160,
+  "files": [
+    {
+      "path": "utils/ghidra-data/DISCLAIMER.md",
+      "sha256": "324f4544abe620362f7bc66fbd8ec3c90e62e1aeac249fb850aef67e71c8b24d",
+      "size": 1792,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/DISCLAIMER.md"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/ElfFunctionsThatDoNotReturn",
+      "sha256": "f1c76795ab15d2e2f954443aa81175e971fae4c954deffc127c801fddab9d9b3",
+      "size": 370,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/ElfFunctionsThatDoNotReturn"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/GolangFunctionsThatDoNotReturn",
+      "sha256": "4cb3a0ec9abf6cb7f6d958a13a063cf3804fb570726d7c680e0ecba8c46ddb83",
+      "size": 2971,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/GolangFunctionsThatDoNotReturn"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/MachOFunctionsThatDoNotReturn",
+      "sha256": "7c076a4e8d963887488ed631e4e4650766188fa83d48f760c4f5929bd91484ad",
+      "size": 1278,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/MachOFunctionsThatDoNotReturn"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/PEFunctionsThatDoNotReturn",
+      "sha256": "04dec43e29d4203244e4353a1ffb682efdc6f51d292bbf6561343dafcd382d9d",
+      "size": 556,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/PEFunctionsThatDoNotReturn"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/RustFunctionsThatDoNotReturn",
+      "sha256": "3694041acd4e9fd77c8b5af6c33aef934f4d3ba280c11cc0843f83b4c99d11cd",
+      "size": 641,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/RustFunctionsThatDoNotReturn"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/functionTags.xml",
+      "sha256": "9f433bdcd6e9d713342b5909b1d5388666eddf14e12d095d33f178263f08bb82",
+      "size": 698,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/functionTags.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/ms_pe_rich_products.xml",
+      "sha256": "50fdf7ea2cbcd0dead04efe39836485a2d08cafd044cfad3283eacfc7b50b9aa",
+      "size": 9260,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/ms_pe_rich_products.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/noReturnFunctionConstraints.xml",
+      "sha256": "398d7f5921b362795c4c0f166450d598f6928ef5924003c9043100d8858be832",
+      "size": 1186,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/noReturnFunctionConstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/MacOSX_10.5.prf",
+      "sha256": "6c6e9e4c0817c187b6a41a4a2fa919c52ba57a7608ef63e57ee9d4ddbda02748",
+      "size": 2444,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/MacOSX_10.5.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/MacOSX_10.9.prf",
+      "sha256": "eb4a9546b761919d02563287de9a37518d2101059957ce2e98d8e26b6f187fbd",
+      "size": 5961,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/MacOSX_10.9.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/MacOSX_Cocoa.prf",
+      "sha256": "133bc6bc3d4f2735a742124bd1bf10301d897fc8253a2fb1e1dc305fcdd844ec",
+      "size": 1165,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/MacOSX_Cocoa.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/VisualStudio12_32.prf",
+      "sha256": "1a529ff30b13911ec33a1efffe92ab211d0cac69564819ae3ec1fcb90f9015ff",
+      "size": 2444,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/VisualStudio12_32.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/VisualStudio12_64.prf",
+      "sha256": "f88150abb66f6dc62a1c2fc72cd62bb1e02794f74a1ea0ea5456575bb1e1d8a4",
+      "size": 2495,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/VisualStudio12_64.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/VisualStudio22_64.prf",
+      "sha256": "e55f992f673bc78c4fa3d29e23464cb019610eca412d0a3c1a1e12217e73c10a",
+      "size": 4471,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/VisualStudio22_64.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/VisualStudio9.prf",
+      "sha256": "7e611a882f447410cee35168c20dca1aa1cb746c735d349e80cf5cde6729f553",
+      "size": 1151,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/VisualStudio9.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/clib.prf",
+      "sha256": "da36e590aacdadcd57d1bbfc875a9a3547662091a35b638eecb99fa3b59ffded",
+      "size": 972,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/clib.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/generic_clib_32.prf",
+      "sha256": "733c8e7372f9091ff17f4382caada3c352f8b3af152aa8a42e466191f1fc5c01",
+      "size": 3265,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/generic_clib_32.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/generic_clib_64.prf",
+      "sha256": "1df98277afcbd31ee8c658f6be5fa2af1f91642bf609b363e4de2fa311871caa",
+      "size": 3261,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/generic_clib_64.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/linux_32.prf",
+      "sha256": "8d7031e51de630b74214acef9c63512ba350032bef72740e042791d26c621691",
+      "size": 8588,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/linux_32.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/linux_64.prf",
+      "sha256": "7e0b25aad91957e56c92f54f95a2cb4ce032eb3ff83edf1a4b80816bd767b8d1",
+      "size": 8564,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/linux_64.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/objc_mac_carbon.prf",
+      "sha256": "d60693f83371b26e641bb2484535f3309f6637a8b1dc8c958c4661ede67a6177",
+      "size": 5713,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/objc_mac_carbon.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/parserprofiles/vs12Local.prf",
+      "sha256": "8880ad47c5155b61a6f483740834ac3ad6592c02523c406d75c6761de4f6ad0b",
+      "size": 5064,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/parserprofiles/vs12Local.prf"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/stringngrams/StringModel.sng",
+      "sha256": "ff12fa11b372b818e6edc8571f7e054b53fcf1fa5a7d9d78cc1c3014e56109b7",
+      "size": 545854,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/stringngrams/StringModel.sng"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/README.txt",
+      "sha256": "2c0b6565203aff5713b6a2452fba6bbc4880c17b05c8c2f7c0b0f729952d41ed",
+      "size": 1554,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/README.txt"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/commctrl.exports",
+      "sha256": "57a283808f8dd148f2c765b4b04f42063a24bc553b90d333c3bef7d669ac8d73",
+      "size": 1667,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/commctrl.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/commdlg.exports",
+      "sha256": "50d5f0b88955e9b2892cc6e59c3ef01b957455c6bb4c0803a3a90f32e07fd06a",
+      "size": 1984,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/commdlg.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/gdi.exports",
+      "sha256": "35358989115305362bb0eb1e1cfe3fafe0f60ec00114b7616ad6375a922f6ab5",
+      "size": 20145,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/gdi.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/kernel.exports",
+      "sha256": "0eea6adfdde27007b5fb4bbd9def2fe2563f7db428865d39e1ba70a054e38d7f",
+      "size": 16338,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/kernel.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/krnl386.exports",
+      "sha256": "717d968dd2a12bd6cdb6468fcca6c22d607938c658218365a1df7b0e52e8032a",
+      "size": 16364,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/krnl386.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/lzexpand.exports",
+      "sha256": "8b9837139f6c3b4e04679b25f25302e186e2e9c38d0ab14fbae49545a24c69f7",
+      "size": 921,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/lzexpand.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/mmsystem.exports",
+      "sha256": "1b85bb754bebaa15955affcfc90f08e3b98b9df12588a5e62c654bb1ccd3217b",
+      "size": 10013,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/mmsystem.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/toolhelp.exports",
+      "sha256": "39019796303c52c65ca88b3d9bd6d5ce6de2c392bfa9539fa29f43bbeba51822",
+      "size": 2572,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/toolhelp.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/user.exports",
+      "sha256": "2a73f9a952c080a6d63b65e70a5d0f9f88f1c14a7606b2486ea7ff9df698e7ea",
+      "size": 29587,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/user.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/ver.exports",
+      "sha256": "fdae942a4f856da49a7d4a512ce3ad8bd21b5cd4b92deb038dff6243e659fc56",
+      "size": 780,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/ver.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win16/win87em.exports",
+      "sha256": "5908eb77a1469d08082cd17b1761196b5b15e66df6e8475c3dd8430161173978",
+      "size": 479,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win16/win87em.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/kernel32.hints",
+      "sha256": "08e27ad0678c84f5aabb4e4b0a335e1b9f972ffc8828c1658852706c1b7b0e7f",
+      "size": 281,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/kernel32.hints"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc100.exports",
+      "sha256": "cb5df9aa5ff46911c82a2bbcbbf29ba2d9a73d2578eee44272dfd6c4b99cf663",
+      "size": 1531235,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc100.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc100u.exports",
+      "sha256": "e1766f7960d0e12e25633b7acfd407698bcd85749cf31aea87bfcb5c0a79d2d5",
+      "size": 1543423,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc100u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc110.exports",
+      "sha256": "6e63a6079e05cbe3ff83761b04bbd13ceace720252d5acf4ecdf1eaa9b703eb1",
+      "size": 1587017,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc110.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc110u.exports",
+      "sha256": "8e94c8fd30bed8a6fc48a10152dce66d190d0e3c07cf5f81125aa3f114a3e83f",
+      "size": 1599189,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc110u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc140.exports",
+      "sha256": "8bef4ba19a4148d5555cb296a9a7b16ea6a888d4a782ed5a416ffa1aaf40433d",
+      "size": 1611139,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc140.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc140u.exports",
+      "sha256": "4ae2761e69f8a9a66ead6ac07f378a80b12b6851ba0e6f2d799b5937f2e227b6",
+      "size": 1623328,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc140u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc42.exports",
+      "sha256": "0f740a5da18ff483c27a1b12c5d0c9b7cce23ee35c3046493ceb4f8a025f5938",
+      "size": 662819,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc42.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc42u.exports",
+      "sha256": "db82edb8764caa60f8c316f935fed296e35d2b6084843a6adffef911f8ca17f8",
+      "size": 662219,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc42u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc71.exports",
+      "sha256": "c610db11fdd19f4ad893e44eb571ca8c9b67e6594fb6eafbca6eb094afbaa4ac",
+      "size": 694716,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc71.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc71u.exports",
+      "sha256": "b1a89bdb91fc55578671c3c3de0c41f6a8e9e033a2970223daca84e68352df40",
+      "size": 695643,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc71u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc80.exports",
+      "sha256": "57a09f5ba748647c5317a4b8f797b2d584ab65c1bc9bb939b8ac51a5afeb59ea",
+      "size": 701824,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc80.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc80u.exports",
+      "sha256": "cd31c21958f60e8aee6aa1327fa4e2daddfa88c060a913bb5fce6b5c169acf99",
+      "size": 703155,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc80u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc90.exports",
+      "sha256": "b9e291e20a77255e30cb8dfedaeda38a1feafb8a0f9346d7fbbe2ce932448523",
+      "size": 709047,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc90.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/mfc90u.exports",
+      "sha256": "35411922772a34cb6e639fe763ea75e7bcfb4c4ff7551e5741bdb7abec9898c4",
+      "size": 712660,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/mfc90u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win32/msvcrt.hints",
+      "sha256": "e93a97b172fc33f6503e34b5315837d17bafe62e6ea3bc6c275976c8979e87fc",
+      "size": 326,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win32/msvcrt.hints"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/kernel32.hints",
+      "sha256": "08e27ad0678c84f5aabb4e4b0a335e1b9f972ffc8828c1658852706c1b7b0e7f",
+      "size": 281,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/kernel32.hints"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc100.exports",
+      "sha256": "54cc22834f7a3b414d5c39d16c3d8559cd3d523b9fb4048eaac6398eae4f327e",
+      "size": 1515491,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc100.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc100u.exports",
+      "sha256": "37b7ff3f8bce7ae89f092651cc33f81c00048c68d7dd27cd5716bbd7f2f134be",
+      "size": 1526869,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc100u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc110.exports",
+      "sha256": "cb89b38d0d96c1a7da267ce68028e26ae343cc3e0a825b71d8c57208b4730d4a",
+      "size": 1572089,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc110.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc110u.exports",
+      "sha256": "b7e229788b4f4dbc546ae46a711b7ba0232a4023d862187e2aeb970499952525",
+      "size": 1583450,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc110u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc140.exports",
+      "sha256": "6f7c645bbff75430d58aab376c6bf2feb6461fc8ce06616894036a87c480d00e",
+      "size": 1596500,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc140.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc140u.exports",
+      "sha256": "0c0dc322c52a2be9d0486f3a2399c42e22f74ae04449060f170d771c6e8cf796",
+      "size": 1607877,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc140u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc42.exports",
+      "sha256": "2b6a67a3d5a7d55331559f9a65f8162326f1ca1fecde517a3befd5b78ecbf8af",
+      "size": 688153,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc42.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc42u.exports",
+      "sha256": "d7cb43e64fcb22f92df20783c060c2806cadc64b5831d913ee2494d693786f6b",
+      "size": 687570,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc42u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc80.exports",
+      "sha256": "d2d2caa11d17b7ab697f1b5e6ba863cc51333fed22a41d6428626e29decde655",
+      "size": 673619,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc80.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc80u.exports",
+      "sha256": "fa4cf18984f53410330b8ce6208da3a1378bf00f568928bf77638dda74221279",
+      "size": 674002,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc80u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc90.exports",
+      "sha256": "cace909ea1732c7794675fb50296f4b5b1bf91a17657224052d2aa0e09d50a66",
+      "size": 680961,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc90.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/mfc90u.exports",
+      "sha256": "9a5da2ec5e1e22ba94661c0367fc67347c27c0cdfd3c1580c0a82e1b7c776825",
+      "size": 683673,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/mfc90u.exports"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/Base/data/symbols/win64/msvcrt.hints",
+      "sha256": "e93a97b172fc33f6503e34b5315837d17bafe62e6ea3bc6c275976c8979e87fc",
+      "size": 326,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/Base/data/symbols/win64/msvcrt.hints"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/FileFormats/data/languages/apport.opinion",
+      "sha256": "2397041e4eaedcbb22ddd6dfaeaf82bca12c56ef0295d7fdff9c75f78fa0a808",
+      "size": 250,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/FileFormats/data/languages/apport.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/FileFormats/data/languages/minidump.opinion",
+      "sha256": "f1247e8e81ebdc8f46af720e47ec6660b59f08492a0f274559ad344a67bfca80",
+      "size": 1579,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/FileFormats/data/languages/minidump.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Features/FileFormats/data/languages/pagedump.opinion",
+      "sha256": "061c49a02afe6fee4127f404f81245edb7b6e746a741dc09d4338830300243cd",
+      "size": 2424,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Features/FileFormats/data/languages/pagedump.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/68000/data/languages/68000.opinion",
+      "sha256": "d0035bc1cef042e4772611bae6769cb14fee8f3b6ebfb47270092aba43296fb8",
+      "size": 973,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/68000/data/languages/68000.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/68000/data/patterns/68000_patterns.xml",
+      "sha256": "43087cf3ebc860f07e9bbaba58c5de30e9ad97f2a96150c23d6c636006e2352f",
+      "size": 2008,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/68000/data/patterns/68000_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/68000/data/patterns/patternconstraints.xml",
+      "sha256": "d1e7038f77949330f456fbbd965c203e8f88092ed696fbabf0386e8205d95ac6",
+      "size": 138,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/68000/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/8051/data/languages/8051.opinion",
+      "sha256": "5524970febc8555327617a25b5cb3437b56d88eae2009ceadb14160c0ebadc4c",
+      "size": 239,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/8051/data/languages/8051.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/AARCH64/data/aarch64-pltThunks.xml",
+      "sha256": "7864e8335add24016c99c51efc940d14f87d00d9fd0a173f5815f075a3612d1d",
+      "size": 836,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/AARCH64/data/aarch64-pltThunks.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/AARCH64/data/languages/AARCH64.opinion",
+      "sha256": "6e25d96730cf351d3750173ce3785d4ad4ad9dcdea26dc0832e11eabf86899fb",
+      "size": 1896,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/AARCH64/data/languages/AARCH64.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/AARCH64/data/patterns/AARCH64_LE_patterns.xml",
+      "sha256": "29a098d068cbae27fe139c654f1b664d22646494bdf3daec0b0ce6e1860d1687",
+      "size": 4601,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/AARCH64/data/patterns/AARCH64_LE_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/AARCH64/data/patterns/AARCH64_win_patterns.xml",
+      "sha256": "c16ada954680c33b8bd37aa52a9af921e3e98b0761bfc486c85358743ff8e195",
+      "size": 1490,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/AARCH64/data/patterns/AARCH64_win_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/AARCH64/data/patterns/patternconstraints.xml",
+      "sha256": "c051f7a36e7c7c0f1f9cbb7a871a63067a8f0cd9d91a0d87260a66da531358d6",
+      "size": 145,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/AARCH64/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/AARCH64/data/patterns/prepatternconstraints.xml",
+      "sha256": "c26ee5eac1584294ff16ddfb9c2a76516181f72bada2a81ad3f56a7a3343f124",
+      "size": 192,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/AARCH64/data/patterns/prepatternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/ARM/data/languages/ARM.opinion",
+      "sha256": "f75114e22d5982cf91c89805f288b8d6b340ef4a7e65ce3ca4f6c8bb38eb7377",
+      "size": 4411,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/ARM/data/languages/ARM.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/ARM/data/patterns/ARM_BE_patterns.xml",
+      "sha256": "04314f1afb9d8ca616e628a553700aa07a01cbc1f076e1fc8cc5a48151d86f02",
+      "size": 15442,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/ARM/data/patterns/ARM_BE_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/ARM/data/patterns/ARM_LE_patterns.xml",
+      "sha256": "1cd11d8a1b7468c2384ed40cb8910c59c4f606a8ad1cc907136c59f222a99f02",
+      "size": 16969,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/ARM/data/patterns/ARM_LE_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/ARM/data/patterns/ARM_switch_patterns.xml",
+      "sha256": "8ee77a7574e44cd6ae5019c285f433da38d6635fb5bdce5b747c8cb7b10fc40a",
+      "size": 4503,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/ARM/data/patterns/ARM_switch_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/ARM/data/patterns/patternconstraints.xml",
+      "sha256": "16edf0d8c47b376a9db88ec1d7d90d457c386096ddfaf3db4a351d080fd89950",
+      "size": 341,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/ARM/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/ARM/data/patterns/prepatternconstraints.xml",
+      "sha256": "9619f559587407b0f1005d4bf3c11a6be66ce9152c97db4f122210a6dc04e42e",
+      "size": 140,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/ARM/data/patterns/prepatternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Atmel/data/languages/avr32.opinion",
+      "sha256": "48d6c343347c3d387314e01d3f7491ebaa2ddd83ca5e934f3c54fc573bb210cb",
+      "size": 309,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Atmel/data/languages/avr32.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Atmel/data/languages/avr8.opinion",
+      "sha256": "fe00caa261416f0e8adb5ae4bb3bbd67ceee8bbd59de563b7ee3d2b1c7bd6030",
+      "size": 674,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Atmel/data/languages/avr8.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Atmel/data/patterns/AVR8_patterns.xml",
+      "sha256": "ad9aced0b6fbec77d240bead46d69ee298572ae263fccebb7a8dc902ba66d87b",
+      "size": 1460,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Atmel/data/patterns/AVR8_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Atmel/data/patterns/patternconstraints.xml",
+      "sha256": "a6611388bb75b30de3a01029c4d6e658040b50f43f96dd893cacad4ea40a93a9",
+      "size": 135,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Atmel/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/CP1600/data/languages/CP1600.opinion",
+      "sha256": "25c963dc48c4c341dc389a7e816018a1dc751e832d9c35bee19a25eb1ea82e59",
+      "size": 23,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/CP1600/data/languages/CP1600.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/CR16/data/languages/CR16.opinion",
+      "sha256": "d69827781852f29dd655e2510890e1f3ae5426c4c7c644d6d3f08206549a825f",
+      "size": 194,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/CR16/data/languages/CR16.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Dalvik/data/languages/Dalvik.opinion",
+      "sha256": "ca077672393409e240157426f6b5375a9540208042f72b0268d69edf2caa49df",
+      "size": 2544,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Dalvik/data/languages/Dalvik.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/HCS08/data/languages/HCS08.opinion",
+      "sha256": "0892e2957672807b0367425fc1e00ebdf527aef70b0659821e39a66f9f942609",
+      "size": 334,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/HCS08/data/languages/HCS08.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/HCS12/data/languages/HCS12.opinion",
+      "sha256": "f309ec8e11ef3605ce6844c6179331d1c3dcd84f9c8d893e4e7e63c4e08a4d5d",
+      "size": 438,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/HCS12/data/languages/HCS12.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/JVM/data/languages/JVM.opinion",
+      "sha256": "110a7941832bbbc891f80b81bab667894617ccbff83b54246fc5d9e8feaaa57b",
+      "size": 174,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/JVM/data/languages/JVM.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Loongarch/data/languages/loongarch.opinion",
+      "sha256": "b15b3b7169cbfe7dee8ac5b905dfb980178dfb0b35ce48c1168b297e1142a468",
+      "size": 970,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Loongarch/data/languages/loongarch.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Loongarch/data/patterns/loongarch_patterns.xml",
+      "sha256": "95445b4b545ef9758a604f977747fe3fa0f98bd3c3e0e34b1f4256bd2014c1b7",
+      "size": 1403,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Loongarch/data/patterns/loongarch_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Loongarch/data/patterns/patternconstraints.xml",
+      "sha256": "a063d0c08443047bd259ec850048d10464888e0550efdbcc3f70538b9e01b23b",
+      "size": 146,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Loongarch/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/M8C/data/languages/m8c.opinion",
+      "sha256": "fadec124749997ad6267a8f026047c2f64b1f1589a3d2848a683794cb9d12099",
+      "size": 213,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/M8C/data/languages/m8c.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/MIPS/data/languages/MIPS.opinion",
+      "sha256": "1ca534a60f0da0b778519641d02c48133ac4aa232b8c21ec6c3013f77304b5c3",
+      "size": 11698,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/MIPS/data/languages/MIPS.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/MIPS/data/patterns/MIPS_BE_patterns.xml",
+      "sha256": "fc5be9c87134a242b9e089dc7aac7dfec4754d08119b9ee9863bf2b3a75896a3",
+      "size": 4210,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/MIPS/data/patterns/MIPS_BE_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/MIPS/data/patterns/MIPS_LE_patterns.xml",
+      "sha256": "996d5af3cd181c81bee9a09e269774e577284d1e9bec220185d24b0ef01e6310",
+      "size": 3912,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/MIPS/data/patterns/MIPS_LE_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/MIPS/data/patterns/patternconstraints.xml",
+      "sha256": "d7c45b1bde46008cf64ecabcc50f5d6c20e4a1482ac3850cb39e53ee74aedd2e",
+      "size": 235,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/MIPS/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/NDS32/data/languages/nds32.opinion",
+      "sha256": "8d7e9aa7d7edcff052385d06e359160c28297e512b78a9ae729469e3d5adccbd",
+      "size": 194,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/NDS32/data/languages/nds32.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/NDS32/data/patterns/nds32_patterns.xml",
+      "sha256": "0a4ebb0e4283a8c92007a6aee9e5f43cdbb9a058558e7a26e92e52e700938494",
+      "size": 355,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/NDS32/data/patterns/nds32_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/NDS32/data/patterns/patternconstraints.xml",
+      "sha256": "311529dde4c2a52ed342210418e30f8ae75e3dbd59734760da3a0fe1b5005b57",
+      "size": 137,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/NDS32/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PA-RISC/data/languages/pa-risc.opinion",
+      "sha256": "4a4bd40f9f2aac56d40f1237d07d7b02560838a90ea3a85327f8e104cbaf4c85",
+      "size": 540,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PA-RISC/data/languages/pa-risc.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PA-RISC/data/patterns/pa-risc_patterns.xml",
+      "sha256": "5406ca14a363ba35c2f395f19012ca8b1a29ecfe10098c9fa0e4820587e710fc",
+      "size": 735,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PA-RISC/data/patterns/pa-risc_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PA-RISC/data/patterns/patternconstraints.xml",
+      "sha256": "e8c58d42c46afc44f96f7eb4c2841b28eceefe60bc249eab086d72f2306ca739",
+      "size": 142,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PA-RISC/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PIC/data/languages/PIC24.opinion",
+      "sha256": "5efe551409541e109e9dd05042a9eda2db0a9b2d9dc8b43bee2745e6e6689822",
+      "size": 883,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PIC/data/languages/PIC24.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PowerPC/data/languages/PowerPC.opinion",
+      "sha256": "84f52f2fc8375d58c98365187fc6a05bd7e047859922e82c19b8016f2a313134",
+      "size": 1538,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PowerPC/data/languages/PowerPC.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PowerPC/data/patterns/PPC_BE_patterns.xml",
+      "sha256": "9ac393c2f7a4c1b224986e8f8f198f9dee163bb355dc8aca6c07d2d475eac247",
+      "size": 4767,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PowerPC/data/patterns/PPC_BE_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PowerPC/data/patterns/PPC_BE_prepatterns.xml",
+      "sha256": "9d713894a2dd24be683eb740cfea4909b1c93232e4ffa4c6094773559467ddb3",
+      "size": 6703,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PowerPC/data/patterns/PPC_BE_prepatterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PowerPC/data/patterns/PPC_LE_patterns.xml",
+      "sha256": "8010aaad53942203997dfe393eaaec0e2d43e4293cf6d95d2cca5499d2b60d5f",
+      "size": 4771,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PowerPC/data/patterns/PPC_LE_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PowerPC/data/patterns/PPC_LE_prepatterns.xml",
+      "sha256": "1f672c3262a615d1a57d8116ca3027e8521063961fd60921e4e2a8b645f14108",
+      "size": 6735,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PowerPC/data/patterns/PPC_LE_prepatterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PowerPC/data/patterns/patternconstraints.xml",
+      "sha256": "0f25bc3b40a72cc188abd6885699a01d011b0bc5154a6e35bc60120054cced97",
+      "size": 238,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PowerPC/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/PowerPC/data/patterns/prepatternconstraints.xml",
+      "sha256": "58a3a853233bcd5278c67e73a931b7f00ef714c47c8b9408c8946496e4f65f12",
+      "size": 244,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/PowerPC/data/patterns/prepatternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/RISCV/data/languages/riscv.opinion",
+      "sha256": "eb0a33e202c97b4827cacd83ec4c26e0d638416bedd2fcd730d642070e459178",
+      "size": 911,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/RISCV/data/languages/riscv.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/RISCV/data/patterns/patternconstraints.xml",
+      "sha256": "273fb0b41605be8fdcb1c898c399b0129343c0f33b5768a20c956a0c6634d26c",
+      "size": 141,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/RISCV/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/RISCV/data/patterns/riscv_gc_patterns.xml",
+      "sha256": "49a675899719e9a73458fc2cb5fc92da260454fc055101141a123762560ebe88",
+      "size": 1985,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/RISCV/data/patterns/riscv_gc_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Sparc/data/languages/Sparc.opinion",
+      "sha256": "b2ef8b051cf8f6f80d4d19b74c3495cbb502fc59ada863a7f98906ab5b262e06",
+      "size": 779,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Sparc/data/languages/Sparc.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Sparc/data/patterns/SPARC_patterns.xml",
+      "sha256": "68ca08a0469ef1f41c3ac988d5ff065b3abcd5717e7e6fde3c72e82b690f02a2",
+      "size": 2320,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Sparc/data/patterns/SPARC_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Sparc/data/patterns/patternconstraints.xml",
+      "sha256": "dfc3ad9b2ddd31ad94de6940f80f4414952d3dc78a6bc6df3dd4743f0854bd98",
+      "size": 138,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Sparc/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/SuperH4/data/languages/SuperH4.opinion",
+      "sha256": "f91f1674a9028d2b3cf45da0819053036b6b1572f7ecd03d661bf6f6f20ef0d7",
+      "size": 692,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/SuperH4/data/languages/SuperH4.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/SuperH4/data/patterns/SuperH4_patterns.xml",
+      "sha256": "23953833c8847fce9992329af13350a5bcf671de8f23e7a6ea648664addc08b4",
+      "size": 774,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/SuperH4/data/patterns/SuperH4_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/SuperH4/data/patterns/patternconstraints.xml",
+      "sha256": "56ea728274ee1a595f4437b9d084a1ff1eaac02befdfc1f5eb9c4db2d35b406b",
+      "size": 143,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/SuperH4/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/TI_MSP430/data/languages/ti_msp430.opinion",
+      "sha256": "680d204df3731a49e348ad00961abde7b3f54d03e15cf63e1e2fced99c663378",
+      "size": 508,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/TI_MSP430/data/languages/ti_msp430.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/V850/data/languages/V850.opinion",
+      "sha256": "30177cdaf0092e48e7543e30d902aeacf048ff9ad1211bfb4d45dd808faa991e",
+      "size": 299,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/V850/data/languages/V850.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/V850/data/patterns/V850_patterns.xml",
+      "sha256": "eaeef9a173e82242b1626cbcedcb3faa963c6e4e5974163cd6a022433558e28e",
+      "size": 2151,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/V850/data/patterns/V850_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/V850/data/patterns/patternconstraints.xml",
+      "sha256": "f87a61f0c9a39e9ed1eb38ee3c191f104f489d704726e167b32c7acfb76e7860",
+      "size": 143,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/V850/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Xtensa/data/languages/xtensa.opinion",
+      "sha256": "eeef7960f085ae6d4afdaf7ccf027014f479721380002a3d5ac41277f047a089",
+      "size": 250,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Xtensa/data/languages/xtensa.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Xtensa/data/patterns/patternconstraints.xml",
+      "sha256": "703dd186be573c4a0d1fbd6c714939d33f848dc67727a6ed05f41c31c08e54c0",
+      "size": 181,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Xtensa/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/Xtensa/data/patterns/xtensa_patterns.xml",
+      "sha256": "ce188593230ef19dd63259e01e8cef815deccc3e5b583bb4ed084f83fe6606a3",
+      "size": 5119,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/Xtensa/data/patterns/xtensa_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/eBPF/data/languages/eBPF.opinion",
+      "sha256": "a1a3b903226b5f95f73303cbd165e1ff496e4f4245957c64d5b25918f62c30ba",
+      "size": 287,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/eBPF/data/languages/eBPF.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/tricore/data/languages/tricore.opinion",
+      "sha256": "594753c7110dcf84af7877b1cabba11462e7c4f56f158a30218063b91d131cc6",
+      "size": 209,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/tricore/data/languages/tricore.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/tricore/data/patterns/patternconstraints.xml",
+      "sha256": "23768fab9fe6528d103a77e6790efd246e179a64698b4aa7f0b3924dc5081662",
+      "size": 143,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/tricore/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/tricore/data/patterns/tricore_patterns.xml",
+      "sha256": "5b50ce84e4750b4b29021e0395d85bb3baf83ab5a1b217f92c51a612928a0a40",
+      "size": 1785,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/tricore/data/patterns/tricore_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/unix32/cc.xml",
+      "sha256": "1eef9aa987c370ea7ab6dd0baa5c82090d08f1e3918444beb224fa95266eed66",
+      "size": 906,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/unix32/cc.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/unix32/probe_fixup.xml",
+      "sha256": "fe46e13247ce660ae67e7dd3875954ff2ef4290a05781f24882ffbdd5e571bec",
+      "size": 164,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/unix32/probe_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/unix32/try_fixup.xml",
+      "sha256": "68c2b2afb09f2d040be1c04890dcb5c38c638fb71832eadb31e1e1172e394c49",
+      "size": 150,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/unix32/try_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/unix64/cc.xml",
+      "sha256": "1771774cadeafdb149330c4f11d0fd9b9d655839e0efccec5ca245bcae88fce8",
+      "size": 2418,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/unix64/cc.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/unix64/probe_fixup.xml",
+      "sha256": "fe46e13247ce660ae67e7dd3875954ff2ef4290a05781f24882ffbdd5e571bec",
+      "size": 164,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/unix64/probe_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/unix64/try_fixup.xml",
+      "sha256": "b483d9d2673721ca7db40ff17172f83d190ccfa81c18066218f23e6eec299655",
+      "size": 150,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/unix64/try_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/windows32/probe_fixup.xml",
+      "sha256": "fe46e13247ce660ae67e7dd3875954ff2ef4290a05781f24882ffbdd5e571bec",
+      "size": 164,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/windows32/probe_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/windows32/try_fixup.xml",
+      "sha256": "f713c6f74e92868a229393a6d8d56e63b3b74a651e1bc62dc7e8c642ad476d0a",
+      "size": 150,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/windows32/try_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/windows64/probe_fixup.xml",
+      "sha256": "fe46e13247ce660ae67e7dd3875954ff2ef4290a05781f24882ffbdd5e571bec",
+      "size": 164,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/windows64/probe_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/extensions/rust/windows64/try_fixup.xml",
+      "sha256": "de72cd5d3329145a514a141d80793b763f371175754e2a0834a1bb4f1a0b256e",
+      "size": 150,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/extensions/rust/windows64/try_fixup.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/languages/x86.opinion",
+      "sha256": "c209534f7a9c05906cf9eef0bcc498f07e499b0e3a30802604ef7070ec806696",
+      "size": 6116,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/languages/x86.opinion"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/patternconstraints.xml",
+      "sha256": "a09d21bf77a56c6554bc06aff12fc4853a193c5360076db5baa47547ebf58180",
+      "size": 1058,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/patternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/prepatternconstraints.xml",
+      "sha256": "552202073b2287536476d43523332fe59b832e6909fafff5ebcbefcdaec62902",
+      "size": 533,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/prepatternconstraints.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86-16_default_patterns.xml",
+      "sha256": "5bf76c32ac8c88655c6bbb94c712c9a7b5615afb89193ed517e6e03b73ecf7bb",
+      "size": 1009,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86-16_default_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86-64gcc_patterns.xml",
+      "sha256": "5aab53b51b73bb5b58342d2e18fa69db9f40d39e2382930284047cb586b36e2e",
+      "size": 14741,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86-64gcc_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86-64win_patterns.xml",
+      "sha256": "3bf60152a78d7efef81dc338146245c7c484bd75b9d584a680d558356f3adf5e",
+      "size": 3324,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86-64win_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86delphi_patterns.xml",
+      "sha256": "c66ea0eceedf0b3ffe4d0c95045a3d59e7016ea0317b6f6dc11e70935ba9630a",
+      "size": 2414,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86delphi_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86gcc_patterns.xml",
+      "sha256": "5e8409a48e31b75bdacea9f4a34a25c695e61fe3615be2b5a230a5bd6bb5023d",
+      "size": 6102,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86gcc_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86gcc_prepatterns.xml",
+      "sha256": "87c98f91cb11f3a039cdf5995bffc1a81b938c9f4ba0ce9aa650c1d9f62358b2",
+      "size": 530,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86gcc_prepatterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86win_patterns.xml",
+      "sha256": "2cf7ac3adb5274c8e354d9a1eec070926ce96bf8c17a6cbf5817ea4b6c05e8c4",
+      "size": 6777,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86win_patterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/Ghidra/Processors/x86/data/patterns/x86win_prepatterns.xml",
+      "sha256": "11cee666fb5c2d91fd9626170a8ea5baf2cfd48b7d8ace6daf523ac820a5d32a",
+      "size": 777,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/Ghidra/Processors/x86/data/patterns/x86win_prepatterns.xml"
+    },
+    {
+      "path": "utils/ghidra-data/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "size": 11357,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/LICENSE"
+    },
+    {
+      "path": "utils/ghidra-data/NOTICE",
+      "sha256": "ad4b2bb6e75e908251226180081b5afa01c7161d7710e08b603d0c340a08a23f",
+      "size": 2281,
+      "source_path": "vendor/ghidra/ghidra-Ghidra_12.0.4_build/NOTICE"
+    }
+  ],
+  "generated_at": "2026-05-01T09:16:18.619933+00:00",
+  "policy": "Vendored Ghidra data snapshot only; Fission must parse these files with Rust-owned code and must not depend on the vendor source tree at runtime.",
+  "source_root": "vendor/ghidra/ghidra-Ghidra_12.0.4_build"
+}

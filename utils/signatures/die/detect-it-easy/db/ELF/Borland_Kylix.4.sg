@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+
+meta("compiler", "Borland Kylix");
+
+function detect() {
+    if (ELF.isSectionNamePresent("borland.ressym")) {
+        bDetected = true;
+    } else if (ELF.isSectionNamePresent("borland.reshash")) {
+        bDetected = true;
+    } else if (ELF.isSectionNamePresent("borland.resdata")) {
+        bDetected = true;
+    } else if (ELF.isSectionNamePresent("borland.resspare")) {
+        bDetected = true;
+    }
+
+    sLang = "Pascal/C/C++";
+
+    return result();
+}

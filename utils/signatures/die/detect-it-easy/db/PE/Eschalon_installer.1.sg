@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+meta("installer", "Eschalon Installer");
+
+function detect() {
+    if (PE.compareEP("558bec81c4........53565733c08985........8985........e8$$$$$$$$e8$$$$$$$$31d28d")) {
+        if (PE.compareOverlay("'EPSF'")) {
+            sVersion = PE.getFileVersion().replace(/\.0\.0$/, String());
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

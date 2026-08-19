@@ -1,0 +1,87 @@
+// Detect It Easy: DiE-JS framework file
+// Don't change anything unless you're sure about what you're doing
+
+includeScript("_debug");
+includeScript("_runtime_helpers");
+includeScript("language");
+
+var bDetected,
+    sType,
+    sName,
+    sVersion,
+    sOptions,
+    sLang,
+    sLangVersion;
+
+/**
+ * Initializes the detection process with the given parameters.
+ *
+ * @param {string} sType - The type of the item to detect.
+ * @param {string} sName - The name of the item to detect.
+ * @param {string} [sVersion] - The version of the item to detect. Optional.
+ * @param {string} [sOptions] - Additional options for detection. Optional.
+ * @param {string} [sLang] - The programming language of the item to detect. Optional.
+ * @param {string} [sLangVersion] - The version of the programming language. Optional.
+ */
+function meta(
+    sTypeInput,       // (*) type
+    sNameInput,       // (*) name
+    sVersionInput,    //     version
+    sOptionsInput,    //     options
+    sLangInput,       //     language
+    sLangVersionInput //     language version
+) {
+    if (!sTypeInput) _error("No input detection type.");
+
+    sType = sTypeInput;
+    sName = sNameInput ? sNameInput : String();
+
+    sVersion = sVersionInput ? sVersionInput : String();
+    sOptions = sOptionsInput ? sOptionsInput : String();
+    sLang = sLangInput ? sLangInput : String();
+    sLangVersion = sLangVersionInput ? sLangVersionInput : String();
+
+    bDetected = false;
+}
+
+function init() { meta.apply(null, arguments); }
+
+
+/**
+ * Processes the detection result and resets the detection variables.
+ *
+ * If a detection has been made (bDetected is true), this function sets the result
+ * using the _setResult function with the provided type, name, version, and options.
+ * After setting the result, it resets the detection flag (bDetected) to false.
+ *
+ * Regardless of whether a detection was made, it resets the sName, sVersion, and sOptions
+ * variables to empty strings.
+ */
+function result() {
+    if (bDetected) {
+        sVersion = sVersion ? sVersion : String();
+        sOptions = sOptions ? sOptions : String();
+
+        if (sName) {
+            _setResult(sType, sName, sVersion, sOptions);
+
+            if (sLang) {
+                if (sLangVersion) {
+                    _setLang(sLang, sLangVersion);
+                } else {
+                    _setLang(sLang);
+                }
+            }
+        } else {
+            _error("No input detection name.");
+        }
+    }
+
+    sName = sVersion = sOptions = sLang = sLangVersion = '';
+
+    var resultValue = bDetected;
+
+    bDetected = false;
+
+    return resultValue;
+}

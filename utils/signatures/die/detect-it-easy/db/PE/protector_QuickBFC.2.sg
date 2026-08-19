@@ -1,0 +1,21 @@
+// Detect It Easy: detection rule file
+
+// Author: DosX
+// E-Mail: collab@kay-software.ru
+// GitHub: https://github.com/DosX-dev
+// Telegram: @DosX_dev
+
+// https://www.abyssmedia.com/quickbfc/
+meta("protector", "Quick Batch File Compiler");
+
+function detect() {
+    var textSection = PE.section[".text"];
+
+    if (PE.isSectionNamePresent(".didata") && textSection && PE.isResourceNamePresent("SRC") && PE.isSignaturePresent(textSection.FileOffset, textSection.FileSize, "'batfilerecord'")) {
+        bDetected = true;
+    }
+
+    sLang = "Batch";
+
+    return result();
+}

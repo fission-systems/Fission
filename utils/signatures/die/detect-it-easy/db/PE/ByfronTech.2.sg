@@ -1,0 +1,63 @@
+// Detect It Easy: detection rule file
+// Author: @justmazz_
+
+meta("protector", "Byfron Technologies");
+
+function detect() {
+    // Engine-managed detection flag
+    // Set bDetected = true when detection criteria is met
+
+    var containsRunExport = false,
+        containsTextSection = false,
+        containsByfronCodeSection = false,
+        containsByfronDataSection = false;
+
+    // --- EXPORT DETECTION ---
+    // Byfron often exports a function named 'run'
+    if (PE.isExportFunctionPresent("run")) {
+        containsRunExport = true;
+    }
+
+    // --- SECTION ANALYSIS ---
+    // .text - standard code section
+    // .byfron - custom RX section used by Byfron
+    // .byfron1 - initialized, discardable data used by Byfron
+
+    const FLAGS_RX = 0x60000020, FLAGS_INITIALIZED_DATA_DISCARDABLE = 0x02000040;
+
+    for (var i = PE.nLastSection; i >= 0; i--) {
+        var sectionName = PE.getSectionName(i),
+            sectionCharacteristics = PE.getSectionCharacteristics(i);
+
+        if (sectionName == ".text") {
+            containsTextSection = true;
+            continue;
+        }
+
+        if (sectionName == ".byfron" && sectionCharacteristics == FLAGS_RX) {
+            containsByfronCodeSection = true;
+            continue;
+        }
+
+        if (sectionName == ".byfron1" && sectionCharacteristics == FLAGS_INITIALIZED_DATA_DISCARDABLE) {
+            containsByfronDataSection = true;
+            continue;
+        }
+    }
+
+    // --- VALIDATION LOGIC ---
+    // Conditions typically associated with Byfron:
+    // 1. Exported function named 'run'
+    // 2. No standard .text section
+    // 3. Presence of either .byfron or .byfron1 sections
+
+    if (containsRunExport) {
+        if (!containsTextSection) {
+            if (containsByfronCodeSection || containsByfronDataSection) {
+                bDetected = true;
+            }
+        }
+    }
+
+    return result();
+}

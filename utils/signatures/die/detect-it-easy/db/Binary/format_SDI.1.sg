@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://en.wikipedia.org/wiki/System_Deployment_Image
+meta("format", "System Deployment Image (.SDI)");
+
+function detect() {
+    if (Binary.compare("'$SDI0001'0000000000000000")) {
+        bDetected = true;
+    }
+
+    return result();
+}

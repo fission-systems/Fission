@@ -1,0 +1,17 @@
+// Detect It Easy: DiE-JS framework file
+// Don't change anything unless you're sure about what you're doing
+
+// MFC is tested twice - as a library and as a compiler (to distinguish C from
+// C++).  Detect it once here.
+
+var aMFC;
+
+if (!aMFC && PE) {
+    aMFC = PE.isLibraryPresentExp(/^MFC(\d+?)(u?)(d?)\.dll/i);
+    if (!aMFC) {
+        if (PE.section[".data"] &&
+            PE.isSignatureInSectionPresent(PE.section[".data"].Number, "'CMFCComObject'")) {
+            aMFC = 1;
+        }
+    }
+}

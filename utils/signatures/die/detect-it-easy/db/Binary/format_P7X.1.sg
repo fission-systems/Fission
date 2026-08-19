@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://stackoverflow.com/questions/38634052/what-is-the-structure-of-appxsignature-p7x
+meta("format", "P7X");
+
+function detect() {
+    if (Binary.compare("'PKCX0'82")) {
+        sOptions = "PKCX0";
+        bDetected = true;
+    }
+
+    return result();
+}

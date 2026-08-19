@@ -1,0 +1,19 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+// Used by Lego Racers
+
+// https://fileinfo.com/extension/tun
+meta("audio", "TUN");
+
+function detect() {
+    if (Binary.compare("'ALP'")) {
+        var soundOption = Binary.getString(8, 5).trim();
+
+        if (/^[A-Z]{5}$/.test(soundOption)) {
+            if (X.isVerbose()) sOptions = soundOption;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

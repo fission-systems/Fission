@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+
+meta("protector", "CodeWall");
+
+function detect() {
+    if (PE.isNet()) {
+        if (PE.isNetObjectPresent("CodeWallTrialVersion") || PE.isNetObjectPresent("CodeWallTrialVersion\u0001")) {
+            sVersion = "4.X";
+            sOptions = "demo";
+            bDetected = true;
+        } else if (PE.isSignatureInSectionPresent(0, "9161d281........11..175813..11..11..32..28........11..6f........13..7e........2d..73")) {
+            sVersion = "4.X";
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

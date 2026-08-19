@@ -1,0 +1,22 @@
+// Detect It Easy: detection rule file
+
+meta("library", "Python"); // !!!! 🐓🐓🐓🐓🐓 !!!!
+
+function detect() {
+    var aPython = PE.isLibraryPresentExp(/^python(\d)(\d+)/i);
+    if (aPython) {
+        sVersion = aPython[1] + "." + aPython[2];
+        bDetected = true;
+    }
+
+    var aPython2 = PE.isLibraryPresentExp(/^libpython(\d.\d)/i);
+    if (aPython2) {
+        sVersion = aPython2[1];
+        bDetected = true;
+    }
+
+    sLang = "Python";
+    sLangVersion = sVersion;
+
+    return result();
+}

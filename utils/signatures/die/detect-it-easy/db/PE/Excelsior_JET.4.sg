@@ -1,0 +1,34 @@
+// Detect It Easy: detection rule file
+// Author: sendersu
+// If errors pls contact sendersu on cracklab.team
+
+meta("compiler", "Excelsior JET");
+
+function detect() {
+    var nFound = 0;
+
+    for (var i = 0; i <= PE.nLastSection; i++) {
+        var nOffset = PE.section[i].FileOffset,
+            sSection = PE.section[i].Name;
+
+        if (sSection == ".jidata") {
+            if (PE.isSignaturePresent(nOffset, 16, "'JIMP'")) {
+                ++nFound;
+            }
+        } else if (sSection == ".jedata") {
+            if (PE.isSignaturePresent(nOffset, 16, "'JEXP'")) {
+                ++nFound;
+            }
+        } else if (sSection == ".config") {
+            ++nFound;
+        }
+        if (nFound == 3) {
+            bDetected = true;
+            break;
+        }
+    }
+
+    sLang = "Java";
+
+    return result();
+}

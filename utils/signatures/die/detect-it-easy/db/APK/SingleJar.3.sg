@@ -1,0 +1,10 @@
+// Detect It Easy: detection rule file
+
+meta("tool", "SingleJar");
+
+function detect() {
+
+    bDetected = APK.getManifestRecord("Created-By") == "singlejar";
+
+    return result();
+}

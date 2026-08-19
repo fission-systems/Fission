@@ -1,0 +1,13 @@
+// Detect It Easy: detection rule file
+// Author: KDSS-Research
+
+// https://github.com/frkngksl/Huan
+meta("cryptor", "Huan");
+
+function detect() {
+    if (PE.isSectionNamePresent(".huan")) {
+        bDetected = true;
+    }
+
+    return result();
+}

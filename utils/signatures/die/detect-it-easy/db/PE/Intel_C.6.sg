@@ -1,0 +1,16 @@
+// Detect It Easy: detection rule file
+// Author: hypn0 <hypn0@mail.ru>
+
+meta("compiler", "Intel C/C++ Compiler");
+
+function detect() {
+    if (PE.isNet()) return; // Doesn't support .NET
+
+    if (PE.compareEP("83ec..56ff15........8bf08a063c..75..8a46..463c..74..84c074..8a46..463c..75..803e..75..46eb")) {
+        bDetected = true;
+    }
+
+    sLang = "C/C++";
+
+    return result();
+}

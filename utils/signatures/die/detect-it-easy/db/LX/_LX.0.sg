@@ -1,0 +1,15 @@
+// Detect It Easy: detection rule file
+
+meta("operation system", "OS/2");
+
+function detect() {
+    if (LX.isVerbose()) {
+        sName = LX.getOperationSystemName();
+        sVersion = LX.getOperationSystemVersion();
+        sOptions = LX.getOperationSystemOptions();
+
+        bDetected = true;
+    }
+
+    return result();
+}

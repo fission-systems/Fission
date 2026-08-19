@@ -1,0 +1,18 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// https://en.wikipedia.org/wiki/Island_Xtreme_Stunts
+meta("format", "LIXS");
+
+function detect() {
+    if (Binary.compare("'Island Xtreme Stunts - Silicon Dreams'")) {
+        var copyrightYear = Binary.getString(40, 5).trim();
+
+        if (/^[12]\d{3}$/.test(copyrightYear)) {
+            sVersion = copyrightYear;
+            bDetected = true;
+        }
+    }
+
+    return result();
+}

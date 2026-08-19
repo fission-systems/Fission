@@ -1,0 +1,34 @@
+// Detect It Easy: detection rule file
+
+meta("compiler", "ldc");
+
+function getLDCVersion() {
+    var sResult = "";
+    var nSection = ELF.getSectionNumber(".comment");
+    if (nSection != -1) {
+        var nSectionOffset = ELF.getSectionFileOffset(nSection);
+        var nSectionSize = ELF.getSectionFileSize(nSection);
+        var nOffset = ELF.findString(nSectionOffset, nSectionSize, "ldc version ");
+        if (nOffset != -1) {
+            sResult = ELF.getString(nOffset + 12, 20);
+        }
+    }
+
+    return sResult;
+}
+
+function detect() {
+    if (ELF.isLibraryPresent("libphobos2-ldc-shared.so.98") || ELF.isLibraryPresent("libdruntime-ldc-shared.so.98")) {
+        bDetected = true;
+    }
+
+    var sLDCVersion = getLDCVersion();
+    if (sLDCVersion) {
+        bDetected = true;
+        sVersion = sLDCVersion;
+    }
+
+    sLang = "D";
+
+    return result();
+}

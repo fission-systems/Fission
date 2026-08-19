@@ -1,0 +1,29 @@
+// Detect It Easy: detection rule file
+// Author: LinXP
+// doc-ref: http://site.xara.com/support/docs/webformat/spec/XARFormatDocument.pdf
+meta("image", "Xar Vector graphic file (.XAR)");
+
+function detect() {
+    if (Binary.getSize() >= 0x40) {
+        if (Binary.compare("'XARA'A3A30D0A")) {
+            bDetected = true;
+            var sProducer = Binary.getString(0x1F),
+                sProducerVersion = Binary.getString(0x1F + sProducer.length + 1),
+                sProducerBuild = Binary.getString(0x1F + sProducer.length + 1 + sProducerVersion.length + 1);
+
+            sName = sProducer + " Document (.XAR)";
+            sVersion = sProducerVersion;
+
+            if (Binary.isVerbose()) {
+                sOption("build: " + sProducerBuild);
+
+                switch (Binary.getString(0x10, 3)) {
+                    case 'CXW': sOption("Web file"); break;
+                    case 'CXN': sOption("Paper-publishable file"); break;
+                }
+            }
+        }
+    }
+
+    return result();
+}

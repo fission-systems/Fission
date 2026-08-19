@@ -1,0 +1,14 @@
+// Detect It Easy: detection rule file
+// Author: BJNFNE <bjnfne@web.de>
+
+// http://www.cdinteractive.co.uk/forums/cdinteractive/viewtopic.php?t=2115
+meta("format", "ZZDATA");
+
+function detect() {
+    if (Binary.compare("'DIRINFO'000000000000000000")) {
+        sVersion = "CD-I";
+        bDetected = true;
+    }
+
+    return result();
+}
