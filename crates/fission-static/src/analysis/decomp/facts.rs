@@ -835,15 +835,30 @@ mod tests {
     /// rbp,rsp; mov eax,0x2a; pop rbp; ret`) in
     /// Confirms the bundled third-party-library FID databases
     /// (`get_library_fid_paths` -> DIE `Library` detection wiring) are real,
-    /// parseable `.fidbf` files, not just filenames that happen to exist on
-    /// disk -- `parse_fidbf` must successfully read at least one library's
-    /// function hash table out of it.
+    /// readable databases, not just filenames that happen to resolve -- at
+    /// least one must yield a library row.
+    ///
+    /// Both forms are accepted because both are load-bearing: what ships is the
+    /// packed pair, and `LazyFidDatabase::open` is what the runtime reaches for
+    /// first, so testing only `parse_fidbf` would assert against a file that is
+    /// absent everywhere except a tree with `utils/source/`.
     #[test]
     fn library_fid_databases_are_parseable() {
+        use fission_signatures::fidbf::fpk_store::LazyFidDatabase;
+
         let paths = fission_core::PATHS.get_library_fid_paths(true, "OpenSSL");
         assert!(!paths.is_empty(), "expected a bundled OpenSSL FID database");
         let mut parsed_any = false;
         for path in &paths {
+            if let Some(lazy) = LazyFidDatabase::open(path) {
+                assert!(
+                    lazy.has_any_library(),
+                    "{} opened but has no libraries",
+                    path.display()
+                );
+                parsed_any = true;
+                continue;
+            }
             if let Ok(db) = fission_signatures::fidbf::parse_fidbf(path) {
                 assert!(
                     !db.libraries.is_empty(),
@@ -853,7 +868,7 @@ mod tests {
                 parsed_any = true;
             }
         }
-        assert!(parsed_any, "none of {paths:?} parsed successfully");
+        assert!(parsed_any, "none of {paths:?} opened successfully");
     }
 
     /// `fission-sleigh`'s `fid_full_hash_matches_ghidra_exactly_for_register_only_function`.

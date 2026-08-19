@@ -434,6 +434,15 @@ impl LazyFidDatabase {
         &self.source_path
     }
 
+    /// Whether the database carries any library row at all.
+    ///
+    /// `libraries` is read once on open, so an empty vector means the `.lib`
+    /// table was empty or unreadable -- a database that resolved but carries
+    /// nothing.
+    pub fn has_any_library(&self) -> bool {
+        !self.libraries.is_empty()
+    }
+
     /// Whether any library here matches `language_id`, the check
     /// `discover_for_load_spec` makes before keeping a database.
     pub fn has_language(&self, language_id: &str) -> bool {

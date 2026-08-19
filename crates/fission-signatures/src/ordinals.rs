@@ -286,6 +286,13 @@ mod packed_tests {
                 }
             }
         }
+        if tables.is_empty() {
+            // `utils/source/` is gitignored, so a normal checkout (and CI) has
+            // the `.fpk` but not the JSON it was packed from. There is nothing
+            // to compare against; the guard above already skipped every file.
+            eprintln!("skipping: packer inputs not found at {}", source.display());
+            return;
+        }
         json.tables = std::sync::Arc::new(tables);
 
         let mut checked = 0usize;

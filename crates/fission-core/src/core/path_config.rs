@@ -302,6 +302,25 @@ impl PathConfig {
         }
     }
 
+    /// Whether `dir` holds `filename`, counting the packed form as present.
+    ///
+    /// `.fidbf` moved to `utils/source/fid` and is not shipped; what ships is
+    /// the packed pair `<stem>.fn.fpk` / `<stem>.lib.fpk` that
+    /// `LazyFidDatabase::open` derives from the `.fidbf` path it is handed. So
+    /// resolution has to answer "is this database available" rather than "is
+    /// this file here" -- checking only the `.fidbf` turns FID matching off
+    /// entirely in every tree without the packer inputs, which is CI, the
+    /// container image, and any clone.
+    fn fid_database_present(dir: &Path, filename: &str) -> bool {
+        if dir.join(filename).exists() {
+            return true;
+        }
+        Path::new(filename)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| dir.join(format!("{stem}.fn.fpk")).exists())
+    }
+
     /// A path under `subdir` naming `filename` whose `.fpk` sibling exists.
     fn signature_table_path(&self, filename: &str, subdir: &str) -> Option<PathBuf> {
         let packed = Path::new(filename).with_extension("fpk");
@@ -614,6 +633,17 @@ impl PathConfig {
         crate::core::utils::find_file_in_dirs(dirs, filename)
     }
 
+    /// `find_file_in_dirs` for FID databases, counting the packed form present.
+    fn find_fid_in_dirs(dirs: &[&str], filename: &str) -> Option<PathBuf> {
+        if let Some(path) = crate::core::utils::find_file_in_dirs(dirs, filename) {
+            return Some(path);
+        }
+        let stem = Path::new(filename).file_stem()?.to_str()?;
+        let packed = format!("{stem}.fn.fpk");
+        let found = crate::core::utils::find_file_in_dirs(dirs, &packed)?;
+        Some(found.with_file_name(filename))
+    }
+
     // ========================================================================
     // FID Database Resolution
     // ========================================================================
@@ -624,14 +654,13 @@ impl PathConfig {
 
         // Try FID directory first
         if let Some(ref fid_dir) = self.fid_dir {
-            let path = fid_dir.join(&filename);
-            if path.exists() {
-                return Some(path);
+            if Self::fid_database_present(fid_dir, &filename) {
+                return Some(fid_dir.join(&filename));
             }
         }
 
         // Fallback to search paths
-        Self::find_file_in_dirs(FID_SEARCH_DIRS, &filename)
+        Self::find_fid_in_dirs(FID_SEARCH_DIRS, &filename)
     }
 
     /// Get all available FID database paths for an architecture
@@ -773,9 +802,8 @@ impl PathConfig {
     /// falls back to `fidb_java_dir` with the `.fidb` extension (same basename).
     pub fn find_fid_file(&self, filename: &str) -> Option<PathBuf> {
         if let Some(ref fid_dir) = self.fid_dir {
-            let path = fid_dir.join(filename);
-            if path.exists() {
-                return Some(path);
+            if Self::fid_database_present(fid_dir, filename) {
+                return Some(fid_dir.join(filename));
             }
         }
         if let Some(ref java_dir) = self.fidb_java_dir {
@@ -786,7 +814,7 @@ impl PathConfig {
                 return Some(path);
             }
         }
-        if let Some(p) = Self::find_file_in_dirs(FID_SEARCH_DIRS, filename) {
+        if let Some(p) = Self::find_fid_in_dirs(FID_SEARCH_DIRS, filename) {
             return Some(p);
         }
         let fidb_name = filename.strip_suffix(".fidbf").unwrap_or(filename);
