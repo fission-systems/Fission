@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use fission_sleigh::compiler::sla::{load_compiled_sla, sla_format, PackedElement, PackedParser};
+use fission_sleigh::compiler::sla::{PackedElement, PackedParser, load_compiled_sla, sla_format};
 
 fn main() {
     let root_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -25,7 +25,9 @@ fn main() {
     let mut shown = 0usize;
 
     for path in &files {
-        let Ok(artifact) = load_compiled_sla(path) else { continue };
+        let Ok(artifact) = load_compiled_sla(path) else {
+            continue;
+        };
         let Ok(root) = PackedParser::new(&artifact.payload).parse_root() else {
             continue;
         };
@@ -55,20 +57,28 @@ fn main() {
         if shown < 6 && !names.is_empty() {
             shown += 1;
             let f = path.file_name().unwrap().to_string_lossy();
-            println!("  {f:<28} {} context syms: {:?}", syms.len(),
-                     &names[..names.len().min(8)]);
+            println!(
+                "  {f:<28} {} context syms: {:?}",
+                syms.len(),
+                &names[..names.len().min(8)]
+            );
         }
     }
 
     println!();
-    println!("files with context symbols : {files_with_ctx} of {}", files.len());
+    println!(
+        "files with context symbols : {files_with_ctx} of {}",
+        files.len()
+    );
     println!("context syms WITH a name   : {with_names}");
     println!("context syms WITHOUT a name: {without}");
 }
 
 fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else { return out };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {

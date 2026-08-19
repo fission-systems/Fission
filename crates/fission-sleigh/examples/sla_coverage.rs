@@ -86,16 +86,25 @@ fn main() {
     println!("constructors        : {ctors_total}");
     println!(
         "  decode Unsupported: {ctors_unsupported} ({:.2}%)",
-        if ctors_total == 0 { 0.0 } else { ctors_unsupported as f64 / ctors_total as f64 * 100.0 }
+        if ctors_total == 0 {
+            0.0
+        } else {
+            ctors_unsupported as f64 / ctors_total as f64 * 100.0
+        }
     );
-    println!("subtables with constructors but no decision tree: {}", no_decision_tree.len());
+    println!(
+        "subtables with constructors but no decision tree: {}",
+        no_decision_tree.len()
+    );
     for n in no_decision_tree.iter().take(10) {
         println!("      {n}");
     }
 
     println!("named context fields reachable from SlaLanguage: {ctx_named}");
-    println!("  files with none: {} (a language with no `define context` has none to carry)",
-             files_without_ctx.len());
+    println!(
+        "  files with none: {} (a language with no `define context` has none to carry)",
+        files_without_ctx.len()
+    );
 
     println!("\nlow-bit-code context fields the runtime looks up by name, found in .sla:");
     println!("  files carrying at least one: {}", low_bit_hits.len());

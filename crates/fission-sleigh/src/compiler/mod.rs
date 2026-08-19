@@ -3,6 +3,7 @@ mod codegen;
 pub mod discovery;
 mod equivalence;
 mod ir;
+pub use ir::default_context_from_sla_and_pspec;
 mod policy;
 mod preprocessor;
 pub mod sla;
@@ -582,7 +583,14 @@ pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFron
     Ok(compiled)
 }
 
-fn processor_spec_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
+/// The `.pspec` an entry spec uses, resolved through the `.ldefs` metadata.
+///
+/// Public because the `.sla`-only default-context path needs the same
+/// resolution: an entry id like `ARM8m_le` has no `ARM8m_le.pspec` beside it --
+/// its processor spec is `ARMCortex.pspec` -- so the naive
+/// `entry_spec.with_extension("pspec")` fallback silently finds nothing and
+/// yields an all-zero default context.
+pub fn processor_spec_for_entry_spec(entry_spec: &Path) -> Result<Option<PathBuf>> {
     let arch = infer_arch_from_entry_spec(entry_spec)?;
     let entry_id = entry_id_from_path(entry_spec)?;
     let arch_root = spec_root_for_arch(&arch);

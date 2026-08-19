@@ -45,6 +45,22 @@ pub struct SlaLanguage {
 pub struct SlaContextField {
     pub name: String,
     pub symbol_id: u32,
+    /// Low bit of the field within the context word, from `ELEM_CONTEXTFIELD`
+    /// on the symbol body. `None` when the body carries no context field --
+    /// a context symbol can name a derived expression rather than a raw range.
+    pub bit_start: Option<u32>,
+    /// High bit, inclusive.
+    pub bit_end: Option<u32>,
+}
+
+impl SlaContextField {
+    /// `(bit_offset, bit_width)` in the form the `.pspec` default-context
+    /// resolver wants, or `None` when this symbol has no raw bit range.
+    #[must_use]
+    pub fn bit_range(&self) -> Option<(u32, u32)> {
+        let (start, end) = (self.bit_start?, self.bit_end?);
+        Some((start, end.saturating_sub(start) + 1))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1070,3 +1070,66 @@ fn sla_context_field_names_are_never_empty() {
         "expected the full corpus, got {with_fields}"
     );
 }
+
+/// The bit ranges decoded from the `.sla` must equal the ones the `.slaspec`
+/// compiler derives, for every context field that has a consumer.
+///
+/// `infer_default_context_from_pspec` maps `<set name=... val=...>` onto bits
+/// using exactly this table, so a disagreement here is a wrong initial context
+/// -- which on ARM decides Thumb vs ARM decoding and would be silent.
+#[test]
+fn sla_context_bit_ranges_match_the_compiled_frontend() {
+    use crate::compiler::{compile_frontend_for_entry_spec, packaged_sla_for_entry_spec};
+
+    let Ok(specs) = crate::compiler::discover_all_entry_specs() else {
+        eprintln!("skipping: no entry specs");
+        return;
+    };
+
+    let mut compared = 0usize;
+    let mut fields_checked = 0usize;
+    for entry_id in ["x86-64", "ARM8_le", "ARM7_le", "8051"] {
+        let Some(entry) = specs.iter().find(|e| e.entry_id == entry_id) else {
+            continue;
+        };
+        let Ok(Some(sla_path)) = packaged_sla_for_entry_spec(&entry.path) else {
+            continue;
+        };
+        let Ok(library) = super::load_construct_templates_from_sla(&sla_path) else {
+            continue;
+        };
+        let Ok(compiled) = compile_frontend_for_entry_spec(&entry.path) else {
+            continue;
+        };
+
+        let spec_ranges: std::collections::BTreeMap<&str, (u32, u32)> = compiled
+            .language_layout
+            .context_fields
+            .iter()
+            .map(|f| (f.name.as_str(), (f.bit_offset, f.bit_width)))
+            .collect();
+
+        for field in &library.native.context_fields {
+            let Some(sla_range) = field.bit_range() else {
+                continue;
+            };
+            let Some(spec_range) = spec_ranges.get(field.name.as_str()) else {
+                // Present in the .sla but not the spec list: nothing consumes
+                // it, so there is nothing to disagree about.
+                continue;
+            };
+            assert_eq!(
+                sla_range, *spec_range,
+                "{entry_id}: context field {} bit range differs (.sla vs compiled spec)",
+                field.name
+            );
+            fields_checked += 1;
+        }
+        compared += 1;
+    }
+    assert!(compared > 0, "expected at least one language to compare");
+    assert!(
+        fields_checked > 20,
+        "expected many fields compared, got {fields_checked}"
+    );
+}

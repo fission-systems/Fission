@@ -186,6 +186,39 @@ fn extract_xml_attribute(line: &str, attr: &str) -> Option<String> {
     None
 }
 
+/// Default context from a `.pspec`, resolved against the `.sla`'s own context
+/// fields instead of the `.slaspec`'s.
+///
+/// `infer_default_context_from_pspec` needs `name -> (bit_offset, bit_width)`,
+/// which until now only the SLEIGH source could supply -- the single reason the
+/// runtime still parsed 11 MB of `.slaspec`/`.sinc`. The `.sla` carries the
+/// same table (names on the symbol-table header pass, ranges on
+/// `ELEM_CONTEXTFIELD`), verified equal field-for-field by
+/// `sla_context_bit_ranges_match_the_compiled_frontend`.
+pub fn default_context_from_sla_and_pspec(
+    entry_spec: &Path,
+    processor_spec: Option<&Path>,
+    library: &CompiledSlaTemplateLibrary,
+) -> Result<PackedContextOverride> {
+    let field_info: BTreeMap<String, FieldBitRange> = library
+        .native
+        .context_fields
+        .iter()
+        .filter_map(|field| {
+            let (bit_offset, bit_width) = field.bit_range()?;
+            Some((
+                field.name.clone(),
+                FieldBitRange {
+                    bit_offset,
+                    bit_width,
+                    kind: FieldKind::Context,
+                },
+            ))
+        })
+        .collect();
+    infer_default_context_from_pspec(entry_spec, processor_spec, &field_info)
+}
+
 pub fn build_frontend_from_sla_native_model(
     compiled: &mut CompiledFrontend,
     library: &CompiledSlaTemplateLibrary,

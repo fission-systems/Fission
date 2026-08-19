@@ -599,6 +599,33 @@ pub(super) fn decode_construct_templates(
 fn decode_context_field_names(
     root: &PackedElement,
 ) -> Result<Vec<crate::compiler::sla::SlaContextField>> {
+    // Bit ranges live on `ELEM_CONTEXTFIELD` under the symbol *body*, keyed by
+    // the same id as the header entry that carries the name. Index the bodies
+    // first, then walk the heads.
+    let mut ranges: BTreeMap<u32, (u32, u32)> = BTreeMap::new();
+    for body in root.descendants_with_id(sla_format::ELEM_CONTEXT_SYM) {
+        let Ok(id) = required_unsigned_u32(body, sla_format::ATTR_ID, "context_sym id") else {
+            continue;
+        };
+        let Some(field) = body
+            .children
+            .iter()
+            .find(|child| child.id == sla_format::ELEM_CONTEXTFIELD)
+        else {
+            continue;
+        };
+        let (Some(start), Some(end)) = (
+            field.attr_unsigned(sla_format::ATTR_STARTBIT),
+            field.attr_unsigned(sla_format::ATTR_ENDBIT),
+        ) else {
+            continue;
+        };
+        let (Ok(start), Ok(end)) = (u32::try_from(start), u32::try_from(end)) else {
+            continue;
+        };
+        ranges.insert(id, (start, end));
+    }
+
     root.descendants_with_id(sla_format::ELEM_CONTEXT_SYM_HEAD)
         .into_iter()
         .filter(|head| head.attr_string(sla_format::ATTR_NAME).is_some())
@@ -613,7 +640,16 @@ fn decode_context_field_names(
                 .attr_string(sla_format::ATTR_NAME)
                 .expect("filtered above")
                 .to_string();
-            Ok(crate::compiler::sla::SlaContextField { name, symbol_id })
+            let (bit_start, bit_end) = match ranges.get(&symbol_id) {
+                Some((s, e)) => (Some(*s), Some(*e)),
+                None => (None, None),
+            };
+            Ok(crate::compiler::sla::SlaContextField {
+                name,
+                symbol_id,
+                bit_start,
+                bit_end,
+            })
         })
         .collect()
 }
