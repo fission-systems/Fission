@@ -302,8 +302,6 @@ impl PathConfig {
         }
     }
 
-    /// `win_api_signatures.txt` (pipe-separated API signatures), if present.
-
     /// A path under `subdir` naming `filename` whose `.fpk` sibling exists.
     fn signature_table_path(&self, filename: &str, subdir: &str) -> Option<PathBuf> {
         let packed = Path::new(filename).with_extension("fpk");
