@@ -242,7 +242,100 @@ fn merge_json_struct_defs(
 /// functions.
 #[derive(Clone)]
 pub struct WindowsStructures {
+    /// Entries merged eagerly. Empty when the packed tables are present --
+    /// they are the whole corpus, and materialising 22,674 structs to answer a
+    /// handful of lookups is what packing was meant to stop.
     pub structures: std::sync::Arc<HashMap<String, StructDef>>,
+    packed: Option<std::sync::Arc<PackedStructures>>,
+}
+
+/// The merged corpus as two `.fpk` tables.
+///
+/// `structures.fpk` is keyed by struct name, for `get`. `structures.bysize.fpk`
+/// is keyed by `"<width>:<zero-padded size>"` and holds the names at that size,
+/// for `infer_struct_name_from_offsets` -- which used to filter all 22,674
+/// entries on an exact size match, so the index turns a full scan into one
+/// block read.
+pub struct PackedStructures {
+    by_name: crate::fpk::FpkReader,
+    by_size: crate::fpk::FpkReader,
+    /// Resolved entries, leaked so `get` can hand out `&StructDef` like the
+    /// eager map did. Bounded by how many distinct structs a run looks up, and
+    /// the cache is process-lifetime anyway.
+    resolved: std::sync::Mutex<HashMap<String, &'static StructDef>>,
+}
+
+impl PackedStructures {
+    fn open(dir: &std::path::Path) -> Option<Self> {
+        let by_name = crate::fpk::FpkReader::open(&dir.join("structures.fpk")).ok()?;
+        let by_size = crate::fpk::FpkReader::open(&dir.join("structures.bysize.fpk")).ok()?;
+        Some(Self {
+            by_name,
+            by_size,
+            resolved: std::sync::Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn get(&self, name: &str) -> Option<&'static StructDef> {
+        if let Ok(cache) = self.resolved.lock()
+            && let Some(hit) = cache.get(name)
+        {
+            return Some(*hit);
+        }
+        let block = self.by_name.block_for(name).ok()??;
+        let mut found = None;
+        for line in block.lines() {
+            let Ok(item) = serde_json::from_str::<JsonStructDef>(line) else {
+                continue;
+            };
+            if item.name == name {
+                found = Some(struct_def_from_json(item));
+                break;
+            }
+        }
+        let leaked: &'static StructDef = Box::leak(Box::new(found?));
+        if let Ok(mut cache) = self.resolved.lock() {
+            cache.insert(name.to_string(), leaked);
+        }
+        Some(leaked)
+    }
+
+    /// Names of every struct whose width-appropriate size is exactly `size`.
+    fn names_with_size(&self, is_64bit: bool, size: u32) -> Vec<String> {
+        let key = format!("{}:{size:010}", if is_64bit { 64 } else { 32 });
+        let Ok(Some(block)) = self.by_size.block_for(&key) else {
+            return Vec::new();
+        };
+        for line in block.lines() {
+            let Some((k, names)) = line.split_once('|') else {
+                continue;
+            };
+            if k == key {
+                return names.split(',').map(str::to_owned).collect();
+            }
+        }
+        Vec::new()
+    }
+}
+
+fn struct_def_from_json(item: JsonStructDef) -> StructDef {
+    StructDef {
+        name: item.name,
+        size_32: item.size_32,
+        size_64: item.size_64,
+        fields: item
+            .fields
+            .into_iter()
+            .map(|f| FieldDef {
+                name: f.name,
+                type_name: f.type_name,
+                offset_32: f.offset_32,
+                offset_64: f.offset_64,
+                size_32: f.size_32,
+                size_64: f.size_64,
+            })
+            .collect(),
+    }
 }
 
 static STRUCTURES_CACHE: std::sync::OnceLock<Result<WindowsStructures, WinTypesError>> =
@@ -261,6 +354,20 @@ impl WindowsStructures {
     }
 
     fn load() -> Result<Self, WinTypesError> {
+        // The packed corpus is the merge of all six JSON sources, done once by
+        // scripts/pack_structures.py. When it is there the sources are not
+        // (they live in the unshipped `utils/source/`), so this is the normal
+        // path and the JSON merge below is the fallback for a source tree.
+        if let Some(packed) = resources()
+            .win32_typeinfo_json_path("structures.fpk")
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+            .and_then(|dir| PackedStructures::open(&dir))
+        {
+            return Ok(Self {
+                structures: std::sync::Arc::new(HashMap::new()),
+                packed: Some(std::sync::Arc::new(packed)),
+            });
+        }
         let json_str = try_read_typeinfo_json("structures.json")?;
         let items: Vec<JsonStructDef> = serde_json::from_str(&json_str).map_err(|e| {
             let path = try_win32_typeinfo_json_path("structures.json")
@@ -340,17 +447,39 @@ impl WindowsStructures {
 
         Ok(Self {
             structures: std::sync::Arc::new(structures),
+            packed: None,
         })
     }
 
     /// Get structure by name
     pub fn get(&self, name: &str) -> Option<&StructDef> {
+        if let Some(packed) = &self.packed {
+            return packed.get(name).map(|def| def as &StructDef);
+        }
         self.structures.get(name)
     }
 
-    /// Get all structure names
-    pub fn names(&self) -> Vec<&String> {
-        self.structures.keys().collect()
+    /// Every struct whose width-appropriate size is exactly `size`.
+    ///
+    /// The reverse lookup `infer_struct_name_from_offsets` needs. Callers used
+    /// to iterate `structures` and discard everything of the wrong size; with
+    /// the packed corpus that would mean decoding all 22,674 entries per call,
+    /// so the size index answers it directly.
+    pub fn with_size(&self, is_64bit: bool, size: u32) -> Vec<&StructDef> {
+        if let Some(packed) = &self.packed {
+            return packed
+                .names_with_size(is_64bit, size)
+                .into_iter()
+                .filter_map(|name| packed.get(&name).map(|def| def as &StructDef))
+                .collect();
+        }
+        self.structures
+            .values()
+            .filter(|def| {
+                let s = if is_64bit { def.size_64 } else { def.size_32 };
+                s as u32 == size && s != 0
+            })
+            .collect()
     }
 }
 
@@ -416,5 +545,118 @@ mod tests {
             !base.is_empty(),
             "expected base_types from base_types.json (Win32 typeinfo corpus)"
         );
+    }
+}
+
+#[cfg(test)]
+mod packed_structures_tests {
+    use super::*;
+
+    /// Every struct the packed corpus holds must be byte-identical to what the
+    /// JSON merge produces, and the two must agree on which names exist at all.
+    ///
+    /// Skips when either side is absent: `utils/source/` (the JSON) is
+    /// gitignored, and a tree without the `.fpk` has nothing to compare.
+    #[test]
+    fn packed_and_json_agree_on_every_struct() {
+        let Some(dir) = resources()
+            .win32_typeinfo_json_path("structures.fpk")
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        else {
+            eprintln!("skipping: no win32 typeinfo dir");
+            return;
+        };
+        let Some(packed) = PackedStructures::open(&dir) else {
+            eprintln!("skipping: no packed corpus at {}", dir.display());
+            return;
+        };
+
+        // Read every record straight out of the name table.
+        let all = packed.by_name.read_all().expect("read packed");
+        assert!(
+            all.len() > 20_000,
+            "expected the full corpus, got {}",
+            all.len()
+        );
+
+        let mut checked = 0usize;
+        for line in &all {
+            let item: JsonStructDef = serde_json::from_str(line).expect("decode record");
+            let name = item.name.clone();
+            let expected = struct_def_from_json(item);
+            let got = packed
+                .get(&name)
+                .unwrap_or_else(|| panic!("{name} not found by get"));
+            assert_eq!(got.name, expected.name);
+            assert_eq!(got.size_32, expected.size_32, "{name} size_32");
+            assert_eq!(got.size_64, expected.size_64, "{name} size_64");
+            assert_eq!(
+                got.fields.len(),
+                expected.fields.len(),
+                "{name} field count"
+            );
+            for (a, b) in got.fields.iter().zip(expected.fields.iter()) {
+                assert_eq!(a.name, b.name, "{name} field name");
+                assert_eq!(a.type_name, b.type_name, "{name} field type");
+                assert_eq!(a.offset_32, b.offset_32, "{name} field offset_32");
+                assert_eq!(a.offset_64, b.offset_64, "{name} field offset_64");
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, all.len());
+    }
+
+    /// The size index must return exactly the set a full scan would, for every
+    /// size present -- this is the lookup `infer_struct_name_from_offsets`
+    /// depends on, and a missing name there is a silently worse inference.
+    #[test]
+    fn size_index_matches_a_full_scan() {
+        let Some(dir) = resources()
+            .win32_typeinfo_json_path("structures.fpk")
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        else {
+            return;
+        };
+        let Some(packed) = PackedStructures::open(&dir) else {
+            return;
+        };
+        let all = packed.by_name.read_all().expect("read packed");
+
+        let mut expected_32: HashMap<u32, Vec<String>> = HashMap::new();
+        let mut expected_64: HashMap<u32, Vec<String>> = HashMap::new();
+        for line in &all {
+            let item: JsonStructDef = serde_json::from_str(line).expect("decode");
+            if item.size_32 > 0 {
+                expected_32
+                    .entry(item.size_32 as u32)
+                    .or_default()
+                    .push(item.name.clone());
+            }
+            if item.size_64 > 0 {
+                expected_64
+                    .entry(item.size_64 as u32)
+                    .or_default()
+                    .push(item.name.clone());
+            }
+        }
+
+        let mut sizes_checked = 0usize;
+        for (is_64bit, expected) in [(false, &expected_32), (true, &expected_64)] {
+            for (size, names) in expected {
+                let mut want = names.clone();
+                want.sort();
+                let mut got = packed.names_with_size(is_64bit, *size);
+                got.sort();
+                assert_eq!(got, want, "size {size} (64bit={is_64bit})");
+                sizes_checked += 1;
+            }
+        }
+        assert!(
+            sizes_checked > 100,
+            "expected many sizes, got {sizes_checked}"
+        );
+
+        // A size nothing has must come back empty rather than wrong.
+        assert!(packed.names_with_size(true, 0xffff_fffe).is_empty());
     }
 }

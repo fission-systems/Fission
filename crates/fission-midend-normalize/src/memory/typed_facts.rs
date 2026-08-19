@@ -147,18 +147,15 @@ fn infer_struct_name_from_offsets(
     // Collect candidates where every accessed offset maps to a declared field.
     // Score each by how many struct fields are NOT covered by the accesses (extra_fields).
     // The struct with the fewest extra fields is the most specific match.
+    // `with_size` is the size-indexed form of the filter this used to open
+    // with: iterate everything, discard every struct whose width-appropriate
+    // size is not exactly `inferred_size`. With the packed corpus that filter
+    // would have to decode all 22,674 entries per call.
     let mut candidates: Vec<(String, usize)> = structures
-        .structures
-        .iter()
-        .filter_map(|(name, def)| {
-            let struct_size = if is_64bit {
-                def.size_64 as u32
-            } else {
-                def.size_32 as u32
-            };
-            if struct_size == 0 || struct_size != inferred_size {
-                return None;
-            }
+        .with_size(is_64bit, inferred_size)
+        .into_iter()
+        .filter_map(|def| {
+            let name = &def.name;
             let all_match = accessed_offsets.iter().all(|offset| {
                 def.fields.iter().any(|field| {
                     let fo = if is_64bit {
