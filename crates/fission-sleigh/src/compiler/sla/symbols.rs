@@ -67,6 +67,8 @@ pub struct CompiledSlaTemplateLibrary {
     /// Populated from ELEM_VARNODE_SYM in the .sla file, which is the Ghidra-canonical
     /// source for the name→offset mapping consumed by .cspec prototype resolution.
     pub register_map: BTreeMap<String, CompiledResolvedVarnode>,
+    /// Named context fields, decoded from the symbol-table header pass.
+    pub context_fields: Vec<super::SlaContextField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

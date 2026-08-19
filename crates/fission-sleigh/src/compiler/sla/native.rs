@@ -24,7 +24,27 @@ pub struct SlaLanguage {
     pub register_space_index: u64,
     /// Base offset for unique temporary varnode allocation (`uniqbase` from `.sla`).
     pub uniqbase: u64,
+    /// Context fields with their names, in `.sla` symbol order.
+    ///
+    /// The bit ranges live on `ELEM_CONTEXTFIELD`, which the pattern decoder
+    /// already reads, but the *names* are on `ELEM_CONTEXT_SYM_HEAD` -- Ghidra
+    /// writes its symbol table in two passes, id+name first and bodies after,
+    /// and nothing here read the head pass. That name was the last thing the
+    /// runtime could only get by compiling the `.slaspec`: `address_state`
+    /// looks a field up by name for the ARM/Thumb low-bit mode fallback, and
+    /// the `.pspec` default context is written in named fields.
+    ///
+    /// Measured across the 133 checked-in `.sla`: 1,021 context symbols, every
+    /// one of them named.
+    pub context_fields: Vec<SlaContextField>,
     pub subtables: BTreeMap<String, SlaSubtable>,
+}
+
+/// A named context field decoded from the `.sla` symbol table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlaContextField {
+    pub name: String,
+    pub symbol_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +147,7 @@ impl SlaLanguage {
             unique_space_index: library.unique_space_index,
             register_space_index: library.register_space_index,
             uniqbase: library.uniqbase,
+            context_fields: library.context_fields.clone(),
             subtables,
         }
     }

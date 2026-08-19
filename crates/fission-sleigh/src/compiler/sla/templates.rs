@@ -573,6 +573,7 @@ pub(super) fn decode_construct_templates(
         constructors_by_source,
         subtables,
         register_map,
+        context_fields: decode_context_field_names(&root)?,
         native: SlaLanguage {
             path: artifact.path.clone(),
             version: artifact.version,
@@ -581,11 +582,40 @@ pub(super) fn decode_construct_templates(
             unique_space_index: u64::MAX,
             register_space_index: u64::MAX,
             uniqbase: 0,
+            context_fields: Vec::new(),
             subtables: BTreeMap::new(),
         },
     };
     library.native = SlaLanguage::from_compiled_library(&library);
     Ok(library)
+}
+
+/// Named context fields from the `.sla` symbol table.
+///
+/// `ELEM_CONTEXT_SYM` carries the pattern expression but no name; the name is
+/// on the matching `ELEM_CONTEXT_SYM_HEAD` from Ghidra's header pass. Reading
+/// the head list is what lets the runtime stop compiling `.slaspec` just to
+/// learn what a context field is called.
+fn decode_context_field_names(
+    root: &PackedElement,
+) -> Result<Vec<crate::compiler::sla::SlaContextField>> {
+    root.descendants_with_id(sla_format::ELEM_CONTEXT_SYM_HEAD)
+        .into_iter()
+        .filter(|head| head.attr_string(sla_format::ATTR_NAME).is_some())
+        .map(|head| {
+            // `required_unsigned_u32` rather than `as u32`: a symbol id that
+            // does not fit is corruption, and silently wrapping it would
+            // mis-key the field. `sla_template_decode_does_not_wrap_narrow_integer_fields`
+            // enforces that across this module.
+            let symbol_id =
+                required_unsigned_u32(head, sla_format::ATTR_ID, "context_sym_head id")?;
+            let name = head
+                .attr_string(sla_format::ATTR_NAME)
+                .expect("filtered above")
+                .to_string();
+            Ok(crate::compiler::sla::SlaContextField { name, symbol_id })
+        })
+        .collect()
 }
 
 fn decode_subtable_identity(

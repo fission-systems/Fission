@@ -976,3 +976,97 @@ fn x86_64_sla_userops_include_syscall() {
         assert_eq!(name, "syscall", "unexpected userop 5: {name}");
     }
 }
+
+/// The `.sla` must carry every context field the runtime looks up by name.
+///
+/// This is the fact the "load from .sla instead of compiling" question turns
+/// on. It is deliberately *not* a set-equality check against the compiled
+/// frontend: that list is wider because `parse_define_bit_ranges` also picks up
+/// the varlist symbols `attach variables` derives from a context field
+/// (`vexVVVV_XmmReg`, `evexV5_ZmmReg`, ... on x86-64 -- 10 of its 53 entries).
+/// Those are not context fields, no `.pspec` names one, and the `.sla` is right
+/// to list only the 43 real ones. What has to hold is that the names with a
+/// consumer are all present.
+#[test]
+fn sla_carries_the_context_fields_the_runtime_resolves_by_name() {
+    use crate::compiler::packaged_sla_for_entry_spec;
+
+    // `address_state::LOW_BIT_CODE_CONTEXT_FIELDS`, the only names the runtime
+    // resolves textually.
+    const WANTED: [&str; 4] = ["TMode", "T", "ISA_MODE", "LowBitCodeMode"];
+
+    let Ok(specs) = crate::compiler::discover_all_entry_specs() else {
+        eprintln!("skipping: no entry specs");
+        return;
+    };
+
+    let mut checked = 0usize;
+    for entry in specs.iter().filter(|e| e.entry_id.starts_with("ARM")) {
+        let Ok(Some(sla_path)) = packaged_sla_for_entry_spec(&entry.path) else {
+            continue;
+        };
+        let Ok(library) = super::load_construct_templates_from_sla(&sla_path) else {
+            continue;
+        };
+        let names: std::collections::BTreeSet<&str> = library
+            .native
+            .context_fields
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect();
+        // A base ARMv4 has no Thumb and so no TMode; the assertion is that a
+        // language carrying any of these carries all of them, not that every
+        // ARM variant has them.
+        let present: Vec<&str> = WANTED
+            .iter()
+            .copied()
+            .filter(|w| names.contains(w))
+            .collect();
+        if present.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            present.len(),
+            WANTED.len(),
+            "{}: .sla has only {present:?} of {WANTED:?}",
+            entry.entry_id
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 8,
+        "expected several Thumb-capable ARM languages, checked {checked}"
+    );
+}
+
+/// Names come from the symbol-table *header* pass, which nothing read before.
+#[test]
+fn sla_context_field_names_are_never_empty() {
+    use crate::compiler::packaged_sla_for_entry_spec;
+
+    let Ok(specs) = crate::compiler::discover_all_entry_specs() else {
+        return;
+    };
+    let mut with_fields = 0usize;
+    for entry in specs.iter() {
+        let Ok(Some(sla_path)) = packaged_sla_for_entry_spec(&entry.path) else {
+            continue;
+        };
+        let Ok(library) = super::load_construct_templates_from_sla(&sla_path) else {
+            continue;
+        };
+        for field in &library.native.context_fields {
+            assert!(
+                !field.name.is_empty(),
+                "{}: context symbol {} decoded with an empty name",
+                entry.entry_id,
+                field.symbol_id
+            );
+            with_fields += 1;
+        }
+    }
+    assert!(
+        with_fields > 500,
+        "expected the full corpus, got {with_fields}"
+    );
+}
