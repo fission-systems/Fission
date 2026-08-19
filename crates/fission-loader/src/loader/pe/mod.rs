@@ -267,7 +267,24 @@ impl PeLoader {
                 }
 
                 // Merge COFF symbols with existing functions, preferring COFF names over generated ones
-                for coff_func in coff_functions {
+                // 32-bit x86 decorates C symbols by calling convention; the
+                // source-level name (and DWARF's) has no decoration. Undecorate
+                // only where it does not collide: if both `_foo` and `foo` are
+                // in the table they are different symbols, and renaming one
+                // onto the other would silently merge them.
+                let decorated_taken: std::collections::HashSet<String> = if is_64bit {
+                    std::collections::HashSet::new()
+                } else {
+                    coff_functions.iter().map(|f| f.name.clone()).collect()
+                };
+                for mut coff_func in coff_functions {
+                    if !is_64bit {
+                        let undecorated = crate::loader::demangle::undecorate_i386(&coff_func.name);
+                        if undecorated != coff_func.name && !decorated_taken.contains(&undecorated)
+                        {
+                            coff_func.name = undecorated;
+                        }
+                    }
                     if let Some(&index) = address_to_index.get(&coff_func.address) {
                         let existing = &mut functions_info[index];
                         // Replace generated name with real COFF symbol name
