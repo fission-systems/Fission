@@ -35,13 +35,15 @@ runs:
         # the tree being wholly absent.
         slaspec_count=$(find utils/sleigh-specs -name '*.slaspec' 2>/dev/null | wc -l | tr -d ' ')
         fpk_count=$(find utils -name '*.fpk' 2>/dev/null | wc -l | tr -d ' ')
-        die_count=$(find utils/signatures/die -name '*.sg' 2>/dev/null | wc -l | tr -d ' ')
+        # The DIE corpus is one packed file now (5d8af943); the 2,066 .sg
+        # scripts it was parsed from live in the gitignored utils/source/.
+        die_packed=$(find utils/signatures/die -name 'die_signatures.fpk' 2>/dev/null | wc -l | tr -d ' ')
 
-        echo "utils/: ${slaspec_count} slaspec, ${fpk_count} fpk, ${die_count} die signatures"
+        echo "utils/: ${slaspec_count} slaspec, ${fpk_count} fpk, ${die_packed} packed DIE corpus"
 
         test "${slaspec_count}" -gt 100 || {
           echo "ERROR: expected >100 .slaspec, found ${slaspec_count}"; exit 1; }
         test "${fpk_count}" -gt 200 || {
           echo "ERROR: expected >200 .fpk (FID, signatures, ordinals, Go), found ${fpk_count}"; exit 1; }
-        test "${die_count}" -gt 1000 || {
-          echo "ERROR: expected >1000 DIE .sg signatures, found ${die_count}"; exit 1; }
+        test "${die_packed}" -eq 1 || {
+          echo "ERROR: expected utils/signatures/die/detect-it-easy/die_signatures.fpk, found ${die_packed}"; exit 1; }
