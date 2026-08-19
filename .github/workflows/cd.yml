@@ -136,10 +136,10 @@ jobs:
             echo "ℹ️  No ghidra resource directory found; skipping copy"
           fi
           
-          # Runtime resource bundle (sleigh / signatures / ghidra-data).
-          # utils/ is committed, so the checkout has it; setup-utils only verifies.
+          # Runtime resources (sleigh / signatures / ghidra-data). utils/ is
+          # committed, so the checkout has it and setup-utils only verifies.
           if [ ! -d utils/sleigh-specs ]; then
-            echo "❌ utils/sleigh-specs missing — cannot ship a usable resource bundle"
+            echo "❌ utils/sleigh-specs missing — the archive would not decompile anything"
             exit 1
           fi
           slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')

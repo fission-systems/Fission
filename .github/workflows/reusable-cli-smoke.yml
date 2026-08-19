@@ -37,9 +37,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # The specs come from the checkout now, so there is nothing to restore;
-      # ~/.fission-sleigh-specs was only ever a copy of the downloaded bundle.
-
       - name: Install MinGW-w64 (PE smoke fixture)
         run: |
           sudo apt-get update

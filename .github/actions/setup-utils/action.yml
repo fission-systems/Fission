@@ -2,20 +2,14 @@ name: Setup Utils
 description: "Verify the versioned utils/ tree is present and complete"
 
 # `utils/` is committed, so a checkout already has it and there is nothing to
-# fetch. This used to download an `assets-v*` bundle over the checkout, which
-# meant CI ran against a tree no one could inspect from the repository -- and
-# assets-v3 turned out to hold 1,048 of 3,468 files, missing signatures/die
-# entirely, while reporting 3,468 in its inventory.
+# fetch. Until v0.2.2 this downloaded an `assets-v*` bundle over the checkout,
+# which meant CI ran against a tree no one could inspect from the repository:
+# assets-v3 held 1,048 of 3,468 files, missing signatures/ and die/ entirely,
+# while its own inventory reported 3,468.
 #
-# The step is kept rather than deleted so every workflow that calls it keeps a
-# place to fail loudly when the tree is not there, which is what a shallow or
-# partial checkout looks like.
-
-inputs:
-  assets_tag:
-    description: "Unused; kept so callers that still pass it do not break"
-    required: false
-    default: ""
+# The step is kept rather than deleted so every workflow that calls it has a
+# place to fail loudly when the tree is not there -- which is what a shallow or
+# filtered checkout looks like.
 
 runs:
   using: "composite"
