@@ -185,6 +185,30 @@ jobs:
             -f "tag=${TAG}"
           echo "Queued. Track: gh run list --workflow 'CD Release' --limit 3"
 
+      # The benchmark's image bake downloads this release's CLI asset, so it
+      # cannot start until CD has uploaded it. Dispatching immediately after
+      # queueing CD is a race, and it lost for v0.2.1: Publish Images began at
+      # 17:16:16, the release was published at 17:16:42, and
+      # fission-linux-x64.tar.gz landed at 17:21:37 -- the build 404'd five
+      # minutes before the file existed, the chain stopped there, and
+      # benchmark-history/ has had no entry since v0.1.9.
+      - name: Wait for the release asset CD publishes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Waiting for fission-linux-x64.tar.gz on ${TAG} (up to ~30m)..."
+          for attempt in $(seq 1 60); do
+            if gh release view "${TAG}" --repo "${{ github.repository }}"                  --json assets                  --jq '.assets[].name' 2>/dev/null                | grep -qx "fission-linux-x64.tar.gz"; then
+              echo "✓ asset present after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::warning::asset did not appear; the benchmark dispatch below will likely 404"
+
       # Cross-repo: optional PAT with actions:write on fission-benchmark.
       # Without the secret, operators run the gh commands printed below.
       - name: Trigger fission-benchmark Publish Images (optional)
