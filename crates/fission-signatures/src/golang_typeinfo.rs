@@ -96,10 +96,37 @@ pub struct GoTypeEntry {
 /// Flat function+type database loaded from a Go API snapshot JSON file.
 ///
 /// Keys are canonical Go symbol names (e.g. `"fmt.Println"`, `"os.(*File).Read"`).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct GoTypeinfoDatabase {
     pub funcs: HashMap<String, GoFuncSig>,
     pub types: HashMap<String, GoTypeEntry>,
+    /// Packed tables plus the build tags to consult, in merge order.
+    packed: Option<PackedTables>,
+}
+
+/// The `.fpk` form: symbols keyed by `<tag>\x1f<name>`.
+///
+/// `from_raw` merged the tags once at load, which meant reading the whole
+/// snapshot -- 42ms for go1.20, 80ms for go1.25 -- before answering anything.
+/// The same merge happens per lookup instead: the tags are tried in order and
+/// the first definition wins, which is what `or_insert` did.
+struct PackedTables {
+    funcs: crate::fpk::FpkReader,
+    types: crate::fpk::FpkReader,
+    merge_tags: Vec<String>,
+    resolved_funcs: std::sync::Mutex<HashMap<String, Option<&'static GoFuncSig>>>,
+    resolved_types: std::sync::Mutex<HashMap<String, Option<&'static GoTypeEntry>>>,
+}
+
+impl std::fmt::Debug for GoTypeinfoDatabase {
+    /// Reports shape without materialising: formatting must not decode tables.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GoTypeinfoDatabase")
+            .field("eager_funcs", &self.funcs.len())
+            .field("eager_types", &self.types.len())
+            .field("packed", &self.packed.is_some())
+            .finish()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +152,103 @@ const UNIX_GOOS: &[&str] = &[
 // Implementation
 // ---------------------------------------------------------------------------
 
+
+/// Build tags to consult, lowest priority first -- the order `from_raw` merged
+/// them in, so trying them in sequence and taking the first hit reproduces
+/// `or_insert`'s "first definition wins".
+fn merge_tags_for(goos: &str, goarch: &str) -> Vec<String> {
+    let mut tags = vec!["all".to_string(), goarch.to_string(), goos.to_string()];
+    if UNIX_GOOS.contains(&goos) {
+        tags.push("unix".to_string());
+    }
+    tags.push(format!("{goos}-{goarch}"));
+    tags
+}
+
+/// The record for `<tag>\x1f<name>`, if the table has one.
+fn lookup_record(reader: &crate::fpk::FpkReader, tag: &str, name: &str) -> Option<String> {
+    let key = format!("{tag}\u{1f}{}", escape_field(name));
+    let block = reader.block_for(&key).ok().flatten()?;
+    block
+        .lines()
+        .find(|line| {
+            line.strip_prefix(key.as_str())
+                .is_some_and(|rest| rest.starts_with('|'))
+        })
+        .map(str::to_owned)
+}
+
+/// Mirror of the packer's escaping.
+fn escape_field(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('|', "\\p")
+        .replace(';', "\\s")
+        .replace('\u{1f}', "\\u")
+        .replace('\n', "\\n")
+}
+
+fn unescape_field(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('p') => out.push('|'),
+            Some('s') => out.push(';'),
+            Some('u') => out.push('\u{1f}'),
+            Some('n') => out.push('\n'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// `name:type;name:type` -> pairs. An empty field is no pairs, not one empty
+/// pair, which is what `split` would give.
+fn parse_pairs(text: &str) -> Vec<(String, String)> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    text.split(';')
+        .filter_map(|pair| {
+            let (name, ty) = pair.split_once(':')?;
+            Some((unescape_field(name), unescape_field(ty)))
+        })
+        .collect()
+}
+
+fn parse_func_record(line: &str) -> Option<GoFuncSig> {
+    let mut fields = line.splitn(3, '|');
+    let _key = fields.next()?;
+    let params = fields.next()?;
+    let results = fields.next()?;
+    Some(GoFuncSig {
+        params: parse_pairs(params),
+        results: parse_pairs(results),
+    })
+}
+
+fn parse_type_record(line: &str) -> Option<GoTypeEntry> {
+    let mut fields = line.splitn(4, '|');
+    let _key = fields.next()?;
+    let kind = fields.next()?;
+    let target = fields.next()?;
+    let fields_text = fields.next()?;
+    Some(GoTypeEntry {
+        kind: unescape_field(kind),
+        target: unescape_field(target),
+        fields: parse_pairs(fields_text),
+    })
+}
+
 impl GoTypeinfoDatabase {
     /// Load a Go API snapshot JSON for the given `version`, `goos`, and `goarch`.
     ///
@@ -139,6 +263,30 @@ impl GoTypeinfoDatabase {
         typeinfo_dir: &Path,
     ) -> Option<Self> {
         let json_path = resolve_json_path(version, typeinfo_dir)?;
+        // Prefer the packed tables beside the snapshot.
+        let stem = json_path.file_stem()?.to_str()?.to_string();
+        let dir = json_path.parent()?;
+        let (fn_path, ty_path) = (
+            dir.join(format!("{stem}.fn.fpk")),
+            dir.join(format!("{stem}.ty.fpk")),
+        );
+        if fn_path.exists()
+            && ty_path.exists()
+            && let Ok(funcs) = crate::fpk::FpkReader::open(&fn_path)
+            && let Ok(types) = crate::fpk::FpkReader::open(&ty_path)
+        {
+            return Some(Self {
+                funcs: HashMap::new(),
+                types: HashMap::new(),
+                packed: Some(PackedTables {
+                    funcs,
+                    types,
+                    merge_tags: merge_tags_for(goos, goarch),
+                    resolved_funcs: Default::default(),
+                    resolved_types: Default::default(),
+                }),
+            });
+        }
         let file = std::fs::File::open(&json_path).ok()?;
         let reader = std::io::BufReader::new(file);
         let raw: HashMap<String, JsonPlatformEntry> = serde_json::from_reader(reader)
@@ -197,19 +345,77 @@ impl GoTypeinfoDatabase {
         db
     }
 
-    /// Number of function signatures loaded.
+    /// Number of function signatures available.
+    ///
+    /// Counts records in the packed table rather than decoding them: the point
+    /// of the packed form is that nothing is materialised until it is asked
+    /// for, and a count is not a reason to break that.
+    ///
+    /// The packed table holds every build tag where the eager map held only the
+    /// merged view, so this is an upper bound there rather than the exact number
+    /// a lookup can reach.
     pub fn func_count(&self) -> usize {
-        self.funcs.len()
+        match &self.packed {
+            Some(packed) => packed.funcs.record_count() as usize,
+            None => self.funcs.len(),
+        }
     }
 
-    /// Number of type entries loaded.
+    /// Number of type entries available. See [`Self::func_count`].
     pub fn type_count(&self) -> usize {
-        self.types.len()
+        match &self.packed {
+            Some(packed) => packed.types.record_count() as usize,
+            None => self.types.len(),
+        }
     }
 
     /// Look up a function signature by its canonical Go name.
     pub fn get_func(&self, name: &str) -> Option<&GoFuncSig> {
-        self.funcs.get(name)
+        if let Some(sig) = self.funcs.get(name) {
+            return Some(sig);
+        }
+        let packed = self.packed.as_ref()?;
+        if let Ok(cache) = packed.resolved_funcs.lock()
+            && let Some(hit) = cache.get(name)
+        {
+            return *hit;
+        }
+        let found = packed
+            .merge_tags
+            .iter()
+            .find_map(|tag| lookup_record(&packed.funcs, tag, name))
+            .and_then(|line| parse_func_record(&line))
+            // Leaked so `get_func` can return a reference, as elsewhere in this
+            // crate: the database is cached for the process and the eager map
+            // this replaces was never freed either.
+            .map(|sig| &*Box::leak(Box::new(sig)));
+        if let Ok(mut cache) = packed.resolved_funcs.lock() {
+            cache.insert(name.to_string(), found);
+        }
+        found
+    }
+
+    /// Look up a type entry by its canonical Go name.
+    pub fn get_type(&self, name: &str) -> Option<&GoTypeEntry> {
+        if let Some(entry) = self.types.get(name) {
+            return Some(entry);
+        }
+        let packed = self.packed.as_ref()?;
+        if let Ok(cache) = packed.resolved_types.lock()
+            && let Some(hit) = cache.get(name)
+        {
+            return *hit;
+        }
+        let found = packed
+            .merge_tags
+            .iter()
+            .find_map(|tag| lookup_record(&packed.types, tag, name))
+            .and_then(|line| parse_type_record(&line))
+            .map(|entry| &*Box::leak(Box::new(entry)));
+        if let Ok(mut cache) = packed.resolved_types.lock() {
+            cache.insert(name.to_string(), found);
+        }
+        found
     }
 
     /// Infer GOOS from a binary format string (e.g. `"ELF"` → `"linux"`, `"Mach-O"` → `"darwin"`).
@@ -440,5 +646,79 @@ mod tests {
         );
         // darwin should have more funcs than linux due to extra darwin-arm64 key
         assert!(db.func_count() > 1000);
+    }
+}
+
+#[cfg(test)]
+mod packed_tests {
+    use super::*;
+
+    /// The packed path must answer exactly as the JSON one did, including the
+    /// tag merge order -- a symbol defined in both `all` and `windows-amd64`
+    /// has to resolve the same way it did when the tags were merged at load.
+    #[test]
+    fn packed_and_json_agree_across_platforms() {
+        let dir = std::path::Path::new("/Users/sjkim1127/Fission/utils/signatures/typeinfo");
+        if !dir.join("golang").exists() {
+            return; // bundle not present in this checkout
+        }
+        for (version, goos, goarch) in [
+            ("go1.25.0", "windows", "amd64"),
+            ("go1.20.0", "linux", "amd64"),
+        ] {
+            let golang = dir.join("golang");
+            let packed = match GoTypeinfoDatabase::load_for_binary(version, goos, goarch, dir) {
+                Some(db) if db.packed.is_some() => db,
+                _ => continue, // packed tables not built here
+            };
+
+            // Hide the packed tables so the same call takes the JSON path.
+            let hidden: Vec<_> = ["fn", "ty"]
+                .iter()
+                .map(|kind| {
+                    let from = golang.join(format!("{version}.{kind}.fpk"));
+                    let to = std::env::temp_dir()
+                        .join(format!("{version}.{kind}.{}.hidden", std::process::id()));
+                    std::fs::rename(&from, &to).ok();
+                    (from, to)
+                })
+                .collect();
+            let json = GoTypeinfoDatabase::load_for_binary(version, goos, goarch, dir);
+            for (from, to) in &hidden {
+                std::fs::rename(to, from).ok();
+            }
+            let Some(json) = json else { continue };
+
+            for (name, sig) in &json.funcs {
+                let got = packed.get_func(name).unwrap_or_else(|| {
+                    panic!("{version} {goos}/{goarch}: {name} missing from packed")
+                });
+                assert_eq!(got.params, sig.params, "{name} params");
+                assert_eq!(got.results, sig.results, "{name} results");
+            }
+            for (name, entry) in &json.types {
+                let got = packed.get_type(name).unwrap_or_else(|| {
+                    panic!("{version} {goos}/{goarch}: type {name} missing from packed")
+                });
+                assert_eq!(got.kind, entry.kind, "{name} kind");
+                assert_eq!(got.target, entry.target, "{name} target");
+                assert_eq!(got.fields, entry.fields, "{name} fields");
+            }
+            assert!(packed.get_func("no.such.Symbol").is_none());
+            assert!(json.funcs.len() > 10_000, "expected a full snapshot");
+        }
+    }
+
+    #[test]
+    fn merge_order_matches_what_from_raw_used() {
+        // all, arch, os, unix when the OS is one, then os-arch.
+        assert_eq!(
+            merge_tags_for("linux", "amd64"),
+            vec!["all", "amd64", "linux", "unix", "linux-amd64"]
+        );
+        assert_eq!(
+            merge_tags_for("windows", "386"),
+            vec!["all", "386", "windows", "windows-386"]
+        );
     }
 }

@@ -29,6 +29,7 @@
 #   *.fidbf                     -> <name>.{lib,fn,rel,dom}.fpk
 #   *_signatures.txt            -> <name>_signatures.fpk
 #   {x86,arm}_ordinals.json     -> ordinals.fpk
+#   go1.X.json                  -> go1.X.{fn,ty}.fpk
 #
 # windows_vs12_*.gdt.types.json is excluded outright: nothing reads it, and its
 # enum values are wrong -- PAGE_NOACCESS and FILE_SHARE_READ both recorded 264
@@ -66,6 +67,13 @@ done
 if [ -f utils/signatures/ordinals/ordinals.fpk ]; then
   excludes+=(--exclude='x86_ordinals.json' --exclude='arm_ordinals.json')
 fi
+for snapshot in utils/signatures/typeinfo/golang/go1.*.json; do
+  [ -e "${snapshot}" ] || continue
+  stem="${snapshot%.json}"
+  if [ -f "${stem}.fn.fpk" ] && [ -f "${stem}.ty.fpk" ]; then
+    excludes+=(--exclude="$(basename "${snapshot}")")
+  fi
+done
 
 tar "${excludes[@]}" -czf "${out}" utils
 shasum -a 256 "${out}" > "${out}.sha256"
