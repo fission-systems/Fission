@@ -21,7 +21,6 @@
 //! bundle needs, since none of them has a packed form to be confused with.
 //!
 
-
 use std::path::{Path, PathBuf};
 
 /// A packer input, kept out of the shipped bundle.

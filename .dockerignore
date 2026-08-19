@@ -3,3 +3,11 @@
 !Cargo.lock
 !crates/
 !crates/**
+
+# The runtime resource tree, committed as of 2026-08-19. Its packer inputs
+# under source/ are gitignored and large; exclude them explicitly so a local
+# build (where they do exist) matches CI.
+!utils/
+!utils/**
+utils/source/
+utils/source/**

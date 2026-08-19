@@ -1,22 +1,12 @@
-# ── Stage 0: Versioned runtime resources ─────────────────────────────────────
-FROM debian:bookworm-slim AS resources
-
-ARG FISSION_UTILS_TAG=v0.1.6
-ARG FISSION_UTILS_SHA256=35dd98b3cb4e4a6b1baac410b64ab1e62a78e4d0c5464332f90840b4adc095e7
-
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl --fail --location --show-error \
-    "https://github.com/fission-systems/Fission/releases/download/${FISSION_UTILS_TAG}/fission-utils.tar.gz" \
-    --output /tmp/fission-utils.tar.gz \
-    && echo "${FISSION_UTILS_SHA256}  /tmp/fission-utils.tar.gz" | sha256sum --check --strict \
-    && mkdir -p /bundle \
-    && tar -xzf /tmp/fission-utils.tar.gz -C /bundle \
-    && test -f /bundle/utils/sleigh-specs/ghidra_language_manifest.json \
-    && rm /tmp/fission-utils.tar.gz
+# ── Runtime resources ────────────────────────────────────────────────────────
+# `utils/` comes from the build context. It used to be downloaded here from a
+# pinned release tag (`v0.1.6`, sha-checked), which meant production ran on a
+# resource tree from a release cut long before the current one -- silently, and
+# invisibly from the repository. The tree is committed now, so the image gets
+# exactly what the commit being deployed contains.
+#
+# `utils/source/` (the packer inputs, ~491M) is gitignored and excluded by
+# .dockerignore, so only what the runtime reads is copied.
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 FROM rust:1.97-slim-bookworm AS builder
@@ -31,7 +21,12 @@ WORKDIR /build
 # Cache dependencies — copy manifests first
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
-COPY --from=resources /bundle/utils/sleigh-specs/ ./utils/sleigh-specs/
+COPY utils/sleigh-specs/ ./utils/sleigh-specs/
+
+# The download step this replaced checked the manifest before proceeding. Keep
+# that: an ignore-file mistake would otherwise surface as a runtime failure in
+# production rather than a build failure here.
+RUN test -f /build/utils/sleigh-specs/ghidra_language_manifest.json
 
 ENV FISSION_SLEIGH_SPEC_DIR=/build/utils/sleigh-specs
 
@@ -52,7 +47,7 @@ COPY --from=builder /build/target/release/fission-serve ./fission-serve
 
 # Copy fission-utils (sleigh specs, signatures, type info)
 # These are required by the SLEIGH runtime for decompilation.
-COPY --from=resources /bundle/utils/ ./utils/
+COPY utils/ ./utils/
 
 # ── Runtime configuration (override via env vars or --flag) ───────────────────
 ENV FISSION_SLEIGH_SPEC_DIR=/app/utils/sleigh-specs
