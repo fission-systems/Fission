@@ -7,7 +7,7 @@ codebase and its docs assume.
 
 | Symptom | First check |
 |---|---|
-| Missing Sleigh specs | Pull `fission-utils.tar.gz` from the `assets-v1` release (see [Resource Bundle](#resource-bundle)) and check resource status. |
+| Missing Sleigh specs | `utils/` is committed — a full checkout has them. Check for a sparse/filtered clone, then check resource status. |
 | CLI cannot find resources | Check `FISSION_RESOURCE_ROOT`, `--resource-root`, and `PathConfig::detect` behavior. |
 | Raw p-code mismatch | Start in `fission-sleigh` before interpreting NIR output. |
 | NIR is wrong but p-code is right | Investigate NIR materialization, normalization, or type hint application. |

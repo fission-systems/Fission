@@ -18,7 +18,6 @@ A tagged release is eligible when:
   - `fission-linux-x64` / `fission-macos-arm64` / `fission-windows-x64` (each archive includes a verified `utils/` tree)
   - **`fission-utils.tar.gz`** (+ `.sha256`, inventory) — standalone resource bundle on the same tag
   - Linux benchmark CLI: `fission_cli-x86_64-unknown-linux-gnu` (binary-only convenience asset)
-- Optional: refresh long-lived CI pin via Actions → **Publish Utils Assets** (`assets-v1`, see [`docs/CI_RELEASE_GATES.md`](CI_RELEASE_GATES.md) § Resource bundle)
 - The **30-minute** evaluation path in [`docs/EVALUATION.md`](EVALUATION.md) passes on at least **one** Windows x64 sample binary.
 - If corpus-wide quality is claimed, attach or link `benchmark_compact_summary.json` and confirm:
   - `release_promotion_allowed` is `true`, **or**

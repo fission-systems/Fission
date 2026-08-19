@@ -38,13 +38,12 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 │  - release-e2e.yml (Release E2E · L2)  │
 │  - release-tag.yml (tag after L0–L2)   │
 │  - cd.yml (CD Release · L3 + utils)    │
-│  - publish-utils-assets.yml (assets-v*)│
 │  - ci-cd-monitor.yml (Status)          │
 │  - fuzz.yml (Fuzzing)                  │
 └─────────────────────────────────────────┘
 ```
 
-**Utils assets:** each SemVer release ships `fission-utils.tar.gz`; CI pins a long-lived `assets-v*` tag via setup-utils. See [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
+**Utils assets:** `utils/` is committed to the repository, so CI gets it from the checkout and `setup-utils` only verifies it. Each SemVer release still ships `fission-utils.tar.gz` for offline installs. See [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
 
 **Release gate policy (conservative):** [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
 

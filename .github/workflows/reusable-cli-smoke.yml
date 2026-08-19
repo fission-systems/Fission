@@ -13,11 +13,6 @@ on:
         required: false
         default: debug
         description: "Cargo profile for fission_cli (debug|release)"
-      assets_tag:
-        type: string
-        required: false
-        default: "assets-v3"
-        description: "GitHub Release tag hosting sleigh-specs.tar.gz"
 
 env:
   CARGO_TERM_COLOR: always
@@ -42,11 +37,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Restore Sleigh specs from cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.fission-sleigh-specs
-          key: sleigh-specs-${{ inputs.assets_tag }}
+      # The specs come from the checkout now, so there is nothing to restore;
+      # ~/.fission-sleigh-specs was only ever a copy of the downloaded bundle.
 
       - name: Install MinGW-w64 (PE smoke fixture)
         run: |

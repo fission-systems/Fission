@@ -137,7 +137,7 @@ jobs:
           fi
           
           # Runtime resource bundle (sleigh / signatures / ghidra-data).
-          # Populated by setup-utils (assets-v* download) and/or LFS checkout.
+          # utils/ is committed, so the checkout has it; setup-utils only verifies.
           if [ ! -d utils/sleigh-specs ]; then
             echo "❌ utils/sleigh-specs missing — cannot ship a usable resource bundle"
             exit 1
@@ -210,7 +210,7 @@ jobs:
           prerelease: false
 
   # Standalone utils/ resource bundle on the same SemVer release (once, Linux).
-  # Consumers and CI setup-utils can pin either assets-v* or this versioned asset.
+  # For offline installs that want utils pinned to the same version as the CLI.
   publish-utils-bundle:
     name: 📦 Publish fission-utils bundle
     runs-on: ubuntu-latest

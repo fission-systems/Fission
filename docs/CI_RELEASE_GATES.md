@@ -147,20 +147,24 @@ not block once that SHA already has a green push Heavy).
 ## Resource bundle (`utils/`) assets
 
 Runtime data lives under [`utils/`](../utils/) (Sleigh specs, signatures, ghidra-data).
-It is **not** checked into git at all — `.gitignore` excludes `utils/`, and the tree is
-populated from the `fission-utils.tar.gz` release asset (see table below), not Git LFS.
+It **is** checked into git as of 2026-08-19. Only `utils/source/` (the inputs the
+packed artifacts are built from) stays ignored. Packing the databases into `.fpk`
+brought the tree down to a size git can carry, which removed the `assets-v*` bundle
+and the class of failure it caused: `assets-v3` shipped 1,048 of 3,468 files while
+its inventory claimed all 3,468, and CI ran against that truncated tree for four days
+without anyone being able to see it.
 
 | Asset | How it is published | Who uses it |
 |-------|---------------------|-------------|
 | **Inside platform archives** (`fission-linux-x64.tar.gz`, …) | `cd.yml` copies a verified `utils/` into each OS package | End-user installs that unpack the full release |
 | **`fission-utils.tar.gz` on the SemVer release** | `cd.yml` job `publish-utils-bundle` (once per tag) | Offline installs; pin utils to the same version as the CLI |
-| **`fission-utils.tar.gz` on `assets-v*`** | [`publish-utils-assets.yml`](../.github/workflows/publish-utils-assets.yml) (manual) | CI [`.github/actions/setup-utils`](../.github/actions/setup-utils) default pin (`assets-v1`) |
+| **The `utils/` tree itself** | Committed; changed like any other source | CI — [`.github/actions/setup-utils`](../.github/actions/setup-utils) verifies the checkout rather than downloading anything |
 
 Rules:
 
 1. Platform packages **fail the release** if `utils/sleigh-specs` is missing/incomplete.
 2. Prefer **version-matched** `fission-utils.tar.gz` on the same `vX.Y.Z` release for production installs.
-3. Bump or refresh `assets-v1` only when CI/bootstrap should pick up new specs for all branches (not every SemVer).
+3. Regenerate packed artifacts (`.fpk`) with the scripts in [`scripts/`](../scripts) and commit them; there is no separate publish step for CI to pick them up.
 
 ## Related files
 
@@ -168,5 +172,4 @@ Rules:
 - [`.github/workflows/release-tag.yml`](../.github/workflows/release-tag.yml)
 - [`.github/workflows/release-e2e.yml`](../.github/workflows/release-e2e.yml)
 - [`.github/workflows/cd.yml`](../.github/workflows/cd.yml)
-- [`.github/workflows/publish-utils-assets.yml`](../.github/workflows/publish-utils-assets.yml)
 - [`utils/MANIFEST.md`](../utils/MANIFEST.md)
