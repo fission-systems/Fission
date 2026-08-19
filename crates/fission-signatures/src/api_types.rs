@@ -207,6 +207,11 @@ impl ApiTypeDatabase {
     /// preferred rather than required: a checkout with only the `.txt` present
     /// still loads, which is what keeps the two forms interchangeable while the
     /// bundle carries both.
+    /// Merge a signature table, preferring the `.fpk` for it.
+    ///
+    /// `path` names the `.txt` the table was built from. That text moved to
+    /// `utils/source/` and is normally absent, so a missing `.txt` with a
+    /// present `.fpk` is the expected shape rather than an error.
     pub fn merge_path(&mut self, path: &Path) -> Result<(), ApiTypeError> {
         let packed_path = path.with_extension("fpk");
         if packed_path.exists()

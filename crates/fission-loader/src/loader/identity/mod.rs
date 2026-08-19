@@ -422,6 +422,7 @@ mod tests {
 
         let cfg = fission_core::path_config::PathConfig {
             workspace_root: Some(tmp.path().to_path_buf()),
+            utils_root: sig.parent().map(std::path::Path::to_path_buf),
             signatures_base: Some(sig.clone()),
             fid_dir: Some(sig.join("fid")),
             fidb_java_dir: None,

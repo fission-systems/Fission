@@ -10,30 +10,24 @@
 # inventory reported file_count=3468 while its archive held 1048 files, so the
 # one number available to check a bundle against described something else.
 #
-# Two kinds of file are excluded, each after checking it is unreachable.
+# Everything under `utils/source/` is a packer input and never ships: the
+# `.fidbf` databases, the `.gdt` archives, the ordinal and Go JSON, and the
+# signature text. Packing runs here, not on the machine that installs the
+# bundle, so those inputs have no reason to travel.
 #
-# .gdt archives: read only by the offline extractors (scripts/gdt_extract_*.py,
-# scripts/win32_enum_groups.py) which run here, never by Fission.
-# `get_all_gdt_paths` has no callers and no `.gdt` path is opened anywhere
-# outside path_config.rs. 20.7M.
+# That is the whole exclusion rule now. It used to be a list of extensions
+# paired with "drop the source only where its .fpk exists", because the tree
+# mixed inputs and outputs in one directory -- signatures/fid held 228 .fpk, 57
+# .fidbf and 5 .txt. The layout states it instead.
 #
-# signatures/fidb_java/: `find_fid_file` falls back from `<name>.fidbf` to
-# `<name>.fidb` only when the .fidbf is absent, and all 47 .fidb files have a
-# .fidbf sibling -- the fallback cannot fire. 64.5M, and it barely compresses
-# (1.1x) because Ghidra already stores it deflated.
-#
-# Sources that a `.fpk` now replaces. The packed form is what the runtime reads;
-# the original is what the packer reads, and packing happens here, not on the
-# machine that installs the bundle. Each is excluded only where its `.fpk`
-# exists, so a half-converted tree ships the source rather than nothing:
-#   *.fidbf                     -> <name>.{lib,fn,rel,dom}.fpk
-#   *_signatures.txt            -> <name>_signatures.fpk
-#   {x86,arm}_ordinals.json     -> ordinals.fpk
-#   go1.X.json                  -> go1.X.{fn,ty}.fpk
-#
-# windows_vs12_*.gdt.types.json is excluded outright: nothing reads it, and its
-# enum values are wrong -- PAGE_NOACCESS and FILE_SHARE_READ both recorded 264
-# where both are 1. `win_enum_constants.json` carries the correct table.
+# Two things are dropped that are not packer inputs, each after checking
+# nothing reads them:
+#   *.gdt.types.json  -- unreferenced, and its enum values are wrong:
+#                        PAGE_NOACCESS and FILE_SHARE_READ both recorded 264
+#                        where both are 1.
+#   *.exports         -- 27.4M of DLL export XML. `ghidra_no_return.rs` walks
+#                        those directories but reads only `.hints`, of which
+#                        there are four totalling 0.03M.
 set -euo pipefail
 
 out="${1:-fission-utils.tar.gz}"
@@ -48,34 +42,11 @@ if [ "${slaspec_count}" -le 10 ]; then
   exit 1
 fi
 
-# Build the exclusion list, dropping a source only when its .fpk is present.
-excludes=(--exclude='*.gdt' --exclude='.DS_Store'
-          --exclude='utils/signatures/fidb_java'
-          --exclude='*.gdt.types.json')
-for fidbf in utils/signatures/fid/*.fidbf; do
-  [ -e "${fidbf}" ] || continue
-  stem="${fidbf%.fidbf}"
-  if [ -f "${stem}.fn.fpk" ] && [ -f "${stem}.lib.fpk" ] \
-     && [ -f "${stem}.rel.fpk" ] && [ -f "${stem}.dom.fpk" ]; then
-    excludes+=(--exclude="$(basename "${fidbf}")")
-  fi
-done
-for txt in utils/signatures/typeinfo/*/*_signatures.txt; do
-  [ -e "${txt}" ] || continue
-  [ -f "${txt%.txt}.fpk" ] && excludes+=(--exclude="$(basename "${txt}")")
-done
-if [ -f utils/signatures/ordinals/ordinals.fpk ]; then
-  excludes+=(--exclude='x86_ordinals.json' --exclude='arm_ordinals.json')
-fi
-for snapshot in utils/signatures/typeinfo/golang/go1.*.json; do
-  [ -e "${snapshot}" ] || continue
-  stem="${snapshot%.json}"
-  if [ -f "${stem}.fn.fpk" ] && [ -f "${stem}.ty.fpk" ]; then
-    excludes+=(--exclude="$(basename "${snapshot}")")
-  fi
-done
-
-tar "${excludes[@]}" -czf "${out}" utils
+tar --exclude='utils/source' \
+    --exclude='.DS_Store' \
+    --exclude='*.gdt.types.json' \
+    --exclude='*.exports' \
+    -czf "${out}" utils
 shasum -a 256 "${out}" > "${out}.sha256"
 
 archive_files=$(tar tzf "${out}" | grep -vc '/$')
@@ -99,7 +70,7 @@ done
   echo "source_sha=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "slaspec_count=${slaspec_count}"
   echo "file_count=${archive_files}   # counted in the archive, not the tree"
-  echo "excluded=*.gdt, fidb_java, *.gdt.types.json, and every source a .fpk replaces"
+  echo "excluded=utils/source (packer inputs), *.gdt.types.json, *.exports, .DS_Store"
   echo "archive_bytes=$(wc -c < "${out}" | tr -d ' ')"
   echo
   echo "archive files by top-level directory:"

@@ -190,10 +190,12 @@ mod packed_tests {
             resolved: Default::default(),
         };
         let mut tables: HashMap<String, HashMap<u32, String>> = HashMap::new();
+        // The JSON moved to `utils/source/ordinals` and is not shipped, so this
+        // comparison only runs in a tree that still has the packer inputs.
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../utils/source/ordinals");
         for filename in ["x86_ordinals.json", "arm_ordinals.json"] {
-            let Some(path) = ResourceProvider::global().ordinals_json_path(filename) else {
-                continue;
-            };
+            let path = source.join(filename);
             let Ok(content) = fs::read_to_string(&path) else { continue };
             let raw: HashMap<String, HashMap<String, String>> =
                 serde_json::from_str(&content).expect("parse json");

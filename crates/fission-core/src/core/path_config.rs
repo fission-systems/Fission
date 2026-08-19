@@ -3,6 +3,7 @@
 //! Centralized path resolution for all signature files, type databases,
 //! and other resources. Mirrors C++ fission::config::PathConfig.
 
+use crate::core::resource_layout::ResourceKind;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -158,6 +159,9 @@ const LIBSODIUM_FID_FILES_X86: &[&str] = &["libsodium-x86.LE.32.default.fidbf"];
 /// Path configuration for Fission resources
 #[derive(Debug, Clone)]
 pub struct PathConfig {
+    /// The `utils/` directory itself, from which every resource kind resolves
+    /// through `resource_layout`. Present for both the split and legacy trees.
+    pub utils_root: Option<PathBuf>,
     /// Base directory for signatures
     pub signatures_base: Option<PathBuf>,
     /// FID database directory (`.fidbf` files, both raw and Java-packed)
@@ -246,15 +250,24 @@ impl PathConfig {
             )
         });
 
+        // `utils/` itself, for resolving the packer sources under `source/`.
+        let utils_root = signatures_base
+            .as_ref()
+            .and_then(|base| base.parent().map(Path::to_path_buf))
+            .or_else(|| workspace_root.as_ref().map(|root| root.join("utils")));
+
         let fid_dir = signatures_base
             .as_ref()
             .map(|base| base.join("fid"))
             .filter(|p| p.exists())
             .or_else(|| crate::core::utils::find_existing_dir(FID_SEARCH_DIRS));
 
-        let fidb_java_dir = signatures_base
+        // Ghidra's Java-packed FID databases now live under `source/`, unshipped:
+        // every one has a `.fidbf` sibling, so `find_fid_file` never falls back
+        // to them. The search dirs stay for a tree that predates the move.
+        let fidb_java_dir = utils_root
             .as_ref()
-            .map(|base| base.join("fidb_java"))
+            .map(|root| ResourceKind::SourceFidbJava.dir(root))
             .filter(|p| p.exists())
             .or_else(|| crate::core::utils::find_existing_dir(FIDB_JAVA_SEARCH_DIRS));
 
@@ -278,6 +291,7 @@ impl PathConfig {
             .or_else(|| crate::core::utils::find_existing_dir(PATTERN_SEARCH_DIRS));
 
         Self {
+            utils_root,
             signatures_base,
             fid_dir,
             fidb_java_dir,
@@ -289,8 +303,39 @@ impl PathConfig {
     }
 
     /// `win_api_signatures.txt` (pipe-separated API signatures), if present.
+
+    /// A path under `subdir` naming `filename` whose `.fpk` sibling exists.
+    fn signature_table_path(&self, filename: &str, subdir: &str) -> Option<PathBuf> {
+        let packed = Path::new(filename).with_extension("fpk");
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if let Some(ref base) = self.signatures_base {
+            roots.push(base.clone());
+        }
+        if let Some(ref root) = self.workspace_root {
+            roots.push(root.join("utils").join("signatures"));
+        }
+        for base in roots {
+            let mut dir = base;
+            for part in subdir.split('/') {
+                dir = dir.join(part);
+            }
+            if dir.join(&packed).exists() {
+                return Some(dir.join(filename));
+            }
+        }
+        None
+    }
+    /// Where `win_api_signatures.txt` would be.
+    ///
+    /// The text itself moved to `utils/source/typeinfo` and is not shipped; the
+    /// caller opens `path.with_extension("fpk")` first, so what matters is that
+    /// this names the directory the packed table lives in. It returns a path
+    /// whose `.fpk` sibling exists before falling back to a real `.txt`.
     pub fn get_win_api_signatures_path(&self) -> Option<PathBuf> {
         let filename = "win_api_signatures.txt";
+        if let Some(path) = self.signature_table_path(filename, "typeinfo/win32") {
+            return Some(path);
+        }
         if let Some(ref gdt_dir) = self.gdt_dir {
             let path = gdt_dir.join(filename);
             if path.exists() {
@@ -316,6 +361,9 @@ impl PathConfig {
 
     /// `ntoskrnl_signatures.txt` (Windows kernel ntoskrnl/HAL API signatures), if present.
     pub fn get_ntoskrnl_signatures_path(&self) -> Option<PathBuf> {
+        if let Some(path) = self.signature_table_path("ntoskrnl_signatures.txt", "typeinfo/win32") {
+            return Some(path);
+        }
         let filename = "ntoskrnl_signatures.txt";
         if let Some(ref gdt_dir) = self.gdt_dir {
             let path = gdt_dir.join(filename);
@@ -344,6 +392,9 @@ impl PathConfig {
     /// signatures, extracted from angr's vendored WDK prototype JSON via
     /// `scripts/angr_wdk_extract_signatures.py`), if present.
     pub fn get_wdk_signatures_path(&self) -> Option<PathBuf> {
+        if let Some(path) = self.signature_table_path("wdk_signatures.txt", "typeinfo/win32") {
+            return Some(path);
+        }
         let filename = "wdk_signatures.txt";
         if let Some(ref gdt_dir) = self.gdt_dir {
             let path = gdt_dir.join(filename);
@@ -370,6 +421,9 @@ impl PathConfig {
 
     /// `generic_clib_signatures.txt` (pipe-separated generic C library signatures), if present.
     pub fn get_generic_clib_signatures_path(&self) -> Option<PathBuf> {
+        if let Some(path) = self.signature_table_path("generic_clib_signatures.txt", "typeinfo/generic") {
+            return Some(path);
+        }
         let filename = "generic_clib_signatures.txt";
         if let Some(ref gdt_dir) = self.gdt_dir {
             let path = gdt_dir.join(filename);
@@ -396,6 +450,9 @@ impl PathConfig {
 
     /// `generic_clib_64_signatures.txt` (x86-64 generic C library signatures), if present.
     pub fn get_generic_clib_64_signatures_path(&self) -> Option<PathBuf> {
+        if let Some(path) = self.signature_table_path("generic_clib_64_signatures.txt", "typeinfo/generic") {
+            return Some(path);
+        }
         let filename = "generic_clib_64_signatures.txt";
         if let Some(ref base) = self.signatures_base {
             let path = base.join("typeinfo").join("generic").join(filename);
@@ -416,6 +473,9 @@ impl PathConfig {
 
     /// `mac_osx_signatures.txt` (macOS API signatures), if present.
     pub fn get_mac_osx_signatures_path(&self) -> Option<PathBuf> {
+        if let Some(path) = self.signature_table_path("mac_osx_signatures.txt", "typeinfo/mac_10.9") {
+            return Some(path);
+        }
         let filename = "mac_osx_signatures.txt";
         if let Some(ref base) = self.signatures_base {
             let path = base.join("typeinfo").join("mac_10.9").join(filename);

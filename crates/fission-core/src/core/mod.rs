@@ -10,6 +10,7 @@
 //! - logging: Level-based logging with file output
 //! - prelude: Common imports for convenience
 
+pub mod resource_layout;
 pub mod calling_convention;
 pub mod config;
 pub mod config_store;

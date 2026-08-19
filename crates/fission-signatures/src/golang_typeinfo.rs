@@ -262,13 +262,14 @@ impl GoTypeinfoDatabase {
         goarch: &str,
         typeinfo_dir: &Path,
     ) -> Option<Self> {
-        let json_path = resolve_json_path(version, typeinfo_dir)?;
-        // Prefer the packed tables beside the snapshot.
-        let stem = json_path.file_stem()?.to_str()?.to_string();
-        let dir = json_path.parent()?;
+        // The packed tables are what ships; the JSON they were built from moved
+        // to `utils/source/` and is normally absent, so they are resolved
+        // directly rather than as siblings of a snapshot that may not be there.
+        let stem = packed_stem_for(version, typeinfo_dir);
+        let json_path = resolve_json_path(version, typeinfo_dir);
         let (fn_path, ty_path) = (
-            dir.join(format!("{stem}.fn.fpk")),
-            dir.join(format!("{stem}.ty.fpk")),
+            typeinfo_dir.join("golang").join(format!("{stem}.fn.fpk")),
+            typeinfo_dir.join("golang").join(format!("{stem}.ty.fpk")),
         );
         if fn_path.exists()
             && ty_path.exists()
@@ -287,6 +288,7 @@ impl GoTypeinfoDatabase {
                 }),
             });
         }
+        let json_path = json_path?;
         let file = std::fs::File::open(&json_path).ok()?;
         let reader = std::io::BufReader::new(file);
         let raw: HashMap<String, JsonPlatformEntry> = serde_json::from_reader(reader)
@@ -458,6 +460,17 @@ impl GoTypeinfoDatabase {
 /// Resolve a `go1.X.Y.json` (or `go1.X.json` for patch-0) path under `typeinfo_dir/golang/`.
 ///
 /// Strategy: strip patch to 0 for the base file (`go1.22.0.json`); also accepts `go1.22.json`.
+/// `go1.<major>.<minor>.0`, the name both the snapshot and its packed tables
+/// carry. Derived from the version string rather than from a file on disk,
+/// because the snapshot is not shipped.
+fn packed_stem_for(version: &str, _typeinfo_dir: &Path) -> String {
+    let ver = version.strip_prefix("go").unwrap_or(version);
+    let mut parts = ver.split('.');
+    let major = parts.next().unwrap_or("1");
+    let minor = parts.next().unwrap_or("0");
+    format!("go{major}.{minor}.0")
+}
+
 fn resolve_json_path(version: &str, typeinfo_dir: &Path) -> Option<std::path::PathBuf> {
     let golang_dir = typeinfo_dir.join("golang");
     if !golang_dir.exists() {
@@ -589,15 +602,24 @@ mod tests {
 
     #[test]
     fn test_resolve_json_path_real() {
+        // The snapshot JSON moved to `utils/source/` and is not shipped, so
+        // what has to resolve for a version string is the packed pair. The
+        // stem is derived from the version rather than found on disk, which is
+        // what lets a tree without the sources still load.
         let Some(typeinfo_dir) = workspace_typeinfo_dir() else {
             eprintln!("skipped: typeinfo dir not found");
             return;
         };
-        let path = resolve_json_path("go1.22.3", &typeinfo_dir);
-        assert!(path.is_some(), "go1.22.0.json should resolve for go1.22.3");
-        let path = path.unwrap();
-        assert!(path.exists(), "resolved path must exist: {:?}", path);
-        eprintln!("resolved: {:?}", path);
+        assert_eq!(packed_stem_for("go1.22.3", &typeinfo_dir), "go1.22.0");
+        assert_eq!(packed_stem_for("1.22", &typeinfo_dir), "go1.22.0");
+
+        let golang = typeinfo_dir.join("golang");
+        let packed = golang.join("go1.22.0.fn.fpk");
+        if !packed.exists() {
+            eprintln!("skipped: packed tables not built here");
+            return;
+        }
+        assert!(golang.join("go1.22.0.ty.fpk").exists(), "both halves ship together");
     }
 
     #[test]
