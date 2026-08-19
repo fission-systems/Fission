@@ -1136,7 +1136,7 @@
 <td><strong>L3 CD</strong></td>
 <td><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a></td>
 <td>Tag push <code>v*.*.*</code> / <code>X.Y.Z</code></td>
-<td>Multi-platform CLI archives (each includes <code>utils/</code>) + standalone <strong><code>fission-utils.tar.gz</code></strong> → GitHub Release</td>
+<td>Multi-platform CLI archives (each includes <code>utils/</code>) → GitHub Release</td>
 </tr>
 </tbody>
 </table>
@@ -1270,11 +1270,6 @@ without anyone being able to see it.</p>
 <td>End-user installs that unpack the full release</td>
 </tr>
 <tr>
-<td><strong><code>fission-utils.tar.gz</code> on the SemVer release</strong></td>
-<td><code>cd.yml</code> job <code>publish-utils-bundle</code> (once per tag)</td>
-<td>Offline installs; pin utils to the same version as the CLI</td>
-</tr>
-<tr>
 <td><strong>The <code>utils/</code> tree itself</strong></td>
 <td>Committed; changed like any other source</td>
 <td>CI — <a href="../.github/actions/setup-utils"><code>.github/actions/setup-utils</code></a> verifies the checkout rather than downloading anything</td>
@@ -1284,7 +1279,7 @@ without anyone being able to see it.</p>
 <p>Rules:</p>
 <ol>
 <li>Platform packages <strong>fail the release</strong> if <code>utils/sleigh-specs</code> is missing/incomplete.</li>
-<li>Prefer <strong>version-matched</strong> <code>fission-utils.tar.gz</code> on the same <code>vX.Y.Z</code> release for production installs.</li>
+<li>There is no standalone resource bundle any more; <code>utils/</code> reaches consumers through the clone or through the platform archive.</li>
 <li>Regenerate packed artifacts (<code>.fpk</code>) with the scripts in <a href="../scripts"><code>scripts/</code></a> and commit them; there is no separate publish step for CI to pick them up.</li>
 </ol>
 <h2 id="related-files">Related files<a class="headerlink" href="#related-files" title="Permanent link">&para;</a></h2>

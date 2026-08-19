@@ -1033,11 +1033,11 @@
 <p>Railway runs <code>fission-serve</code> as a persistent Docker service. The image contains
 the version-matched SLEIGH, signature, FID, and type-information resources, so
 the deployed service does not depend on a developer checkout or a volume.</p>
-<p><code>utils/</code> is intentionally excluded from Git. The Docker resource stage downloads
-the version-pinned <code>fission-utils.tar.gz</code> release asset and verifies its SHA-256
-before either the Rust build or runtime image can use it. When updating
-<code>FISSION_UTILS_TAG</code> in <code>Dockerfile</code>, update <code>FISSION_UTILS_SHA256</code> from the same
-release asset at the same time.</p>
+<p><code>utils/</code> is committed, so the image copies it straight from the build context --
+there is no tag or SHA-256 to keep in step. <code>utils/source/</code> (the packer inputs)
+is excluded by <code>.dockerignore</code>, and the builder stage fails if the Sleigh
+manifest is missing, so an ignore-file mistake breaks the build rather than the
+running service.</p>
 <p>The runtime explicitly maps the packaged SLEIGH specifications and Ghidra
 opinion data through <code>FISSION_SLEIGH_SPEC_DIR</code> and
 <code>FISSION_GHIDRA_DATA_DIR</code>.</p>
