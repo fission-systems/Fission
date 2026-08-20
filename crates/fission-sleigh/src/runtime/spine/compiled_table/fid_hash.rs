@@ -484,6 +484,35 @@ pub(crate) fn x86_skip_instruction(arch: &str, bytes: &[u8]) -> bool {
 /// computed value lands in `"const"` space, since it's a value, not a
 /// dereference) and plain immediates (`mov eax,0x2a`, also `"const"`) --
 /// both of which use their real value in the specific hash.
+/// Ghidra's `obj instanceof Address` arm: the target of a direct branch or
+/// call. The address value itself is never hashed -- both digests receive the
+/// scalar placeholder, so the same `call` to two different functions hashes
+/// identically, which is the whole point of a signature.
+///
+/// This exists separately from [`mix_operand`]'s `Immediate` arm because the
+/// operand reaches us with no resolved `BoundOperand` at all on most branch
+/// forms: `jz`/`jnz` on x86 and `beq`/`bvc` on ARM leave the target in
+/// register or unique space rather than as an immediate, and only the
+/// immediate form was recognised. Everything else fell through to the
+/// memory-address tracer, which cannot describe a branch target -- so the
+/// function's whole hash was refused. Measured on the sample-set: 83 register-
+/// space and 74 unique-space branch operands on one ARM binary, 15 and 5 on
+/// one x86-64 binary.
+fn mix_address_operand(operand_index: usize) -> Option<OperandContribution> {
+    let index_term = i32::try_from(operand_index)
+        .ok()?
+        .wrapping_add(1)
+        .wrapping_mul(7777);
+    let term = SCALAR_PLACEHOLDER
+        .wrapping_add(1_234_567)
+        .wrapping_mul(67_999);
+    Some(OperandContribution {
+        full: index_term.wrapping_add(SCALAR_PLACEHOLDER),
+        specific: index_term.wrapping_add(term),
+        specific_count: 0,
+    })
+}
+
 fn mix_operand(
     operand_index: usize,
     operand: &BoundOperand,
@@ -565,6 +594,15 @@ pub(crate) struct FidHashes {
 /// Returns `None` if the extent has fewer than [`FID_SHORT_CODE_UNIT_LIMIT`]
 /// code units after skipping (mirrors Ghidra returning `null` for "function
 /// too small").
+/// Why a hash quad could not be produced. Temporary instrumentation behind
+/// `FISSION_FID_DIAG`; every arm corresponds to a `return None` below.
+fn fid_diag(reason: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("FISSION_FID_DIAG").is_some()) {
+        eprintln!("[FID-HASH-DECLINE] {reason}");
+    }
+}
+
 pub(crate) fn compute_fid_hashes(
     compiled: &CompiledFrontend,
     extent: &[crate::runtime::DecodedInstruction],
@@ -590,7 +628,13 @@ pub(crate) fn compute_fid_hashes(
             call_count += 1;
         }
 
-        let state = decode_instruction_raw_state(compiled, &instr.bytes, instr.address).ok()?;
+        let state = match decode_instruction_raw_state(compiled, &instr.bytes, instr.address) {
+            Ok(state) => state,
+            Err(_) => {
+                fid_diag("decode_instruction_raw_state");
+                return None;
+            }
+        };
 
         // Ghidra's getNumOperands()/getOpObjects(ii) enumerate *display*
         // operands, e.g. "mov eax,[rbp+8]" has exactly 2 -- not
@@ -609,10 +653,14 @@ pub(crate) fn compute_fid_hashes(
             .collect::<Vec<_>>();
 
         for (operand_index, &handle_index) in display_order.iter().enumerate() {
-            let handle = state
+            let Some(handle) = state
                 .handles
                 .iter()
-                .find(|h| h.operand_index == handle_index)?;
+                .find(|h| h.operand_index == handle_index)
+            else {
+                fid_diag("no handle for display operand");
+                return None;
+            };
             let handle_space_is_ram = handle.fixed.space.as_ref().is_some_and(|s| s.name == "ram");
             // A memory-dereference address always lands in "ram" space (see
             // below) -- true across architectures, since it's the space the
@@ -633,13 +681,14 @@ pub(crate) fn compute_fid_hashes(
             // choice for an edge case neither x86 nor AArch64 exhibit, not
             // the full hash (which never branches on this at all) or any
             // other architecture's coverage already validated.
+            let is_branch = matches!(
+                instr.flow_kind,
+                crate::runtime::DecodedFlowKind::Call
+                    | crate::runtime::DecodedFlowKind::Jump
+                    | crate::runtime::DecodedFlowKind::ConditionalJump
+            );
             let is_flow_target =
-                matches!(
-                    instr.flow_kind,
-                    crate::runtime::DecodedFlowKind::Call
-                        | crate::runtime::DecodedFlowKind::Jump
-                        | crate::runtime::DecodedFlowKind::ConditionalJump
-                ) && matches!(&handle.debug_value, Some(BoundOperand::Immediate { .. }));
+                is_branch && matches!(&handle.debug_value, Some(BoundOperand::Immediate { .. }));
             let handle_is_address = handle_space_is_ram || is_flow_target;
             let contribution = if let Some(operand) = &handle.debug_value {
                 mix_operand(
@@ -648,6 +697,13 @@ pub(crate) fn compute_fid_hashes(
                     handle_is_address,
                     resolve_register_offset,
                 )?
+            } else if is_branch && instr.direct_target.is_some() {
+                // A *direct* branch or call: the one unresolved operand is the
+                // target, which Ghidra reports as an `Address`. Restricted to
+                // the direct form on purpose -- an indirect `call rax` carries
+                // a real register operand, and that resolves through
+                // `debug_value` above rather than arriving here.
+                mix_address_operand(operand_index)?
             } else {
                 // No resolved BoundOperand: a memory reference whose address
                 // this runtime computes rather than resolves directly.
@@ -688,11 +744,64 @@ pub(crate) fn compute_fid_hashes(
                         target_size,
                     )
                 });
+                // Only *after* the tracer declines: a register-space handle
+                // may still be a memory address, since AArch64 pre-index
+                // addressing leaves the computed address directly in a
+                // register-space varnode. Taking the register reading first
+                // broke the `stp`/`ldp` golden vector, which is exactly the
+                // shape the tracer exists to describe. What is left here is a
+                // handle that names a register and nothing more --
+                // `cmovz RDX,RBX`'s destination -- which is Ghidra's
+                // `obj instanceof Register` arm, hashing `reg.getOffset()`.
+                let shape = shape.map(Ok).unwrap_or_else(|| {
+                    let is_register_space = handle
+                        .fixed
+                        .space
+                        .as_ref()
+                        .is_some_and(|sp| sp.index == compiled.sla_register_space_index);
+                    if is_register_space {
+                        Err(Some(handle.fixed.offset_offset))
+                    } else {
+                        Err(None)
+                    }
+                });
+                let shape = match shape {
+                    Ok(shape) => Some(shape),
+                    Err(Some(register_offset)) => {
+                        let index_term = i32::try_from(operand_index)
+                            .ok()?
+                            .wrapping_add(1)
+                            .wrapping_mul(7777);
+                        let mixed = reg_mix(register_offset)?;
+                        full_digest.update_i32(index_term.wrapping_add(mixed));
+                        specific_digest.update_i32(index_term.wrapping_add(mixed));
+                        continue;
+                    }
+                    Err(None) => None,
+                };
                 let Some(shape) = shape else {
                     // An operand shape this doesn't understand -- fail the
                     // whole function's hash rather than silently mix a
                     // wrong or missing contribution in (see module doc
                     // comment).
+                    fid_diag(&format!(
+                        "unknown operand shape: {} | op{} space={} off_space={} off_off={:#x} off_size={} size={}",
+                        instr.instruction_text(),
+                        operand_index,
+                        handle
+                            .fixed
+                            .space
+                            .as_ref()
+                            .map_or("<none>", |sp| sp.name.as_str()),
+                        handle
+                            .fixed
+                            .offset_space
+                            .as_ref()
+                            .map_or("<none>", |sp| sp.name.as_str()),
+                        handle.fixed.offset_offset,
+                        handle.fixed.offset_size,
+                        handle.fixed.size
+                    ));
                     return None;
                 };
                 mix_memory_operand(operand_index, &shape)?
@@ -715,6 +824,7 @@ pub(crate) fn compute_fid_hashes(
 
     code_unit_index += 1; // now a count, not an index
     if code_unit_index < i32::try_from(FID_SHORT_CODE_UNIT_LIMIT).ok()? {
+        fid_diag("too few code units");
         return None;
     }
     let full_count = code_unit_index - call_count;
@@ -727,4 +837,62 @@ pub(crate) fn compute_fid_hashes(
         specific_count,
         specific_hash: specific_digest.digest_long(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `MessageDigestFidHasher.java`'s `obj instanceof Address` arm, spelled
+    /// out from the Java rather than from this module, so the test fails if
+    /// the mixing here drifts from the reference:
+    ///
+    /// ```java
+    /// specificUpdate = specificUpdate + (0xfeeddead + 1234567) * 67999;
+    /// fullUpdate += 0xfeeddead;
+    /// ```
+    ///
+    /// where both start at `(ii + 1) * 7777`.
+    #[test]
+    fn address_operand_matches_ghidras_arithmetic() {
+        for operand_index in 0..4usize {
+            let base = ((operand_index as i32) + 1).wrapping_mul(7777);
+            let expected_full = base.wrapping_add(0xfeed_dead_u32 as i32);
+            let expected_specific = base.wrapping_add(
+                (0xfeed_dead_u32 as i32)
+                    .wrapping_add(1_234_567)
+                    .wrapping_mul(67_999),
+            );
+            let got = mix_address_operand(operand_index).expect("address contribution");
+            assert_eq!(got.full, expected_full, "full, operand {operand_index}");
+            assert_eq!(
+                got.specific, expected_specific,
+                "specific, operand {operand_index}"
+            );
+            // An address contributes no *counted* scalar: Ghidra increments
+            // `specificCount` only in the `Scalar` arm.
+            assert_eq!(got.specific_count, 0);
+        }
+    }
+
+    /// A branch target and a same-position immediate that is known to be an
+    /// address hash identically -- the point being that the two paths into
+    /// the reference's `Address` behaviour must not diverge.
+    #[test]
+    fn address_operand_agrees_with_the_immediate_address_path() {
+        let resolve = |_: &str| -> Option<i64> { None };
+        for operand_index in 0..3usize {
+            let immediate = BoundOperand::Immediate {
+                value: 0x4011_c0,
+                encoded_size: 4,
+                signed: false,
+            };
+            let via_immediate = mix_operand(operand_index, &immediate, true, &resolve)
+                .expect("immediate-as-address contribution");
+            let via_address = mix_address_operand(operand_index).expect("address contribution");
+            assert_eq!(via_immediate.full, via_address.full);
+            assert_eq!(via_immediate.specific, via_address.specific);
+            assert_eq!(via_immediate.specific_count, via_address.specific_count);
+        }
+    }
 }
