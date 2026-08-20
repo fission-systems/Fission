@@ -21,6 +21,15 @@
 //!   four candidates replace a few jumps with thousands of repeated boolean
 //!   nodes. Formula growth must stay within the measured healthy envelope or
 //!   remain proportional to the transfer reduction.
+//! - **guard branch terms**: guard *size* is expression nodes, and a
+//!   short-circuit `&&` is three of them -- indistinguishable from `a + b`.
+//!   But in C `&&` and `||` *are* control flow: each one is a conditional
+//!   branch. So a candidate could take a function from 38 jumps to zero while
+//!   emitting 2,743 short-circuit operators, and every axis above reported a
+//!   clean win. Measured on the 250-function sample-set, short-circuit count
+//!   predicts decompiled CFG size at r=0.954 against r=0.233 for statement
+//!   count, and the functions carrying them hold 97% of the corpus's total
+//!   structural distance from source.
 //! The largest single guard is also measured for callers that open a new,
 //! broader candidate funnel. Total formula size can look affordable while one
 //! `if` carries most of the reaching-condition forest; the linear-fallback and
@@ -34,7 +43,7 @@
 //! rather than by how a particular corpus happens to score, which is what lets
 //! the drivers run at all.
 
-use fission_midend_prehir::{PreHirExpr, PreHirStmt};
+use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirStmt};
 
 /// What a structuring is worth, on every axis measurement has shown to matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -51,6 +60,14 @@ pub struct StructuringQuality {
     pub guard_formula_size: usize,
     /// Largest single guard expression, in expression nodes.
     pub max_guard_formula_size: usize,
+    /// Short-circuit operators (`&&`, `||`) across every guard.
+    ///
+    /// Each one is a conditional branch, so this is the guard axis measured in
+    /// the same unit as [`Self::gotos`] -- the unit the trade is actually
+    /// denominated in. [`Self::guard_formula_size`] cannot stand in for it:
+    /// one 2,000-node guard may be a single wide arithmetic comparison and
+    /// another a 600-term predicate chain.
+    pub guard_branch_terms: usize,
     /// Statements in the body, counted through every nested construct.
     ///
     /// The axis that catches a structuring paying for its jumps with text.
@@ -91,6 +108,7 @@ impl StructuringQuality {
             && self.empty_if_shells <= baseline.empty_if_shells
             && self.nesting_depth <= baseline.nesting_depth + removed
             && self.guard_formula_size <= guard_budget
+            && self.guard_branch_terms <= branch_term_budget(baseline.guard_branch_terms, removed)
             && self.statements <= statement_budget(baseline.statements, removed)
     }
 
@@ -110,6 +128,9 @@ impl StructuringQuality {
         let guard_budget = guard_budget(baseline.guard_formula_size, removed);
         if self.guard_formula_size > guard_budget {
             out.push("guard_formula_size");
+        }
+        if self.guard_branch_terms > branch_term_budget(baseline.guard_branch_terms, removed) {
+            out.push("guard_branch_terms");
         }
         if self.statements > statement_budget(baseline.statements, removed) {
             out.push("statements");
@@ -166,6 +187,65 @@ fn statement_budget(baseline_statements: usize, removed_gotos: usize) -> usize {
     // for the same trade, so this refuses only the runaway case.
     const MAX_STATEMENTS_PER_REMOVED_GOTO: usize = 16;
     baseline_statements.saturating_add(removed_gotos.saturating_mul(MAX_STATEMENTS_PER_REMOVED_GOTO))
+}
+
+/// How many short-circuit branches a structuring may add for the jumps it
+/// removes.
+///
+/// The one budget denominated in the same unit as the thing being optimised.
+/// Every other guard budget counts expression nodes, which cannot tell
+/// `a && b` from `a + b` -- so a candidate could take a function from 38 jumps
+/// to zero by emitting 2,743 short-circuit operators and every axis reported a
+/// clean win. It is not one: `&&` is a conditional branch, so that trade
+/// removed 38 branches and added 2,743.
+///
+/// One per removed jump, because a jump is a branch and `&&` is a branch. At
+/// that rate the budget states an invariant rather than a tolerance -- a
+/// candidate may add at most as many short-circuits as it removed jumps, so
+/// **the total number of branches never increases**. It still admits the
+/// legitimate fold, since turning `if (a) if (b) X;` into `if (a && b) X;`
+/// spends exactly one term for the one transfer it removes, while refusing a
+/// reaching-condition formula, which spends hundreds.
+///
+/// Swept over the 250-function sample-set, counting both kinds of branch:
+///
+/// ```text
+/// per-goto   gotos   short-circuit   total branches
+///        0    1,297              85           1,382
+///        1    1,123             228           1,351   <- minimum
+///        2    1,030             537           1,567
+///        4      963           1,347           2,310
+///        8      936           1,983           2,919
+///       32      729          11,570          12,299
+///      512      617          27,866          28,483   <- previous behaviour
+/// ```
+///
+/// The old setting bought 506 fewer jumps for 27,638 more branch terms: 55
+/// branches spent per branch removed. Measured on the decompiled CFGs
+/// themselves rather than on this proxy -- short-circuit count predicts CFG
+/// size at r=0.954 -- the same sweep moves the structural mass the corpus
+/// carries:
+///
+/// ```text
+/// per-goto   CFG nodes+edges   mean/median   largest function
+///      512            87,073         15.3x        4,721 nodes
+///        8            18,895          3.3x          491 nodes
+///        2            14,172          2.8x          281 nodes
+///        1            13,191          2.7x          281 nodes
+/// ```
+///
+/// Every other decompiler on DecBench sits between 1.8x and 3.4x, so 8 already
+/// reaches the band. 1 is chosen over it for the invariant rather than the
+/// last 0.6x: it is the only rate that is not a tuned number, and it still
+/// carries 30% less structural mass than 8 does.
+///
+/// A per-guard ceiling was tried instead and is dominated: capping one guard
+/// at 16 terms gives 1,040 jumps and 763 terms against this rate at 2 giving
+/// 1,030 and 537 -- worse on both axes, because rejecting a candidate for its
+/// largest guard discards all of its jump removals at once.
+fn branch_term_budget(baseline_terms: usize, removed_gotos: usize) -> usize {
+    const MAX_BRANCH_TERMS_PER_REMOVED_GOTO: usize = 1;
+    baseline_terms.saturating_add(removed_gotos.saturating_mul(MAX_BRANCH_TERMS_PER_REMOVED_GOTO))
 }
 
 fn guard_budget(baseline_size: usize, removed_gotos: usize) -> usize {
@@ -246,6 +326,42 @@ fn add_guard(q: &mut StructuringQuality, guard: &PreHirExpr) {
     let size = expr_size(guard);
     q.guard_formula_size = q.guard_formula_size.saturating_add(size);
     q.max_guard_formula_size = q.max_guard_formula_size.max(size);
+    q.guard_branch_terms = q
+        .guard_branch_terms
+        .saturating_add(expr_branch_terms(guard));
+}
+
+/// Short-circuit operators in `e`, each of which is one conditional branch.
+pub fn expr_branch_terms(e: &PreHirExpr) -> usize {
+    match e {
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => 0,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => expr_branch_terms(expr),
+        PreHirExpr::Binary { op, lhs, rhs, .. } => {
+            let own = usize::from(matches!(
+                op,
+                PreHirBinaryOp::LogicalAnd | PreHirBinaryOp::LogicalOr
+            ));
+            own + expr_branch_terms(lhs) + expr_branch_terms(rhs)
+        }
+        PreHirExpr::Index { base, index, .. } => expr_branch_terms(base) + expr_branch_terms(index),
+        // `?:` branches too, and its arms may carry their own short circuits.
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            1 + expr_branch_terms(cond)
+                + expr_branch_terms(then_expr)
+                + expr_branch_terms(else_expr)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().map(expr_branch_terms).sum(),
+    }
 }
 
 /// Total size of every guard in a body, counted in expression nodes.
@@ -452,6 +568,21 @@ mod tests {
         assert_eq!(guard_formula_size(&flat), guard_formula_size(&nested));
     }
 
+    /// Wide in expression nodes, and free of short-circuit branches, so the
+    /// size axis can be exercised on its own.
+    fn doubled_arith(depth: usize) -> PreHirExpr {
+        if depth == 0 {
+            return cond();
+        }
+        let inner = doubled_arith(depth - 1);
+        PreHirExpr::Binary {
+            op: fission_midend_prehir::PreHirBinaryOp::Add,
+            lhs: Box::new(inner.clone()),
+            rhs: Box::new(inner),
+            ty: fission_midend_core::ir::NirType::Bool,
+        }
+    }
+
     fn doubled_cond(depth: usize) -> PreHirExpr {
         if depth == 0 {
             return cond();
@@ -473,15 +604,20 @@ mod tests {
         // 4,095 nodes for one jump was over budget under the 2,008-node
         // envelope, which described a weaker driver's output. Candidates in
         // this range are the ones now reaching zero jumps.
+        // Built from arithmetic rather than `&&`, because size and branching
+        // are separate axes: a guard this wide is affordable, and the same
+        // width spent on short-circuits is not (see
+        // `branches_are_budgeted_against_the_jumps_they_replace`).
         let inside_envelope = measure(&[PreHirStmt::If {
-            cond: doubled_cond(11), // 4,095 expression nodes.
+            cond: doubled_arith(11), // 4,095 expression nodes, no branches.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
+        assert_eq!(inside_envelope.guard_branch_terms, 0);
         assert!(inside_envelope.improves_on(&baseline));
 
         let over_budget = measure(&[PreHirStmt::If {
-            cond: doubled_cond(14), // 32,767 nodes for the same one-jump saving.
+            cond: doubled_arith(14), // 32,767 nodes for the same one-jump saving.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
@@ -500,7 +636,7 @@ mod tests {
         // Concentrating several terms into one guard is what taking a function
         // to zero jumps looks like, so it has to be affordable.
         let concentrated = measure(&[PreHirStmt::If {
-            cond: doubled_cond(3), // Fifteen nodes for a one-jump saving.
+            cond: doubled_arith(3), // Fifteen nodes for a one-jump saving.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
@@ -511,11 +647,48 @@ mod tests {
         // worth is still refused -- the measured failure was 160,423 nodes and
         // 45 seconds.
         let runaway = measure(&[PreHirStmt::If {
-            cond: doubled_cond(14), // 32,767 nodes for the same one-jump saving.
+            cond: doubled_arith(14), // 32,767 nodes for the same one-jump saving.
             then_body: Rc::new(vec![goto("a")]),
             else_body: Rc::new(Vec::new()),
         }]);
         assert!(!runaway.has_proportional_max_guard_growth(&baseline));
+    }
+
+    #[test]
+    fn branches_are_budgeted_against_the_jumps_they_replace() {
+        // Three jumps in, and the candidate spends one short-circuit to remove
+        // one of them -- what folding `if (a) if (b) X;` into `if (a && b) X;`
+        // costs.
+        let baseline = measure(&[goto("a"), goto("b"), goto("c")]);
+        let folded = measure(&[
+            PreHirStmt::If {
+                cond: doubled_cond(1), // One `&&`.
+                then_body: Rc::new(vec![goto("a")]),
+                else_body: Rc::new(Vec::new()),
+            },
+            goto("b"),
+        ]);
+        assert_eq!(folded.guard_branch_terms, 1);
+        assert!(folded.improves_on(&baseline));
+
+        // The reaching-condition shape: the jumps do disappear, and every
+        // other axis reports a win, but the branches they were made of come
+        // back as predicate terms and there are more of them than there were
+        // jumps. Measured at its extreme on the corpus, 38 jumps removed for
+        // 2,743 short-circuit operators.
+        let path_conditions = measure(&[PreHirStmt::If {
+            cond: doubled_cond(3), // Seven `&&` for three jumps.
+            then_body: Rc::new(vec![PreHirStmt::Return(None)]),
+            else_body: Rc::new(Vec::new()),
+        }]);
+        assert_eq!(path_conditions.gotos, 0);
+        assert!(path_conditions.guard_formula_size <= 8_000);
+        assert!(!path_conditions.improves_on(&baseline));
+        assert!(
+            path_conditions
+                .regressions_against(&baseline)
+                .contains(&"guard_branch_terms")
+        );
     }
 
     #[test]
