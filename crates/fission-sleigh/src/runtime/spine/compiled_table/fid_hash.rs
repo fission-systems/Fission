@@ -74,6 +74,37 @@ enum MemoryAddressShape {
 
 /// If `varnode` is itself a register (not produced by any op -- e.g. a raw
 /// input to this instruction's p-code), returns its register-space offset.
+/// The address a lone `LOAD`/`STORE` in this instruction dereferences.
+///
+/// The handle route to a memory operand is not always populated: a store
+/// destination such as `mov dword ptr [RBX],EAX` arrives with an entirely
+/// empty `RuntimeFixedHandle` -- no space, no offset space, no sizes -- and an
+/// operand subtable carrying no handles of its own, so there is no varnode for
+/// [`trace_simple_memory_address`] to start from. The p-code still says
+/// exactly what the address is, and `LOAD`/`STORE` name it directly as their
+/// address input.
+///
+/// Restricted to instructions with exactly one such op on purpose: with two,
+/// nothing here proves which display operand owns which, and a wrong operand
+/// mix is the failure mode this module refuses to risk.
+fn sole_dereferenced_address(ops: &[fission_pcode::PcodeOp]) -> Option<&fission_pcode::Varnode> {
+    let mut found = None;
+    for op in ops {
+        if !matches!(
+            op.opcode,
+            fission_pcode::PcodeOpcode::Load | fission_pcode::PcodeOpcode::Store
+        ) {
+            continue;
+        }
+        // Both carry `(space_id_const, address, ...)`.
+        let address = op.inputs.get(1)?;
+        if found.replace(address).is_some() {
+            return None;
+        }
+    }
+    found
+}
+
 fn as_register_offset(v: &fission_pcode::Varnode, register_space_index: u64) -> Option<u64> {
     (!v.is_constant && u64::from(v.space_id) == register_space_index).then_some(v.offset)
 }
@@ -744,6 +775,56 @@ pub(crate) fn compute_fid_hashes(
                         target_size,
                     )
                 });
+                // The operand's own handle is empty, but its subtable carries
+                // exactly one that names a register. That is Ghidra's
+                // `getOpObjects` flattening: the display operand is a
+                // subtable whose single object is the register, and it
+                // reports the `Register`, not the subtable. Restricted to the
+                // single-handle case, because with more than one this would
+                // have to reproduce the reference's whole accumulation order
+                // rather than read one value off.
+                if handle.fixed.space.is_none() {
+                    if let Some(sub) = handle.subtable_state.as_ref() {
+                        if let [inner] = sub.handles.as_slice() {
+                            if inner
+                                .fixed
+                                .space
+                                .as_ref()
+                                .is_some_and(|sp| sp.index == compiled.sla_register_space_index)
+                                && inner.debug_value.is_none()
+                            {
+                                let index_term = i32::try_from(operand_index)
+                                    .ok()?
+                                    .wrapping_add(1)
+                                    .wrapping_mul(7777);
+                                let mixed = reg_mix(inner.fixed.offset_offset)?;
+                                full_digest.update_i32(index_term.wrapping_add(mixed));
+                                specific_digest.update_i32(index_term.wrapping_add(mixed));
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // Still nothing: the handle never named a varnode to trace
+                // from, so ask the p-code which address this instruction
+                // actually dereferences.
+                let shape = shape.or_else(|| {
+                    let address = sole_dereferenced_address(ops)?;
+                    if let Some(offset) =
+                        as_register_offset(address, compiled.sla_register_space_index)
+                    {
+                        return Some(MemoryAddressShape::Register(offset));
+                    }
+                    trace_simple_memory_address(
+                        ops,
+                        compiled.sla_register_space_index,
+                        u64::from(address.space_id),
+                        address.offset,
+                        address.size,
+                    )
+                });
+
                 // Only *after* the tracer declines: a register-space handle
                 // may still be a memory address, since AArch64 pre-index
                 // addressing leaves the computed address directly in a
@@ -785,7 +866,7 @@ pub(crate) fn compute_fid_hashes(
                     // wrong or missing contribution in (see module doc
                     // comment).
                     fid_diag(&format!(
-                        "unknown operand shape: {} | op{} space={} off_space={} off_off={:#x} off_size={} size={}",
+                        "unknown operand shape: {} | op{} space={} off_space={} off_off={:#x} off_size={} size={} sub={}",
                         instr.instruction_text(),
                         operand_index,
                         handle
@@ -800,7 +881,27 @@ pub(crate) fn compute_fid_hashes(
                             .map_or("<none>", |sp| sp.name.as_str()),
                         handle.fixed.offset_offset,
                         handle.fixed.offset_size,
-                        handle.fixed.size
+                        handle.fixed.size,
+                        handle.subtable_state.as_ref().map_or_else(
+                            || "none".to_string(),
+                            |st| format!(
+                                "{} handles [{}]",
+                                st.handles.len(),
+                                st.handles
+                                    .iter()
+                                    .map(|h| format!(
+                                        "{}@{:#x}/dbg={}",
+                                        h.fixed
+                                            .space
+                                            .as_ref()
+                                            .map_or("<none>", |sp| sp.name.as_str()),
+                                        h.fixed.offset_offset,
+                                        h.debug_value.is_some()
+                                    ))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        )
                     ));
                     return None;
                 };

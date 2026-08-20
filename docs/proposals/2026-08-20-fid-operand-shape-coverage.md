@@ -18,7 +18,14 @@ ELF32-ARM (8 bins)       8         0        0             0
 `fid_hashes` declines roughly 95% of decoded candidates, and not one of the
 hashes it does produce matches any of the 228 shipped databases. Every named
 libc call in the x86-64 output comes from those binaries' 33,208 dynamic
-symbols; FID contributes nothing on any architecture.
+symbols; FID contributes nothing here.
+
+**Correction, measured later in the same cycle:** "matches nothing" is true of
+this corpus and must not be generalised. Every sample-set x86-64 binary is
+dynamically linked, so its library code is not in the image and zero matches
+is correct behaviour rather than a defect. On a statically linked target --
+`vendor/binaries/tests/x86_64/elf_with_static_libc_ubuntu_2004_stripped` --
+the same build already matched three functions before any change here.
 
 The decline reasons, measured:
 
@@ -115,33 +122,44 @@ ISA-agnostic check:
       verified unrelated earlier in this cycle.
 - [x] Re-measured on the sample-set binaries the anchor was taken from.
 
-Measured result:
+Measured result. Hashes produced, before this cycle's changes and after:
 
 ```text
-binary        hashed before   hashed after
-bin_000.elf               3             11
-bin_002.elf              14             20
-bin_009.elf              41             82
-bin_001.elf (ARM)         0              0
+binary                                       before   after
+bin_000.elf (sample-set, dynamic)                 3      25
+bin_002.elf (sample-set, dynamic)                14     335
+bin_009.elf (sample-set, dynamic)                41     138
+elf_with_static_libc_ubuntu_2004_stripped       192     377
+elf_with_static_libc_ubuntu_2004                235     466
+static                                          177     380
+bin_001.elf (sample-set, ARM)                     0       0
 ```
 
-**No end-to-end improvement is claimed.** FID still matches zero functions.
-Two reasons, and they are different:
+Three operand shapes were closed, in the order the reference classifies:
 
-- The x86-64 binaries measured here are dynamically linked, so their library
-  code is not in the image at all. FID identifies statically linked library
-  code; having nothing to match on them is correct behaviour, not a defect.
-- The ARM binaries *are* statically linked, and are where a match should
-  appear -- but they still produce no hashes, because their remaining declines
-  are load/store operands (939 of 2,091), and those arrive with a completely
-  empty handle: `space`, `offset_space`, `offset_offset`, `offset_size` and
-  `size` are all unset. There is nothing to classify. The same shape accounts
-  for 41 of the 45 remaining x86-64 declines (`mov dword ptr [RBX],EAX` and
-  friends).
+1. a direct branch or call target, as `Address`;
+2. the address a lone `LOAD`/`STORE` dereferences, when the handle names no
+   varnode to trace from -- this is the one that moved the numbers, since a
+   store destination such as `mov dword ptr [RBX],EAX` arrives with an
+   entirely empty handle;
+3. a bare register, read either off the handle or off a single-handle operand
+   subtable, which is Ghidra's `getOpObjects` flattening.
 
-That is a gap in the SLEIGH walker's handle population, not in this module,
-and it is the next thing to own. Until it is closed, FID cannot pay off on a
-statically linked target regardless of what this module does.
+**Match count is unchanged at three on each static binary, and no end-to-end
+gain is claimed.** Hash production roughly doubled without converting into
+matches, which leaves two possibilities this cycle did not separate: the newly
+hashed functions are genuinely absent from the vendored databases (an Ubuntu
+20.04 glibc against databases built from other distributions), or the new
+hashes disagree with Ghidra's. Nothing regressed -- the three that matched
+before still match, and the AArch64 golden vector still passes -- but the
+next cycle should settle which, because the answer decides whether the
+remaining work is more operand shapes or more databases.
+
+ARM still produces no hashes at all. Its remaining declines are `stmda<cond>`
+forms with an operand subtable carrying no handles, and those are what
+arbitrary data decodes to under ARM -- a signal that `balanced` discovery is
+claiming data regions on that target, which is a discovery question rather
+than a hashing one.
 
 ## 6. AI Review / Prompt Firewall
 
