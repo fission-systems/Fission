@@ -1275,7 +1275,13 @@
 <p><code>fid_hashes</code> declines roughly 95% of decoded candidates, and not one of the
 hashes it does produce matches any of the 228 shipped databases. Every named
 libc call in the x86-64 output comes from those binaries' 33,208 dynamic
-symbols; FID contributes nothing on any architecture.</p>
+symbols; FID contributes nothing here.</p>
+<p><strong>Correction, measured later in the same cycle:</strong> "matches nothing" is true of
+this corpus and must not be generalised. Every sample-set x86-64 binary is
+dynamically linked, so its library code is not in the image and zero matches
+is correct behaviour rather than a defect. On a statically linked target --
+<code>vendor/binaries/tests/x86_64/elf_with_static_libc_ubuntu_2004_stripped</code> --
+the same build already matched three functions before any change here.</p>
 <p>The decline reasons, measured:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>                       ARM (of 2,091)   x86-64 (of 59)
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>unknown operand shape           2,043               53
@@ -1361,30 +1367,40 @@ the tracer declines, never a shortcut past it.</p>
       verified unrelated earlier in this cycle.</li>
 <li>[x] Re-measured on the sample-set binaries the anchor was taken from.</li>
 </ul>
-<p>Measured result:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>binary        hashed before   hashed after
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>bin_000.elf               3             11
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>bin_002.elf              14             20
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>bin_009.elf              41             82
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>bin_001.elf (ARM)         0              0
+<p>Measured result. Hashes produced, before this cycle's changes and after:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>binary                                       before   after
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>bin_000.elf (sample-set, dynamic)                 3      25
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>bin_002.elf (sample-set, dynamic)                14     335
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>bin_009.elf (sample-set, dynamic)                41     138
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>elf_with_static_libc_ubuntu_2004_stripped       192     377
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>elf_with_static_libc_ubuntu_2004                235     466
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>static                                          177     380
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>bin_001.elf (sample-set, ARM)                     0       0
 </span></code></pre></div>
-<p><strong>No end-to-end improvement is claimed.</strong> FID still matches zero functions.
-Two reasons, and they are different:</p>
-<ul>
-<li>The x86-64 binaries measured here are dynamically linked, so their library
-  code is not in the image at all. FID identifies statically linked library
-  code; having nothing to match on them is correct behaviour, not a defect.</li>
-<li>The ARM binaries <em>are</em> statically linked, and are where a match should
-  appear -- but they still produce no hashes, because their remaining declines
-  are load/store operands (939 of 2,091), and those arrive with a completely
-  empty handle: <code>space</code>, <code>offset_space</code>, <code>offset_offset</code>, <code>offset_size</code> and
-  <code>size</code> are all unset. There is nothing to classify. The same shape accounts
-  for 41 of the 45 remaining x86-64 declines (<code>mov dword ptr [RBX],EAX</code> and
-  friends).</li>
-</ul>
-<p>That is a gap in the SLEIGH walker's handle population, not in this module,
-and it is the next thing to own. Until it is closed, FID cannot pay off on a
-statically linked target regardless of what this module does.</p>
+<p>Three operand shapes were closed, in the order the reference classifies:</p>
+<ol>
+<li>a direct branch or call target, as <code>Address</code>;</li>
+<li>the address a lone <code>LOAD</code>/<code>STORE</code> dereferences, when the handle names no
+   varnode to trace from -- this is the one that moved the numbers, since a
+   store destination such as <code>mov dword ptr [RBX],EAX</code> arrives with an
+   entirely empty handle;</li>
+<li>a bare register, read either off the handle or off a single-handle operand
+   subtable, which is Ghidra's <code>getOpObjects</code> flattening.</li>
+</ol>
+<p><strong>Match count is unchanged at three on each static binary, and no end-to-end
+gain is claimed.</strong> Hash production roughly doubled without converting into
+matches, which leaves two possibilities this cycle did not separate: the newly
+hashed functions are genuinely absent from the vendored databases (an Ubuntu
+20.04 glibc against databases built from other distributions), or the new
+hashes disagree with Ghidra's. Nothing regressed -- the three that matched
+before still match, and the AArch64 golden vector still passes -- but the
+next cycle should settle which, because the answer decides whether the
+remaining work is more operand shapes or more databases.</p>
+<p>ARM still produces no hashes at all. Its remaining declines are <code>stmda&lt;cond&gt;</code>
+forms with an operand subtable carrying no handles, and those are what
+arbitrary data decodes to under ARM -- a signal that <code>balanced</code> discovery is
+claiming data regions on that target, which is a discovery question rather
+than a hashing one.</p>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
 <ul>
 <li>No external model was asked for implementation advice.</li>
