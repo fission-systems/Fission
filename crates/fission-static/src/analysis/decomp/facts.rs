@@ -373,14 +373,32 @@ impl FactStore {
         binary: &LoadedBinary,
         databases: &[FidDatabase],
     ) {
+        let diag = std::env::var_os("FISSION_FID_DIAG").is_some();
         let Some(load_spec) = binary.load_spec() else {
+            if diag {
+                eprintln!("[FID-DIAG] stop: no load_spec");
+            }
             return;
         };
+        if diag {
+            eprintln!(
+                "[FID-DIAG] language_id={} databases={} functions={}",
+                load_spec.pair.language_id.as_str(),
+                databases.len(),
+                binary.functions.len()
+            );
+        }
         let Ok(frontend) = RuntimeSleighFrontend::new_for_load_spec(load_spec) else {
+            if diag {
+                eprintln!("[FID-DIAG] stop: frontend construction failed");
+            }
             return;
         };
         let Some(register_model) = register_model_for_language(load_spec.pair.language_id.as_str())
         else {
+            if diag {
+                eprintln!("[FID-DIAG] stop: no register model for language");
+            }
             return;
         };
         let resolve_register_offset = |name: &str| -> Option<i64> {
@@ -403,6 +421,8 @@ impl FactStore {
         // candidate, decode+hash+lookup done in parallel, only the final
         // `ingest_name_fact` mutation stays sequential.
         use rayon::prelude::*;
+        let n_decoded = std::sync::atomic::AtomicUsize::new(0);
+        let n_hashed = std::sync::atomic::AtomicUsize::new(0);
         let matches: Vec<(u64, String)> = binary
             .functions
             .par_iter()
@@ -444,8 +464,17 @@ impl FactStore {
                     }
                 }
 
-                let (_full_count, full_hash, _specific_count, specific_hash) =
-                    frontend.fid_hashes(&decoded.instructions, &resolve_register_offset)?;
+                if diag {
+                    n_decoded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let Some((_full_count, full_hash, _specific_count, specific_hash)) =
+                    frontend.fid_hashes(&decoded.instructions, &resolve_register_offset)
+                else {
+                    return None;
+                };
+                if diag {
+                    n_hashed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
 
                 let best_match = databases
                     .iter()
@@ -455,6 +484,15 @@ impl FactStore {
                 Some((func.address, best_match.name))
             })
             .collect();
+
+        if diag {
+            eprintln!(
+                "[FID-DIAG] decoded={} hashed={} matched={}",
+                n_decoded.load(std::sync::atomic::Ordering::Relaxed),
+                n_hashed.load(std::sync::atomic::Ordering::Relaxed),
+                matches.len()
+            );
+        }
 
         for (address, name) in matches {
             // Ingest matched name fact with tiered priority: FactProvenance::StrongFid
