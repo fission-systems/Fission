@@ -1389,6 +1389,199 @@ fn inline_loop_condition_trailing_temps_substitutes_condition_chain() {
 }
 
 #[test]
+fn inline_loop_header_temp_promotes_single_use_load_into_condition() {
+    let load = PreHirExpr::Load {
+        ptr: Box::new(PreHirExpr::Var("table_entry".to_string())),
+        ty: int(16),
+    };
+    let mut func = PreHirFunction {
+        name: "test_loop_header_temp".to_string(),
+        body: vec![PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar90".to_string()),
+                    rhs: load.clone(),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Eq,
+                        lhs: Box::new(PreHirExpr::Var("xVar90".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(-1, int(16))),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![PreHirStmt::Break].into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Expr(PreHirExpr::Var("body_value".to_string())),
+            ].into(),
+        }],
+        ..Default::default()
+    };
+
+    assert!(inline_loop_condition_trailing_temps(&mut func));
+    let PreHirStmt::While { cond, body } = &func.body[0] else {
+        panic!("expected while");
+    };
+    assert_eq!(body.len(), 1);
+    assert!(matches!(
+        cond,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr,
+            ..
+        } if matches!(
+            expr.as_ref(),
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Eq,
+                lhs,
+                ..
+            } if lhs.as_ref() == &load
+        )
+    ));
+}
+
+#[test]
+fn inline_loop_header_temp_resolves_pcode_assignment_chain() {
+    let mut func = PreHirFunction {
+        name: "test_loop_header_chain".to_string(),
+        body: vec![PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("iVar55".to_string()),
+                    rhs: PreHirExpr::Var("index".to_string()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("iVar55".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shl,
+                        lhs: Box::new(PreHirExpr::Var("iVar55".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(4, int(32))),
+                        ty: int(64),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar86".to_string()),
+                    rhs: PreHirExpr::Const(300192, int(64)),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar86".to_string()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("iVar55".to_string())),
+                            rhs: Box::new(PreHirExpr::Const(300192, int(64))),
+                            ty: int(64),
+                        }),
+                        ty: int(16),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar90".to_string()),
+                    rhs: PreHirExpr::Var("xVar86".to_string()),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Eq,
+                        lhs: Box::new(PreHirExpr::Var("xVar90".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(-1, int(16))),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![PreHirStmt::Break].into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Expr(PreHirExpr::Var("body_value".to_string())),
+            ].into(),
+        }],
+        ..Default::default()
+    };
+
+    assert!(inline_loop_condition_trailing_temps(&mut func));
+    let PreHirStmt::While { cond, body } = &func.body[0] else {
+        panic!("expected while");
+    };
+    assert_eq!(body.len(), 1);
+    assert!(matches!(
+        cond,
+        PreHirExpr::Unary { expr, .. } if matches!(
+            expr.as_ref(),
+            PreHirExpr::Binary { lhs, .. }
+                if matches!(lhs.as_ref(), PreHirExpr::Load { .. })
+        )
+    ));
+    assert!(!expr_mentions_var(cond, "iVar55"));
+    assert!(!expr_mentions_var(cond, "xVar86"));
+    assert!(!expr_mentions_var(cond, "xVar90"));
+}
+
+#[test]
+fn inline_loop_header_temp_keeps_value_read_after_guard() {
+    let mut func = PreHirFunction {
+        name: "test_loop_header_live_temp".to_string(),
+        body: vec![PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar90".to_string()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("table_entry".to_string())),
+                        ty: int(16),
+                    },
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("xVar90".to_string()),
+                    then_body: vec![PreHirStmt::Break].into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Expr(PreHirExpr::Var("xVar90".to_string())),
+            ].into(),
+        }],
+        ..Default::default()
+    };
+
+    assert!(!inline_loop_condition_trailing_temps(&mut func));
+    let PreHirStmt::While { cond, body } = &func.body[0] else {
+        panic!("expected while");
+    };
+    assert!(matches!(cond, PreHirExpr::Const(1, _)));
+    assert_eq!(body.len(), 3);
+}
+
+#[test]
+fn inline_loop_header_temp_keeps_side_effecting_call() {
+    let mut func = PreHirFunction {
+        name: "test_loop_header_call".to_string(),
+        body: vec![PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar90".to_string()),
+                    rhs: PreHirExpr::Call {
+                        target: "next_item".to_string(),
+                        args: Vec::new(),
+                        ty: int(64),
+                    },
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("xVar90".to_string()),
+                    then_body: vec![PreHirStmt::Break].into(),
+                    else_body: Vec::new().into(),
+                },
+            ].into(),
+        }],
+        ..Default::default()
+    };
+
+    assert!(!inline_loop_condition_trailing_temps(&mut func));
+    let PreHirStmt::While { cond, body } = &func.body[0] else {
+        panic!("expected while");
+    };
+    assert!(matches!(cond, PreHirExpr::Const(1, _)));
+    assert_eq!(body.len(), 2);
+}
+
+#[test]
 fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
     let mut stmts = vec![
         PreHirStmt::Assign {

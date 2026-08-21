@@ -459,12 +459,280 @@ pub fn inline_loop_condition_trailing_temps(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     for _ in 0..8 {
         let use_count = DefUseMap::build(&func.body).use_count;
-        if !inline_loop_condition_trailing_temps_in_stmts(&mut func.body, &use_count) {
+        let leading_changed = inline_loop_header_break_temps_in_stmts(&mut func.body, &use_count);
+        let trailing_changed =
+            inline_loop_condition_trailing_temps_in_stmts(&mut func.body, &use_count);
+        if !leading_changed && !trailing_changed {
             break;
         }
         changed = true;
     }
     changed
+}
+
+/// Promote a one-use loop-header temporary followed by a break guard into the
+/// loop condition. The RHS may contain a load because it is moved, not copied;
+/// its evaluation count and order therefore remain unchanged.
+fn inline_loop_header_break_temps_in_stmts(
+    stmts: &mut Vec<PreHirStmt>,
+    read_counts: &HashMap<String, usize>,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::While { cond, body } => {
+                changed |= try_inline_loop_header_break_temp(cond, body, read_counts);
+                changed |= inline_loop_header_break_temps_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    read_counts,
+                );
+            }
+            PreHirStmt::DoWhile { body, .. } | PreHirStmt::Block(body) => {
+                changed |= inline_loop_header_break_temps_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    read_counts,
+                );
+            }
+            PreHirStmt::For { init, update, body, .. } => {
+                if let Some(init) = init
+                    && let PreHirStmt::Block(init_body) = init.as_mut()
+                {
+                    changed |= inline_loop_header_break_temps_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(init_body),
+                        read_counts,
+                    );
+                }
+                if let Some(update) = update
+                    && let PreHirStmt::Block(update_body) = update.as_mut()
+                {
+                    changed |= inline_loop_header_break_temps_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(update_body),
+                        read_counts,
+                    );
+                }
+                changed |= inline_loop_header_break_temps_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    read_counts,
+                );
+            }
+            PreHirStmt::If { then_body, else_body, .. } => {
+                changed |= inline_loop_header_break_temps_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    read_counts,
+                );
+                changed |= inline_loop_header_break_temps_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    read_counts,
+                );
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    changed |= inline_loop_header_break_temps_in_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        read_counts,
+                    );
+                }
+                changed |= inline_loop_header_break_temps_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    read_counts,
+                );
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+fn try_inline_loop_header_break_temp(
+    loop_cond: &mut PreHirExpr,
+    body: &mut std::rc::Rc<Vec<PreHirStmt>>,
+    read_counts: &HashMap<String, usize>,
+) -> bool {
+    if !matches!(loop_cond, PreHirExpr::Const(value, _) if *value != 0) {
+        return false;
+    }
+    let body_ref = body.as_ref();
+    let guard_idx = body_ref
+        .iter()
+        .position(|stmt| !matches!(stmt, PreHirStmt::Assign { .. }))
+        .unwrap_or(body_ref.len());
+    if guard_idx == 0 || guard_idx > 8 {
+        return false;
+    }
+    let Some(PreHirStmt::If {
+        cond: break_cond,
+        then_body,
+        else_body,
+    }) = body_ref.get(guard_idx)
+    else {
+        return false;
+    };
+    if !matches!(then_body.as_slice(), [PreHirStmt::Break]) || !else_body.is_empty() {
+        return false;
+    }
+
+    let prefix = &body_ref[..guard_idx];
+    let mut assigned_names = HashSet::default();
+    let mut resolved_values = HashMap::default();
+    let mut original_memory_reads = expr_memory_read_count(break_cond);
+    for stmt in prefix {
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } = stmt
+        else {
+            return false;
+        };
+        if !is_trivial_temp_name(name) || expr_has_side_effects(rhs) {
+            return false;
+        }
+        let resolved_rhs = resolve_loop_header_expr(rhs, &resolved_values);
+        if !expr_is_loop_header_inline_candidate(&resolved_rhs, 16) {
+            return false;
+        }
+        original_memory_reads += expr_memory_read_count(rhs);
+        assigned_names.insert(name.clone());
+        resolved_values.insert(name.clone(), resolved_rhs);
+    }
+
+    for name in &assigned_names {
+        let prefix_reads = prefix
+            .iter()
+            .map(|stmt| count_var_uses_in_stmt(stmt, name))
+            .sum::<usize>();
+        let owned_reads = prefix_reads + count_var_uses(break_cond, name);
+        if read_counts.get(name).copied().unwrap_or(0) != owned_reads {
+            return false;
+        }
+    }
+
+    // More than one memory read would lose the explicit sequencing supplied
+    // by the prefix assignments. One read can be moved to the condition at
+    // exactly the same control-flow point without duplication or reordering.
+    if original_memory_reads > 1 {
+        return false;
+    }
+
+    let promoted_cond = resolve_loop_header_expr(break_cond, &resolved_values);
+    if promoted_cond == *break_cond
+        || expr_memory_read_count(&promoted_cond) != original_memory_reads
+        || !expr_is_loop_header_inline_candidate(&promoted_cond, 16)
+    {
+        return false;
+    }
+    *loop_cond = negate_expr(promoted_cond);
+    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).drain(..=guard_idx);
+    true
+}
+
+fn resolve_loop_header_expr(
+    expr: &PreHirExpr,
+    values: &HashMap<String, PreHirExpr>,
+) -> PreHirExpr {
+    match expr {
+        PreHirExpr::Var(name) => values.get(name).cloned().unwrap_or_else(|| expr.clone()),
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => expr.clone(),
+        PreHirExpr::Cast { ty, expr } => PreHirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(resolve_loop_header_expr(expr, values)),
+        },
+        PreHirExpr::Unary { op, expr, ty } => PreHirExpr::Unary {
+            op: *op,
+            expr: Box::new(resolve_loop_header_expr(expr, values)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Binary { op, lhs, rhs, ty } => PreHirExpr::Binary {
+            op: *op,
+            lhs: Box::new(resolve_loop_header_expr(lhs, values)),
+            rhs: Box::new(resolve_loop_header_expr(rhs, values)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Select { cond, then_expr, else_expr, ty } => PreHirExpr::Select {
+            cond: Box::new(resolve_loop_header_expr(cond, values)),
+            then_expr: Box::new(resolve_loop_header_expr(then_expr, values)),
+            else_expr: Box::new(resolve_loop_header_expr(else_expr, values)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Call { target, args, ty } => PreHirExpr::Call {
+            target: target.clone(),
+            args: args
+                .iter()
+                .map(|arg| resolve_loop_header_expr(arg, values))
+                .collect(),
+            ty: ty.clone(),
+        },
+        PreHirExpr::Load { ptr, ty } => PreHirExpr::Load {
+            ptr: Box::new(resolve_loop_header_expr(ptr, values)),
+            ty: ty.clone(),
+        },
+        PreHirExpr::PtrOffset { base, offset } => PreHirExpr::PtrOffset {
+            base: Box::new(resolve_loop_header_expr(base, values)),
+            offset: *offset,
+        },
+        PreHirExpr::Index { base, index, elem_ty } => PreHirExpr::Index {
+            base: Box::new(resolve_loop_header_expr(base, values)),
+            index: Box::new(resolve_loop_header_expr(index, values)),
+            elem_ty: elem_ty.clone(),
+        },
+        PreHirExpr::FieldAccess { base, field_name, offset, ty } => PreHirExpr::FieldAccess {
+            base: Box::new(resolve_loop_header_expr(base, values)),
+            field_name: field_name.clone(),
+            offset: *offset,
+            ty: ty.clone(),
+        },
+        PreHirExpr::AggregateCopy { src, size } => PreHirExpr::AggregateCopy {
+            src: Box::new(resolve_loop_header_expr(src, values)),
+            size: *size,
+        },
+    }
+}
+
+fn expr_memory_read_count(expr: &PreHirExpr) -> usize {
+    match expr {
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => 0,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => expr_memory_read_count(expr),
+        PreHirExpr::Load { ptr, .. } => 1 + expr_memory_read_count(ptr),
+        PreHirExpr::FieldAccess { base, .. } => 1 + expr_memory_read_count(base),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            expr_memory_read_count(lhs) + expr_memory_read_count(rhs)
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            1 + expr_memory_read_count(base) + expr_memory_read_count(index)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().map(expr_memory_read_count).sum(),
+        PreHirExpr::Select { cond, then_expr, else_expr, .. } => {
+            expr_memory_read_count(cond)
+                + expr_memory_read_count(then_expr)
+                + expr_memory_read_count(else_expr)
+        }
+    }
+}
+
+fn expr_is_loop_header_inline_candidate(expr: &PreHirExpr, depth_budget: usize) -> bool {
+    if depth_budget == 0 {
+        return false;
+    }
+    match expr {
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
+            expr_is_loop_header_inline_candidate(expr, depth_budget - 1)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index { base: lhs, index: rhs, .. } => {
+            expr_is_loop_header_inline_candidate(lhs, depth_budget - 1)
+                && expr_is_loop_header_inline_candidate(rhs, depth_budget - 1)
+        }
+        PreHirExpr::Call { .. }
+        | PreHirExpr::Select { .. }
+        | PreHirExpr::AggregateCopy { .. } => false,
+    }
 }
 
 /// Repair the `do { ... v = v - c; } while (v != c)` → `do { ... v = v - c; } while (v != 0)`

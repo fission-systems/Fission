@@ -616,7 +616,25 @@ pub fn build_normalize_pipeline() -> Pipeline {
                     ],
                 )),
         )
-        .group(group("cleanup", concept).pass(stage_pass("cleanup", concept, run_stage_cleanup)))
+        .group(
+            group("cleanup", concept)
+                .pass(stage_pass("cleanup", concept, run_stage_cleanup))
+                // rule_normalization in the cleanup stage can expose a
+                // compact header chain that did not exist during the first
+                // loop-condition pass.
+                .pass(gated_followup(
+                    fn_pass(
+                        "loop_condition_temp_inline_late",
+                        block,
+                        inline_loop_condition_trailing_temps,
+                    ),
+                    vec![cleanup_pass(
+                        "cleanup_loop_condition_temps_late",
+                        block,
+                        cleanup_after_loop_condition_temps,
+                    )],
+                )),
+        )
 }
 
 pub fn run_normalize_pipeline(func: &mut PreHirFunction, diag: bool, perf: bool) {
