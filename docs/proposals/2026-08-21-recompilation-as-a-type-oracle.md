@@ -48,8 +48,8 @@ enumeration.
       comparison needs.
 - [x] Source-side sensitivity: does a wrong type move the object code at all?
 - [x] Output-side gradient: does it still move against a real decompilation?
-- [ ] Whether the gradient can *find* a wrong type, not merely confirm a right
-      one. **This is the next measurement and the one that decides the idea.**
+- [x] Whether the gradient can *find* a wrong type, not merely confirm a right
+      one -- and whether what it finds is correct.
 
 **Source-side sensitivity.** Compile the corpus's own sources, change exactly
 one type, recompile, count instructions moved:
@@ -88,14 +88,44 @@ rolling_hash32              46/40              34           58       +24
 
 Four of five move, against six of twenty under arbitrary mutation.
 
-**What this does not yet show.** Every delta here is positive, which says the
-emitted type was already the better of the two -- the gradient confirms a
-right answer. Using it to *find* a wrong one needs cases where a change
-*reduces* the distance. Two appeared in the arbitrary-mutation run (-3 and
--5) and none in the targeted one, on five functions. The sample is far too
-small to conclude either way, and a larger targeted run hunting for negative
-deltas is the measurement that decides whether this is a search procedure or
-only a verifier.
+**Hunting the other sign.** For every variable reaching the code generator,
+every plausible alternative width and signedness was tried and the best kept.
+Across 27 functions at `-O2`, 14 were reachable by the harness and four of
+those yielded a typing that lands *closer* than what we emit. Checked against
+the corpus's own sources:
+
+```text
+function            distance      oracle's suggestion            source        verdict
+rotate_words        85 -> 19      ulonglong -> unsigned int      uint32_t      correct
+sum_array           21 -> 18      longlong -> unsigned long long size_t i      correct
+bounded_tlv_sum    102 -> 101     uint -> unsigned long long     size_t cursor correct
+clamp               21 -> 18      int -> unsigned int            int           WRONG
+```
+
+Three of four are right, and they are not trivial: `rotate_words` is typed
+`ulonglong` where the source says `uint32_t`, and correcting the width moved
+66 of the function's instructions. **The gradient finds real type errors.**
+
+**And it produces false positives.** `clamp` is the failure mode. Its original
+is seven instructions and our output stands 21 away from it -- a baseline
+already three times the function's own length, where our structure bears no
+relation to the original's. A three-instruction "improvement" under that is
+alignment noise, not a type fact.
+
+The three correct calls sit at baseline ratios of 0.60, 1.40 and 1.73 against
+the wrong one's 3.00, and the correct improvements include one of 66
+instructions against the wrong one's 3. Both suggest the confidence criterion
+lives in the baseline distance and the size of the improvement -- but four
+points cannot set a threshold, and picking one here would be fitting a sample
+of 27 functions.
+
+**Status: the principle is proved, the procedure is not usable yet.** A 25%
+false-positive rate applied to type inference would flip correct types and
+make the metric worse. Two things are needed before any production code:
+raising applicability past the current half (the harness finds variables by
+regex; `type_match.parse_c_variables` already does it properly), and finding
+the confidence criterion on a sample large enough that the threshold is not
+the sample's.
 
 A second limit: where our structure differs wildly from the original the
 baseline distance already exceeds the function's length -- `matrix_multiply`
