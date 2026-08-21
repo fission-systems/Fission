@@ -16,6 +16,9 @@ mod guard_invert;
 pub use guard_invert::invert_forward_guard_gotos;
 
 mod join_layout;
+
+/// Dropping statements control cannot reach.
+mod unreachable_tail;
 pub use join_layout::relocate_jump_only_joins;
 
 /// `protected` labels are never removed by the cleanup passes below even
@@ -69,6 +72,14 @@ pub fn finalize_post_layout_body(
             break;
         }
     }
+    // Once, after the loop has settled, never inside it. The rewrites above
+    // read the shape of the body they are given, and a tail this removes is
+    // one of the shapes they read: taking it away mid-fixpoint changed what
+    // the next round matched and cost a `select` that the diamond-join tests
+    // pin. Reachability is a property of the finished body, so this is the
+    // right place to decide it.
+    let referenced = collect_referenced_label_counts(&body);
+    let (body, _) = unreachable_tail::drop_unreachable_tails(body, &referenced);
     body
 }
 

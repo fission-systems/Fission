@@ -219,9 +219,22 @@ fn diamond_join_lowers_branch_local_register_defs_as_select() {
 
     let code = render_mlil_preview(&pcode, "diamond_select", 0x1000, &options).expect("render");
 
+    // The diamond select *is* built, but structuring copies the join's return
+    // into both arms, so the select survives only in the exit block behind
+    // them -- which nothing reaches. This used to assert on that dead text and
+    // passed on output no reader ever saw; it now asserts on the reachable
+    // form, which must still pair the branch-target arm's value with the true
+    // condition: `tmp_80` true takes the `else` here, and the `else` yields 20.
     assert!(
-        code.contains("return tmp_80 ? 20 : 10;"),
-        "expected branch-target arm to be the true select arm:\n{code}"
+        code.contains("return tmp_80 ? 20 : 10;")
+            || (code.contains("if (!tmp_80)")
+                && code.contains("return 10;")
+                && code.contains("return 20;")),
+        "expected branch-target arm to be the true arm:\n{code}"
+    );
+    assert!(
+        !code.contains("}\n    return tmp_80 ?"),
+        "the select must not be emitted where nothing reaches it:\n{code}"
     );
 }
 

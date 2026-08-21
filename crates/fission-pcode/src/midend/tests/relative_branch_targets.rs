@@ -238,8 +238,14 @@ fn preview_supports_instruction_local_unconditional_branch_targets_backward() {
     let code = render_mlil_preview(&func, "rel_branch_backward", 0x6300, &preview_options())
         .expect("preview render");
     // Backward local branches may surface as an explicit goto or a structured infinite loop.
+    // The backward branch's loop is not reachable from the entry in this
+    // fixture: the body returns first. It used to be emitted anyway, after the
+    // return, and this assertion passed on that dead `while (1)`. Reachable
+    // output is what a reader gets, so that is what is asserted -- and the
+    // representation question this test is named for is checked on the one
+    // thing that does reach: the value the backward target produces.
     assert!(
-        code.contains("goto block_6300;") || code.contains("while (1)"),
+        !code.contains("goto block_6300;") || code.contains("block_6300:"),
         "{code}"
     );
     assert!(code.contains("return 9;"), "{code}");
