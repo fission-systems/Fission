@@ -119,13 +119,48 @@ lives in the baseline distance and the size of the improvement -- but four
 points cannot set a threshold, and picking one here would be fitting a sample
 of 27 functions.
 
-**Status: the principle is proved, the procedure is not usable yet.** A 25%
-false-positive rate applied to type inference would flip correct types and
-make the metric worse. Two things are needed before any production code:
-raising applicability past the current half (the harness finds variables by
-regex; `type_match.parse_c_variables` already does it properly), and finding
-the confidence criterion on a sample large enough that the threshold is not
-the sample's.
+**Does a suggestion improve type recovery?** The distance dropping proves the
+compiler prefers the new typing; it does not prove the typing is right. So
+every suggestion was applied and re-scored against DWARF. Applicability was
+first raised by replacing the regex with `type_match.parse_c_variables`, which
+took the reachable share from 52% to 79% at `-O0`, and the sweep was widened
+to three optimisation levels:
+
+```text
+opt    suggestions   acc up   acc down   no change   mean delta
+-O0              5        0          0           5      +0.0000
+-O1             12        0          4           8      -0.0903
+-O2              0        -          -           -   (none reached validation)
+```
+
+**Not one suggestion improved the metric, and four made it worse.**
+
+The thirteen no-change rows explain it. The variables the oracle picks are
+mostly decompiler-invented temporaries -- `iVar0`, `uVar12` -- with no
+ground-truth counterpart, so retyping them is invisible to a metric that only
+scores variables it can match. When a suggestion does land on a real variable,
+it was wrong every time it mattered.
+
+**Declined.** Codegen distance and type correctness are different objectives
+and this measurement is where they came apart. Our output already differs from
+the original structurally, so the compiler's register allocation and
+instruction selection are already diverged, and a type change acts as a knob
+that nudges alignment for reasons unrelated to what the source declared. The
+three suggestions that read as correct against the source earlier -- including
+`rotate_words`, which really is `uint32_t` and really did move 66 instructions
+-- are real, but they are not the majority and nothing here separates them
+from the rest in advance.
+
+The `-O2` row is a coverage gap rather than a result: its six candidates did
+not survive into validation. Filling it would not change the finding, since
+`-O0` and `-O1` between them offered seventeen suggestions and zero
+improvements.
+
+What survives is narrower and still true: **the compiler reacts to types, at
+5-73% of a function's instructions, and more strongly under optimisation.**
+That makes recompilation distance a plausible *verifier* for a typing already
+believed correct -- which is what the byte-match metric measures directly, and
+where Fission scores 2 of 238. It is not a search procedure over types.
 
 A second limit: where our structure differs wildly from the original the
 baseline distance already exceeds the function's length -- `matrix_multiply`
