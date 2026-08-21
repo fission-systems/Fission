@@ -95,14 +95,62 @@ spelling matches more often" does not.
       153 at `-O0` and 152 at `-O2`, across gcc and clang, 32- and 64-bit.
 - [x] Storage census of every ground-truth variable at both levels.
 - [x] Cross-checked `corpus/scale` to establish it is unrepresentative here.
-- [ ] Type-confusion census: which (ground truth, emitted) pairs make up the
-      22%. **This is the next measurement and the one that names the fix.**
+- [x] Type-confusion census: which (ground truth, emitted) pairs make up the
+      22%.
+- [x] Whether assert strings can open the metric's exact-name pass.
 
 A harness defect found and corrected in passing: `compute_type_match` returns
 its own `fn` key -- false negatives -- which silently overwrote the function
 name being recorded. The false-negative figures were derived independently and
 proved identical, so no reported number changes, but the storage census could
 not run until the collision was fixed.
+
+### The confusion census
+
+`compute_type_match` returns counts, not pairs, so its three passes were
+replayed to record what was emitted every time a matched variable failed.
+Across `corpus/dev` at `-O0`: 553 variables matched, 428 right, **125
+mistyped**. Of those 125, **57 are function arguments** -- matched by ABI
+position, which is the place we should have the best information there is.
+
+```text
+class                              count   examples
+32-bit widened to 64-bit            ~40    int -> longlong (20), int -> ulonglong (4)
+pointer emitted as an integer       ~20    char* -> ulonglong (8), FILE* -> ulonglong
+64-bit narrowed to 32-bit            15    long/size_t -> uint (12)
+pointer with the wrong pointee      ~15    Node* -> int*, float* -> uint*
+```
+
+**Nearly half of every mistype is width alone**, with signedness incidental.
+That is consistent with typing from the register a value occupies rather than
+from the operation performed on it: a 32-bit `int` living in a 64-bit register
+becomes `longlong`. The second class, pointers printed as integers, is a
+separate and equally concrete failure.
+
+Neither needs the metric to justify fixing. "A `char *` was printed as
+`ulonglong`" and "a 32-bit quantity was declared 64-bit" are both wrong on
+their own terms.
+
+### Assert strings: measured and declined
+
+The metric's third pass matches by exact source name, which is the only route
+to a register-resident local, and assert expressions are the one place a
+stripped binary spells a variable's name outright -- glibc stores them as
+`<expression>\0<file>.c\0<function>\0`, so the expression is recoverable by
+reading the string physically before any `.c` filename.
+
+It works, and the yield is too small. On the scored sample-set, 16 of 150
+binaries (11%) carry any assert expression at all, giving **53 expressions and
+49 distinct identifiers** across the whole corpus -- and most are `NULL`,
+`result`, `datalen`. Release builds define `NDEBUG` and delete asserts
+outright, so this is a property of what is in the binaries rather than of the
+extraction.
+
+Two earlier attempts at this measurement were wrong and are worth recording:
+scanning all strings for expression-shaped text matched English prose from
+error messages ("to", "not", "failed"), and tightening the pattern without
+anchoring on the filename matched binary noise (`H+E`, `t%H`). Only the
+adjacency structure separates a real assert from a coincidence.
 
 ## 6. AI Review / Prompt Firewall
 
