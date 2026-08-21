@@ -32,12 +32,20 @@ const WIDE_DEAD_ASSIGNMENT_RERUN_LOCAL_LIMIT: usize = 160;
 pub struct DefUseMap {
     /// Number of rvalue uses of each variable name across the whole body.
     pub use_count: HashMap<String, usize>,
+    /// Number of write sites for each variable name.
+    ///
+    /// Separate from [`Self::use_count`], which counts reads only -- a
+    /// write-only binding is a real thing this pipeline must keep, so the two
+    /// cannot be merged. Together they answer a question neither can alone:
+    /// whether a name appears in the body *at all*.
+    pub def_count: HashMap<String, usize>,
 }
 
 impl DefUseMap {
     pub fn build(stmts: &[PreHirStmt]) -> Self {
         let mut map = Self {
             use_count: HashMap::default(),
+            def_count: HashMap::default(),
         };
         for stmt in stmts {
             map.count_stmt(stmt);
@@ -127,8 +135,11 @@ impl DefUseMap {
 
     fn count_lvalue(&mut self, lhs: &PreHirLValue) {
         match lhs {
-            // The defined name is a write site — not an rvalue use.
-            PreHirLValue::Var(_) => {}
+            // The defined name is a write site — not an rvalue use, so it
+            // belongs in `def_count` rather than `use_count`.
+            PreHirLValue::Var(name) => {
+                *self.def_count.entry(name.clone()).or_insert(0) += 1;
+            }
             PreHirLValue::Deref { ptr, .. } => self.count_expr(ptr),
             PreHirLValue::Index { base, index, .. } => {
                 self.count_expr(base);

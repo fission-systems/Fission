@@ -1180,15 +1180,52 @@ pub fn prune_unused_temp_bindings(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
     func.locals.retain(|binding| {
         let used = use_map.use_count.get(binding.name.as_str()).copied().unwrap_or(0) > 0;
+        let written = use_map.def_count.get(binding.name.as_str()).copied().unwrap_or(0) > 0;
+        let initializer_has_side_effects = binding
+            .initializer
+            .as_ref()
+            .is_some_and(expr_has_side_effects);
+        // A binding the body neither reads nor writes has no effect the
+        // emitted C can express, so its declaration is noise. The rule below
+        // cannot reach these: it turns on `use_count` alone -- reads only --
+        // and so must leave write-only stack homes declared for the rescue
+        // pass to find. A home that is written appears in `def_count`, so
+        // this cannot collide with them.
+        //
+        // **Stack-derived bindings are excluded, and that exclusion is the
+        // whole subtlety.** This pass runs at some thirty pipeline stages,
+        // including ones before slot addresses have been rewritten into slot
+        // names. A stack local referenced only as `Load { ptr: <slot addr> }`
+        // appears nowhere by name and is still live; pruning it there deletes
+        // the binding a later stage was going to rewrite into. Nothing in the
+        // emitted text breaks -- the name was absent either way -- so a
+        // corpus sweep cannot see it. `preview_type_hints_apply_stack_local_
+        // type_to_surfaced_slot_alias` can, and did.
+        //
+        // What is left reachable: temporaries and scaffolding, which are
+        // name-referenced by construction. Measured on the 250-function
+        // sample-set, 224 of 6,774 declared locals appear nowhere at all;
+        // 123 of those are stack slots this deliberately does not touch.
+        let address_referable = binding.origin.is_some_and(|origin| {
+            matches!(
+                origin,
+                NirBindingOrigin::StackOffset(_)
+                    | NirBindingOrigin::HomeSlot(_)
+                    | NirBindingOrigin::OutgoingArgSlot(_)
+                    | NirBindingOrigin::DerivedFromStackOffset(_)
+                    | NirBindingOrigin::VaRegion
+            )
+        });
+        if !used && !written && !initializer_has_side_effects && !address_referable {
+            changed = true;
+            return false;
+        }
         let assigned_side_effect =
             stmt_list_assigns_var_from_side_effecting_expr(&func.body, &binding.name);
         let keep = should_keep_unused_temp_binding(
             is_prunable_unused_temp_binding(binding),
             used || assigned_side_effect,
-            binding
-                .initializer
-                .as_ref()
-                .is_some_and(expr_has_side_effects),
+            initializer_has_side_effects,
         );
         changed |= !keep;
         keep
