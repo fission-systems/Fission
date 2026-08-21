@@ -507,6 +507,7 @@ impl ElfLoader {
                         &mut global_symbols,
                         &mut global_symbol_sizes,
                         endian,
+                        header.machine == EM_ARM,
                     );
                 }
             }
@@ -838,6 +839,7 @@ impl ElfLoader {
         out_globals: &mut HashMap<u64, String>,
         out_global_sizes: &mut HashMap<u64, u64>,
         endian: Endian,
+        is_arm: bool,
     ) {
         let strtab = if strtab_shndx < shdrs.len() {
             let sh = &shdrs[strtab_shndx];
@@ -927,6 +929,7 @@ impl ElfLoader {
             } else {
                 sym.st_value as u64
             };
+            let address = elf32_symbol_entry_address(address, is_arm, sym_type);
 
             if sym_type == STT_OBJECT {
                 out_globals.entry(address).or_insert(name);
@@ -968,6 +971,25 @@ impl ElfLoader {
                 },
             );
         }
+    }
+}
+
+/// Where a symbol's code or data actually begins.
+///
+/// The ARM ELF ABI encodes Thumb state in bit 0 of a *function* symbol's
+/// value; the instruction itself is at the even address. Left set, every Thumb
+/// function registers one byte past where it begins, an address lookup misses
+/// it and lands on the symbol before -- which names every function in the
+/// image after its neighbour. Measured on ARM firmware: not one of twenty
+/// functions carried its own name in either program tried, against twenty of
+/// twenty on every x86-64 program.
+///
+/// Only function symbols. For data, bit 0 is address, not state.
+fn elf32_symbol_entry_address(address: u64, is_arm: bool, sym_type: u8) -> u64 {
+    if is_arm && sym_type == STT_FUNC {
+        address & !1
+    } else {
+        address
     }
 }
 
@@ -3243,6 +3265,18 @@ mod tests {
             .expect("ARM CALL patch"),
             0xebff_fff8
         );
+    }
+
+    #[test]
+    fn arm_thumb_state_bit_is_not_part_of_a_function_address() {
+        // Odd function symbol on ARM: the Thumb bit, not the address.
+        assert_eq!(elf32_symbol_entry_address(0x8001, true, STT_FUNC), 0x8000);
+        // Even one is already the address.
+        assert_eq!(elf32_symbol_entry_address(0x8040, true, STT_FUNC), 0x8040);
+        // Data keeps bit 0 -- an odd datum is genuinely at an odd address.
+        assert_eq!(elf32_symbol_entry_address(0x9001, true, STT_OBJECT), 0x9001);
+        // Every other machine addresses code bytewise; nothing is masked.
+        assert_eq!(elf32_symbol_entry_address(0x8001, false, STT_FUNC), 0x8001);
     }
 
     #[test]
