@@ -1297,8 +1297,8 @@ enumeration.</p>
       comparison needs.</li>
 <li>[x] Source-side sensitivity: does a wrong type move the object code at all?</li>
 <li>[x] Output-side gradient: does it still move against a real decompilation?</li>
-<li>[ ] Whether the gradient can <em>find</em> a wrong type, not merely confirm a right
-      one. <strong>This is the next measurement and the one that decides the idea.</strong></li>
+<li>[x] Whether the gradient can <em>find</em> a wrong type, not merely confirm a right
+      one -- and whether what it finds is correct.</li>
 </ul>
 <p><strong>Source-side sensitivity.</strong> Compile the corpus's own sources, change exactly
 one type, recompile, count instructions moved:</p>
@@ -1328,14 +1328,38 @@ type-sensitive operation:</p>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>rolling_hash32              46/40              34           58       +24
 </span></code></pre></div>
 <p>Four of five move, against six of twenty under arbitrary mutation.</p>
-<p><strong>What this does not yet show.</strong> Every delta here is positive, which says the
-emitted type was already the better of the two -- the gradient confirms a
-right answer. Using it to <em>find</em> a wrong one needs cases where a change
-<em>reduces</em> the distance. Two appeared in the arbitrary-mutation run (-3 and
--5) and none in the targeted one, on five functions. The sample is far too
-small to conclude either way, and a larger targeted run hunting for negative
-deltas is the measurement that decides whether this is a search procedure or
-only a verifier.</p>
+<p><strong>Hunting the other sign.</strong> For every variable reaching the code generator,
+every plausible alternative width and signedness was tried and the best kept.
+Across 27 functions at <code>-O2</code>, 14 were reachable by the harness and four of
+those yielded a typing that lands <em>closer</em> than what we emit. Checked against
+the corpus's own sources:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>function            distance      oracle's suggestion            source        verdict
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>rotate_words        85 -&gt; 19      ulonglong -&gt; unsigned int      uint32_t      correct
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>sum_array           21 -&gt; 18      longlong -&gt; unsigned long long size_t i      correct
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>bounded_tlv_sum    102 -&gt; 101     uint -&gt; unsigned long long     size_t cursor correct
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>clamp               21 -&gt; 18      int -&gt; unsigned int            int           WRONG
+</span></code></pre></div>
+<p>Three of four are right, and they are not trivial: <code>rotate_words</code> is typed
+<code>ulonglong</code> where the source says <code>uint32_t</code>, and correcting the width moved
+66 of the function's instructions. <strong>The gradient finds real type errors.</strong></p>
+<p><strong>And it produces false positives.</strong> <code>clamp</code> is the failure mode. Its original
+is seven instructions and our output stands 21 away from it -- a baseline
+already three times the function's own length, where our structure bears no
+relation to the original's. A three-instruction "improvement" under that is
+alignment noise, not a type fact.</p>
+<p>The three correct calls sit at baseline ratios of 0.60, 1.40 and 1.73 against
+the wrong one's 3.00, and the correct improvements include one of 66
+instructions against the wrong one's 3. Both suggest the confidence criterion
+lives in the baseline distance and the size of the improvement -- but four
+points cannot set a threshold, and picking one here would be fitting a sample
+of 27 functions.</p>
+<p><strong>Status: the principle is proved, the procedure is not usable yet.</strong> A 25%
+false-positive rate applied to type inference would flip correct types and
+make the metric worse. Two things are needed before any production code:
+raising applicability past the current half (the harness finds variables by
+regex; <code>type_match.parse_c_variables</code> already does it properly), and finding
+the confidence criterion on a sample large enough that the threshold is not
+the sample's.</p>
 <p>A second limit: where our structure differs wildly from the original the
 baseline distance already exceeds the function's length -- <code>matrix_multiply</code>
 compiles to 5 instructions against the original's 91 -- and no per-variable
