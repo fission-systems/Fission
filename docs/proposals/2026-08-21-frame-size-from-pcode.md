@@ -96,6 +96,33 @@ measured *from* steady-state rsp, so `local_X` counts bytes below entry-rsp,
 and four aggregate tests said so. The number that survives is 102, from the
 coordinate the existing tests encode.
 
+### Effect on the type metric: slightly negative, and instructive
+
+The frame fix changes what `local_X` names, and the type metric reads that
+name. `type_match._effective_offset` recovers a variable's stack offset by
+parsing the hex out of `local_38`, then calibrates a per-function constant
+shift against DWARF. **Type matching is coupled to our slot-naming
+coordinate.**
+
+Re-measured on `corpus/dev`, the same 305 functions:
+
+```text
+              perfect      accuracy     offset matches
+before      78 (26%)          0.542                190
+after       76 (25%)          0.537                190
+```
+
+Identical offset-match *count*; a different set of variables matched. Ten
+functions fell, three rose, 292 were unchanged, and the calibration shift moved
+in exactly the ones that fell -- `8 -> 0`, `24 -> 0`, `0 -> 16`.
+
+Two of 153 functions is small and the direction is wrong, so it is worth being
+plain: **this change did not help types and cost two functions there.** It is
+justified anyway -- reporting a zero-size frame for every function is a defect
+whatever the metric says about the names that follow from it -- but the coupling
+is now a known fact rather than a surprise, and any further work on slot naming
+has to be measured against types as well as against duplicates.
+
 ## 6. AI Review / Prompt Firewall
 
 - No external model was consulted. Both diagnostics were temporary and are not
