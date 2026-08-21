@@ -702,6 +702,18 @@ fn preview_refines_win64_param_width_from_later_subregister_use() {
                     asm_mnemonic: Some("PUSH R8".to_string()),
                 },
                 PcodeOp {
+                    // The stack-pointer half of the same `push`. This fixture
+                    // carried only the Copy, which the old asm-text prologue
+                    // scan accepted because it read the label instead of the
+                    // p-code; a real push also decrements the stack pointer.
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x140001880,
+                    output: Some(reg(0x20, 8)),
+                    inputs: vec![reg(0x20, 8), cst(8, 8)],
+                    asm_mnemonic: Some("PUSH R8".to_string()),
+                },
+                PcodeOp {
                     seq_num: 1,
                     opcode: PcodeOpcode::IntSExt,
                     address: 0x140001881,
@@ -888,11 +900,35 @@ fn preview_recovers_stack_slot_from_rust_sleigh_rsp_space() {
                     asm_mnemonic: Some("PUSH RBX".to_string()),
                 },
                 PcodeOp {
+                    // The stack-pointer half of the same `push`. This fixture
+                    // carried only the Copy, which the old asm-text prologue
+                    // scan accepted because it read the label instead of the
+                    // p-code; a real push also decrements the stack pointer.
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x140001940,
+                    output: Some(reg(0x20, 8)),
+                    inputs: vec![reg(0x20, 8), cst(8, 8)],
+                    asm_mnemonic: Some("PUSH RBX".to_string()),
+                },
+                PcodeOp {
                     seq_num: 1,
                     opcode: PcodeOpcode::Store,
                     address: 0x140001940,
                     output: None,
                     inputs: vec![cst(3, 8), rsp.clone(), cst(42, 8)],
+                    asm_mnemonic: Some("PUSH RBX".to_string()),
+                },
+                PcodeOp {
+                    // The stack-pointer half of the same `push`. This fixture
+                    // carried only the Copy, which the old asm-text prologue
+                    // scan accepted because it read the label instead of the
+                    // p-code; a real push also decrements the stack pointer.
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x140001940,
+                    output: Some(reg(0x20, 8)),
+                    inputs: vec![reg(0x20, 8), cst(8, 8)],
                     asm_mnemonic: Some("PUSH RBX".to_string()),
                 },
                 PcodeOp {

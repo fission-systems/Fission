@@ -16,6 +16,18 @@ fn preview_type_hints_name_rsp_aggregate_slot_as_local() {
                     asm_mnemonic: Some("PUSH RSI".to_string()),
                 },
                 PcodeOp {
+                    // The stack-pointer half of the same `push`. This fixture
+                    // carried only the Copy, which the old asm-text prologue
+                    // scan accepted because it read the label instead of the
+                    // p-code; a real push also decrements the stack pointer.
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x140006260,
+                    output: Some(reg(0x20, 8)),
+                    inputs: vec![reg(0x20, 8), cst(8, 8)],
+                    asm_mnemonic: Some("PUSH RSI".to_string()),
+                },
+                PcodeOp {
                     seq_num: 1,
                     opcode: PcodeOpcode::IntSub,
                     address: 0x140006261,

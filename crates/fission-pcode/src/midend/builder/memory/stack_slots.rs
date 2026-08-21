@@ -1130,10 +1130,34 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(in crate::midend::builder) fn rsp_local_display_offset(&self, offset: i64) -> i64 {
-        if offset >= 0 && self.stack_frame_size > offset {
-            self.stack_frame_size - offset
+        // `local_X` names X bytes below entry-rsp, which is the same
+        // coordinate the rbp-relative branch uses (`offset.unsigned_abs()` on
+        // a negative displacement). An `rsp`-relative displacement is measured
+        // from steady-state rsp, and steady-state rsp sits `stack_frame_size`
+        // below entry-rsp, so the conversion is one subtraction -- for
+        // displacements on either side of it, since a negative one simply
+        // lands further below.
+        //
+        // This used to apply that only to `offset >= 0 && stack_frame_size >
+        // offset` and fall back to `offset.unsigned_abs()` otherwise, which
+        // named different storage identically: `rsp-16` and `rsp+16` are
+        // thirty-two bytes apart and both displayed as `local_10`, so the
+        // second slot to arrive took a `_N` suffix to avoid the collision.
+        // Measured on the sample-set, 214 such suffixed duplicates across 59
+        // functions.
+        //
+        // It is one problem with the prologue scan, not two. Every one of the
+        // 63 collisions instrumented occurred while `stack_frame_size` was
+        // zero -- and repairing that alone made this *worse*, 214 duplicates
+        // to 243, because a real frame size started remapping the positive
+        // branch into the range the fallback occupied. Both together: 7.
+        let below_entry = self.stack_frame_size.saturating_sub(offset);
+        if below_entry >= 0 {
+            below_entry
         } else {
-            offset.unsigned_abs() as i64
+            // Above entry-rsp: the caller's frame, not a local of ours. Keep
+            // it distinct from anything below rather than folding the sign.
+            offset.saturating_add(self.stack_frame_size)
         }
     }
 

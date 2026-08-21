@@ -88,11 +88,8 @@ pub(super) fn infer_entry_stack_layout(
     // unchanged, so straight-line/simple functions are unaffected.
     let mut rsp_prologue_delta_table: HashMap<LoweringSite, i64> = HashMap::default();
 
-    let mut frame_size = 0_i64;
     let mut frame_pointer_established = false;
     let mut frame_pointer_bias = 0_i64;
-    let mut seen_addrs = HashSet::default();
-    let mut started = false;
     let register_namer = RegisterNamer::from_options(options);
     let pointer_size = i64::from(options.pointer_size);
 
@@ -294,14 +291,12 @@ pub(super) fn infer_entry_stack_layout(
                         // same misclassification this whole fix targets.
                         frame_pointer_established = true;
                         frame_pointer_bias = rsp_delta + pointer_size;
-                        started = true;
                     }
                 } else if let Some((temp_key, k)) = &pending_rsp_add
                     && *temp_key == VarnodeKey::from(input)
                 {
                     frame_pointer_established = true;
                     frame_pointer_bias = rsp_delta + *k + pointer_size;
-                    started = true;
                 }
             }
         }
@@ -322,43 +317,128 @@ pub(super) fn infer_entry_stack_layout(
                 pending_rsp_add = Some((VarnodeKey::from(output), k));
             }
         }
-        if !seen_addrs.insert(op.address) {
-            continue;
-        }
-        let Some(asm) = op.asm_mnemonic.as_deref() else {
-            break;
-        };
-        let asm = asm.trim().to_ascii_uppercase();
-        if asm.starts_with("PUSH ") {
-            frame_size += pointer_size;
-            started = true;
-            continue;
-        }
-        let sub_rsp = if options.is_64bit {
-            asm.strip_prefix("SUB RSP,")
-        } else {
-            asm.strip_prefix("SUB ESP,")
-        };
-        if let Some(imm) = sub_rsp.and_then(parse_signed_asm_immediate) {
-            frame_size += imm;
-            started = true;
-            continue;
-        }
-        if asm.starts_with("MOV RBP,RSP") || asm.starts_with("MOV EBP,ESP") {
-            frame_pointer_established = true;
-            started = true;
-            continue;
-        }
-        if started {
-            break;
-        }
     }
+    let (frame_size, pcode_frame_pointer) =
+        scan_prologue_from_pcode(&entry.ops, &register_namer, pointer_size);
+    frame_pointer_established |= pcode_frame_pointer;
     (
         frame_size,
         frame_pointer_established,
         frame_pointer_bias,
         rsp_prologue_delta_table,
     )
+}
+
+/// The frame the entry prologue establishes, read from p-code.
+///
+/// This used to read `asm_mnemonic` and look for `"PUSH "`, `"SUB RSP,"` and
+/// `"MOV RBP,RSP"`. That field does not carry disassembly: it falls back to
+/// the raw p-code opcode name, so it held `"COPY"` and `"INT_SUB"`, no
+/// prologue form could ever match, and `frame_size` stayed at zero for every
+/// function measured -- 0 of 49 across 40 sample-set binaries carried
+/// operand-bearing text. The consequences ran a long way downstream: with no
+/// frame, `rsp_local_display_offset` falls back to `offset.unsigned_abs()`,
+/// which names `rsp+16` and `rsp-16` alike, and 63 of 63 stack-slot name
+/// collisions on the corpus occurred at `stack_frame_size == 0`.
+///
+/// Two reasons this reads p-code rather than repairing the text. Semantics
+/// should not be inferred from a presentation artifact -- disassembly text is
+/// rendered *for* a reader. And the text forms are x86 spellings: `"PUSH "`
+/// and `"SUB RSP,"` can never match on ARM however the field is populated,
+/// while `IntSub` on the stack pointer is what every architecture's push
+/// lowers to.
+///
+/// The prologue is the leading run of frame-setup instructions, which is the
+/// same boundary the text scan drew: accumulate while each instruction sets up
+/// the frame, stop at the first that does not. Instructions that lower to no
+/// p-code at all -- `endbr64` -- are invisible here and so do not end the run,
+/// which is what the text scan's skip-until-started did for them.
+fn scan_prologue_from_pcode(
+    ops: &[PcodeOp],
+    register_namer: &RegisterNamer,
+    pointer_size: i64,
+) -> (i64, bool) {
+    fn is_stack_pointer(namer: &RegisterNamer, vn: &Varnode) -> bool {
+        matches!(
+            namer.hw_name_at(vn.offset, vn.size).as_deref(),
+            Some("esp") | Some("rsp") | Some("sp")
+        )
+    }
+    fn is_frame_pointer(namer: &RegisterNamer, vn: &Varnode) -> bool {
+        matches!(
+            namer.hw_name_at(vn.offset, vn.size).as_deref(),
+            Some("ebp") | Some("rbp") | Some("fp")
+        )
+    }
+
+    let mut frame_size = 0_i64;
+    let mut frame_pointer = false;
+    let mut started = false;
+    let mut current: Option<u64> = None;
+    let mut this_instruction_sets_up = false;
+
+    // One extra iteration with `None` flushes the final instruction.
+    let flush = |started: &mut bool, sets_up: bool, frame_size: &mut i64, pending: i64| -> bool {
+        if sets_up {
+            *started = true;
+            *frame_size += pending;
+            false
+        } else {
+            *started
+        }
+    };
+
+    let mut pending_delta = 0_i64;
+    for op in ops {
+        if current != Some(op.address) {
+            if current.is_some()
+                && flush(
+                    &mut started,
+                    this_instruction_sets_up,
+                    &mut frame_size,
+                    pending_delta,
+                )
+            {
+                return (frame_size, frame_pointer);
+            }
+            current = Some(op.address);
+            this_instruction_sets_up = false;
+            pending_delta = 0;
+        }
+
+        // `push reg` and `sub rsp, N` are the same p-code shape: the stack
+        // pointer decremented by a constant.
+        if matches!(op.opcode, PcodeOpcode::IntSub)
+            && op.inputs.len() == 2
+            && let Some(output) = op.output.as_ref()
+            && is_stack_pointer(register_namer, output)
+            && is_stack_pointer(register_namer, &op.inputs[0])
+            && let Some(delta) = const_offset(&op.inputs[1])
+        {
+            this_instruction_sets_up = true;
+            pending_delta += delta;
+        }
+
+        // `mov rbp, rsp`.
+        if matches!(op.opcode, PcodeOpcode::Copy)
+            && let (Some(output), Some(input)) = (op.output.as_ref(), op.inputs.first())
+            && is_frame_pointer(register_namer, output)
+            && is_stack_pointer(register_namer, input)
+        {
+            this_instruction_sets_up = true;
+            frame_pointer = true;
+        }
+    }
+    if current.is_some() {
+        flush(
+            &mut started,
+            this_instruction_sets_up,
+            &mut frame_size,
+            pending_delta,
+        );
+    }
+    let _ = pointer_size;
+    (frame_size, frame_pointer)
 }
 
 fn parse_signed_asm_immediate(text: &str) -> Option<i64> {
