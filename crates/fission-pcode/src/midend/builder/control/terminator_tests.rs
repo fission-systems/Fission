@@ -257,6 +257,156 @@ fn x64_cbranch_condition_recovers_cmp_jnz_from_fresh_zero_flag() {
 }
 
 #[test]
+fn destructive_cmp_branch_tests_result_against_zero() {
+    let rsi = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 48,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rcx = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 8,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rax = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let zf = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 518,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let branch_cond = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x110,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let pcode = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![1, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1000,
+                        output: Some(rax.clone()),
+                        inputs: vec![rsi],
+                        asm_mnemonic: Some("mov".to_string()),
+                    },
+                    // x86-style two-address SUB: the comparison's first input
+                    // and arithmetic result occupy the same register.
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntSub,
+                        address: 0x1002,
+                        output: Some(rax.clone()),
+                        inputs: vec![rax.clone(), rcx.clone()],
+                        asm_mnemonic: Some("sub".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::IntEqual,
+                        address: 0x1002,
+                        output: Some(zf.clone()),
+                        inputs: vec![rax, Varnode::constant(0, 8)],
+                        asm_mnemonic: Some("sub".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::BoolNegate,
+                        address: 0x1004,
+                        output: Some(branch_cond.clone()),
+                        inputs: vec![zf],
+                        asm_mnemonic: Some("jnz".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1004,
+                        output: None,
+                        inputs: vec![Varnode::constant(0x2000, 8), branch_cond],
+                        asm_mnemonic: Some("jnz".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1006,
+                successors: Vec::new(),
+                ops: Vec::new(),
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x2000,
+                successors: Vec::new(),
+                ops: Vec::new(),
+            },
+        ],
+    };
+    let options = preview_options_with_cspec(MlilPreviewOptions {
+        pe_x64_only: false,
+        is_64bit: true,
+        is_big_endian: false,
+        pointer_size: 8,
+        format: "PE".to_string(),
+        image_base: 0x1000,
+        sections: vec![(0x1000, 0x3000)],
+        region_linearize_structuring: false,
+        force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        global_names: Default::default(),
+        global_sizes: Default::default(),
+        relocation_names: Default::default(),
+        calling_convention: CallingConvention::WindowsX64,
+        ..Default::default()
+    });
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let (_, cond) = builder
+        .lower_cbranch_condition_for_block(0)
+        .expect("lower destructive compare branch condition");
+
+    assert_eq!(
+        cond,
+        test_binary(
+            PreHirBinaryOp::Ne,
+            test_binary(
+                PreHirBinaryOp::Sub,
+                PreHirExpr::Var("rsi".to_string()),
+                PreHirExpr::Var("param_1".to_string()),
+                NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+            ),
+            PreHirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+            ),
+            NirType::Bool,
+        )
+    );
+}
+
+#[test]
 fn return_recovery_keeps_return_register_before_side_effect_store() {
     let w0 = Varnode {
         space_id: RUST_SLEIGH_REGISTER_SPACE_ID,

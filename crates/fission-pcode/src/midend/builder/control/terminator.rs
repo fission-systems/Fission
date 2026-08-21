@@ -2529,56 +2529,63 @@ impl<'a> PreviewBuilder<'a> {
                 };
                 bool_binary(PreHirBinaryOp::Ne, masked.clone(), zero_like(&masked))
             }
-            X86BranchPredicate::Eq(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::Eq(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Eq, lhs, rhs)
             }
-            X86BranchPredicate::Ne(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::Ne(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Ne, lhs, rhs)
             }
-            X86BranchPredicate::ULt(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::ULt(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Lt, lhs, rhs)
             }
-            X86BranchPredicate::ULe(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::ULe(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Le, lhs, rhs)
             }
-            X86BranchPredicate::UGt(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::UGt(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Lt, rhs, lhs)
             }
-            X86BranchPredicate::UGe(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::UGe(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::Le, rhs, lhs)
             }
-            X86BranchPredicate::SLt(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::SLt(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLt, lhs, rhs)
             }
-            X86BranchPredicate::SLe(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::SLe(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLe, lhs, rhs)
             }
-            X86BranchPredicate::SGt(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::SGt(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLt, rhs, lhs)
             }
-            X86BranchPredicate::SGe(lhs_vn, rhs_vn) => {
-                let lhs = lower(self, &lhs_vn, &mut visiting)?;
-                let rhs = lower(self, &rhs_vn, &mut visiting)?;
+            X86BranchPredicate::SGe(operands) => {
+                let (lhs, rhs) = self.lower_compare_operands(&operands, &mut visiting)?;
                 bool_binary(PreHirBinaryOp::SLe, rhs, lhs)
             }
+        })
+    }
+
+    /// Comparison inputs are values at the flag-producing operation, not at
+    /// the later branch. This matters for two-address p-code such as
+    /// `IntSub rax, rhs -> rax`: lowering `rax` at the CBranch observes the
+    /// subtraction result, while lowering it at `IntSub` observes the input
+    /// value whose flags the branch actually tests.
+    fn lower_compare_operands(
+        &mut self,
+        operands: &X86CompareOperands,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<(PreHirExpr, PreHirExpr), MlilPreviewError> {
+        self.with_lowering_site(operands.site, |this| {
+            let lhs = this.lower_wrapped_varnode(&operands.lhs, visiting)?;
+            let rhs = this.lower_wrapped_varnode(&operands.rhs, visiting)?;
+            Ok((lhs, rhs))
         })
     }
 
@@ -3658,17 +3665,17 @@ impl<'a> PreviewBuilder<'a> {
                     let in0 = self.peel_passthrough_varnode(&op.inputs[0]);
                     let in1 = self.peel_passthrough_varnode(&op.inputs[1]);
                     if in1.is_zero()
-                        && let Some((lhs, rhs)) = self.match_cmp_diff_from_peeled(&in0)
-                        && same_family_varnode(&lhs, selector_family)
-                        && rhs.is_constant
+                        && let Some(operands) = self.match_cmp_diff_from_peeled(&in0)
+                        && same_family_varnode(&operands.lhs, selector_family)
+                        && operands.rhs.is_constant
                     {
-                        equality_bound = u64::try_from(rhs.constant_val).ok();
+                        equality_bound = u64::try_from(operands.rhs.constant_val).ok();
                     } else if in0.is_zero()
-                        && let Some((lhs, rhs)) = self.match_cmp_diff_from_peeled(&in1)
-                        && same_family_varnode(&lhs, selector_family)
-                        && rhs.is_constant
+                        && let Some(operands) = self.match_cmp_diff_from_peeled(&in1)
+                        && same_family_varnode(&operands.lhs, selector_family)
+                        && operands.rhs.is_constant
                     {
-                        equality_bound = u64::try_from(rhs.constant_val).ok();
+                        equality_bound = u64::try_from(operands.rhs.constant_val).ok();
                     }
                 }
                 _ => {}
@@ -3687,58 +3694,84 @@ impl<'a> PreviewBuilder<'a> {
     fn match_cmp_branch_predicate(&self, vn: &Varnode) -> Option<X86BranchPredicate> {
         let peeled = self.peel_passthrough_varnode(vn);
 
-        if let Some((lhs, rhs)) = self.match_cmp_zero_flag_from_peeled(&peeled) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::Eq(lhs, rhs));
+        if let Some(operands) = self.match_cmp_zero_flag_from_peeled(&peeled) {
+            if let Some(result) = operands.destructive_result() {
+                return Some(X86BranchPredicate::EqZero(result.clone()));
+            }
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::Eq(operands));
             }
         }
         if let Some(inner) = self.match_bool_negate_from_peeled(&peeled)
-            && let Some((lhs, rhs)) = self.match_cmp_zero_flag(&inner)
+            && let Some(operands) = self.match_cmp_zero_flag(&inner)
         {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::Ne(lhs, rhs));
+            if let Some(result) = operands.destructive_result() {
+                return Some(X86BranchPredicate::NeZero(result.clone()));
+            }
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::Ne(operands));
             }
         }
-        if let Some((lhs, rhs)) = self.match_cmp_carry_flag_from_peeled(&peeled) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::ULt(lhs, rhs));
+        if let Some(operands) = self.match_cmp_carry_flag_from_peeled(&peeled) {
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::ULt(operands));
             }
         }
         if let Some(inner) = self.match_bool_negate_from_peeled(&peeled)
-            && let Some((lhs, rhs)) = self.match_cmp_carry_flag(&inner)
+            && let Some(operands) = self.match_cmp_carry_flag(&inner)
         {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::UGe(lhs, rhs));
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::UGe(operands));
             }
         }
-        if let Some((lhs, rhs)) = self.match_unsigned_le(vn) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::ULe(lhs, rhs));
+        if let Some(operands) = self.match_unsigned_le(vn) {
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::ULe(operands));
             }
         }
-        if let Some((lhs, rhs)) = self.match_unsigned_gt(vn) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::UGt(lhs, rhs));
+        if let Some(operands) = self.match_unsigned_gt(vn) {
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::UGt(operands));
             }
         }
-        if let Some((lhs, rhs)) = self.match_cmp_sign_overflow_ne(vn) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::SLt(lhs, rhs));
+        if let Some(operands) = self.match_cmp_sign_overflow_ne(vn) {
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::SLt(operands));
             }
         }
-        if let Some((lhs, rhs)) = self.match_cmp_sign_overflow_eq(vn) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::SGe(lhs, rhs));
+        if let Some(operands) = self.match_cmp_sign_overflow_eq(vn) {
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::SGe(operands));
             }
         }
-        if let Some((lhs, rhs)) = self.match_signed_gt(vn) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::SGt(lhs, rhs));
+        if let Some(operands) = self.match_signed_gt(vn) {
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::SGt(operands));
             }
         }
-        if let Some((lhs, rhs)) = self.match_signed_le(vn) {
-            if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
-                return Some(X86BranchPredicate::SLe(lhs, rhs));
+        if let Some(operands) = self.match_signed_le(vn) {
+            if self.is_simple_branch_value(&operands.lhs)
+                && self.is_simple_branch_value(&operands.rhs)
+            {
+                return Some(X86BranchPredicate::SLe(operands));
             }
         }
         None
@@ -3976,63 +4009,78 @@ impl<'a> PreviewBuilder<'a> {
         (zf_value == sign_value).then_some(zf_value)
     }
 
-    fn match_cmp_diff(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_diff(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let peeled = self.peel_passthrough_varnode(vn);
         self.match_cmp_diff_from_peeled(&peeled)
     }
 
-    fn match_cmp_diff_from_peeled(&self, peeled: &Varnode) -> Option<(Varnode, Varnode)> {
-        let (_, op) = self.lookup_def_site(&peeled)?;
+    fn match_cmp_diff_from_peeled(&self, peeled: &Varnode) -> Option<X86CompareOperands> {
+        let (site, op) = self.lookup_def_site(&peeled)?;
         if op.opcode != PcodeOpcode::IntSub || op.inputs.len() != 2 {
             return None;
         }
-        Some((op.inputs[0].clone(), op.inputs[1].clone()))
+        Some(X86CompareOperands {
+            lhs: op.inputs[0].clone(),
+            rhs: op.inputs[1].clone(),
+            site,
+            result: Some(peeled.clone()),
+        })
     }
 
-    fn match_cmp_zero_flag(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_zero_flag(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let source = self.match_zero_compare_input(vn)?;
         self.match_cmp_diff(&source)
     }
 
-    fn match_cmp_zero_flag_from_peeled(&self, peeled: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_zero_flag_from_peeled(&self, peeled: &Varnode) -> Option<X86CompareOperands> {
         let source = self.match_zero_compare_input_from_peeled(peeled)?;
         self.match_cmp_diff(&source)
     }
 
-    fn match_cmp_carry_flag(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_carry_flag(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let peeled = self.peel_passthrough_varnode(vn);
         self.match_cmp_carry_flag_from_peeled(&peeled)
     }
 
-    fn match_cmp_carry_flag_from_peeled(&self, peeled: &Varnode) -> Option<(Varnode, Varnode)> {
-        let (_, op) = self.lookup_def_site(&peeled)?;
+    fn match_cmp_carry_flag_from_peeled(&self, peeled: &Varnode) -> Option<X86CompareOperands> {
+        let (site, op) = self.lookup_def_site(&peeled)?;
         if op.opcode != PcodeOpcode::IntLess || op.inputs.len() != 2 {
             return None;
         }
-        Some((op.inputs[0].clone(), op.inputs[1].clone()))
+        Some(X86CompareOperands {
+            lhs: op.inputs[0].clone(),
+            rhs: op.inputs[1].clone(),
+            site,
+            result: None,
+        })
     }
 
-    fn match_cmp_sign_flag(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_sign_flag(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let source = self.match_signed_less_than_zero_input(vn)?;
         self.match_cmp_diff(&source)
     }
 
-    fn match_cmp_overflow_flag(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_overflow_flag(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let peeled = self.peel_passthrough_varnode(vn);
-        let (_, op) = self.lookup_def_site(&peeled)?;
+        let (site, op) = self.lookup_def_site(&peeled)?;
         if op.opcode != PcodeOpcode::IntSBorrow || op.inputs.len() != 2 {
             return None;
         }
-        Some((op.inputs[0].clone(), op.inputs[1].clone()))
+        Some(X86CompareOperands {
+            lhs: op.inputs[0].clone(),
+            rhs: op.inputs[1].clone(),
+            site,
+            result: None,
+        })
     }
 
-    fn match_cmp_sign_overflow_ne(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_sign_overflow_ne(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let (lhs, rhs) = self.match_compare_pair(vn, PcodeOpcode::IntNotEqual)?;
         self.match_cmp_sign_overflow_pair(&lhs, &rhs)
             .or_else(|| self.match_cmp_sign_overflow_pair(&rhs, &lhs))
     }
 
-    fn match_cmp_sign_overflow_eq(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_cmp_sign_overflow_eq(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let (lhs, rhs) = self.match_compare_pair(vn, PcodeOpcode::IntEqual)?;
         self.match_cmp_sign_overflow_pair(&lhs, &rhs)
             .or_else(|| self.match_cmp_sign_overflow_pair(&rhs, &lhs))
@@ -4042,25 +4090,25 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         lhs: &Varnode,
         rhs: &Varnode,
-    ) -> Option<(Varnode, Varnode)> {
+    ) -> Option<X86CompareOperands> {
         let sign = self.match_cmp_sign_flag(lhs)?;
         let overflow = self.match_cmp_overflow_flag(rhs)?;
         same_cmp_pair(&sign, &overflow).then_some(sign)
     }
 
-    fn match_unsigned_le(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_unsigned_le(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let (lhs, rhs) = self.match_bool_binary(vn, PcodeOpcode::BoolOr)?;
         self.match_unsigned_le_pair(&lhs, &rhs)
             .or_else(|| self.match_unsigned_le_pair(&rhs, &lhs))
     }
 
-    fn match_unsigned_le_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_unsigned_le_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<X86CompareOperands> {
         let carry = self.match_cmp_carry_flag(lhs)?;
         let zero = self.match_cmp_zero_flag(rhs)?;
         same_cmp_pair(&carry, &zero).then_some(carry)
     }
 
-    fn match_unsigned_gt(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_unsigned_gt(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         if let Some((lhs, rhs)) = self.match_bool_binary(vn, PcodeOpcode::BoolAnd) {
             if let Some(res) = self
                 .match_unsigned_gt_pair(&lhs, &rhs)
@@ -4082,7 +4130,7 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    fn match_unsigned_gt_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_unsigned_gt_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<X86CompareOperands> {
         let not_cf = self.match_bool_negate(lhs)?;
         let carry = self.match_cmp_carry_flag(&not_cf)?;
         let not_zf = self.match_bool_negate(rhs)?;
@@ -4090,26 +4138,26 @@ impl<'a> PreviewBuilder<'a> {
         same_cmp_pair(&carry, &zero).then_some(carry)
     }
 
-    fn match_signed_gt(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_signed_gt(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let (lhs, rhs) = self.match_bool_binary(vn, PcodeOpcode::BoolAnd)?;
         self.match_signed_gt_pair(&lhs, &rhs)
             .or_else(|| self.match_signed_gt_pair(&rhs, &lhs))
     }
 
-    fn match_signed_gt_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_signed_gt_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<X86CompareOperands> {
         let not_zf = self.match_bool_negate(lhs)?;
         let zero = self.match_cmp_zero_flag(&not_zf)?;
         let sign = self.match_cmp_sign_overflow_eq(rhs)?;
         same_cmp_pair(&zero, &sign).then_some(zero)
     }
 
-    fn match_signed_le(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_signed_le(&self, vn: &Varnode) -> Option<X86CompareOperands> {
         let (lhs, rhs) = self.match_bool_binary(vn, PcodeOpcode::BoolOr)?;
         self.match_signed_le_pair(&lhs, &rhs)
             .or_else(|| self.match_signed_le_pair(&rhs, &lhs))
     }
 
-    fn match_signed_le_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<(Varnode, Varnode)> {
+    fn match_signed_le_pair(&self, lhs: &Varnode, rhs: &Varnode) -> Option<X86CompareOperands> {
         let zero = self.match_cmp_zero_flag(lhs)?;
         let sign = self.match_cmp_sign_overflow_ne(rhs)?;
         same_cmp_pair(&zero, &sign).then_some(zero)
@@ -4137,16 +4185,38 @@ enum X86BranchPredicate {
     SGeZero(Varnode),
     MaskEqZero { value: Varnode, mask: Varnode },
     MaskNeZero { value: Varnode, mask: Varnode },
-    Eq(Varnode, Varnode),
-    Ne(Varnode, Varnode),
-    ULt(Varnode, Varnode),
-    ULe(Varnode, Varnode),
-    UGt(Varnode, Varnode),
-    UGe(Varnode, Varnode),
-    SLt(Varnode, Varnode),
-    SLe(Varnode, Varnode),
-    SGt(Varnode, Varnode),
-    SGe(Varnode, Varnode),
+    Eq(X86CompareOperands),
+    Ne(X86CompareOperands),
+    ULt(X86CompareOperands),
+    ULe(X86CompareOperands),
+    UGt(X86CompareOperands),
+    UGe(X86CompareOperands),
+    SLt(X86CompareOperands),
+    SLe(X86CompareOperands),
+    SGt(X86CompareOperands),
+    SGe(X86CompareOperands),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct X86CompareOperands {
+    lhs: Varnode,
+    rhs: Varnode,
+    /// Operation whose flags describe `lhs op rhs`. The operands must be
+    /// lowered here so destructive outputs cannot replace their input values.
+    site: LoweringSite,
+    /// Arithmetic result tested for equality with zero. When it aliases an
+    /// input, equality predicates must test this result directly: a later
+    /// materialized high variable may represent the post-operation value even
+    /// when queried under the producer site.
+    result: Option<Varnode>,
+}
+
+impl X86CompareOperands {
+    fn destructive_result(&self) -> Option<&Varnode> {
+        self.result
+            .as_ref()
+            .filter(|result| **result == self.lhs || **result == self.rhs)
+    }
 }
 
 fn bool_binary(op: PreHirBinaryOp, lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
@@ -4162,8 +4232,8 @@ fn zero_like(expr: &PreHirExpr) -> PreHirExpr {
     PreHirExpr::Const(0, expr_type(expr))
 }
 
-fn same_cmp_pair(lhs: &(Varnode, Varnode), rhs: &(Varnode, Varnode)) -> bool {
-    lhs.0 == rhs.0 && lhs.1 == rhs.1
+fn same_cmp_pair(lhs: &X86CompareOperands, rhs: &X86CompareOperands) -> bool {
+    lhs.lhs == rhs.lhs && lhs.rhs == rhs.rhs
 }
 
 fn decode_jump_table_target(
