@@ -1250,6 +1250,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#effect-on-the-type-metric-slightly-negative-and-instructive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effect on the type metric: slightly negative, and instructive
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1364,6 +1375,26 @@ duplicates falling 214 to 7. It was wrong: an <code>rsp</code>-relative displace
 measured <em>from</em> steady-state rsp, so <code>local_X</code> counts bytes below entry-rsp,
 and four aggregate tests said so. The number that survives is 102, from the
 coordinate the existing tests encode.</p>
+<h3 id="effect-on-the-type-metric-slightly-negative-and-instructive">Effect on the type metric: slightly negative, and instructive<a class="headerlink" href="#effect-on-the-type-metric-slightly-negative-and-instructive" title="Permanent link">&para;</a></h3>
+<p>The frame fix changes what <code>local_X</code> names, and the type metric reads that
+name. <code>type_match._effective_offset</code> recovers a variable's stack offset by
+parsing the hex out of <code>local_38</code>, then calibrates a per-function constant
+shift against DWARF. <strong>Type matching is coupled to our slot-naming
+coordinate.</strong></p>
+<p>Re-measured on <code>corpus/dev</code>, the same 305 functions:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>              perfect      accuracy     offset matches
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>before      78 (26%)          0.542                190
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>after       76 (25%)          0.537                190
+</span></code></pre></div>
+<p>Identical offset-match <em>count</em>; a different set of variables matched. Ten
+functions fell, three rose, 292 were unchanged, and the calibration shift moved
+in exactly the ones that fell -- <code>8 -&gt; 0</code>, <code>24 -&gt; 0</code>, <code>0 -&gt; 16</code>.</p>
+<p>Two of 153 functions is small and the direction is wrong, so it is worth being
+plain: <strong>this change did not help types and cost two functions there.</strong> It is
+justified anyway -- reporting a zero-size frame for every function is a defect
+whatever the metric says about the names that follow from it -- but the coupling
+is now a known fact rather than a surprise, and any further work on slot naming
+has to be measured against types as well as against duplicates.</p>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
 <ul>
 <li>No external model was consulted. Both diagnostics were temporary and are not
