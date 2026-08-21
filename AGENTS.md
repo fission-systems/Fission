@@ -204,6 +204,55 @@ can audit for leaks, but the required gate is that any AI suggestion or benchmar
 observation must be restated as an owner-native invariant in the canonical
 semantic layer before production code changes.
 
+### Fitting the metric instead of the row
+
+The Pass-Gate Lint catches the crude form -- a `func_name ==` or an
+`addr == 0x...` in the pipeline -- and that is the only form it can catch. The
+form that has actually cost this project is different and passes every static
+scan, because it contains no benchmark identity at all: **optimising a metric
+along an axis the metric cannot see.**
+
+It has happened once already. Goto density scored a structuring that replaced
+38 transfers with 2,743 short-circuit operators as a clean win, because the
+counter could not see that `&&` is a branch. Nothing about that change named a
+row. See `structuring_quality`'s module docs, where every axis is there because
+some driver scored an improvement while emitting something worse.
+
+The same shape is available on structure distance. DecBench's graph edit
+distance prices node count and degree and *nothing else* -- statement content
+costs zero -- so merging basic blocks, replacing every `if`/`else` with a
+ternary, or duplicating code to avoid a join all improve the score and can
+make the output worse.
+
+**The test, applied to every quality change:**
+
+> State why the new output is better without mentioning the metric. If the
+> sentence cannot be written, the change is fitting the metric, not fixing a
+> defect.
+
+Two worked examples. *"The old output returned an indeterminate value on a
+path that does not exist"* passes and needs no benchmark to be true.
+*"This emits fewer basic blocks"* fails -- fewer than what, and better for
+whom?
+
+### Row-driven investigation without row fitting
+
+Reading individual benchmark rows to find defects is correct and encouraged;
+the risk is stopping at the row. When investigating a bucket of near-miss
+functions:
+
+1. **Act only on a shape that repeats** -- at minimum three functions across
+   two different programs, and not all at the same optimisation level. One
+   function exhibiting something is a note in the proposal, not a change.
+2. **Justify without the metric**, per the test above.
+3. **Measure on a split the benchmark does not score.**
+   `fission-benchmark/corpus/scale` carries published source CFGs for 64,231
+   functions that are not the scored sample-set, which makes fitting the
+   scored rows structurally impossible rather than merely discouraged. Note
+   its own bias, though: it is `-O0` with symbols, so a shape visible only
+   there is a different overfit -- hence the mixed-optimisation requirement in
+   rule 1.
+
 ### Pre-implementation gate
 
 Before adding production code for builder, materialize, normalize, structuring, type/data recovery, **or HIR presentation readability** fixes intended as quality work, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) as required by [`docs/adr/0006-decompiler-quality-change-gate.md`](docs/adr/0006-decompiler-quality-change-gate.md). The proposal must show **measured** row anchor, owner proof, invariant proof, and validation matrix before implementation starts. **No row measurement → no quality implementation.**
