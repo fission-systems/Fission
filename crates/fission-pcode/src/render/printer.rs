@@ -308,7 +308,7 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
     let return_type = func
         .surface_return_type_name
         .clone()
-        .unwrap_or_else(|| print_type(&func.return_type));
+        .unwrap_or_else(|| print_return_type(&func.return_type));
     out.push_str(&format!("{return_type} {}(", func.name));
     if func.params.is_empty() {
         out.push_str("void");
@@ -892,6 +892,25 @@ fn print_integer_const(value: i64, ty: &NirType) -> String {
         }
     }
     value.to_string()
+}
+
+/// A function's return type, which unlike a value's cannot be left open.
+///
+/// `print_type` renders `NirType::Unknown` as `undefined`, which is not a C
+/// type and states no width. On a *value* that is at worst uninformative; in a
+/// signature it decides what every caller does with the result. The
+/// benchmark's uniform recompilation fixup resolves `undefined` to `unsigned
+/// char`, so a function whose return we could not determine returns one byte
+/// and every call site truncates.
+///
+/// Word width instead. It is the same answer `opaque_pcodeop_return_type_name`
+/// already gives for the same question one layer down, and it is never
+/// narrower than the value a caller reads.
+fn print_return_type(ty: &NirType) -> String {
+    match ty {
+        NirType::Unknown => "ulonglong".to_string(),
+        _ => print_type(ty),
+    }
 }
 
 pub(crate) fn print_type(ty: &NirType) -> String {

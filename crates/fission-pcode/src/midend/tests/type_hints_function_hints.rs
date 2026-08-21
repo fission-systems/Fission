@@ -187,7 +187,9 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
     assert_eq!(func.params[1].surface_type_name.as_deref(), Some("LPRECT"));
     let rendered = print_hir_function(&func);
     assert!(
-        rendered.contains("undefined FUN_0x140001000(HWND param_1, LPRECT param_2)"),
+        // Parameter spellings are the subject; the return is rendered at word
+        // width now rather than as `undefined`, which names no C type.
+        rendered.contains("FUN_0x140001000(HWND param_1, LPRECT param_2)"),
         "rendered:\n{}",
         rendered
     );

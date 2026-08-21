@@ -107,7 +107,11 @@ fn render_hir_function_with_profile(
         rendered.push_str(&render_opaque_pcodeop_stub(&target, &return_ty));
     }
     for (name, ty) in decls {
-        rendered.push_str(&format!("{} {};\n", print_type(&ty), name));
+        rendered.push_str(&format!(
+            "{} {};\n",
+            print_global_decl_type(&ty, options),
+            name
+        ));
     }
     rendered.push('\n');
     rendered.push_str(&print_hir_function_with_profile(
@@ -1050,6 +1054,36 @@ fn global_decl_type_from_size(size: u64) -> Option<NirType> {
         }),
         _ => None,
     }
+}
+
+/// How an undetermined global is spelled once nothing more can be learned.
+///
+/// `NirType::Unknown` is [`merge_global_decl_type`]'s "not known yet" marker --
+/// a real type may still replace it, which is why the merge cannot commit and
+/// this does. Rendering is the last point at which the answer is still open.
+///
+/// Printed as `undefined`, the spelling states no width at all, and the
+/// benchmark's uniform recompilation fixup resolves it to `unsigned char`. So
+/// a global we go on to dereference eight bytes wide gets defined as one, and
+/// the codegen that follows is not the program's. `stdout` is the case that
+/// showed it: declared `undefined`, read as `ulonglong *`.
+///
+/// Pointer width is the default because it is never *narrower* than the access
+/// that made us name the global, which is the failure that matters here. It
+/// remains a default rather than a recovery -- when the size table or the
+/// assignment context knows better, `merge_global_decl_type` has already taken
+/// that answer and this never runs.
+fn print_global_decl_type(ty: &NirType, options: &MlilPreviewOptions) -> String {
+    if *ty != NirType::Unknown {
+        return print_type(ty);
+    }
+    let bits = u32::try_from(options.pointer_size)
+        .unwrap_or(8)
+        .saturating_mul(8);
+    print_type(&NirType::Int {
+        bits: if bits == 0 { 64 } else { bits },
+        signed: false,
+    })
 }
 
 fn merge_global_decl_type(decls: &mut BTreeMap<String, NirType>, name: &str, ty: NirType) {

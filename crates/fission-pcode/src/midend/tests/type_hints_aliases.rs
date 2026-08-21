@@ -57,7 +57,14 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
     apply_preview_type_hints(&mut func, &context, &crate::midend::HashMap::default());
     assert_eq!(func.params[1].surface_type_name.as_deref(), Some("LPRECT"));
     let rendered = print_hir_function(&func);
-    assert!(rendered.contains("undefined FUN_0x140006260(longlong param_1, LPRECT param_2)"));
+    // The subject is the parameter alias, not the return spelling: an
+    // undetermined return is now rendered at word width rather than as
+    // `undefined`, which is not a C type and states no width.
+    assert!(
+        rendered.contains("FUN_0x140006260(longlong param_1, LPRECT param_2)"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("undefined FUN_"), "{rendered}");
 }
 
 #[test]
