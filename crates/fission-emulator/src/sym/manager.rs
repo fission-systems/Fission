@@ -81,12 +81,7 @@ impl SimulationManager {
     /// Step all states in the `active` stash.
     pub fn step(&mut self) -> Result<()> {
         self.steps_taken = self.steps_taken.saturating_add(1);
-        let active_states = self
-            .stashes
-            .get_mut("active")
-            .unwrap()
-            .drain(..)
-            .collect::<Vec<_>>();
+        let active_states = std::mem::take(self.stashes.get_mut("active").unwrap());
         let mut next_active = Vec::new();
         let mut next_deadended = Vec::new();
         let mut next_unsat = Vec::new();
