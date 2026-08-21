@@ -1225,6 +1225,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="5. Validation Matrix">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-confusion-census" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The confusion census
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assert-strings-measured-and-declined" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assert strings: measured and declined
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1332,14 +1360,52 @@ spelling matches more often" does not.</p>
       153 at <code>-O0</code> and 152 at <code>-O2</code>, across gcc and clang, 32- and 64-bit.</li>
 <li>[x] Storage census of every ground-truth variable at both levels.</li>
 <li>[x] Cross-checked <code>corpus/scale</code> to establish it is unrepresentative here.</li>
-<li>[ ] Type-confusion census: which (ground truth, emitted) pairs make up the
-      22%. <strong>This is the next measurement and the one that names the fix.</strong></li>
+<li>[x] Type-confusion census: which (ground truth, emitted) pairs make up the
+      22%.</li>
+<li>[x] Whether assert strings can open the metric's exact-name pass.</li>
 </ul>
 <p>A harness defect found and corrected in passing: <code>compute_type_match</code> returns
 its own <code>fn</code> key -- false negatives -- which silently overwrote the function
 name being recorded. The false-negative figures were derived independently and
 proved identical, so no reported number changes, but the storage census could
 not run until the collision was fixed.</p>
+<h3 id="the-confusion-census">The confusion census<a class="headerlink" href="#the-confusion-census" title="Permanent link">&para;</a></h3>
+<p><code>compute_type_match</code> returns counts, not pairs, so its three passes were
+replayed to record what was emitted every time a matched variable failed.
+Across <code>corpus/dev</code> at <code>-O0</code>: 553 variables matched, 428 right, <strong>125
+mistyped</strong>. Of those 125, <strong>57 are function arguments</strong> -- matched by ABI
+position, which is the place we should have the best information there is.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>class                              count   examples
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>32-bit widened to 64-bit            ~40    int -&gt; longlong (20), int -&gt; ulonglong (4)
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>pointer emitted as an integer       ~20    char* -&gt; ulonglong (8), FILE* -&gt; ulonglong
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>64-bit narrowed to 32-bit            15    long/size_t -&gt; uint (12)
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>pointer with the wrong pointee      ~15    Node* -&gt; int*, float* -&gt; uint*
+</span></code></pre></div>
+<p><strong>Nearly half of every mistype is width alone</strong>, with signedness incidental.
+That is consistent with typing from the register a value occupies rather than
+from the operation performed on it: a 32-bit <code>int</code> living in a 64-bit register
+becomes <code>longlong</code>. The second class, pointers printed as integers, is a
+separate and equally concrete failure.</p>
+<p>Neither needs the metric to justify fixing. "A <code>char *</code> was printed as
+<code>ulonglong</code>" and "a 32-bit quantity was declared 64-bit" are both wrong on
+their own terms.</p>
+<h3 id="assert-strings-measured-and-declined">Assert strings: measured and declined<a class="headerlink" href="#assert-strings-measured-and-declined" title="Permanent link">&para;</a></h3>
+<p>The metric's third pass matches by exact source name, which is the only route
+to a register-resident local, and assert expressions are the one place a
+stripped binary spells a variable's name outright -- glibc stores them as
+<code>&lt;expression&gt;\0&lt;file&gt;.c\0&lt;function&gt;\0</code>, so the expression is recoverable by
+reading the string physically before any <code>.c</code> filename.</p>
+<p>It works, and the yield is too small. On the scored sample-set, 16 of 150
+binaries (11%) carry any assert expression at all, giving <strong>53 expressions and
+49 distinct identifiers</strong> across the whole corpus -- and most are <code>NULL</code>,
+<code>result</code>, <code>datalen</code>. Release builds define <code>NDEBUG</code> and delete asserts
+outright, so this is a property of what is in the binaries rather than of the
+extraction.</p>
+<p>Two earlier attempts at this measurement were wrong and are worth recording:
+scanning all strings for expression-shaped text matched English prose from
+error messages ("to", "not", "failed"), and tightening the pattern without
+anchoring on the filename matched binary noise (<code>H+E</code>, <code>t%H</code>). Only the
+adjacency structure separates a real assert from a coincidence.</p>
 <h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
 <ul>
 <li>No external model was consulted.</li>
