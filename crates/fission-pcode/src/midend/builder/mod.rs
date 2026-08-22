@@ -813,15 +813,27 @@ impl<'a> PreviewBuilder<'a> {
             // `recover_tail_call_expr_from_branchind_target`) only produces a
             // `Call` target_expr when it has recovered a genuine tail call --
             // control permanently leaves this function via an unconditional
-            // jump into the callee, so the callee's return *is* this
-            // function's return. That holds regardless of whether the
-            // underlying p-code opcode was a real `BranchInd` (register-
+            // jump into the callee. A value-bearing callee result is therefore
+            // this function's return; an exact declared-void call remains an
+            // expression followed by a bare return. That holds regardless of
+            // whether the underlying p-code opcode was a real `BranchInd` (register-
             // indirect jump) or a direct `Branch` to a statically-known
             // address (`evidence.opcode` used to gate on the literal string
             // `"BranchInd"` here, which silently dropped the `return` for
             // every direct-address tail call -- `jmp known_func` rendered as
             // a bare `known_func();` statement with fallthrough implied,
             // instead of `return known_func();`).
+            let result_is_proven_non_source = matches!(
+                target_expr.as_ref(),
+                Some(PreHirExpr::Call { target, .. })
+                    if self.call_result_is_proven_non_source(target)
+            );
+            if result_is_proven_non_source {
+                let call = target_expr.expect("call target was checked above");
+                return PreHirStmt::Block(
+                    vec![PreHirStmt::Expr(call), PreHirStmt::Return(None)].into(),
+                );
+            }
             return PreHirStmt::Return(target_expr);
         }
 

@@ -158,6 +158,7 @@ mod tests {
                 ambiguous_call_targets: Default::default(),
                 call_effect_summaries: HashMap::new(),
                 call_prototype_summaries: HashMap::new(),
+                call_result_is_source_value: HashMap::new(),
                 call_param_rules: vec![PreviewCallParamRule {
                     callee_address: None,
                     callee_name: "MessageBoxW".to_string(),
@@ -531,6 +532,7 @@ mod tests {
             ambiguous_call_targets: Default::default(),
             call_effect_summaries: HashMap::new(),
             call_prototype_summaries: HashMap::new(),
+            call_result_is_source_value: HashMap::new(),
             call_param_rules: vec![PreviewCallParamRule {
                 callee_address: None,
                 callee_name: "MessageBoxW".to_string(),

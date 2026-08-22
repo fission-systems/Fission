@@ -42,6 +42,7 @@ fn preview_type_hints_rename_params_from_function_hints() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
+        call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
@@ -106,6 +107,7 @@ fn preview_type_hints_rename_stack_locals_from_function_hints() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
+        call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
@@ -168,6 +170,7 @@ fn preview_type_hints_surface_param_types_from_function_hints() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
+        call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
@@ -224,6 +227,7 @@ fn preview_type_hints_surface_stack_local_types_from_function_hints() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
+        call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
@@ -265,6 +269,7 @@ fn preview_type_hints_surface_return_type_from_function_hints() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
+        call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
@@ -340,6 +345,7 @@ fn preview_type_hints_elide_surface_implied_return_cast() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
+        call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {
@@ -380,6 +386,7 @@ fn preview_type_hints_create_missing_surface_params_from_function_hints() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: HashMap::default(),
         call_prototype_summaries: HashMap::default(),
+        call_result_is_source_value: HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {

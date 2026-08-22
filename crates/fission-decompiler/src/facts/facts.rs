@@ -15,9 +15,9 @@ use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use std::sync::{Arc, LazyLock, Mutex};
 use fission_loader::loader::types::DwarfLocation;
-use fission_signatures::SIGNATURE_RESOURCES;
 use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
 use fission_signatures::win_types::WindowsStructures;
+use fission_signatures::{SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup};
 use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -229,12 +229,38 @@ pub(crate) fn build_nir_type_context(
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
         call_prototype_summaries: HashMap::new(),
+        call_result_is_source_value: build_nir_call_result_facts(&all_target_refs),
         call_param_rules: call_param_rules_for_binary(binary, &all_target_refs)
             .as_ref()
             .clone(),
         function_hints,
         struct_types: build_nir_struct_type_hints(binary),
     }
+}
+
+/// Transport exact source-result facts from the signature owner to the
+/// builder. ABI result registers remain machine clobbers for declared-void
+/// calls; this fact only says that the clobber is not a source-language value.
+fn build_nir_call_result_facts(
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+) -> HashMap<String, bool> {
+    let mut facts = HashMap::new();
+    for target_ref in call_target_refs.values() {
+        let signature = SIGNATURE_RESOURCES
+            .api_signature(&target_ref.symbol)
+            .or_else(|| {
+                symbol_for_win_api_database_lookup(&target_ref.symbol)
+                    .and_then(|name| SIGNATURE_RESOURCES.api_signature(name))
+            });
+        let Some(signature) = signature else {
+            continue;
+        };
+        if !signature.return_type.trim().eq_ignore_ascii_case("void") {
+            continue;
+        }
+        facts.insert(target_ref.symbol.clone(), false);
+    }
+    facts
 }
 
 /// Struct/union/class layouts known from debug info (DWARF `DW_TAG_structure_
@@ -1510,9 +1536,9 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 #[cfg(test)]
 mod tests {
     use super::{
-        build_nir_call_param_rules, merge_nir_function_hints, record_interprocedural_arity_facts,
-        record_unambiguous_register_type_hint, resolve_nir_struct_name,
-        summarize_preview_callee_effects,
+        build_nir_call_param_rules, build_nir_call_result_facts, merge_nir_function_hints,
+        record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
+        resolve_nir_struct_name, summarize_preview_callee_effects,
     };
     use crate::{
         CallEdgeKind, CallTargetProvenance, CallTargetRef, NirTypeContext, PcodeBasicBlock,
@@ -1526,6 +1552,23 @@ mod tests {
         let mut ctx = NirTypeContext::default();
         ctx.call_targets.insert(addr, name.to_string());
         ctx
+    }
+
+    #[test]
+    fn exact_void_signature_marks_abi_result_as_non_source() {
+        let call_targets = HashMap::from([(
+            0x401000,
+            CallTargetRef {
+                address: Some(0x401000),
+                symbol: "free".to_string(),
+                provenance: CallTargetProvenance::Import,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 100,
+            },
+        )]);
+
+        let facts = build_nir_call_result_facts(&call_targets);
+        assert_eq!(facts.get("free"), Some(&false));
     }
 
     fn raw_hir_calling(callee_name: &str, arg_count: usize) -> fission_pcode::PreHirFunction {

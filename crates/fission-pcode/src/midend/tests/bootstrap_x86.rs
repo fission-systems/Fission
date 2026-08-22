@@ -276,6 +276,156 @@ fn preview_x64_ret_prefers_abi_return_register_over_stack_target() {
 }
 
 #[test]
+fn preview_proven_void_call_clobber_is_not_a_source_return() {
+    let ret_target = uniq(0x50c, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140002180,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140002180,
+                    output: Some(reg(0x00, 8)),
+                    inputs: vec![cst(42, 8)],
+                    asm_mnemonic: Some("MOV RAX,0x2a".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x140002187,
+                    output: None,
+                    inputs: vec![cst(0x140007000, 8)],
+                    asm_mnemonic: Some("CALL release".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x14000218c,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![cst(0, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV RCX,qword ptr [RSP]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x14000218d,
+                    output: None,
+                    inputs: vec![cst(0, 8), ret_target],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x140007000,
+        CallTargetRef {
+            address: Some(0x140007000),
+            symbol: "release".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context
+        .call_result_is_source_value
+        .insert("release".to_string(), false);
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x64_proven_void_call",
+        0x140002180,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(code.contains("void x64_proven_void_call(void)"), "{code}");
+    assert!(code.contains("release();"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("return 42;"), "{code}");
+}
+
+#[test]
+fn preview_proven_void_call_does_not_hide_post_call_return_def() {
+    let ret_target = uniq(0x50e, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1400021c0,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x1400021c0,
+                    output: None,
+                    inputs: vec![cst(0x140007000, 8)],
+                    asm_mnemonic: Some("CALL release".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400021c5,
+                    output: Some(reg(0x00, 8)),
+                    inputs: vec![cst(7, 8)],
+                    asm_mnemonic: Some("MOV RAX,7".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x1400021cc,
+                    output: Some(ret_target.clone()),
+                    inputs: vec![cst(0, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOV RCX,qword ptr [RSP]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1400021cd,
+                    output: None,
+                    inputs: vec![cst(0, 8), ret_target],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x140007000,
+        CallTargetRef {
+            address: Some(0x140007000),
+            symbol: "release".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context
+        .call_result_is_source_value
+        .insert("release".to_string(), false);
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x64_proven_void_call_then_value",
+        0x1400021c0,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(
+        code.contains("rax = 7;") && code.contains("return rax;"),
+        "{code}"
+    );
+    assert!(
+        code.contains("ulonglong x64_proven_void_call_then_value(void)"),
+        "{code}"
+    );
+}
+
+#[test]
 fn preview_x64_ret_recovers_single_predecessor_return_register() {
     let ret_target = uniq(0x510, 8);
     let func = PcodeFunction {
@@ -1603,6 +1753,55 @@ fn preview_known_forward_external_direct_branch_becomes_tail_call() {
     );
     assert!(!code.contains("__fission_branchind("), "{code}");
     assert!(!code.contains("goto block_406000;"), "{code}");
+}
+
+#[test]
+fn preview_proven_void_external_tail_call_is_expr_then_bare_return() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x406100,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Branch,
+                address: 0x406100,
+                output: None,
+                inputs: vec![cst(0x407000, 8)],
+                asm_mnemonic: Some("JMP release".to_string()),
+            }],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x407000,
+        CallTargetRef {
+            address: Some(0x407000),
+            symbol: "release".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context
+        .call_result_is_source_value
+        .insert("release".to_string(), false);
+
+    let code = render_mlil_preview_with_context(
+        &func,
+        "x86_proven_void_tail_call",
+        0x406100,
+        &preview_options_x86(),
+        Some(&context),
+    )
+    .expect("preview render");
+    assert!(
+        code.contains("void x86_proven_void_tail_call(void)"),
+        "{code}"
+    );
+    assert!(code.contains("release();"), "{code}");
+    assert!(code.contains("return;"), "{code}");
+    assert!(!code.contains("return release();"), "{code}");
 }
 
 #[test]

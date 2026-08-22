@@ -59,6 +59,54 @@ fn is_arm32_callable_mask(value: i64) -> bool {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    pub(in crate::midend::builder) fn call_result_is_proven_non_source(
+        &self,
+        target: &str,
+    ) -> bool {
+        self.type_context
+            .and_then(|context| context.call_result_is_source_value.get(target))
+            .is_some_and(|is_source_value| !is_source_value)
+    }
+
+    fn final_call_result_is_proven_non_source(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> bool {
+        let Some((call_idx, call)) =
+            block
+                .ops
+                .iter()
+                .enumerate()
+                .take(term_idx)
+                .rev()
+                .find(|(idx, op)| {
+                    matches!(
+                        op.opcode,
+                        PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+                    ) && !self.call_is_return_target_artifact(block, *idx)
+                })
+        else {
+            return false;
+        };
+        if block
+            .ops
+            .iter()
+            .take(term_idx)
+            .skip(call_idx + 1)
+            .any(|op| {
+                op.output.as_ref().is_some_and(|output| {
+                    self.register_namer().is_primary_return_register(output)
+                        && !self.is_return_target_copy(op, output)
+                })
+            })
+        {
+            return false;
+        }
+        super::super::resolve_lifted_direct_call_target(call, self.options, self.type_context)
+            .is_some_and(|target| self.call_result_is_proven_non_source(&target))
+    }
+
     fn recover_tail_call_expr_from_target_expr(
         &mut self,
         block_idx: usize,
@@ -1076,6 +1124,14 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             return Ok(expr);
+        }
+        // A declared-void call still clobbers the ABI result slot. With no
+        // definition of that slot after the call, an earlier scratch value in
+        // the same register cannot be the function's source return value.
+        if self.uses_primary_return_registers()
+            && self.final_call_result_is_proven_non_source(block, term_idx)
+        {
+            return Ok(None);
         }
         if self.uses_primary_return_registers()
             && (!self.side_effect_consumes_primary_return_register_before(block, term_idx)

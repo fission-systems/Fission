@@ -693,6 +693,7 @@ fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
         ambiguous_call_targets: Default::default(),
         call_effect_summaries: std::collections::HashMap::default(),
         call_prototype_summaries: std::collections::HashMap::default(),
+        call_result_is_source_value: std::collections::HashMap::default(),
         call_param_rules: Vec::new(),
         struct_types: std::collections::HashMap::default(),
         function_hints: Some(PreviewFunctionHints {

@@ -271,6 +271,12 @@ pub struct NirTypeContext {
     pub call_effect_summaries: HashMap<String, NirCallEffectSummary>,
     #[serde(default)]
     pub call_prototype_summaries: HashMap<String, NirCallPrototypeSummary>,
+    /// Whether a callee's ABI result storage carries a source-language value.
+    /// `false` is authoritative declared-void evidence: the ABI register is
+    /// still clobbered by the call, but must not become a source `return`
+    /// expression. Missing entries keep the conservative unknown behavior.
+    #[serde(default)]
+    pub call_result_is_source_value: HashMap<String, bool>,
     pub call_param_rules: Vec<NirCallParamRule>,
     pub function_hints: Option<NirFunctionHints>,
     /// Struct/union/class layouts known from debug info (DWARF/PDB),
