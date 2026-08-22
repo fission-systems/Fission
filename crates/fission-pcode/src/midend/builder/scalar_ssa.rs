@@ -847,6 +847,28 @@ fn resolve_direct_call_target(
         .first()
         .filter(|target| target.is_constant)?
         .offset;
+    resolve_call_target_address(address, type_context)
+}
+
+pub(in crate::midend) fn resolve_lifted_direct_call_target(
+    op: &PcodeOp,
+    options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+) -> Option<String> {
+    if let Some(symbol) = options.relocation_names.get(&op.address) {
+        return Some(symbol.clone());
+    }
+    let target = op.inputs.first()?;
+    if op.opcode != PcodeOpcode::Call && !target.is_constant {
+        return None;
+    }
+    resolve_call_target_address(target.offset, type_context)
+}
+
+fn resolve_call_target_address(
+    address: u64,
+    type_context: Option<&PreviewTypeContext>,
+) -> Option<String> {
     let context = type_context?;
     if context.ambiguous_call_targets.contains(&address) {
         return None;

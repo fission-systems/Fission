@@ -47,6 +47,7 @@ impl<'a> PreviewBuilder<'a> {
         let layout_fallthrough = build_layout_fallthrough_map(pcode);
         let mut successors =
             build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
+        prune_proven_noreturn_successors(pcode, &mut successors, options, type_context);
         for (from, to) in lsda_extra_edges(pcode, &address_to_index, binary) {
             if let Some(succs) = successors.get_mut(from) {
                 if !succs.contains(&to) {

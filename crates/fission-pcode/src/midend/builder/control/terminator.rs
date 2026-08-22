@@ -1614,7 +1614,13 @@ impl<'a> PreviewBuilder<'a> {
 
         let pcode_idx = self.pcode_block_idx(idx);
         let block = &self.pcode.blocks[pcode_idx];
-        let lowered = if let Some(term_idx) = self.block_terminator_index(block) {
+        let lowered = if crate::midend::cfg::block_ends_in_proven_noreturn_call(
+            block,
+            self.options,
+            self.type_context,
+        ) {
+            LoweredTerminator::Return(None)
+        } else if let Some(term_idx) = self.block_terminator_index(block) {
             let op = &block.ops[term_idx];
             self.with_lowering_site(
                 LoweringSite {

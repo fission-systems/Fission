@@ -1,5 +1,6 @@
 use super::*;
 use fission_loader::loader::LoadedBinary;
+use fission_midend_core::ir::CallEffectSummarySource;
 
 pub(super) fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, usize> {
     let mut address_to_index = HashMap::default();
@@ -163,6 +164,59 @@ pub(super) fn build_predecessor_index_map(successors: &[Vec<usize>]) -> Vec<Vec<
         }
     }
     predecessors
+}
+
+pub(super) fn block_ends_in_proven_noreturn_call(
+    block: &crate::pcode::PcodeBasicBlock,
+    options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+) -> bool {
+    // This repairs only the builder's synthetic lexical fallthrough. If the
+    // lifted CFG itself carries an outgoing edge, preserve that stronger fact.
+    if !block.successors.is_empty() {
+        return false;
+    }
+    let Some(last_addr) = block.ops.last().map(|op| op.address) else {
+        return false;
+    };
+    if block_terminator_op(block).is_some_and(|terminator| terminator.address == last_addr) {
+        return false;
+    }
+    let Some(call) = block
+        .ops
+        .iter()
+        .rev()
+        .take_while(|op| op.address == last_addr)
+        .find(|op| op.opcode == PcodeOpcode::Call)
+    else {
+        return false;
+    };
+    let Some(target) =
+        super::builder::resolve_lifted_direct_call_target(call, options, type_context)
+    else {
+        return false;
+    };
+    type_context
+        .and_then(|context| context.call_effect_summaries.get(&target))
+        .is_some_and(|summary| {
+            summary.may_exit == Some(true)
+                && summary.source == Some(CallEffectSummarySource::GhidraNoReturnData)
+        })
+}
+
+pub(super) fn prune_proven_noreturn_successors(
+    pcode: &PcodeFunction,
+    successors: &mut [Vec<usize>],
+    options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+) {
+    for (idx, block) in pcode.blocks.iter().enumerate() {
+        if block_ends_in_proven_noreturn_call(block, options, type_context)
+            && let Some(block_successors) = successors.get_mut(idx)
+        {
+            block_successors.clear();
+        }
+    }
 }
 
 pub(super) fn build_layout_fallthrough_map(pcode: &PcodeFunction) -> Vec<Option<usize>> {
@@ -647,6 +701,7 @@ mod lsda_extra_edges_tests {
     use crate::pcode::PcodeBasicBlock;
     use fission_loader::loader::gcc_lsda::{LsdaCallSite, LsdaInfo};
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+    use fission_midend_core::ir::NirCallEffectSummary;
 
     fn empty_block(start_address: u64) -> PcodeBasicBlock {
         PcodeBasicBlock {
@@ -655,6 +710,46 @@ mod lsda_extra_edges_tests {
             successors: vec![],
             ops: vec![],
         }
+    }
+
+    fn direct_call_block(start_address: u64, target: u64) -> PcodeBasicBlock {
+        PcodeBasicBlock {
+            index: 0,
+            start_address,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Call,
+                address: start_address,
+                output: None,
+                inputs: vec![Varnode {
+                    space_id: 3,
+                    offset: target,
+                    size: 8,
+                    is_constant: false,
+                    constant_val: 0,
+                }],
+                asm_mnemonic: None,
+            }],
+        }
+    }
+
+    fn noreturn_context(
+        target_addr: u64,
+        target: &str,
+        source: CallEffectSummarySource,
+    ) -> PreviewTypeContext {
+        let mut context = PreviewTypeContext::default();
+        context.call_targets.insert(target_addr, target.to_string());
+        context.call_effect_summaries.insert(
+            target.to_string(),
+            NirCallEffectSummary {
+                may_exit: Some(true),
+                source: Some(source),
+                ..NirCallEffectSummary::default()
+            },
+        );
+        context
     }
 
     fn test_binary() -> fission_loader::loader::LoadedBinary {
@@ -741,6 +836,85 @@ mod lsda_extra_edges_tests {
         let address_to_index = build_address_to_index_map(&pcode);
         let layout_fallthrough = build_layout_fallthrough_map(&pcode);
         let successors = build_successor_index_map(&pcode, &address_to_index, &layout_fallthrough);
+        assert_eq!(successors, vec![vec![1], vec![]]);
+    }
+
+    #[test]
+    fn proven_noreturn_call_prunes_lexical_fallthrough() {
+        let call_addr = 0x1000;
+        let target_addr = 0x5000;
+        let pcode = PcodeFunction {
+            blocks: vec![
+                direct_call_block(call_addr, target_addr),
+                empty_block(0x1010),
+            ],
+        };
+        let options = MlilPreviewOptions::default();
+        let context = noreturn_context(
+            target_addr,
+            "fatal",
+            CallEffectSummarySource::GhidraNoReturnData,
+        );
+        let mut successors = vec![vec![1], vec![]];
+
+        assert!(block_ends_in_proven_noreturn_call(
+            &pcode.blocks[0],
+            &options,
+            Some(&context),
+        ));
+        prune_proven_noreturn_successors(&pcode, &mut successors, &options, Some(&context));
+
+        assert_eq!(successors, vec![Vec::<usize>::new(), Vec::<usize>::new()]);
+    }
+
+    #[test]
+    fn possible_exit_without_noreturn_provenance_keeps_fallthrough() {
+        let call_addr = 0x1000;
+        let pcode = PcodeFunction {
+            blocks: vec![direct_call_block(call_addr, 0x5000), empty_block(0x1010)],
+        };
+        let options = MlilPreviewOptions::default();
+        let context = noreturn_context(
+            0x5000,
+            "maybe_fatal",
+            CallEffectSummarySource::CallTargetRef,
+        );
+        let mut successors = vec![vec![1], vec![]];
+
+        assert!(!block_ends_in_proven_noreturn_call(
+            &pcode.blocks[0],
+            &options,
+            Some(&context),
+        ));
+        prune_proven_noreturn_successors(&pcode, &mut successors, &options, Some(&context));
+
+        assert_eq!(successors, vec![vec![1], vec![]]);
+    }
+
+    #[test]
+    fn lifted_successor_outweighs_noreturn_summary() {
+        let call_addr = 0x1000;
+        let target_addr = 0x5000;
+        let mut call_block = direct_call_block(call_addr, target_addr);
+        call_block.successors.push(0x1010);
+        let pcode = PcodeFunction {
+            blocks: vec![call_block, empty_block(0x1010)],
+        };
+        let options = MlilPreviewOptions::default();
+        let context = noreturn_context(
+            target_addr,
+            "fatal",
+            CallEffectSummarySource::GhidraNoReturnData,
+        );
+        let mut successors = vec![vec![1], vec![]];
+
+        assert!(!block_ends_in_proven_noreturn_call(
+            &pcode.blocks[0],
+            &options,
+            Some(&context),
+        ));
+        prune_proven_noreturn_successors(&pcode, &mut successors, &options, Some(&context));
+
         assert_eq!(successors, vec![vec![1], vec![]]);
     }
 }

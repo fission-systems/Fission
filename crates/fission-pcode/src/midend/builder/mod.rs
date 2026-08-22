@@ -19,6 +19,7 @@ mod init;
 mod materialize;
 mod memory;
 mod scalar_ssa;
+pub(in crate::midend) use scalar_ssa::resolve_lifted_direct_call_target;
 mod stats;
 pub(super) mod switch_table;
 mod telemetry;
