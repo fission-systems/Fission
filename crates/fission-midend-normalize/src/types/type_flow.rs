@@ -125,8 +125,7 @@ impl TypeFlowSolver {
     /// round never converges, identical in kind to the multi-def case this
     /// guard already handles.
     fn safe_for_backward_refine(&self, name: &str) -> bool {
-        self.definition_counts.get(name).copied().unwrap_or(0) <= 1
-            && !self.self_referential.contains(name)
+        binding_is_safe_for_backward_refine(name, &self.definition_counts, &self.self_referential)
     }
 
     fn from_function(func: &PreHirFunction) -> Self {
@@ -403,6 +402,14 @@ impl TypeFlowSolver {
     }
 }
 
+pub(super) fn binding_is_safe_for_backward_refine(
+    name: &str,
+    definition_counts: &HashMap<String, usize>,
+    self_referential: &HashSet<String>,
+) -> bool {
+    definition_counts.get(name).copied().unwrap_or(0) <= 1 && !self_referential.contains(name)
+}
+
 fn type_bits(ty: &NirType, pointer_bits: u32) -> Option<u32> {
     match ty {
         NirType::Bool => Some(8),
@@ -640,7 +647,7 @@ fn collect_edges(stmts: &[PreHirStmt], edges: &mut Vec<TypeFlowEdge>) {
     }
 }
 
-fn collect_definition_counts(stmts: &[PreHirStmt], counts: &mut HashMap<String, usize>) {
+pub(super) fn collect_definition_counts(stmts: &[PreHirStmt], counts: &mut HashMap<String, usize>) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign {
@@ -688,7 +695,7 @@ fn collect_definition_counts(stmts: &[PreHirStmt], counts: &mut HashMap<String, 
 /// embedded in), so def-count alone can't distinguish this from a genuinely
 /// single-valued binding. Treated the same as a multi-def name by every
 /// backward-refine guard in this module.
-fn collect_self_referential_bindings(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
+pub(super) fn collect_self_referential_bindings(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign {

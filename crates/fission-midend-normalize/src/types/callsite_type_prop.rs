@@ -42,15 +42,14 @@
 /// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
-use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_midend_core::wave_stats::{
     add_call_prototype_exact_api_arity_pruned, add_call_prototype_signature_missing,
     add_call_prototype_unknown_target_kept, add_call_prototype_wrapper_resolved,
     add_call_signature_refinements, add_surface_fact_promotions, add_typed_fact_conflicts,
 };
+use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_signatures::{
-    ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup,
-    type_name_is_informative,
+    ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup, type_name_is_informative,
 };
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
@@ -376,11 +375,16 @@ fn apply_binding_surface_renames(
     renames.len()
 }
 
-fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<String, String>) -> bool {
+fn rewrite_call_targets_stmts(
+    stmts: &mut [PreHirStmt],
+    rewrites: &HashMap<String, String>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
-            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
+            PreHirStmt::Assign { rhs, .. }
+            | PreHirStmt::Expr(rhs)
+            | PreHirStmt::Return(Some(rhs)) => {
                 changed |= rewrite_call_targets_expr(rhs, rewrites);
             }
             PreHirStmt::VaStart { va_list, .. } => {
@@ -390,7 +394,10 @@ fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<Strin
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rewrites);
+                changed |= rewrite_call_targets_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    rewrites,
+                );
             }
             PreHirStmt::Switch {
                 expr,
@@ -399,9 +406,15 @@ fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<Strin
             } => {
                 changed |= rewrite_call_targets_expr(expr, rewrites);
                 for case in cases {
-                    changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), rewrites);
+                    changed |= rewrite_call_targets_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        rewrites,
+                    );
                 }
-                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), rewrites);
+                changed |= rewrite_call_targets_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    rewrites,
+                );
             }
             PreHirStmt::If {
                 cond,
@@ -409,8 +422,14 @@ fn rewrite_call_targets_stmts(stmts: &mut [PreHirStmt], rewrites: &HashMap<Strin
                 else_body,
             } => {
                 changed |= rewrite_call_targets_expr(cond, rewrites);
-                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), rewrites);
-                changed |= rewrite_call_targets_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), rewrites);
+                changed |= rewrite_call_targets_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    rewrites,
+                );
+                changed |= rewrite_call_targets_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    rewrites,
+                );
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -600,7 +619,7 @@ fn apply_variadic_printf_format_string_arg_types(
 }
 
 /// Like [`tighten_binding_ty`], but additionally allowed to override a
-/// generic *unsigned*-int binding, not just an `Unknown` one.
+/// generic *unsigned*-int binding with a format-specifier scalar type.
 ///
 /// By the time this pass runs on real compiled code, a call-argument
 /// binding almost never still has `NirType::Unknown` -- `fission-pcode`'s
@@ -608,16 +627,9 @@ fn apply_variadic_printf_format_string_arg_types(
 /// time based purely on the raw register/stack-slot width (`type_from_
 /// size(size, false)`, used throughout the builder), and that default is
 /// always unsigned. That default is not real type evidence, just "whatever
-/// size the value happened to be passed in" -- unlike `tighten_binding_ty`'s
-/// caller above (the WinAPI-signature-driven typing, which has this exact
-/// same real-world limitation, confirmed via a real fixture: `GetWindowRect`'s
-/// own `HWND`/`RECT*` parameters stayed `ulonglong` end-to-end), a format
-/// specifier IS strong, authoritative evidence (the actual variadic-call
-/// API contract, not a guess) -- specific enough to be worth overriding
-/// that generic default for. `tighten_binding_ty` itself stays untouched
-/// (its conservatism is appropriate for its many other, less-certain
-/// callers); this local override is scoped to just this one, narrow,
-/// high-confidence case.
+/// size the value happened to be passed in". A format specifier is strong,
+/// authoritative evidence for scalar variadic arguments and may also refine
+/// signedness/width in ways the ordinary monotone rule deliberately does not.
 fn apply_variadic_printf_arg_ty(binding: &mut PreHirBinding, candidate: &NirType) -> bool {
     if tighten_binding_ty(binding, candidate) {
         return true;
@@ -669,7 +681,9 @@ fn collect_copy_sources(stmts: &[PreHirStmt], out: &mut HashMap<String, String>)
             } => {
                 out.insert(target.clone(), source.clone());
             }
-            PreHirStmt::Block(body) | PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
                 collect_copy_sources(body, out);
             }
             PreHirStmt::If {
@@ -700,6 +714,67 @@ fn collect_copy_sources(stmts: &[PreHirStmt], out: &mut HashMap<String, String>)
             _ => {}
         }
     }
+}
+
+/// Carry an exact API parameter declaration back through stable plain-copy
+/// aliases.  The call argument itself keeps the historical behavior of
+/// receiving the surface declaration even when its PreHIR name is reused;
+/// propagation beyond that name requires the same single-definition and
+/// non-self-referential proof as operation-edge type flow.
+fn apply_api_surface_type_transitively(
+    func: &mut PreHirFunction,
+    copy_sources: &HashMap<String, String>,
+    definition_counts: &HashMap<String, usize>,
+    self_referential: &HashSet<String>,
+    arg_var: &str,
+    surface_type_name: &str,
+) -> bool {
+    let mut changed = false;
+    let mut current = arg_var.to_string();
+    let mut visited = HashSet::default();
+    let compact_surface = surface_type_name
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_uppercase)
+        .collect::<String>();
+    let generic_void_pointer = matches!(compact_surface.as_str(), "VOID*" | "LPVOID" | "PVOID");
+    while visited.insert(current.clone()) {
+        if let Some(binding) = binding_by_name_mut(&mut func.locals, &current)
+            .or_else(|| binding_by_name_mut(&mut func.params, &current))
+            && binding.surface_type_name.is_none()
+        {
+            binding.surface_type_name = Some(surface_type_name.to_string());
+            changed = true;
+        }
+        // `free(void *)` proves the call accepts this value, not that the
+        // source declaration itself was `void *`: any object pointer may be
+        // converted for that call. Keep the surface on the immediate argument
+        // but do not erase a more specific source pointee across its copy.
+        if generic_void_pointer {
+            break;
+        }
+        if !super::type_flow::binding_is_safe_for_backward_refine(
+            &current,
+            definition_counts,
+            self_referential,
+        ) {
+            break;
+        }
+        match copy_sources.get(&current) {
+            Some(source)
+                if super::type_flow::binding_is_safe_for_backward_refine(
+                    source,
+                    definition_counts,
+                    self_referential,
+                ) =>
+            {
+                current = source.clone();
+            }
+            None => break,
+            Some(_) => break,
+        }
+    }
+    changed
 }
 
 /// 0-based argument index of the format-string parameter for a known
@@ -864,6 +939,12 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     let mut wrapper_resolved_count = 0usize;
     let mut signature_missing_count = 0usize;
     let mut unknown_target_kept_count = 0usize;
+    let mut definition_counts = HashMap::default();
+    let mut self_referential = HashSet::default();
+    super::type_flow::collect_definition_counts(&func.body, &mut definition_counts);
+    super::type_flow::collect_self_referential_bindings(&func.body, &mut self_referential);
+    let mut copy_sources = HashMap::default();
+    collect_copy_sources(&func.body, &mut copy_sources);
 
     // Collect call sites: (receiver_name_opt, callee_name, arg_var_names)
     let mut callsites: Vec<(Option<String>, String, Vec<Option<String>>)> = Vec::new();
@@ -937,8 +1018,8 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
         // names are unaffected, so the rename path below stays live.
         //
         // Resolve return type and update receiver binding.
-        if let Some(ret_ty) =
-            resolve_return_ty(&sig.return_type).filter(|_| type_name_is_informative(&sig.return_type))
+        if let Some(ret_ty) = resolve_return_ty(&sig.return_type)
+            .filter(|_| type_name_is_informative(&sig.return_type))
         {
             if let Some(recv_name) = receiver {
                 if let Some(b) = binding_by_name_mut(&mut func.locals, recv_name)
@@ -959,20 +1040,16 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
             let Some(param) = sig.params.get(i) else {
                 break;
             };
+            let informative = type_name_is_informative(&param.type_name);
             if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
                 .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
             {
-                let informative = type_name_is_informative(&param.type_name);
                 let tightened = informative
                     && win_type_name_to_nir(&param.type_name)
                         .map(|param_ty| tighten_binding_ty(b, &param_ty))
                         .unwrap_or(false);
-                let surface_tightened = informative && b.surface_type_name.is_none();
-                if surface_tightened {
-                    b.surface_type_name = Some(param.type_name.trim().to_string());
-                }
-                changed |= tightened || surface_tightened;
-                refined_here |= tightened || surface_tightened;
+                changed |= tightened;
+                refined_here |= tightened;
                 if !matches!(b.origin, Some(NirBindingOrigin::ParamIndex(_)))
                     && is_generic_binding_name(arg_var)
                 {
@@ -983,6 +1060,18 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
                         &param.name,
                     );
                 }
+            }
+            if informative {
+                let surface_tightened = apply_api_surface_type_transitively(
+                    func,
+                    &copy_sources,
+                    &definition_counts,
+                    &self_referential,
+                    arg_var,
+                    param.type_name.trim(),
+                );
+                changed |= surface_tightened;
+                refined_here |= surface_tightened;
             }
         }
         if refined_here {
@@ -1055,7 +1144,9 @@ fn prune_known_api_call_args_stmts(
     let mut pruned = 0usize;
     for stmt in stmts {
         match stmt {
-            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
+            PreHirStmt::Assign { rhs, .. }
+            | PreHirStmt::Expr(rhs)
+            | PreHirStmt::Return(Some(rhs)) => {
                 pruned += prune_known_api_call_args_expr(rhs, summaries);
             }
             PreHirStmt::VaStart { va_list, .. } => {
@@ -1065,7 +1156,10 @@ fn prune_known_api_call_args_stmts(
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), summaries);
+                pruned += prune_known_api_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    summaries,
+                );
             }
             PreHirStmt::Switch {
                 expr,
@@ -1074,9 +1168,15 @@ fn prune_known_api_call_args_stmts(
             } => {
                 pruned += prune_known_api_call_args_expr(expr, summaries);
                 for case in cases {
-                    pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), summaries);
+                    pruned += prune_known_api_call_args_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        summaries,
+                    );
                 }
-                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), summaries);
+                pruned += prune_known_api_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    summaries,
+                );
             }
             PreHirStmt::If {
                 cond,
@@ -1084,8 +1184,14 @@ fn prune_known_api_call_args_stmts(
                 else_body,
             } => {
                 pruned += prune_known_api_call_args_expr(cond, summaries);
-                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), summaries);
-                pruned += prune_known_api_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), summaries);
+                pruned += prune_known_api_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    summaries,
+                );
+                pruned += prune_known_api_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    summaries,
+                );
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -1150,7 +1256,9 @@ fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: 
     let mut pruned = 0usize;
     for stmt in stmts {
         match stmt {
-            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
+            PreHirStmt::Assign { rhs, .. }
+            | PreHirStmt::Expr(rhs)
+            | PreHirStmt::Return(Some(rhs)) => {
                 pruned += prune_self_call_args_expr(rhs, func_name, arity);
             }
             PreHirStmt::VaStart { va_list, .. } => {
@@ -1160,7 +1268,11 @@ fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: 
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), func_name, arity);
+                pruned += prune_self_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    func_name,
+                    arity,
+                );
             }
             PreHirStmt::Switch {
                 expr,
@@ -1169,9 +1281,17 @@ fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: 
             } => {
                 pruned += prune_self_call_args_expr(expr, func_name, arity);
                 for case in cases {
-                    pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body), func_name, arity);
+                    pruned += prune_self_call_args_stmts(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        func_name,
+                        arity,
+                    );
                 }
-                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), func_name, arity);
+                pruned += prune_self_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    func_name,
+                    arity,
+                );
             }
             PreHirStmt::If {
                 cond,
@@ -1179,8 +1299,16 @@ fn prune_self_call_args_stmts(stmts: &mut [PreHirStmt], func_name: &str, arity: 
                 else_body,
             } => {
                 pruned += prune_self_call_args_expr(cond, func_name, arity);
-                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), func_name, arity);
-                pruned += prune_self_call_args_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), func_name, arity);
+                pruned += prune_self_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    func_name,
+                    arity,
+                );
+                pruned += prune_self_call_args_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    func_name,
+                    arity,
+                );
             }
             PreHirStmt::Label(_)
             | PreHirStmt::Goto(_)
@@ -1378,6 +1506,19 @@ mod tests {
         }
     }
 
+    fn unsigned_binding(name: &str, bits: u32, origin: Option<NirBindingOrigin>) -> PreHirBinding {
+        PreHirBinding {
+            name: name.to_string(),
+            ty: NirType::Int {
+                bits,
+                signed: false,
+            },
+            surface_type_name: None,
+            origin,
+            initializer: None,
+        }
+    }
+
     #[test]
     fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
         let mut func = PreHirFunction {
@@ -1387,8 +1528,9 @@ mod tests {
                 "param_1",
                 Some(NirBindingOrigin::ParamIndex(0)),
             )],
-            locals: vec![unknown_binding(
+            locals: vec![unsigned_binding(
                 "local_2",
+                64,
                 Some(NirBindingOrigin::DerivedFromStackOffset(-0x20)),
             )],
             return_type: NirType::Unknown,
@@ -1411,6 +1553,235 @@ mod tests {
         assert!(apply_callsite_type_prop_pass(&mut func));
         assert_eq!(func.locals[0].name, "lpRect");
         assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("RECT*"));
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Int {
+                bits: 64,
+                signed: false,
+            }
+        );
+    }
+
+    #[test]
+    fn callsite_type_prop_keeps_existing_surface_type_locked() {
+        let mut locked = unsigned_binding(
+            "local_2",
+            32,
+            Some(NirBindingOrigin::DerivedFromStackOffset(-0x20)),
+        );
+        locked.surface_type_name = Some("uintptr_t".to_string());
+        let mut func = PreHirFunction {
+            name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![unknown_binding(
+                "param_1",
+                Some(NirBindingOrigin::ParamIndex(0)),
+            )],
+            locals: vec![locked],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                target: "GetWindowRect".to_string(),
+                args: vec![
+                    PreHirExpr::Var("param_1".to_string()),
+                    PreHirExpr::Var("local_2".to_string()),
+                ],
+                ty: NirType::Unknown,
+            })],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert_eq!(
+            func.locals[0].ty,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            }
+        );
+        assert_eq!(
+            func.locals[0].surface_type_name.as_deref(),
+            Some("uintptr_t")
+        );
+    }
+
+    #[test]
+    fn callsite_type_prop_carries_surface_type_to_stable_copy_source() {
+        let mut func = PreHirFunction {
+            name: "caller".to_string(),
+            params: vec![unsigned_binding(
+                "source",
+                64,
+                Some(NirBindingOrigin::ParamIndex(1)),
+            )],
+            locals: vec![
+                unknown_binding("window", Some(NirBindingOrigin::ParamIndex(0))),
+                unsigned_binding("alias", 64, Some(NirBindingOrigin::Temp)),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("alias".to_string()),
+                    rhs: PreHirExpr::Var("source".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "GetWindowRect".to_string(),
+                    args: vec![
+                        PreHirExpr::Var("window".to_string()),
+                        PreHirExpr::Var("alias".to_string()),
+                    ],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert_eq!(func.params[0].surface_type_name.as_deref(), Some("RECT*"));
+        assert_eq!(func.locals[1].surface_type_name.as_deref(), Some("RECT*"));
+        assert!(matches!(func.params[0].ty, NirType::Int { bits: 64, .. }));
+    }
+
+    #[test]
+    fn callsite_type_prop_keeps_generic_void_pointer_at_immediate_argument() {
+        let specific_pointer = NirType::Ptr(Box::new(NirType::Int {
+            bits: 64,
+            signed: false,
+        }));
+        let mut func = PreHirFunction {
+            name: "caller".to_string(),
+            params: vec![PreHirBinding {
+                name: "source".to_string(),
+                ty: specific_pointer.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![PreHirBinding {
+                name: "alias".to_string(),
+                ty: specific_pointer,
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("alias".to_string()),
+                    rhs: PreHirExpr::Var("source".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "free".to_string(),
+                    args: vec![PreHirExpr::Var("alias".to_string())],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert!(func.locals[0].surface_type_name.is_some());
+        assert!(func.params[0].surface_type_name.is_none());
+    }
+
+    #[test]
+    fn callsite_type_prop_does_not_reach_multi_definition_copy_source() {
+        let uint64 = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "caller".to_string(),
+            locals: vec![
+                unknown_binding("window", Some(NirBindingOrigin::ParamIndex(0))),
+                unsigned_binding("source", 64, Some(NirBindingOrigin::Temp)),
+                unsigned_binding("alias", 64, Some(NirBindingOrigin::Temp)),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("source".to_string()),
+                    rhs: PreHirExpr::Const(1, uint64.clone()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("source".to_string()),
+                    rhs: PreHirExpr::Const(2, uint64),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("alias".to_string()),
+                    rhs: PreHirExpr::Var("source".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "GetWindowRect".to_string(),
+                    args: vec![
+                        PreHirExpr::Var("window".to_string()),
+                        PreHirExpr::Var("alias".to_string()),
+                    ],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert!(func.locals[2].surface_type_name.is_some());
+        assert!(func.locals[1].surface_type_name.is_none());
+    }
+
+    #[test]
+    fn callsite_type_prop_does_not_retype_reused_call_receiver_as_pointer() {
+        let uint64 = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "caller".to_string(),
+            params: vec![unknown_binding(
+                "text",
+                Some(NirBindingOrigin::ParamIndex(0)),
+            )],
+            locals: vec![unsigned_binding("rax", 64, Some(NirBindingOrigin::Temp))],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rax".to_string()),
+                    rhs: PreHirExpr::Call {
+                        target: "unknown_scalar".to_string(),
+                        args: vec![],
+                        ty: uint64.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rax".to_string()),
+                    rhs: PreHirExpr::Call {
+                        target: "strchr".to_string(),
+                        args: vec![
+                            PreHirExpr::Var("text".to_string()),
+                            PreHirExpr::Const(
+                                0,
+                                NirType::Int {
+                                    bits: 32,
+                                    signed: true,
+                                },
+                            ),
+                        ],
+                        ty: NirType::Ptr(Box::new(NirType::Int {
+                            bits: 8,
+                            signed: true,
+                        })),
+                    },
+                },
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert_eq!(func.locals[0].ty, uint64);
+        assert!(func.locals[0].surface_type_name.is_none());
     }
 
     #[test]

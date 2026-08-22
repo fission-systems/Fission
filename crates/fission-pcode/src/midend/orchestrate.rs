@@ -21,7 +21,8 @@ use fission_loader::loader::LoadedBinary;
 use fission_midend_structuring::StructuringHost;
 // Owner crate (not pcode re-export path) — keeps orchestrate boundary explicit.
 use fission_midend_normalize::{
-    normalize_hir_function, pipeline as normalize_pipeline, take_normalize_wave_stats,
+    apply_callsite_type_prop_pass, normalize_hir_function, pipeline as normalize_pipeline,
+    take_normalize_wave_stats,
 };
 use std::time::Instant;
 
@@ -253,13 +254,27 @@ pub fn render_mlil_preview_with_binary_and_context(
     // constants next to each other that were separated when folding last ran
     // before structuring. Two folds bracket the propagation for that reason.
     let _ = fission_midend_normalize::constant_folding_pass(&mut hir.body);
-    let _ = fission_midend_normalize::propagate_copies_in_runs(&mut hir);
+    let mut structured_copies_changed =
+        fission_midend_normalize::propagate_copies_in_runs(&mut hir);
     let _ = fission_midend_normalize::constant_folding_pass(&mut hir.body);
     // Folding can turn a computed definition into a constant one, which is only
     // then a pure copyable the run-scoped pass can carry. Propagate once more so
     // the group reaches a fixpoint instead of stopping one step short.
-    let _ = fission_midend_normalize::propagate_copies_in_runs(&mut hir);
+    structured_copies_changed |= fission_midend_normalize::propagate_copies_in_runs(&mut hir);
     let _ = fission_midend_normalize::prune_unobservable_scratch(&mut hir);
+    // Run-scoped propagation can expose the stable source binding at an API
+    // call only after CFG structuring, e.g. `stream_alias = param_1;
+    // fputs(text, stream_alias)` becoming `fputs(text, param_1)`.  Re-run the
+    // existing call-site contract on that simpler, equivalent body so the
+    // exact API parameter type reaches the source binding. Deliberately do not
+    // re-run the whole type fixed point here: doing so would reconsider
+    // unrelated return, signedness, aggregate, and pointer-depth facts after
+    // layout. This ordering avoids unsound backward typing through a reused
+    // PreHIR name with multiple definitions while keeping the late scope local
+    // to bindings newly exposed at calls.
+    if structured_copies_changed {
+        let _ = apply_callsite_type_prop_pass(&mut hir);
+    }
     // The dead/identity cleanup above can expose an alias-only block that did
     // not exist at structuring time. Retarget its function-scoped predecessors
     // before crossing the canonical PreHIR -> HIR boundary.

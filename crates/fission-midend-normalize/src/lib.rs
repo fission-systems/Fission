@@ -70,6 +70,7 @@ pub use types::set_operand_metatype_names;
 pub use rule_normalizer::apply_rule_normalization;
 
 pub use types::is_known_api_signature;
+pub use types::apply_callsite_type_prop_pass;
 
 /// Pure `x = x` / adjacent-duplicate assign cleanup (nested Block/If safe).
 pub use cleanup::eliminate_redundant_var_assigns;
