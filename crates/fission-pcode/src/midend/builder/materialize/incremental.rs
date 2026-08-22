@@ -24,18 +24,21 @@ impl<'a> PreviewBuilder<'a> {
         let mut rsp_accesses = Vec::new();
         let mut rbp_accesses = Vec::new();
 
-        for (block_idx, block) in self.pcode.blocks.iter().enumerate() {
-            for (op_idx, op) in block.ops.iter().enumerate() {
+        for block_idx in 0..self.pcode.blocks.len() {
+            for op_idx in 0..self.pcode.blocks[block_idx].ops.len() {
+                let op = self.pcode.blocks[block_idx].ops[op_idx].clone();
+                let site = LoweringSite { block_idx, op_idx };
                 match op.opcode {
                     PcodeOpcode::Load => {
                         if op.inputs.len() < 2 {
                             continue;
                         }
                         let ptr = &op.inputs[1];
-                        if let Some((base, offset)) = self
-                            .resolve_stack_address_from_memory_op(op)
-                            .or_else(|| self.resolve_stack_address(ptr))
-                        {
+                        let resolved = self.with_lowering_site(site, |this| {
+                            this.resolve_stack_address_from_memory_op(&op)
+                                .or_else(|| this.resolve_stack_address(ptr))
+                        });
+                        if let Some((base, offset)) = resolved {
                             let size = op.output.as_ref().map(|out| out.size).unwrap_or(0);
                             if size > 0 {
                                 match base {
@@ -49,17 +52,27 @@ impl<'a> PreviewBuilder<'a> {
                         if op.inputs.len() < 3 {
                             continue;
                         }
-                        if self.is_callee_saved_push_store(op)
-                            || self.is_call_return_scaffold_store(block, op_idx, op)
-                            || self.x86_32_store_is_recovered_call_arg(block, op_idx)
+                        let is_callee_saved_push = self
+                            .with_lowering_site(site, |this| this.is_callee_saved_push_store(&op));
+                        if is_callee_saved_push
+                            || self.is_call_return_scaffold_store(
+                                &self.pcode.blocks[block_idx],
+                                op_idx,
+                                &op,
+                            )
+                            || self.x86_32_store_is_recovered_call_arg(
+                                &self.pcode.blocks[block_idx],
+                                op_idx,
+                            )
                         {
                             continue;
                         }
                         let ptr = &op.inputs[1];
-                        if let Some((base, offset)) = self
-                            .resolve_stack_address_from_memory_op(op)
-                            .or_else(|| self.resolve_stack_address(ptr))
-                        {
+                        let resolved = self.with_lowering_site(site, |this| {
+                            this.resolve_stack_address_from_memory_op(&op)
+                                .or_else(|| this.resolve_stack_address(ptr))
+                        });
+                        if let Some((base, offset)) = resolved {
                             if let Some(val) = op.inputs.get(2) {
                                 let size = val.size;
                                 if size > 0 {
@@ -214,6 +227,52 @@ pub(super) fn refine_partitions(accesses: &[(i64, u32)]) -> Vec<(i64, u32)> {
 mod tests {
     use super::*;
 
+    fn test_op(
+        seq_num: u32,
+        opcode: PcodeOpcode,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode,
+            address: 0x1000 + u64::from(seq_num),
+            output,
+            inputs,
+            asm_mnemonic: Some(format!("{opcode:?}").to_ascii_uppercase()),
+        }
+    }
+
+    fn test_unique(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: UNIQUE_SPACE_ID,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn test_rbp() -> Varnode {
+        Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 40,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn test_rsp() -> Varnode {
+        Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            offset: 32,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
     #[test]
     fn test_disjoint_partitions() {
         let accesses = vec![(0, 2), (2, 2)];
@@ -244,5 +303,124 @@ mod tests {
         let accesses = vec![(2, 1), (3, 3)];
         let res = refine_partitions(&accesses);
         assert_eq!(res, vec![(2, 1), (3, 3)]);
+    }
+
+    #[test]
+    fn heritage_resolves_reused_address_temp_at_each_operation_site() {
+        // SLEIGH unique-space storage is reused after a value dies.  These two
+        // address expressions deliberately share one VarnodeKey, just as the
+        // real x64 lift does, but refer to distinct stack slots and widths.
+        // A site-free def lookup sees only the later `rbp - 16` definition and
+        // falsely records both accesses there, widening away the real 4-byte
+        // slot at `rbp - 4` before ordinary lowering starts.
+        let address = test_unique(0x8f00, 8);
+        let pcode = PcodeFunction {
+            blocks: vec![crate::pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: Vec::new(),
+                ops: vec![
+                    test_op(
+                        0,
+                        PcodeOpcode::IntAdd,
+                        Some(address.clone()),
+                        vec![test_rbp(), Varnode::constant(-4, 8)],
+                    ),
+                    test_op(
+                        1,
+                        PcodeOpcode::Store,
+                        None,
+                        vec![
+                            Varnode::constant(3, 8),
+                            address.clone(),
+                            Varnode::constant(0, 4),
+                        ],
+                    ),
+                    test_op(
+                        2,
+                        PcodeOpcode::IntAdd,
+                        Some(address.clone()),
+                        vec![test_rbp(), Varnode::constant(-16, 8)],
+                    ),
+                    test_op(
+                        3,
+                        PcodeOpcode::Store,
+                        None,
+                        vec![Varnode::constant(3, 8), address, Varnode::constant(0, 8)],
+                    ),
+                ],
+            }],
+        };
+        let mut options = MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "PE".to_owned(),
+            calling_convention: CallingConvention::WindowsX64,
+            ..Default::default()
+        };
+        crate::midend::cspec::test_maps::apply_preview_cspec(&mut options);
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        builder.run_incremental_heritage().unwrap();
+
+        assert_eq!(
+            builder.locals.get(&-4).map(|slot| &slot.ty),
+            Some(&type_from_size(4, false))
+        );
+        assert_eq!(
+            builder.locals.get(&-16).map(|slot| &slot.ty),
+            Some(&type_from_size(8, false))
+        );
+    }
+
+    #[test]
+    fn heritage_ignores_cspec_preserved_register_push_scaffold() {
+        let rsp = test_rsp();
+        let rbp = test_rbp();
+        let saved_temp = test_unique(0x8e00, 8);
+        let mut push_store = test_op(
+            2,
+            PcodeOpcode::Store,
+            None,
+            vec![Varnode::constant(3, 8), rsp.clone(), saved_temp.clone()],
+        );
+        push_store.address = 0x1000;
+        let pcode = PcodeFunction {
+            blocks: vec![crate::pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: Vec::new(),
+                ops: vec![
+                    test_op(
+                        0,
+                        PcodeOpcode::IntSub,
+                        Some(rsp.clone()),
+                        vec![rsp, Varnode::constant(8, 8)],
+                    ),
+                    {
+                        let mut copy = test_op(1, PcodeOpcode::Copy, Some(saved_temp), vec![rbp]);
+                        copy.address = 0x1000;
+                        copy
+                    },
+                    push_store,
+                ],
+            }],
+        };
+        let mut options = MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "PE".to_owned(),
+            calling_convention: CallingConvention::WindowsX64,
+            ..Default::default()
+        };
+        crate::midend::cspec::test_maps::apply_preview_cspec(&mut options);
+        assert!(options.cspec_unaffected_offsets.contains(&40));
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        builder.run_incremental_heritage().unwrap();
+
+        assert!(builder.locals.is_empty());
     }
 }

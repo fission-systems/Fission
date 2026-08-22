@@ -77,6 +77,7 @@ pub fn apply_resolved_proto_to_options(options: &mut NirRenderOptions, proto: &R
         options.cspec_stack_arg_base = Some(base);
     }
     options.cspec_stack_pointer_offset = proto.stack_pointer_offset;
+    options.cspec_unaffected_offsets = proto.unaffected_offsets.clone();
     options.cspec_extrapop = Some(proto.extrapop);
     options.cspec_return_offset = proto.return_offset;
     options.cspec_float_return_offset = proto.float_return_offset;

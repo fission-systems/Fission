@@ -154,6 +154,61 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn is_callee_saved_push_store(&self, op: &PcodeOp) -> bool {
+        if op.opcode != PcodeOpcode::Store || op.inputs.len() < 3 {
+            return false;
+        }
+        let saved = &op.inputs[2];
+        let register_namer = self.register_namer();
+        let mut saved_origin = saved.clone();
+        let mut saved_name = None;
+        for _ in 0..6 {
+            if let Some(name) = register_namer.hw_name(&saved_origin) {
+                saved_name = Some(name);
+                break;
+            }
+            let Some((_, def)) = self.lookup_def_site(&saved_origin) else {
+                break;
+            };
+            if !matches!(
+                def.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            ) || def.inputs.is_empty()
+            {
+                break;
+            }
+            saved_origin = def.inputs[0].clone();
+        }
+        let preserved = saved_name.is_some_and(|saved_name| {
+            self.options.cspec_unaffected_offsets.iter().any(|offset| {
+                register_namer
+                    .hw_name_at(*offset, saved_origin.size)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(&saved_name))
+            })
+        });
+
+        // `asm_mnemonic` contains p-code opcode labels in the Rust-SLEIGH
+        // pipeline, not disassembly.  Prove a push from its semantic shape:
+        // the same machine instruction subtracts exactly one saved value
+        // from SP and stores that preserved register through the new SP.
+        let pcode_proves_push = preserved
+            && self.pcode.blocks.first().is_some_and(|entry| {
+                entry.ops.iter().any(|candidate| {
+                    candidate.address == op.address
+                        && candidate.opcode == PcodeOpcode::IntSub
+                        && candidate.inputs.len() == 2
+                        && candidate.output.as_ref().is_some_and(|output| {
+                            self.output_is_stack_pointer_register(output)
+                                && self.output_is_stack_pointer_register(&candidate.inputs[0])
+                        })
+                        && const_offset(&candidate.inputs[1]) == Some(i64::from(saved.size))
+                })
+            });
+        if pcode_proves_push {
+            return true;
+        }
+
+        // Preserve the legacy path for callers that provide real disassembly
+        // text but no resolved `.cspec` model.
         let Some(asm) = op.asm_mnemonic.as_deref() else {
             return false;
         };

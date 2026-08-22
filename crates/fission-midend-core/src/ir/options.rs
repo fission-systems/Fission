@@ -52,6 +52,12 @@ pub struct NirRenderOptions {
     /// register name in the SSA implementation.
     #[serde(default, skip)]
     pub cspec_stack_pointer_offset: Option<u64>,
+    /// REGISTER-space offsets preserved by the callee according to the
+    /// active `.cspec` prototype.  Stack-frame recovery uses this model fact
+    /// to recognize register-save scaffolding without spelling ISA register
+    /// names in the semantic pipeline.
+    #[serde(default, skip)]
+    pub cspec_unaffected_offsets: Vec<u64>,
     /// Return-address stack size from .cspec prototype (`extrapop` / `stackshift`).
     ///
     /// Converts pre-call RSP-relative displacements into Ghidra stack-space offsets:
@@ -464,6 +470,7 @@ impl NirRenderOptions {
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
             cspec_stack_pointer_offset: None,
+            cspec_unaffected_offsets: Vec::new(),
             cspec_extrapop: None,
             sla_register_map: None,
             cspec_return_offset: None,

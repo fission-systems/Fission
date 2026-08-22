@@ -32,6 +32,7 @@ mod tests {
             cspec_param_offsets: None,
             cspec_stack_arg_base: None,
             cspec_stack_pointer_offset: None,
+            cspec_unaffected_offsets: Vec::new(),
             cspec_extrapop: None,
             sla_register_map: None,
             cspec_return_offset: None,
