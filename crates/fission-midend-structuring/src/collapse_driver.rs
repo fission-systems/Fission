@@ -56,8 +56,8 @@ use crate::collapse_shapes::{Shape, ShapeKind, find_shape};
 use crate::host::StructuringHost;
 use crate::linear_types::LoweredTerminator;
 use fission_midend_core::ir::MlilPreviewError;
-use fission_midend_prehir::PreHirStmt;
-use fission_midend_prehir::util::negate_expr;
+use fission_midend_prehir::util::{expr_has_side_effecting_call, negate_expr};
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
 /// Ceiling on fold/concession rounds, proportional to graph size.
 const MAX_ROUNDS_PER_NODE: usize = 8;
@@ -556,6 +556,11 @@ pub(crate) fn lower_shape(
                     body: std::rc::Rc::new(body),
                 }]));
             }
+            if let Some(rotated) =
+                rotate_while_test_to_preheader_latch(&test_stmts, cond.clone(), body.clone())
+            {
+                return Ok(Some(rotated));
+            }
             // The test block computes something every iteration, so it belongs
             // *inside* the loop, ahead of the test -- which a `while (cond)`
             // header cannot express, because the header runs before the body.
@@ -728,6 +733,104 @@ pub(crate) fn lower_shape(
     }
 }
 
+/// Express a top-test node without an artificial infinite loop.
+///
+/// In the graph, `test; cond` runs before the first body iteration and after
+/// every normal path through the body. Rotating it to
+/// `test; while (cond) { body; test; }` has exactly that schedule. A
+/// loop-scoped `continue` would skip the appended test, so those bodies retain
+/// the explicit guard representation. Continues inside nested loops target the
+/// nested loop and are irrelevant.
+fn rotate_while_test_to_preheader_latch(
+    test_stmts: &[PreHirStmt],
+    cond: PreHirExpr,
+    mut body: Vec<PreHirStmt>,
+) -> Option<Vec<PreHirStmt>> {
+    if test_stmts.is_empty()
+        || !test_stmts
+            .iter()
+            .all(|stmt| matches!(stmt, PreHirStmt::Assign { .. } | PreHirStmt::Expr(_)))
+        || !test_stmts
+            .iter()
+            .any(test_stmt_requires_scheduled_evaluation)
+        || contains_current_loop_continue(&body)
+    {
+        return None;
+    }
+    body.extend(test_stmts.iter().cloned());
+    let mut out = test_stmts.to_vec();
+    out.push(PreHirStmt::While {
+        cond,
+        body: std::rc::Rc::new(body),
+    });
+    Some(out)
+}
+
+fn test_stmt_requires_scheduled_evaluation(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            !matches!(lhs, fission_midend_prehir::PreHirLValue::Var(_))
+                || expr_observes_runtime_state(rhs)
+        }
+        PreHirStmt::Expr(expr) => expr_observes_runtime_state(expr),
+        _ => false,
+    }
+}
+
+/// Pure arithmetic and flag scaffolding can be folded into the loop condition
+/// by the existing cleanup. Calls and memory observations cannot: their place
+/// in the iteration schedule must remain explicit.
+fn expr_observes_runtime_state(expr: &PreHirExpr) -> bool {
+    if expr_has_side_effecting_call(expr) {
+        return true;
+    }
+    match expr {
+        PreHirExpr::Load { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::FieldAccess { .. }
+        | PreHirExpr::AggregateCopy { .. } => true,
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
+            expr_observes_runtime_state(expr)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            expr_observes_runtime_state(lhs) || expr_observes_runtime_state(rhs)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_observes_runtime_state(cond)
+                || expr_observes_runtime_state(then_expr)
+                || expr_observes_runtime_state(else_expr)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().any(expr_observes_runtime_state),
+        PreHirExpr::PtrOffset { base, .. } => expr_observes_runtime_state(base),
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+    }
+}
+
+fn contains_current_loop_continue(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Continue => true,
+        PreHirStmt::Block(body) => contains_current_loop_continue(body),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => contains_current_loop_continue(then_body) || contains_current_loop_continue(else_body),
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| contains_current_loop_continue(&case.body))
+                || contains_current_loop_continue(default)
+        }
+        PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => false,
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,6 +840,74 @@ mod tests {
         if std::env::var_os("FISSION_MATCH_FOLD").is_none() {
             assert!(match_fold_driver_enabled());
         }
+    }
+
+    #[test]
+    fn while_test_preheader_latch_rotates_ordered_linear_statements() {
+        let first_test = PreHirStmt::Assign {
+            lhs: fission_midend_prehir::PreHirLValue::Var("item".to_string()),
+            rhs: PreHirExpr::Call {
+                target: "next_item".to_string(),
+                args: Vec::new(),
+                ty: fission_midend_core::ir::NirType::Unknown,
+            },
+        };
+        let second_test = PreHirStmt::Assign {
+            lhs: fission_midend_prehir::PreHirLValue::Var("ready".to_string()),
+            rhs: PreHirExpr::Var("item".to_string()),
+        };
+        let cond = PreHirExpr::Var("item".to_string());
+        let body_stmt = PreHirStmt::Expr(PreHirExpr::Var("consume".to_string()));
+        let tests = vec![first_test, second_test];
+
+        let rotated =
+            rotate_while_test_to_preheader_latch(&tests, cond.clone(), vec![body_stmt.clone()])
+                .expect("a linear test sequence is rotatable");
+        assert_eq!(&rotated[..tests.len()], tests.as_slice());
+        assert!(matches!(
+            rotated.last(),
+            Some(PreHirStmt::While { cond: actual_cond, body })
+                if actual_cond == &cond
+                    && body.as_slice()[0] == body_stmt
+                    && &body.as_slice()[1..] == tests.as_slice()
+        ));
+    }
+
+    #[test]
+    fn while_test_preheader_latch_rejects_control_and_current_loop_continue() {
+        let cond = PreHirExpr::Var("keep_going".to_string());
+        assert!(
+            rotate_while_test_to_preheader_latch(&[PreHirStmt::Continue], cond.clone(), Vec::new())
+                .is_none()
+        );
+        assert!(
+            rotate_while_test_to_preheader_latch(
+                &[PreHirStmt::Expr(PreHirExpr::Var("test".to_string()))],
+                cond,
+                vec![PreHirStmt::Continue],
+            )
+            .is_none()
+        );
+        let pure_test = PreHirStmt::Assign {
+            lhs: fission_midend_prehir::PreHirLValue::Var("value".to_string()),
+            rhs: PreHirExpr::Binary {
+                op: fission_midend_prehir::PreHirBinaryOp::Ne,
+                lhs: Box::new(PreHirExpr::Var("value".to_string())),
+                rhs: Box::new(PreHirExpr::Const(
+                    0,
+                    fission_midend_core::ir::NirType::Unknown,
+                )),
+                ty: fission_midend_core::ir::NirType::Bool,
+            },
+        };
+        assert!(
+            rotate_while_test_to_preheader_latch(
+                &[pure_test],
+                PreHirExpr::Var("value".to_string()),
+                Vec::new(),
+            )
+            .is_none()
+        );
     }
 
     #[test]
