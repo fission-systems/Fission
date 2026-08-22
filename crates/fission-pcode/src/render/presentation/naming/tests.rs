@@ -56,6 +56,30 @@ fn pointer_dereference_renames_generic_param() {
 }
 
 #[test]
+fn equal_score_pointer_names_use_original_name_as_stable_tie_break() {
+    let mut func = HirFunction {
+        name: "f".into(),
+        locals: vec![local("uVar2", ptr_ty()), local("uVar1", ptr_ty())],
+        return_type: NirType::Unknown,
+        body: vec![
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("uVar2".into())),
+                ty: int_ty(32, true),
+            }),
+            HirStmt::Expr(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("uVar1".into())),
+                ty: int_ty(32, true),
+            }),
+        ],
+        ..Default::default()
+    };
+
+    assert!(apply_semantic_naming(&mut func));
+    assert_eq!(func.locals[0].name, "p");
+    assert_eq!(func.locals[1].name, "ptr");
+}
+
+#[test]
 fn loop_counter_gets_short_letter_name() {
     // for (uVar1 = 0; uVar1 < param_2; uVar1 = uVar1 + 1) {}
     let mut func = HirFunction {

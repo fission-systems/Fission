@@ -29,7 +29,11 @@ pub(super) fn candidates(func: &HirFunction) -> Vec<Candidate> {
     }
 
     let mut scored: Vec<(String, Info)> = info.into_iter().collect();
-    scored.sort_by(|a, b| b.1.score.cmp(&a.1.score));
+    scored.sort_by(|a, b| {
+        b.1.score
+            .cmp(&a.1.score)
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
     let mut generic_idx = 0;
     let mut iter_idx = 0;
