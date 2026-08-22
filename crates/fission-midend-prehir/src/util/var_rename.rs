@@ -116,6 +116,14 @@ fn rename_var_in_expr(expr: &mut PreHirExpr, renames: &[(String, String)]) {
     }
 }
 
+/// Rename variable references in a standalone expression.
+///
+/// This complements [`rename_vars_in_stmts`] for function binding
+/// initializers, which live outside the statement body.
+pub fn rename_vars_in_expr(expr: &mut PreHirExpr, renames: &[(String, String)]) {
+    rename_var_in_expr(expr, renames);
+}
+
 fn rename_var_name(name: &mut String, renames: &[(String, String)]) {
     if let Some((_, replacement)) = renames.iter().find(|(from, _)| from == name) {
         *name = replacement.clone();

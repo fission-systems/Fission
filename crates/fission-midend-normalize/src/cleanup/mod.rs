@@ -35,7 +35,8 @@ pub use loops_conds::{
     rewrite_orphan_loop_gotos_to_continue,
 };
 pub use temp_var::{
-    coerce_ptr_typed_bitop_vars, collapse_adjacent_pure_copy_into_if,
+    canonicalize_orphaned_stack_slot_names, coerce_ptr_typed_bitop_vars,
+    collapse_adjacent_pure_copy_into_if,
     collapse_temp_self_square_assigns, collapse_trivial_assign_returns,
     elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
     eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,

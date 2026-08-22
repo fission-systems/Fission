@@ -32,6 +32,16 @@ fn temp_binding(name: &str, bits: u32) -> PreHirBinding {
     }
 }
 
+fn stack_binding(name: &str, offset: i64) -> PreHirBinding {
+    PreHirBinding {
+        name: name.to_string(),
+        ty: int(32),
+        surface_type_name: None,
+        origin: Some(NirBindingOrigin::StackOffset(offset)),
+        initializer: None,
+    }
+}
+
 #[test]
 fn recursive_empty_if_cleanup_prunes_nested_pure_empty_guard() {
     let mut stmts = vec![PreHirStmt::Block(vec![PreHirStmt::If {
@@ -2435,5 +2445,69 @@ fn prune_unused_dead_local_bindings_then_rescue_redeclares_write_only_stack_home
         func.locals.iter().any(|b| b.name == "local_18"),
         "rescue must re-declare local_18 so it's not an undeclared identifier: {:?}",
         func.locals
+    );
+}
+
+#[test]
+fn canonicalize_orphaned_stack_slot_name_renames_binding_and_uses() {
+    let mut claimant = stack_binding("local_8_7", -8);
+    claimant.initializer = Some(PreHirExpr::Var("local_8_7".to_string()));
+    let mut func = PreHirFunction {
+        locals: vec![claimant],
+        body: vec![PreHirStmt::Return(Some(PreHirExpr::Var(
+            "local_8_7".to_string(),
+        )))],
+        ..Default::default()
+    };
+
+    assert!(canonicalize_orphaned_stack_slot_names(&mut func));
+    assert_eq!(func.locals[0].name, "local_8");
+    assert!(matches!(
+        func.locals[0].initializer.as_ref(),
+        Some(PreHirExpr::Var(name)) if name == "local_8"
+    ));
+    assert!(matches!(
+        func.body.as_slice(),
+        [PreHirStmt::Return(Some(PreHirExpr::Var(name)))] if name == "local_8"
+    ));
+}
+
+#[test]
+fn canonicalize_orphaned_stack_slot_name_preserves_live_base_collision() {
+    let mut func = PreHirFunction {
+        locals: vec![
+            stack_binding("local_8", -8),
+            stack_binding("local_8_7", -8),
+        ],
+        ..Default::default()
+    };
+
+    assert!(!canonicalize_orphaned_stack_slot_names(&mut func));
+    assert_eq!(
+        func.locals
+            .iter()
+            .map(|binding| binding.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["local_8", "local_8_7"]
+    );
+}
+
+#[test]
+fn canonicalize_orphaned_stack_slot_name_preserves_ambiguous_claimants() {
+    let mut func = PreHirFunction {
+        locals: vec![
+            stack_binding("local_8_1", -8),
+            stack_binding("local_8_2", -8),
+        ],
+        ..Default::default()
+    };
+
+    assert!(!canonicalize_orphaned_stack_slot_names(&mut func));
+    assert_eq!(
+        func.locals
+            .iter()
+            .map(|binding| binding.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["local_8_1", "local_8_2"]
     );
 }

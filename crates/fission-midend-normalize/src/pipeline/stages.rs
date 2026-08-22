@@ -13,8 +13,9 @@ use super::super::arith::{
 use super::super::cleanup::{
     apply_byte_sum_index_trunc, apply_deindirect_pass, apply_expand_load_pass,
     apply_subvar_trim_pass, apply_switch_norm_pass, canonicalize_minmax_conditional_returns,
-    cast_elision_pass, elide_unused_popcount_assigns, eliminate_dead_local_clobber_assigns,
-    eliminate_dead_temp_assigns, eliminate_redundant_var_assigns,
+    canonicalize_orphaned_stack_slot_names, cast_elision_pass, elide_unused_popcount_assigns,
+    eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
+    eliminate_redundant_var_assigns,
     hoist_param_alias_copies_before_first_use, inline_loop_condition_trailing_temps,
     normalize_dowhile_decrement_condition, prune_unused_dead_local_bindings,
     prune_unused_temp_bindings, rescue_undeclared_bindings,
@@ -769,6 +770,12 @@ pub fn run_stage_cleanup(func: &mut PreHirFunction, diag: bool, perf: bool) {
         "rescue_undeclared_bindings_final",
         perf,
         rescue_undeclared_bindings,
+    );
+    run_pass_logged(
+        func,
+        "canonicalize_orphaned_stack_slot_names",
+        perf,
+        canonicalize_orphaned_stack_slot_names,
     );
 }
 
