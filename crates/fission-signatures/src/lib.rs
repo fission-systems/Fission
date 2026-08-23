@@ -49,7 +49,10 @@ pub use signature::FunctionSignature;
 pub static SIGNATURE_DB: std::sync::LazyLock<SignatureDatabase> =
     std::sync::LazyLock::new(SignatureDatabase::new);
 
-pub use api_types::{ApiSignature, ApiTypeDatabase, ApiTypeError, ParamInfo, type_name_is_informative};
+pub use api_types::{
+    ApiSignature, ApiTypeDatabase, ApiTypeError, ParamInfo,
+    pointer_surface_type_name_is_specific, type_name_is_informative,
+};
 pub use fid::{FidDatabase, FidDatabaseSet};
 pub use fidbf::{
     FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfMatch, FidbfRelation, discover_fidbf_paths,

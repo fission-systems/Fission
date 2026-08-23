@@ -320,6 +320,7 @@ pub struct PrototypeSummary {
     pub locked_exact_arity: Option<usize>,
     pub return_lattice: NirType,
     pub param_lattices: Vec<NirType>,
+    pub param_surface_type_names: Vec<Option<String>>,
     pub soundness: SummarySoundness,
 }
 
@@ -354,11 +355,21 @@ pub struct NirCallEffectSummary {
     pub source: Option<CallEffectSummarySource>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NirCallPointerPointee {
+    Unknown,
+    Int { bits: u32, signed: bool },
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NirCallPrototypeSummary {
     pub min_arity: usize,
     pub max_arity: usize,
     pub locked_exact_arity: Option<usize>,
+    #[serde(default)]
+    pub param_pointer_pointees: Vec<Option<NirCallPointerPointee>>,
+    #[serde(default)]
+    pub param_surface_type_names: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

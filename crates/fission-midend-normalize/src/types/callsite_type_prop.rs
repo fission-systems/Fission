@@ -777,6 +777,278 @@ fn apply_api_surface_type_transitively(
     changed
 }
 
+fn tighten_binding_from_direct_callee_pointer(
+    binding: &mut PreHirBinding,
+    candidate: &NirType,
+    pointer_bits: u32,
+) -> bool {
+    if tighten_binding_ty(binding, candidate) {
+        return true;
+    }
+    if binding.surface_type_name.is_some() || !matches!(candidate, NirType::Ptr(_)) {
+        return false;
+    }
+    match binding.ty {
+        NirType::Int { bits, .. } if bits == pointer_bits => {
+            binding.ty = candidate.clone();
+            true
+        }
+        _ => false,
+    }
+}
+
+fn binding_accepts_direct_callee_pointer(
+    binding: &PreHirBinding,
+    candidate: &NirType,
+    pointer_bits: u32,
+) -> bool {
+    match (&binding.ty, candidate) {
+        (NirType::Unknown, NirType::Ptr(_)) => true,
+        (existing, candidate) if existing == candidate => true,
+        (NirType::Ptr(existing), NirType::Ptr(candidate)) => {
+            **candidate == NirType::Unknown || **existing == NirType::Unknown
+        }
+        (NirType::Int { bits, .. }, NirType::Ptr(_)) => {
+            *bits == pointer_bits && binding.surface_type_name.is_none()
+        }
+        _ => false,
+    }
+}
+
+fn expr_root_var(expr: &PreHirExpr) -> Option<&str> {
+    match expr {
+        PreHirExpr::Var(name) => Some(name),
+        PreHirExpr::Cast { expr, .. } => expr_root_var(expr),
+        _ => None,
+    }
+}
+
+fn expr_uses_pointer_base(expr: &PreHirExpr, names: &HashSet<String>) -> bool {
+    match expr {
+        PreHirExpr::Load { ptr, .. } => {
+            expr_root_var(ptr).is_some_and(|name| names.contains(name))
+                || expr_uses_pointer_base(ptr, names)
+        }
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
+            expr_root_var(base).is_some_and(|name| names.contains(name))
+                || expr_uses_pointer_base(base, names)
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            expr_root_var(base).is_some_and(|name| names.contains(name))
+                || expr_uses_pointer_base(base, names)
+                || expr_uses_pointer_base(index, names)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            expr_uses_pointer_base(lhs, names) || expr_uses_pointer_base(rhs, names)
+        }
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
+            expr_uses_pointer_base(expr, names)
+        }
+        PreHirExpr::AggregateCopy { src, .. } => expr_uses_pointer_base(src, names),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_uses_pointer_base(cond, names)
+                || expr_uses_pointer_base(then_expr, names)
+                || expr_uses_pointer_base(else_expr, names)
+        }
+        PreHirExpr::Call { args, .. } => args
+            .iter()
+            .any(|argument| expr_uses_pointer_base(argument, names)),
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => false,
+    }
+}
+
+fn lvalue_uses_pointer_base(lvalue: &PreHirLValue, names: &HashSet<String>) -> bool {
+    match lvalue {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => {
+            expr_root_var(ptr).is_some_and(|name| names.contains(name))
+                || expr_uses_pointer_base(ptr, names)
+        }
+        PreHirLValue::Index { base, index, .. } => {
+            expr_root_var(base).is_some_and(|name| names.contains(name))
+                || expr_uses_pointer_base(base, names)
+                || expr_uses_pointer_base(index, names)
+        }
+        PreHirLValue::FieldAccess { base, .. } => {
+            expr_root_var(base).is_some_and(|name| names.contains(name))
+                || expr_uses_pointer_base(base, names)
+        }
+    }
+}
+
+fn stmts_use_pointer_base(stmts: &[PreHirStmt], names: &HashSet<String>) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            lvalue_uses_pointer_base(lhs, names) || expr_uses_pointer_base(rhs, names)
+        }
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+            expr_uses_pointer_base(expr, names)
+        }
+        PreHirStmt::VaStart { va_list, .. } => expr_uses_pointer_base(va_list, names),
+        PreHirStmt::Block(body) => stmts_use_pointer_base(body, names),
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+            expr_uses_pointer_base(cond, names) || stmts_use_pointer_base(body, names)
+        }
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_uses_pointer_base(cond, names)
+                || stmts_use_pointer_base(then_body, names)
+                || stmts_use_pointer_base(else_body, names)
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref()
+                .is_some_and(|stmt| stmts_use_pointer_base(std::slice::from_ref(stmt), names))
+                || cond
+                    .as_ref()
+                    .is_some_and(|expr| expr_uses_pointer_base(expr, names))
+                || update
+                    .as_deref()
+                    .is_some_and(|stmt| stmts_use_pointer_base(std::slice::from_ref(stmt), names))
+                || stmts_use_pointer_base(body, names)
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_uses_pointer_base(expr, names)
+                || cases
+                    .iter()
+                    .any(|case| stmts_use_pointer_base(&case.body, names))
+                || stmts_use_pointer_base(default, names)
+        }
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
+    })
+}
+
+/// Apply an isolated direct callee's admitted pointer parameter contract to
+/// the matching caller argument. The callee fact producer has already rejected
+/// generic `void*` and pointer types without a concrete pointee or informative
+/// surface declaration. Backward transit uses the same stable-copy proof as
+/// API prototype propagation.
+fn apply_direct_callee_pointer_transitively(
+    func: &mut PreHirFunction,
+    copy_sources: &HashMap<String, String>,
+    definition_counts: &HashMap<String, usize>,
+    self_referential: &HashSet<String>,
+    arg_var: &str,
+    param_ty: &NirType,
+    surface_type_name: Option<&str>,
+) -> bool {
+    let concrete_pointee = matches!(param_ty, NirType::Ptr(inner) if **inner != NirType::Unknown);
+    let informative_surface =
+        surface_type_name.is_some_and(fission_signatures::pointer_surface_type_name_is_specific);
+    if !matches!(param_ty, NirType::Ptr(_)) || (!concrete_pointee && !informative_surface) {
+        return false;
+    }
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
+    let mut current = arg_var.to_string();
+    let mut visited = HashSet::default();
+    let mut chain = Vec::new();
+    while visited.insert(current.clone()) {
+        chain.push(current.clone());
+        if !super::type_flow::binding_is_safe_for_backward_refine(
+            &current,
+            definition_counts,
+            self_referential,
+        ) {
+            break;
+        }
+        match copy_sources.get(&current) {
+            Some(source)
+                if super::type_flow::binding_is_safe_for_backward_refine(
+                    source,
+                    definition_counts,
+                    self_referential,
+                ) =>
+            {
+                current = source.clone();
+            }
+            None | Some(_) => break,
+        }
+    }
+
+    if !chain
+        .iter()
+        .any(|name| func.params.iter().any(|param| param.name == *name))
+    {
+        return false;
+    }
+
+    let has_surface_conflict = chain.iter().any(|name| {
+        func.locals
+            .iter()
+            .chain(func.params.iter())
+            .find(|binding| binding.name == *name)
+            .and_then(|binding| binding.surface_type_name.as_deref())
+            .is_some_and(|existing| surface_type_name != Some(existing))
+    });
+    if has_surface_conflict {
+        return false;
+    }
+
+    let chain_names = chain.iter().cloned().collect::<HashSet<_>>();
+    if surface_type_name.is_none() && stmts_use_pointer_base(&func.body, &chain_names) {
+        // A concrete pointee observed only through the callee must not be
+        // stacked on top of the caller's independent dereference/index
+        // evidence. The caller-side solver owns pointer depth in that case;
+        // this interprocedural rule is for otherwise scalar forwarding chains.
+        return false;
+    }
+
+    let has_type_conflict = chain.iter().any(|name| {
+        func.locals
+            .iter()
+            .chain(func.params.iter())
+            .find(|binding| binding.name == *name)
+            .is_some_and(|binding| {
+                !binding_accepts_direct_callee_pointer(binding, param_ty, pointer_bits)
+            })
+    });
+    if has_type_conflict {
+        return false;
+    }
+
+    let mut changed = false;
+    for name in &chain {
+        if let Some(binding) = binding_by_name_mut(&mut func.locals, name)
+            .or_else(|| binding_by_name_mut(&mut func.params, name))
+        {
+            changed |= tighten_binding_from_direct_callee_pointer(binding, param_ty, pointer_bits);
+            if binding.surface_type_name.is_none()
+                && let Some(surface) = surface_type_name
+            {
+                binding.surface_type_name = Some(surface.to_string());
+                changed = true;
+            }
+        }
+    }
+    if changed && std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+        eprintln!(
+            "[DIRECT-CALLEE-TYPE-DIAG] function={} arg={} candidate={:?} surface={:?} chain={:?}",
+            func.name, arg_var, param_ty, surface_type_name, chain
+        );
+    }
+    changed
+}
+
 /// 0-based argument index of the format-string parameter for a known
 /// printf-family symbol, or `None` if `target` isn't one of the (narrow-
 /// string-only, see [`apply_variadic_printf_format_string_arg_types`]'s
@@ -961,7 +1233,8 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
         let summary = func
             .callee_summaries
             .get(callee)
-            .or_else(|| func.callee_summaries.get(resolved_callee));
+            .or_else(|| func.callee_summaries.get(resolved_callee))
+            .cloned();
         let Some(sig) = api_signature_via_import_aliases(resolved_callee)
             .or_else(|| api_signature_via_import_aliases(callee))
         else {
@@ -970,7 +1243,7 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
             } else {
                 unknown_target_kept_count += 1;
             }
-            if let Some(summary) = summary {
+            if let Some(summary) = summary.as_ref() {
                 let mut refined_here = false;
                 if let Some(recv_name) = receiver
                     && summary.prototype.return_lattice != NirType::Unknown
@@ -991,13 +1264,22 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
                     if *param_ty == NirType::Unknown {
                         continue;
                     }
-                    if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
-                        .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
-                    {
-                        let tightened = tighten_binding_ty(b, param_ty);
-                        changed |= tightened;
-                        refined_here |= tightened;
-                    }
+                    let surface_type_name = summary
+                        .prototype
+                        .param_surface_type_names
+                        .get(i)
+                        .and_then(Option::as_deref);
+                    let tightened = apply_direct_callee_pointer_transitively(
+                        func,
+                        &copy_sources,
+                        &definition_counts,
+                        &self_referential,
+                        arg_var,
+                        param_ty,
+                        surface_type_name,
+                    );
+                    changed |= tightened;
+                    refined_here |= tightened;
                 }
                 if refined_here {
                     add_call_signature_refinements(1);
@@ -1519,6 +1801,190 @@ mod tests {
         }
     }
 
+    fn direct_pointer_summary(
+        target: &str,
+        param_ty: NirType,
+        surface: Option<&str>,
+    ) -> CallSummary {
+        CallSummary {
+            target: CallTargetRef {
+                address: Some(0x2000),
+                symbol: target.to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 160,
+            },
+            prototype: PrototypeSummary {
+                min_arity: 1,
+                max_arity: 1,
+                locked_exact_arity: Some(1),
+                return_lattice: NirType::Unknown,
+                param_lattices: vec![param_ty],
+                param_surface_type_names: vec![surface.map(str::to_string)],
+                soundness: SummarySoundness::Optimistic,
+            },
+            effect_summary: CallEffectSummary {
+                reads_memory: Some(true),
+                writes_memory: None,
+                escapes_args: None,
+                regions: vec![MemoryEffectRegion::Aggregate],
+                wrapper_class: WrapperClass::None,
+                wrapper_of: None,
+                confidence: 160,
+            },
+        }
+    }
+
+    fn caller_with_direct_pointer_summary(
+        caller_bits: u32,
+        param_surface: Option<&str>,
+        summary_ty: NirType,
+        summary_surface: Option<&str>,
+    ) -> PreHirFunction {
+        let mut param = unsigned_binding(
+            "param_1",
+            caller_bits,
+            Some(NirBindingOrigin::ParamIndex(0)),
+        );
+        param.surface_type_name = param_surface.map(str::to_string);
+        PreHirFunction {
+            name: "caller".to_string(),
+            params: vec![param],
+            locals: vec![unsigned_binding(
+                "alias",
+                caller_bits,
+                Some(NirBindingOrigin::Temp),
+            )],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("alias".to_string()),
+                    rhs: PreHirExpr::Var("param_1".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "sub_2000".to_string(),
+                    args: vec![PreHirExpr::Var("alias".to_string())],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            is_64bit: caller_bits == 64,
+            callee_summaries: indexmap::IndexMap::from([(
+                "sub_2000".to_string(),
+                direct_pointer_summary("sub_2000", summary_ty, summary_surface),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn direct_callee_concrete_pointer_reaches_stable_caller_source() {
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let mut func = caller_with_direct_pointer_summary(64, None, char_ptr.clone(), None);
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert_eq!(func.locals[0].ty, char_ptr);
+        assert_eq!(func.params[0].ty, func.locals[0].ty);
+    }
+
+    #[test]
+    fn direct_callee_surface_pointer_preserves_file_declaration() {
+        let mut func = caller_with_direct_pointer_summary(
+            64,
+            None,
+            NirType::Ptr(Box::new(NirType::Unknown)),
+            Some("FILE*"),
+        );
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert_eq!(func.locals[0].surface_type_name.as_deref(), Some("FILE*"));
+        assert_eq!(func.params[0].surface_type_name.as_deref(), Some("FILE*"));
+    }
+
+    #[test]
+    fn direct_callee_generic_void_pointer_is_not_a_source_declaration() {
+        let mut func = caller_with_direct_pointer_summary(
+            64,
+            None,
+            NirType::Ptr(Box::new(NirType::Unknown)),
+            None,
+        );
+
+        assert!(!apply_callsite_type_prop_pass(&mut func));
+        assert!(matches!(func.params[0].ty, NirType::Int { bits: 64, .. }));
+    }
+
+    #[test]
+    fn direct_callee_width_only_pointer_surface_is_not_a_source_declaration() {
+        let mut func = caller_with_direct_pointer_summary(
+            64,
+            None,
+            NirType::Ptr(Box::new(NirType::Unknown)),
+            Some("longlong **"),
+        );
+
+        assert!(!apply_callsite_type_prop_pass(&mut func));
+        assert!(matches!(func.params[0].ty, NirType::Int { bits: 64, .. }));
+        assert!(func.params[0].surface_type_name.is_none());
+    }
+
+    #[test]
+    fn direct_callee_concrete_pointer_does_not_add_to_caller_pointer_depth() {
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let mut func = caller_with_direct_pointer_summary(64, None, char_ptr, None);
+        func.body.push(PreHirStmt::Expr(PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Var("param_1".to_string())),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        }));
+
+        assert!(!apply_callsite_type_prop_pass(&mut func));
+        assert!(matches!(func.params[0].ty, NirType::Int { bits: 64, .. }));
+    }
+
+    #[test]
+    fn direct_callee_pointer_does_not_retype_temporary_only_chains() {
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let mut func = caller_with_direct_pointer_summary(64, None, char_ptr, None);
+        func.params.clear();
+        func.body.remove(0);
+
+        assert!(!apply_callsite_type_prop_pass(&mut func));
+        assert!(matches!(func.locals[0].ty, NirType::Int { bits: 64, .. }));
+    }
+
+    #[test]
+    fn direct_callee_pointer_does_not_override_surface_or_wrong_width() {
+        let char_ptr = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let mut surfaced =
+            caller_with_direct_pointer_summary(64, Some("size_t"), char_ptr.clone(), Some("char*"));
+        assert!(!apply_callsite_type_prop_pass(&mut surfaced));
+        assert_eq!(
+            surfaced.params[0].surface_type_name.as_deref(),
+            Some("size_t")
+        );
+
+        let mut wrong_width = caller_with_direct_pointer_summary(64, None, char_ptr, Some("char*"));
+        wrong_width.is_64bit = false;
+        assert!(!apply_callsite_type_prop_pass(&mut wrong_width));
+        assert!(matches!(
+            wrong_width.params[0].ty,
+            NirType::Int { bits: 64, .. }
+        ));
+    }
+
     #[test]
     fn callsite_type_prop_promotes_import_param_name_and_surface_type() {
         let mut func = PreHirFunction {
@@ -1818,6 +2284,7 @@ mod tests {
                         locked_exact_arity: Some(0),
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
+                        param_surface_type_names: vec![],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -1946,6 +2413,7 @@ mod tests {
                         locked_exact_arity: Some(4),
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![NirType::Unknown; 4],
+                        param_surface_type_names: vec![None; 4],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -2167,6 +2635,7 @@ mod tests {
                         locked_exact_arity: Some(0),
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
+                        param_surface_type_names: vec![],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -2242,6 +2711,7 @@ mod tests {
                         locked_exact_arity: Some(1),
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![NirType::Unknown],
+                        param_surface_type_names: vec![None],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {
@@ -2304,6 +2774,7 @@ mod tests {
                         locked_exact_arity: None,
                         return_lattice: NirType::Unknown,
                         param_lattices: vec![],
+                        param_surface_type_names: vec![],
                         soundness: SummarySoundness::Optimistic,
                     },
                     effect_summary: CallEffectSummary {

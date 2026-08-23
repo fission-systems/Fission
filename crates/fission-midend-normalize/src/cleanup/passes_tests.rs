@@ -1908,6 +1908,7 @@ fn deindirect_resolves_const_address_to_symbol() {
                 locked_exact_arity: None,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown],
+                param_surface_type_names: vec![None],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {
@@ -1971,6 +1972,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
                 locked_exact_arity: None,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![],
+                param_surface_type_names: vec![],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {
@@ -2045,6 +2047,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
                 locked_exact_arity: None,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown],
+                param_surface_type_names: vec![None],
                 soundness: SummarySoundness::Optimistic,
             },
             effect_summary: CallEffectSummary {

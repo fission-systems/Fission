@@ -51,8 +51,10 @@ pub fn build_raw_hir(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<super::PreHirFunction, MlilPreviewError> {
-    let mut builder = PreviewBuilder::new_with_binary(pcode, options, binary, type_context);
-    builder.build_hir(name, address)
+    super::builder::with_discarded_register_origins(|| {
+        let mut builder = PreviewBuilder::new_with_binary(pcode, options, binary, type_context);
+        builder.build_hir(name, address)
+    })
 }
 
 pub fn render_mlil_preview(

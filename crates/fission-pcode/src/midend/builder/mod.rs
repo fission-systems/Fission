@@ -138,6 +138,24 @@ fn seed_callee_summaries_from_type_context(
 ) -> IndexMap<String, CallSummary> {
     let mut summaries = IndexMap::new();
     for (symbol, prototype) in &context.call_prototype_summaries {
+        let mut param_lattices = vec![NirType::Unknown; prototype.max_arity];
+        for (index, pointee) in prototype.param_pointer_pointees.iter().enumerate() {
+            let Some(pointee) = pointee else {
+                continue;
+            };
+            let pointee = match pointee {
+                NirCallPointerPointee::Unknown => NirType::Unknown,
+                NirCallPointerPointee::Int { bits, signed } => NirType::Int {
+                    bits: *bits,
+                    signed: *signed,
+                },
+            };
+            if let Some(slot) = param_lattices.get_mut(index) {
+                *slot = NirType::Ptr(Box::new(pointee));
+            }
+        }
+        let mut param_surface_type_names = prototype.param_surface_type_names.clone();
+        param_surface_type_names.resize(prototype.max_arity, None);
         let target = context
             .call_target_refs
             .values()
@@ -161,7 +179,8 @@ fn seed_callee_summaries_from_type_context(
                     max_arity: prototype.max_arity,
                     locked_exact_arity: prototype.locked_exact_arity,
                     return_lattice: NirType::Unknown,
-                    param_lattices: vec![NirType::Unknown; prototype.max_arity],
+                    param_lattices,
+                    param_surface_type_names,
                     soundness: SummarySoundness::Optimistic,
                 },
                 effect_summary: CallEffectSummary {

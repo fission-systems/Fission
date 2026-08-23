@@ -2,9 +2,9 @@ use crate::decode_rust_sleigh_pcode;
 use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
-    NirCallEffectSummary, NirCallParamRule, NirCallPrototypeSummary, NirFunctionHints,
-    NirStructFieldHint, NirStructTypeHint, NirTypeContext, PcodeFunction, PcodeOpcode,
-    RegisterNamer, infer_entry_register_param_arity,
+    NirCallEffectSummary, NirCallParamRule, NirCallPointerPointee, NirCallPrototypeSummary,
+    NirFunctionHints, NirStructFieldHint, NirStructTypeHint, NirType, NirTypeContext,
+    PcodeFunction, PcodeOpcode, RegisterNamer, infer_entry_register_param_arity,
 };
 use fission_analysis_db::SymbolKind;
 use fission_core::PATHS;
@@ -13,14 +13,16 @@ use fission_core::core::ghidra_no_return::{
 };
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
-use std::sync::{Arc, LazyLock, Mutex};
 use fission_loader::loader::types::DwarfLocation;
 use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
 use fission_signatures::win_types::WindowsStructures;
-use fission_signatures::{SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup};
+use fission_signatures::{
+    SIGNATURE_RESOURCES, pointer_surface_type_name_is_specific, symbol_for_win_api_database_lookup,
+};
 use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::{Arc, LazyLock, Mutex};
 
 fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
     let lower = name.to_ascii_lowercase();
@@ -75,7 +77,6 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
         register_local_type_names: HashMap::new(),
     })
 }
-
 
 /// Per-binary memo for the parts of `NirTypeContext` that do not depend on the
 /// function being decompiled.
@@ -553,7 +554,9 @@ fn collect_raw_call_arities(stmts: &[fission_pcode::PreHirStmt], out: &mut HashM
 
     for stmt in stmts {
         match stmt {
-            PreHirStmt::Assign { rhs, .. } | PreHirStmt::Expr(rhs) | PreHirStmt::Return(Some(rhs)) => {
+            PreHirStmt::Assign { rhs, .. }
+            | PreHirStmt::Expr(rhs)
+            | PreHirStmt::Return(Some(rhs)) => {
                 visit_expr(rhs, out);
             }
             PreHirStmt::VaStart { va_list, .. } => visit_expr(va_list, out),
@@ -764,21 +767,48 @@ pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
         );
     }
     for target_addr in direct_callees {
-        let Some(target_ref) = type_context.call_target_refs.get(&target_addr) else {
+        if pcode
+            .blocks
+            .first()
+            .is_some_and(|block| block.start_address == target_addr)
+        {
             continue;
-        };
+        }
+        let has_resolved_target_identity = type_context.call_target_refs.contains_key(&target_addr);
+        let target_ref = type_context
+            .call_target_refs
+            .get(&target_addr)
+            .cloned()
+            .unwrap_or_else(|| CallTargetRef {
+                address: Some(target_addr),
+                symbol: format!("sub_{target_addr:x}"),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 160,
+            });
         if matches!(target_ref.provenance, CallTargetProvenance::Import) {
             continue;
         }
         let Some((effect_summary, prototype_summary)) =
-            build_preview_callee_summaries(binary, target_addr, &target_ref.symbol)
+            build_preview_callee_summaries(binary, target_addr, &target_ref.symbol, type_context)
         else {
             continue;
         };
-        type_context
-            .call_effect_summaries
-            .insert(target_ref.symbol.clone(), effect_summary);
-        if let Some(prototype_summary) = prototype_summary {
+        if has_resolved_target_identity {
+            type_context
+                .call_effect_summaries
+                .insert(target_ref.symbol.clone(), effect_summary);
+        }
+        if let Some(mut prototype_summary) = prototype_summary {
+            // A stripped `sub_<addr>` identity is sufficient to transport an
+            // ABI-slot type fact back to the exact direct call, but it is not
+            // a declaration-level proof that recovered extra arguments may be
+            // deleted. Keep exact-arity pruning on the pre-existing resolved
+            // symbol path only.
+            if !has_resolved_target_identity {
+                prototype_summary.min_arity = 0;
+                prototype_summary.locked_exact_arity = None;
+            }
             type_context
                 .call_prototype_summaries
                 .insert(target_ref.symbol.clone(), prototype_summary);
@@ -806,6 +836,7 @@ fn build_preview_callee_summaries(
     binary: &LoadedBinary,
     target_addr: u64,
     target_name: &str,
+    type_context: &NirTypeContext,
 ) -> Option<(NirCallEffectSummary, Option<NirCallPrototypeSummary>)> {
     let function = binary.function_at_exact(target_addr)?;
     if function.is_import {
@@ -838,13 +869,77 @@ fn build_preview_callee_summaries(
     let mut options = crate::seed_nir_render_options(binary);
     apply_spec_overrides(binary, &mut options);
     let register_namer = RegisterNamer::from_options(&options);
-    let prototype = infer_entry_register_param_arity(&pcode, &register_namer).map(|arity| {
-        NirCallPrototypeSummary {
-            min_arity: arity,
-            max_arity: arity,
-            locked_exact_arity: Some(arity),
-        }
-    });
+    // Full raw-HIR construction and normalization is deliberately bounded by
+    // the callee's decoded semantic size. Effect summarization above remains
+    // linear and useful for larger callees, while typed previews beyond this
+    // boundary have a sharply different downstream cost profile (large nested
+    // regions, type fixed points, and cleanup), so they are not a safe fact
+    // source for an interactive caller decompilation.
+    const MAX_TYPED_PREVIEW_PCODE_OPS: usize = 2_000;
+    let prototype = (detail.op_count <= MAX_TYPED_PREVIEW_PCODE_OPS)
+        .then(|| infer_entry_register_param_arity(&pcode, &register_namer))
+        .flatten()
+        .map(|arity| {
+            let mut callee_context = type_context.clone();
+            callee_context.function_hints = Some(NirFunctionHints {
+                param_names: (1..=arity).map(|index| format!("param_{index}")).collect(),
+                ..Default::default()
+            });
+            callee_context.call_prototype_summaries.remove(target_name);
+
+            let typed_params = fission_pcode::build_raw_hir(
+                &pcode,
+                target_name,
+                target_addr,
+                &options,
+                Some(binary),
+                Some(&callee_context),
+            )
+            .ok()
+            .map(|mut callee| {
+                fission_midend_normalize::normalize_hir_function(&mut callee);
+                callee.params
+            })
+            .unwrap_or_default();
+
+            let mut param_pointer_pointees = vec![None; arity];
+            let mut param_surface_type_names = vec![None; arity];
+            for (index, param) in typed_params.into_iter().take(arity).enumerate() {
+                let surface = param
+                    .surface_type_name
+                    .filter(|name| pointer_surface_type_name_is_specific(name));
+                let pointee = match param.ty {
+                    NirType::Ptr(inner) => match *inner {
+                        NirType::Int { bits, signed } => {
+                            Some(NirCallPointerPointee::Int { bits, signed })
+                        }
+                        _ if surface.is_some() => Some(NirCallPointerPointee::Unknown),
+                        _ => None,
+                    },
+                    _ if surface.is_some() => Some(NirCallPointerPointee::Unknown),
+                    _ => None,
+                };
+                if pointee.is_some() {
+                    param_pointer_pointees[index] = pointee;
+                    param_surface_type_names[index] = surface;
+                }
+            }
+
+            if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+                eprintln!(
+                    "[CALLEE-TYPE-DIAG] target={} arity={} pointer_pointees={:?} surface_types={:?}",
+                    target_name, arity, param_pointer_pointees, param_surface_type_names
+                );
+            }
+
+            NirCallPrototypeSummary {
+                min_arity: arity,
+                max_arity: arity,
+                locked_exact_arity: Some(arity),
+                param_pointer_pointees,
+                param_surface_type_names,
+            }
+        });
     Some((summary, prototype))
 }
 

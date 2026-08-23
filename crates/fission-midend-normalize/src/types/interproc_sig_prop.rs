@@ -24,6 +24,7 @@ use super::{
     callsite_type_prop::{api_signature, is_known_api_signature, win_type_name_to_nir},
     summarize_wrapper_hir_function, summary_soundness_for_wrapper,
 };
+use fission_signatures::type_name_is_informative;
 
 fn merge_arity(map: &mut IndexMap<String, usize>, callee: &str, arity: usize) {
     map.entry(callee.to_string())
@@ -74,6 +75,10 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                     .prototype
                     .param_lattices
                     .resize(arity, NirType::Unknown);
+                summary
+                    .prototype
+                    .param_surface_type_names
+                    .resize(arity, None);
             }
             if arity == 0 && summary.effect_summary.escapes_args != Some(false) {
                 summary.effect_summary.escapes_args = Some(false);
@@ -88,6 +93,7 @@ fn merge_summary(map: &mut IndexMap<String, CallSummary>, callee: &str, arity: u
                 locked_exact_arity: None,
                 return_lattice: NirType::Unknown,
                 param_lattices: vec![NirType::Unknown; arity],
+                param_surface_type_names: vec![None; arity],
                 soundness: SummarySoundness::Pessimistic,
             },
             effect_summary: CallEffectSummary {
@@ -122,6 +128,10 @@ fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize
             .prototype
             .param_lattices
             .resize(exact_arity, NirType::Unknown);
+        summary
+            .prototype
+            .param_surface_type_names
+            .resize(exact_arity, None);
     }
     for (idx, param) in sig.params.iter().enumerate() {
         let Some(param_ty) = win_type_name_to_nir(&param.type_name) else {
@@ -130,6 +140,12 @@ fn apply_import_signature_seed(summary: &mut CallSummary, callee: &str) -> usize
         if summary.prototype.param_lattices[idx] == NirType::Unknown && param_ty != NirType::Unknown
         {
             summary.prototype.param_lattices[idx] = param_ty;
+            refinements += 1;
+        }
+        if summary.prototype.param_surface_type_names[idx].is_none()
+            && type_name_is_informative(&param.type_name)
+        {
+            summary.prototype.param_surface_type_names[idx] = Some(param.type_name.clone());
             refinements += 1;
         }
     }
@@ -278,12 +294,35 @@ pub fn apply_interproc_callsite_arity_pass(func: &mut PreHirFunction) -> bool {
                     .prototype
                     .max_arity
                     .max(summary.prototype.max_arity);
-                if existing.prototype.param_lattices.len() < summary.prototype.param_lattices.len()
-                {
+                let incoming_param_count = summary
+                    .prototype
+                    .param_lattices
+                    .len()
+                    .max(summary.prototype.param_surface_type_names.len());
+                if existing.prototype.param_lattices.len() < incoming_param_count {
                     existing
                         .prototype
                         .param_lattices
-                        .resize(summary.prototype.param_lattices.len(), NirType::Unknown);
+                        .resize(incoming_param_count, NirType::Unknown);
+                }
+                if existing.prototype.param_surface_type_names.len() < incoming_param_count {
+                    existing
+                        .prototype
+                        .param_surface_type_names
+                        .resize(incoming_param_count, None);
+                }
+                for (index, surface) in summary
+                    .prototype
+                    .param_surface_type_names
+                    .iter()
+                    .enumerate()
+                {
+                    if existing.prototype.param_surface_type_names[index].is_none()
+                        && surface.is_some()
+                    {
+                        existing.prototype.param_surface_type_names[index] = surface.clone();
+                        prototype_refinements += 1;
+                    }
                 }
                 if existing.prototype.soundness == SummarySoundness::Pessimistic
                     && summary.prototype.soundness == SummarySoundness::Optimistic

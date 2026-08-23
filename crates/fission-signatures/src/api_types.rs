@@ -47,6 +47,74 @@ pub fn type_name_is_informative(type_name: &str) -> bool {
     !matches!(type_name.trim(), "" | "int" | "long" | "void")
 }
 
+/// Whether a rendered pointer surface carries declaration information beyond
+/// the structural integer-pointer lattice.
+///
+/// Character pointers retain source-relevant signedness and named/aggregate
+/// pointers retain a declaration identity. Width-only primitive spellings do
+/// neither; transporting e.g. `longlong **` from an isolated decompilation can
+/// turn a caller's aggregate pointer into an invented extra indirection.
+pub fn pointer_surface_type_name_is_specific(type_name: &str) -> bool {
+    let compact = type_name
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    if !compact.ends_with('*') {
+        return false;
+    }
+    let mut base = compact.trim_end_matches('*');
+    loop {
+        let stripped = ["const", "volatile", "restrict"]
+            .into_iter()
+            .find_map(|qualifier| base.strip_prefix(qualifier));
+        match stripped {
+            Some(rest) => base = rest,
+            None => break,
+        }
+    }
+    !matches!(
+        base,
+        "" | "void"
+            | "lpvoid"
+            | "pvoid"
+            | "bool"
+            | "_bool"
+            | "byte"
+            | "word"
+            | "dword"
+            | "qword"
+            | "short"
+            | "ushort"
+            | "signedshort"
+            | "unsignedshort"
+            | "int"
+            | "uint"
+            | "signedint"
+            | "unsignedint"
+            | "long"
+            | "ulong"
+            | "signedlong"
+            | "unsignedlong"
+            | "longlong"
+            | "ulonglong"
+            | "signedlonglong"
+            | "unsignedlonglong"
+            | "int8_t"
+            | "uint8_t"
+            | "int16_t"
+            | "uint16_t"
+            | "int32_t"
+            | "uint32_t"
+            | "int64_t"
+            | "uint64_t"
+            | "intptr_t"
+            | "uintptr_t"
+            | "size_t"
+            | "ssize_t"
+    )
+}
+
 /// Function signature with parameter and return types.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ApiSignature {
@@ -367,6 +435,18 @@ mod tests {
     fn informative_type_count_ignores_placeholders() {
         let db = merged(&["f|int|a:char*,b:int,c:FILE*\n"]);
         assert_eq!(db.get("f").expect("f").informative_type_count(), 2);
+    }
+
+    #[test]
+    fn specific_pointer_surfaces_keep_declarations_not_width_spellings() {
+        assert!(pointer_surface_type_name_is_specific("char **"));
+        assert!(pointer_surface_type_name_is_specific("FILE*"));
+        assert!(pointer_surface_type_name_is_specific("struct record *"));
+        assert!(!pointer_surface_type_name_is_specific("void *"));
+        assert!(!pointer_surface_type_name_is_specific("longlong **"));
+        assert!(!pointer_surface_type_name_is_specific(
+            "const unsigned long *"
+        ));
     }
 
     #[test]
