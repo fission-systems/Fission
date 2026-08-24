@@ -906,6 +906,7 @@ fn build_preview_callee_summaries(
             .ok()
             .map(|mut callee| {
                 fission_midend_normalize::normalize_hir_function(&mut callee);
+                expose_preview_callsite_copy_sources(&mut callee);
                 callee.params
             })
             .unwrap_or_default();
@@ -972,6 +973,19 @@ fn build_preview_callee_summaries(
         merge_preview_pointer_evidence(complete, stable_prefix);
     }
     Some((summary, prototype))
+}
+
+/// Match the ordinary render path's bounded post-layout type opportunity
+/// without running structuring (or recursively previewing another callee).
+/// The copy pass carries values only inside one effect-free statement run;
+/// reapplying the existing call contract then lets an exact callee parameter
+/// type reach the newly exposed source binding.
+fn expose_preview_callsite_copy_sources(callee: &mut fission_pcode::PreHirFunction) -> bool {
+    if !fission_midend_normalize::propagate_copies_in_runs(callee) {
+        return false;
+    }
+    let _ = fission_midend_normalize::apply_callsite_type_prop_pass(callee);
+    true
 }
 
 fn direct_callee_max_bytes(binary: &LoadedBinary, target_addr: u64) -> Option<usize> {
@@ -1694,15 +1708,19 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 mod tests {
     use super::{
         build_nir_call_param_rules, build_nir_call_result_facts, direct_callee_instruction_limit,
-        direct_callee_stable_prefix_instruction_limit, merge_nir_function_hints,
-        merge_preview_pointer_evidence, record_interprocedural_arity_facts,
-        record_unambiguous_register_type_hint, resolve_nir_struct_name,
-        summarize_preview_callee_effects,
+        direct_callee_stable_prefix_instruction_limit, expose_preview_callsite_copy_sources,
+        merge_nir_function_hints, merge_preview_pointer_evidence,
+        record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
+        resolve_nir_struct_name, summarize_preview_callee_effects,
     };
     use crate::{
         CallEdgeKind, CallTargetProvenance, CallTargetRef, NirCallPointerPointee,
         NirCallPrototypeSummary, NirTypeContext, PcodeBasicBlock, PcodeFunction, PcodeOp,
         PcodeOpcode, Varnode,
+    };
+    use fission_midend_normalize::prelude::{
+        NirBindingOrigin, NirType, PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue,
+        PreHirStmt,
     };
     use fission_signatures::win_types::WindowsStructures;
     use fission_static::analysis::decomp::facts::FactStore;
@@ -1722,6 +1740,71 @@ mod tests {
         assert_eq!(direct_callee_instruction_limit(4096), 512);
         assert_eq!(direct_callee_stable_prefix_instruction_limit(117), 32);
         assert_eq!(direct_callee_stable_prefix_instruction_limit(420), 105);
+    }
+
+    #[test]
+    fn preview_reapplies_call_contract_after_run_copy_exposes_source() {
+        let uint64 = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut callee = PreHirFunction {
+            name: "callee".to_string(),
+            params: vec![PreHirBinding {
+                name: "param_1".to_string(),
+                ty: uint64.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                PreHirBinding {
+                    name: "xVar1".to_string(),
+                    ty: uint64.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "local_8".to_string(),
+                    ty: uint64.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::StackOffset(-8)),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar1".to_string()),
+                    rhs: PreHirExpr::Const(0, uint64.clone()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("xVar1".to_string()),
+                    rhs: PreHirExpr::Var("param_1".to_string()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("local_8".to_string()),
+                    rhs: PreHirExpr::Var("xVar1".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "strlen".to_string(),
+                    args: vec![PreHirExpr::Var("local_8".to_string())],
+                    ty: uint64,
+                }),
+            ],
+            ..Default::default()
+        };
+
+        // The ordinary callsite pass cannot cross a reused PreHIR name.
+        assert!(fission_midend_normalize::apply_callsite_type_prop_pass(
+            &mut callee
+        ));
+        assert!(callee.params[0].surface_type_name.is_none());
+
+        // Run-local propagation proves which definition reaches this call,
+        // exposes the source formal, and lets the same exact contract apply.
+        assert!(expose_preview_callsite_copy_sources(&mut callee));
+        assert_eq!(callee.params[0].surface_type_name.as_deref(), Some("char*"));
     }
 
     #[test]
