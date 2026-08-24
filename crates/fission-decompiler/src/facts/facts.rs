@@ -17,7 +17,8 @@ use fission_loader::loader::types::DwarfLocation;
 use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
 use fission_signatures::win_types::WindowsStructures;
 use fission_signatures::{
-    SIGNATURE_RESOURCES, pointer_surface_type_name_is_specific, symbol_for_win_api_database_lookup,
+    SIGNATURE_RESOURCES, is_known_variadic_runtime_symbol, pointer_surface_type_name_is_specific,
+    symbol_for_win_api_database_lookup,
 };
 use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
@@ -229,7 +230,7 @@ pub(crate) fn build_nir_type_context(
         iat_target_refs: iat_target_refs.clone(),
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
-        call_prototype_summaries: HashMap::new(),
+        call_prototype_summaries: build_nir_import_call_prototype_summaries(&all_target_refs),
         call_result_is_source_value: build_nir_call_result_facts(&all_target_refs),
         call_param_rules: call_param_rules_for_binary(binary, &all_target_refs)
             .as_ref()
@@ -262,6 +263,43 @@ fn build_nir_call_result_facts(
         facts.insert(target_ref.symbol.clone(), false);
     }
     facts
+}
+
+/// Transport declaration arity into the builder, where call operands still
+/// exist as ABI-slot values. Normalize already consumes the same signatures
+/// for types and pruning, but it is too late there to reconstruct a slot that
+/// builder recovery discarded because its definition lived in a predecessor.
+fn build_nir_import_call_prototype_summaries(
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+) -> HashMap<String, NirCallPrototypeSummary> {
+    let mut summaries = HashMap::new();
+    for target_ref in call_target_refs.values() {
+        if target_ref.provenance != CallTargetProvenance::Import {
+            continue;
+        }
+        let signature = SIGNATURE_RESOURCES
+            .api_signature(&target_ref.symbol)
+            .or_else(|| {
+                symbol_for_win_api_database_lookup(&target_ref.symbol)
+                    .and_then(|name| SIGNATURE_RESOURCES.api_signature(name))
+            });
+        let Some(signature) = signature else {
+            continue;
+        };
+        let arity = signature.params.len();
+        summaries.insert(
+            target_ref.symbol.clone(),
+            NirCallPrototypeSummary {
+                min_arity: arity,
+                max_arity: arity,
+                locked_exact_arity: (!is_known_variadic_runtime_symbol(&target_ref.symbol))
+                    .then_some(arity),
+                param_pointer_pointees: vec![None; arity],
+                param_surface_type_names: vec![None; arity],
+            },
+        );
+    }
+    summaries
 }
 
 /// Struct/union/class layouts known from debug info (DWARF `DW_TAG_structure_
@@ -1707,7 +1745,8 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 #[cfg(test)]
 mod tests {
     use super::{
-        build_nir_call_param_rules, build_nir_call_result_facts, direct_callee_instruction_limit,
+        build_nir_call_param_rules, build_nir_call_result_facts,
+        build_nir_import_call_prototype_summaries, direct_callee_instruction_limit,
         direct_callee_stable_prefix_instruction_limit, expose_preview_callsite_copy_sources,
         merge_nir_function_hints, merge_preview_pointer_evidence,
         record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
@@ -1865,6 +1904,52 @@ mod tests {
 
         let facts = build_nir_call_result_facts(&call_targets);
         assert_eq!(facts.get("free"), Some(&false));
+    }
+
+    #[test]
+    fn imported_prototypes_transport_exact_but_not_variadic_arity() {
+        let call_targets = HashMap::from([
+            (
+                0x401000,
+                CallTargetRef {
+                    address: Some(0x401000),
+                    symbol: "fstat".to_string(),
+                    provenance: CallTargetProvenance::Import,
+                    edge_kind: CallEdgeKind::Import,
+                    confidence: 255,
+                },
+            ),
+            (
+                0x402000,
+                CallTargetRef {
+                    address: Some(0x402000),
+                    symbol: "printf".to_string(),
+                    provenance: CallTargetProvenance::Import,
+                    edge_kind: CallEdgeKind::Import,
+                    confidence: 255,
+                },
+            ),
+        ]);
+
+        let summaries = build_nir_import_call_prototype_summaries(&call_targets);
+        assert_eq!(summaries["fstat"].locked_exact_arity, Some(2));
+        assert_eq!(summaries["printf"].locked_exact_arity, None);
+    }
+
+    #[test]
+    fn direct_internal_symbol_does_not_receive_import_prototype() {
+        let call_targets = HashMap::from([(
+            0x401000,
+            CallTargetRef {
+                address: Some(0x401000),
+                symbol: "fstat".to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 224,
+            },
+        )]);
+
+        assert!(build_nir_import_call_prototype_summaries(&call_targets).is_empty());
     }
 
     fn raw_hir_calling(callee_name: &str, arg_count: usize) -> fission_pcode::PreHirFunction {

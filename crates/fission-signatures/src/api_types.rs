@@ -123,6 +123,76 @@ pub struct ApiSignature {
     pub params: Vec<ParamInfo>,
 }
 
+/// Whether `name` denotes a runtime entry whose signature record contains
+/// only the fixed prefix of a variadic declaration.
+///
+/// The packed signature format intentionally stores typed parameters and
+/// discards the `...` marker while parsing. Keep the small symbol-family fact
+/// next to that data owner so consumers do not independently mistake the
+/// stored prefix length for an exact call arity.
+pub fn canonical_variadic_runtime_symbol(name: &str) -> String {
+    let mut symbol = name
+        .rsplit_once('!')
+        .map(|(_, symbol)| symbol)
+        .unwrap_or(name)
+        .trim()
+        .to_ascii_lowercase();
+
+    loop {
+        if let Some(stripped) = symbol.strip_prefix("__imp_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix("__mingw_") {
+            symbol = stripped.to_string();
+            continue;
+        }
+        if let Some(stripped) = symbol.strip_prefix('_') {
+            symbol = stripped.to_string();
+            continue;
+        }
+        break;
+    }
+
+    symbol
+}
+
+pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
+    matches!(
+        canonical_variadic_runtime_symbol(name).as_str(),
+        "printf"
+            | "fprintf"
+            | "sprintf"
+            | "snprintf"
+            | "scanf"
+            | "fscanf"
+            | "sscanf"
+            | "wprintf"
+            | "fwprintf"
+            | "swprintf"
+            | "snwprintf"
+            | "wscanf"
+            | "fwscanf"
+            | "swscanf"
+            | "sprintf_s"
+            | "snprintf_s"
+            | "fprintf_s"
+            | "printf_s"
+            | "scanf_s"
+            | "fscanf_s"
+            | "sscanf_s"
+            | "swprintf_s"
+            | "snwprintf_s"
+            | "fwprintf_s"
+            | "wprintf_s"
+            | "wscanf_s"
+            | "fwscanf_s"
+            | "swscanf_s"
+            | "wsprintf"
+            | "wsprintfw"
+    )
+}
+
 impl ApiSignature {
     /// How many of this entry's type strings actually name a type.
     ///

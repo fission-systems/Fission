@@ -1,4 +1,176 @@
 use super::*;
+
+fn exact_import_context(target: u64, symbol: &str, arity: usize) -> PreviewTypeContext {
+    let mut context = PreviewTypeContext::default();
+    context.call_targets.insert(target, symbol.to_string());
+    context.call_target_refs.insert(
+        target,
+        CallTargetRef {
+            address: Some(target),
+            symbol: symbol.to_string(),
+            provenance: CallTargetProvenance::Import,
+            edge_kind: CallEdgeKind::Import,
+            confidence: 255,
+        },
+    );
+    context.call_prototype_summaries.insert(
+        symbol.to_string(),
+        NirCallPrototypeSummary {
+            min_arity: arity,
+            max_arity: arity,
+            locked_exact_arity: Some(arity),
+            param_pointer_pointees: vec![None; arity],
+            param_surface_type_names: vec![None; arity],
+        },
+    );
+    context
+}
+
+#[test]
+fn exact_call_arity_recovers_dominating_predecessor_register_slot() {
+    let target = 0x401100;
+    let rdi = reg(0x38, 8);
+    let rsi = reg(0x30, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: vec![1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x401000,
+                    output: Some(rdi),
+                    inputs: vec![cst(11, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x401010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x401010,
+                        output: Some(rsi),
+                        inputs: vec![cst(22, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x401014,
+                        output: None,
+                        inputs: vec![cst(target as i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x401019,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let context = exact_import_context(target, "two_args", 2);
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "caller",
+        0x401000,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+
+    assert!(rendered.contains("two_args(11, 22)"), "{rendered}");
+}
+
+#[test]
+fn exact_call_arity_does_not_invent_non_dominating_register_slot() {
+    let target = 0x401100;
+    let rdi = reg(0x38, 8);
+    let rsi = reg(0x30, 8);
+    let cond = uniq(0x100, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: vec![1, 2],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x401000,
+                    output: None,
+                    inputs: vec![cst(0x401020, 8), cond],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x401010,
+                successors: vec![2],
+                ops: vec![PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x401010,
+                    output: Some(rdi),
+                    inputs: vec![cst(11, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x401020,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x401020,
+                        output: Some(rsi),
+                        inputs: vec![cst(22, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x401024,
+                        output: None,
+                        inputs: vec![cst(target as i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 4,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x401029,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let context = exact_import_context(target, "two_args", 2);
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "caller",
+        0x401000,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+
+    assert!(!rendered.contains("two_args(11, 22)"), "{rendered}");
+}
 #[test]
 fn preview_type_hints_resolve_indirect_import_call_through_entry_param_alias() {
     let func = PcodeFunction {

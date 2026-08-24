@@ -49,7 +49,8 @@ use fission_midend_core::wave_stats::{
 };
 use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_signatures::{
-    ApiSignature, SIGNATURE_RESOURCES, symbol_for_win_api_database_lookup, type_name_is_informative,
+    ApiSignature, SIGNATURE_RESOURCES, canonical_variadic_runtime_symbol,
+    is_known_variadic_runtime_symbol, symbol_for_win_api_database_lookup, type_name_is_informative,
 };
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
@@ -482,68 +483,6 @@ fn rewrite_call_targets_expr(expr: &mut PreHirExpr, rewrites: &HashMap<String, S
         PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
     changed
-}
-
-fn canonical_variadic_runtime_symbol(target: &str) -> String {
-    let mut symbol = target
-        .rsplit_once('!')
-        .map(|(_, symbol)| symbol)
-        .unwrap_or(target)
-        .trim()
-        .to_ascii_lowercase();
-
-    loop {
-        if let Some(stripped) = symbol.strip_prefix("__imp_") {
-            symbol = stripped.to_string();
-            continue;
-        }
-        if let Some(stripped) = symbol.strip_prefix("__mingw_") {
-            symbol = stripped.to_string();
-            continue;
-        }
-        if let Some(stripped) = symbol.strip_prefix('_') {
-            symbol = stripped.to_string();
-            continue;
-        }
-        break;
-    }
-    symbol
-}
-
-fn is_known_variadic_runtime_symbol(target: &str) -> bool {
-    matches!(
-        canonical_variadic_runtime_symbol(target).as_str(),
-        "printf"
-            | "fprintf"
-            | "sprintf"
-            | "snprintf"
-            | "scanf"
-            | "fscanf"
-            | "sscanf"
-            | "wprintf"
-            | "fwprintf"
-            | "swprintf"
-            | "snwprintf"
-            | "wscanf"
-            | "fwscanf"
-            | "swscanf"
-            | "sprintf_s"
-            | "snprintf_s"
-            | "fprintf_s"
-            | "printf_s"
-            | "scanf_s"
-            | "fscanf_s"
-            | "sscanf_s"
-            | "swprintf_s"
-            | "snwprintf_s"
-            | "fwprintf_s"
-            | "wprintf_s"
-            | "wscanf_s"
-            | "fwscanf_s"
-            | "swscanf_s"
-            | "wsprintf"
-            | "wsprintfw"
-    )
 }
 
 /// Ghidra `FormatStringAnalyzer` scorecard item: types printf-family
@@ -1054,7 +993,8 @@ fn apply_direct_callee_pointer_transitively(
 /// string-only, see [`apply_variadic_printf_format_string_arg_types`]'s
 /// doc comment) symbols this recognizes.
 fn printf_family_format_string_arg_index(target: &str) -> Option<usize> {
-    match canonical_variadic_runtime_symbol(target).as_str() {
+    let canonical = canonical_variadic_runtime_symbol(target);
+    match canonical.as_str() {
         "printf" | "printf_s" => Some(0),
         "fprintf" | "fprintf_s" | "sprintf" => Some(1),
         "sprintf_s" | "snprintf" | "snprintf_s" => Some(2),

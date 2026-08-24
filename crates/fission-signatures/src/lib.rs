@@ -50,8 +50,9 @@ pub static SIGNATURE_DB: std::sync::LazyLock<SignatureDatabase> =
     std::sync::LazyLock::new(SignatureDatabase::new);
 
 pub use api_types::{
-    ApiSignature, ApiTypeDatabase, ApiTypeError, ParamInfo,
-    pointer_surface_type_name_is_specific, type_name_is_informative,
+    ApiSignature, ApiTypeDatabase, ApiTypeError, ParamInfo, canonical_variadic_runtime_symbol,
+    is_known_variadic_runtime_symbol, pointer_surface_type_name_is_specific,
+    type_name_is_informative,
 };
 pub use fid::{FidDatabase, FidDatabaseSet};
 pub use fidbf::{

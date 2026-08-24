@@ -809,6 +809,33 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    /// Return the declaration-locked register arity for an exact direct call.
+    ///
+    /// A call's basic block may stage only a later ABI slot while an earlier
+    /// slot remains live from a dominating predecessor. Ordinary recovery
+    /// deliberately requires a contiguous same-block prefix because an
+    /// unknown call gives us no proof that a live register is an argument.
+    /// An exact prototype supplies that missing proof: every declared
+    /// register-backed slot is consumed at this call site.
+    fn exact_direct_call_register_arity(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        call_idx: usize,
+        param_count: usize,
+    ) -> Option<usize> {
+        let op = block.ops.get(call_idx)?;
+        if op.opcode != PcodeOpcode::Call {
+            return None;
+        }
+        let target =
+            super::super::resolve_lifted_direct_call_target(op, self.options, self.type_context)?;
+        self.type_context?
+            .call_prototype_summaries
+            .get(&target)?
+            .locked_exact_arity
+            .map(|arity| arity.min(param_count))
+    }
+
     /// Peel same-block Copy/ZExt/SExt/Cast so tail-call arg recovery sees the
     /// staged source register, not the ABI slot being written.
     ///
@@ -1035,6 +1062,42 @@ impl<'a> PreviewBuilder<'a> {
                         }
                     }
                 };
+                recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
+            }
+        }
+
+        // A locked declaration proves that every slot below its arity is a
+        // real argument. Fill holes from the existing site-sensitive def-use
+        // lookup, but keep the same dominance/realism guard used by ordinary
+        // carrier recovery. This does not guess values at joins: when no
+        // single realistic reaching definition exists, the slot stays empty.
+        if let Some(exact_register_arity) =
+            self.exact_direct_call_register_arity(block, call_idx, param_count)
+        {
+            for param_index in 0..exact_register_arity {
+                if skip_param == Some(param_index) || recovered[param_index].is_some() {
+                    continue;
+                }
+                let (offset, size) = param_slots[param_index];
+                let vn = Varnode {
+                    space_id: REGISTER_SPACE_ID,
+                    offset,
+                    size,
+                    is_constant: false,
+                    constant_val: 0,
+                };
+                let Some((site, _)) = self.lookup_def_site(&vn) else {
+                    continue;
+                };
+                let def_site = crate::midend::support::DefSite {
+                    block_idx: site.block_idx,
+                    op_idx: site.op_idx,
+                    _marker: std::marker::PhantomData,
+                };
+                if !self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx) {
+                    continue;
+                }
+                let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
                 recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
             }
         }
