@@ -5,12 +5,15 @@ use fission_loader::loader::types::{
     DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
 use fission_pcode::midend::cspec::register_model_for_language;
-use fission_signatures::{FidDatabaseSet, fid::FidDatabase};
+use fission_pcode::{
+    PcodeFunction, PcodeOp, PcodeOpcode, RegisterNamer, Varnode, infer_entry_register_param_arity,
+};
 use fission_signatures::fidbf::FidbfDatabase;
+use fission_signatures::{FidDatabaseSet, fid::FidDatabase};
 use fission_sleigh::runtime::{
     DecodeContract, DecodeStopReason, DecodedPcodeFunction, RuntimeSleighFrontend,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// Generous upper bound on a single function's instruction count for FID
@@ -123,6 +126,144 @@ impl Default for FactStore {
     }
 }
 
+fn is_libc_start_main_symbol(name: &str) -> bool {
+    name.trim().split('@').next() == Some("__libc_start_main")
+}
+
+fn libc_start_main_import_slots(program: &ProgramSnapshot) -> HashSet<u64> {
+    let mut slots = program
+        .symbols
+        .iter()
+        .filter(|symbol| {
+            symbol.kind == SymbolKind::Import && is_libc_start_main_symbol(&symbol.name)
+        })
+        .map(|symbol| symbol.address)
+        .collect::<HashSet<_>>();
+    slots.extend(
+        program
+            .relocations
+            .iter()
+            .filter(|relocation| {
+                relocation
+                    .symbol_name
+                    .as_deref()
+                    .is_some_and(is_libc_start_main_symbol)
+            })
+            .map(|relocation| relocation.address),
+    );
+    slots.remove(&0);
+    slots
+}
+
+fn preceding_definition<'a>(
+    ops: &'a [PcodeOp],
+    before: usize,
+    value: &Varnode,
+) -> Option<(usize, &'a PcodeOp)> {
+    ops[..before]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, op)| op.output.as_ref() == Some(value))
+}
+
+fn resolve_constant_before(
+    ops: &[PcodeOp],
+    before: usize,
+    value: &Varnode,
+    depth: usize,
+) -> Option<u64> {
+    if value.is_constant {
+        return Some(value.offset);
+    }
+    if depth == 0 {
+        return None;
+    }
+    let (definition_index, definition) = preceding_definition(ops, before, value)?;
+    if !matches!(
+        definition.opcode,
+        PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+    ) {
+        return None;
+    }
+    resolve_constant_before(ops, definition_index, definition.inputs.first()?, depth - 1)
+}
+
+fn resolves_to_import_slot_before(
+    ops: &[PcodeOp],
+    before: usize,
+    value: &Varnode,
+    import_slots: &HashSet<u64>,
+    depth: usize,
+) -> bool {
+    if !value.is_constant && import_slots.contains(&value.offset) {
+        return true;
+    }
+    if depth == 0 || value.is_constant {
+        return false;
+    }
+    let Some((definition_index, definition)) = preceding_definition(ops, before, value) else {
+        return false;
+    };
+    if !matches!(
+        definition.opcode,
+        PcodeOpcode::Copy | PcodeOpcode::Load | PcodeOpcode::Cast
+    ) {
+        return false;
+    }
+    definition.inputs.iter().any(|input| {
+        resolves_to_import_slot_before(ops, definition_index, input, import_slots, depth - 1)
+    })
+}
+
+/// Prove one unique runtime callback using only same-block reaching
+/// definitions. Keeping the proof block-local deliberately declines startup
+/// variants that need phi/path reasoning instead of guessing across CFG joins.
+fn runtime_callback_from_entry_pcode(
+    pcode: &PcodeFunction,
+    register_namer: &RegisterNamer,
+    import_slots: &HashSet<u64>,
+    internal_entries: &HashSet<u64>,
+) -> Option<u64> {
+    let mut callbacks = BTreeSet::new();
+    for block in &pcode.blocks {
+        for (call_index, call) in block.ops.iter().enumerate() {
+            if !matches!(call.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                || !call.inputs.first().is_some_and(|target| {
+                    resolves_to_import_slot_before(&block.ops, call_index, target, import_slots, 8)
+                })
+            {
+                continue;
+            }
+
+            let (definition_index, definition) = block.ops[..call_index]
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, op)| {
+                    op.output.as_ref().is_some_and(|output| {
+                        register_namer
+                            .register_name_with_param_owned(output.offset, output.size)
+                            .is_some_and(|(_, param_index)| {
+                                param_index == Some(0)
+                                    && output.size >= register_namer.pointer_size
+                            })
+                    })
+                })?;
+            let callback = resolve_constant_before(
+                &block.ops,
+                definition_index,
+                definition.inputs.first()?,
+                8,
+            )?;
+            if internal_entries.contains(&callback) {
+                callbacks.insert(callback);
+            }
+        }
+    }
+    (callbacks.len() == 1).then(|| *callbacks.first().expect("one callback"))
+}
+
 impl FactStore {
     pub fn from_binary(binary: &LoadedBinary) -> Self {
         Self::from_program(
@@ -185,6 +326,7 @@ impl FactStore {
         }
 
         store.ingest_signature_matches(binary);
+        store.ingest_elf_runtime_callback_hints(binary);
 
         // Load user-defined renames from sidecar patch file (<binary_name>.fission.json) if it exists
         let sidecar_path = std::path::Path::new(&binary.path).with_extension("fission.json");
@@ -246,6 +388,136 @@ impl FactStore {
         }
 
         store
+    }
+
+    /// Recover the program callback passed by an ELF entry routine to
+    /// `__libc_start_main`, then type only callback parameters whose own
+    /// p-code independently proves they are consumed.
+    ///
+    /// The import name identifies the documented runtime contract; callback
+    /// identity comes from same-block reaching definitions of the first cspec
+    /// parameter slot. Function names, instruction mnemonics, benchmark rows,
+    /// and ISA-local register spellings are deliberately absent.
+    fn ingest_elf_runtime_callback_hints(&mut self, binary: &LoadedBinary) {
+        let program = self.program();
+        if !program
+            .binary
+            .format
+            .to_ascii_lowercase()
+            .starts_with("elf")
+            || program.binary.entry_point == 0
+        {
+            return;
+        }
+
+        let import_slots = libc_start_main_import_slots(program);
+        if import_slots.is_empty() {
+            return;
+        }
+
+        let Some(load_spec) = binary.load_spec() else {
+            return;
+        };
+        let Some(register_model) = register_model_for_language(load_spec.pair.language_id.as_str())
+        else {
+            return;
+        };
+        let mut options = fission_pcode::seed_nir_render_options(binary);
+        let register_map = register_model.to_sla_register_map();
+        if !fission_pcode::midend::cspec::apply::apply_cspec_for_pair(
+            &mut options,
+            load_spec.pair.language_id.as_str(),
+            load_spec.pair.compiler_spec_id.as_str(),
+            &register_map,
+        ) {
+            return;
+        }
+        let register_namer = RegisterNamer::from_options(&options);
+        if register_namer.int_param_offsets.is_empty() {
+            return;
+        }
+
+        let Some(frontend) = RuntimeSleighFrontend::new_for_load_spec(load_spec).ok() else {
+            return;
+        };
+        let Some(entry) = self.decode_runtime_contract_function(
+            binary,
+            &frontend,
+            program.binary.entry_point,
+            128,
+        ) else {
+            return;
+        };
+        let internal_entries = program
+            .functions
+            .iter()
+            .filter(|function| !function.is_import && function.entry != 0)
+            .map(|function| function.entry)
+            .collect::<HashSet<_>>();
+        let Some(callback) = runtime_callback_from_entry_pcode(
+            &entry.function,
+            &register_namer,
+            &import_slots,
+            &internal_entries,
+        ) else {
+            return;
+        };
+
+        let Some(callback_pcode) = self.decode_runtime_contract_function(
+            binary,
+            &frontend,
+            callback,
+            FID_INSTRUCTION_LIMIT,
+        ) else {
+            return;
+        };
+        if infer_entry_register_param_arity(&callback_pcode.function, &register_namer)
+            .is_none_or(|arity| arity < 2)
+        {
+            return;
+        }
+
+        self.record_structuring_hints(
+            callback,
+            fission_midend_core::NirFunctionHints {
+                param_names: vec!["argc".to_string(), "argv".to_string()],
+                param_type_names: HashMap::from([
+                    (0, "int".to_string()),
+                    (1, "char **".to_string()),
+                ]),
+                return_type_name: Some("int".to_string()),
+                ..Default::default()
+            },
+        );
+    }
+
+    fn decode_runtime_contract_function(
+        &self,
+        binary: &LoadedBinary,
+        frontend: &RuntimeSleighFrontend,
+        address: u64,
+        instruction_limit: usize,
+    ) -> Option<Arc<DecodedPcodeFunction>> {
+        if let Some(cached) = self.get_cached_decoded_function(address) {
+            return Some(cached);
+        }
+        let address_state = frontend.normalize_low_bit_code_address(address);
+        let max_bytes = function_max_bytes(binary, address_state.address, 4096);
+        let bytes = binary.view_bytes(address_state.address, max_bytes)?;
+        let memory_context = decode_memory_context_for(binary, address_state.address, max_bytes);
+        let decoded = Arc::new(
+            frontend
+                .lift_raw_pcode_function_with_context_and_memory_context(
+                    bytes,
+                    address_state.address,
+                    DecodeContract::decomp_function(instruction_limit),
+                    &memory_context,
+                    address_state.context_override,
+                )
+                .ok()?,
+        );
+        self.cache_decoded_function_if_complete(address, &decoded);
+        Some(decoded)
     }
 
     pub fn program(&self) -> &ProgramSnapshot {
@@ -1234,6 +1506,126 @@ mod tests {
         let snapshot = store.function_facts_snapshot(0x401000);
         assert!(snapshot.dwarf_info.is_some());
         assert!(snapshot.structuring_hints.is_some());
+    }
+
+    fn runtime_callback_test_namer() -> RegisterNamer {
+        let options = fission_pcode::NirRenderOptions {
+            is_64bit: true,
+            pointer_size: 8,
+            format: "ELF64".into(),
+            calling_convention: fission_core::CallingConvention::SystemVAmd64,
+            cspec_param_offsets: Some(vec![56, 48, 16, 8, 128, 136]),
+            ..Default::default()
+        };
+        RegisterNamer::from_options(&options)
+    }
+
+    fn runtime_callback_test_varnode(space_id: u64, offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    #[test]
+    fn runtime_callback_requires_import_and_same_block_constant_abi_slot() {
+        let callback = 0x401000;
+        let import_slot = 0x406000;
+        let call_target = runtime_callback_test_varnode(2, 0x100, 8);
+        let pcode = PcodeFunction {
+            blocks: vec![fission_pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x400000,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x400000,
+                        output: Some(runtime_callback_test_varnode(4, 56, 8)),
+                        inputs: vec![Varnode::constant(callback as i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x400007,
+                        output: Some(call_target.clone()),
+                        inputs: vec![runtime_callback_test_varnode(3, import_slot, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::CallInd,
+                        address: 0x40000d,
+                        output: None,
+                        inputs: vec![call_target],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        };
+
+        assert_eq!(
+            runtime_callback_from_entry_pcode(
+                &pcode,
+                &runtime_callback_test_namer(),
+                &HashSet::from([import_slot]),
+                &HashSet::from([callback]),
+            ),
+            Some(callback)
+        );
+        assert_eq!(
+            runtime_callback_from_entry_pcode(
+                &pcode,
+                &runtime_callback_test_namer(),
+                &HashSet::new(),
+                &HashSet::from([callback]),
+            ),
+            None
+        );
+        assert_eq!(
+            runtime_callback_from_entry_pcode(
+                &pcode,
+                &runtime_callback_test_namer(),
+                &HashSet::from([import_slot]),
+                &HashSet::new(),
+            ),
+            None
+        );
+
+        let mut clobbered = pcode.clone();
+        clobbered.blocks[0].ops.insert(
+            1,
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Copy,
+                address: 0x400004,
+                output: Some(runtime_callback_test_varnode(4, 56, 8)),
+                inputs: vec![runtime_callback_test_varnode(4, 0x200, 8)],
+                asm_mnemonic: None,
+            },
+        );
+        assert_eq!(
+            runtime_callback_from_entry_pcode(
+                &clobbered,
+                &runtime_callback_test_namer(),
+                &HashSet::from([import_slot]),
+                &HashSet::from([callback]),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn libc_start_main_symbol_accepts_version_but_not_nearby_names() {
+        assert!(is_libc_start_main_symbol("__libc_start_main"));
+        assert!(is_libc_start_main_symbol("__libc_start_main@GLIBC_2.34"));
+        assert!(!is_libc_start_main_symbol("libc_start_main"));
+        assert!(!is_libc_start_main_symbol("__libc_start_main_wrapper"));
     }
 
     #[test]
