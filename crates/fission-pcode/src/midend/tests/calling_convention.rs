@@ -2631,6 +2631,57 @@ fn abi_state_recovers_win64_stack_arg_index_from_cspec() {
 }
 
 #[test]
+fn x64_incoming_stack_slots_follow_cspec_register_and_frame_layout() {
+    let sysv = AbiState::new_with_cspec(
+        CallingConvention::SystemVAmd64,
+        true,
+        8,
+        0x1f8,
+        Some(vec![0x38, 0x30, 0x10, 0x08, 0x80, 0x88]),
+        Some(8),
+        Some(8),
+    );
+    assert_eq!(
+        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x08),
+        Some(6)
+    );
+    assert_eq!(
+        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x10),
+        Some(7)
+    );
+    assert_eq!(
+        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x04),
+        None
+    );
+    assert_eq!(
+        sysv.incoming_x64_stack_parameter_index_from_entry_offset(0x0c),
+        None
+    );
+    assert_eq!(
+        sysv.classify_stack_slot_origin(StackBase::Rsp, 0x200),
+        NirBindingOrigin::StackOffset(0x200)
+    );
+
+    let win64 = AbiState::new_with_cspec(
+        CallingConvention::WindowsX64,
+        true,
+        8,
+        0x40,
+        Some(vec![0x08, 0x10, 0x80, 0x88]),
+        Some(40),
+        Some(8),
+    );
+    assert_eq!(
+        win64.incoming_x64_stack_parameter_index_from_entry_offset(0x28),
+        Some(4)
+    );
+    assert_eq!(
+        win64.classify_stack_slot_origin(StackBase::Rsp, 0x48),
+        NirBindingOrigin::HomeSlot(0x48)
+    );
+}
+
+#[test]
 fn x86_32_incoming_stack_slots_follow_frame_base_and_cspec_layout() {
     let framed =
         abi_state_for(CallingConvention::X86_32, 0x14).with_frame_pointer_established(true);
@@ -2720,6 +2771,161 @@ fn x86_32_incoming_stack_load_becomes_formal_parameter() {
         "{code}"
     );
     assert!(!code.contains("param_8;"), "{code}");
+}
+
+#[test]
+fn sysv_x64_incoming_stack_load_becomes_seventh_formal_parameter() {
+    let options = preview_options_for(CallingConvention::SystemVAmd64);
+    assert_eq!(options.cspec_param_offsets.as_ref().map(Vec::len), Some(6));
+    assert_eq!(options.cspec_stack_arg_base, Some(8));
+    let rbp = reg(0x28, 8);
+    let rsp = reg(0x20, 8);
+    let eax = reg(0x00, 4);
+    let stack_ptr = uniq(0x500, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x401000,
+                    output: Some(rsp.clone()),
+                    inputs: vec![rsp.clone(), cst(8, 8)],
+                    asm_mnemonic: Some("INT_SUB".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x401000,
+                    output: None,
+                    inputs: vec![cst(3, 4), rsp.clone(), rbp.clone()],
+                    asm_mnemonic: Some("STORE".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x401000,
+                    output: Some(rbp.clone()),
+                    inputs: vec![rsp],
+                    asm_mnemonic: Some("COPY".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x401003,
+                    output: Some(stack_ptr.clone()),
+                    inputs: vec![rbp, cst(0x10, 8)],
+                    asm_mnemonic: Some("INT_ADD".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x401006,
+                    output: Some(eax.clone()),
+                    inputs: vec![cst(3, 4), stack_ptr],
+                    asm_mnemonic: Some("LOAD".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401009,
+                    output: None,
+                    inputs: vec![cst(0, 8), eax],
+                    asm_mnemonic: Some("RETURN".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "stack_param", 0x401000, &options)
+        .expect("SysV x64 stack parameter preview");
+    assert!(code.contains("param_7"), "{code}");
+    assert!(
+        code.contains("return param_7;")
+            || (code.contains("= param_7;") && code.contains("return ")),
+        "{code}"
+    );
+}
+
+#[test]
+fn sysv_x64_overwritten_stack_slot_does_not_become_formal_parameter() {
+    let options = preview_options_for(CallingConvention::SystemVAmd64);
+    let rbp = reg(0x28, 8);
+    let rsp = reg(0x20, 8);
+    let eax = reg(0x00, 4);
+    let stack_ptr = uniq(0x500, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x401000,
+                    output: Some(rsp.clone()),
+                    inputs: vec![rsp.clone(), cst(8, 8)],
+                    asm_mnemonic: Some("INT_SUB".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x401000,
+                    output: None,
+                    inputs: vec![cst(3, 4), rsp.clone(), rbp.clone()],
+                    asm_mnemonic: Some("STORE".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x401000,
+                    output: Some(rbp.clone()),
+                    inputs: vec![rsp],
+                    asm_mnemonic: Some("COPY".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x401003,
+                    output: Some(stack_ptr.clone()),
+                    inputs: vec![rbp, cst(0x10, 8)],
+                    asm_mnemonic: Some("INT_ADD".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x401006,
+                    output: None,
+                    inputs: vec![cst(3, 4), stack_ptr.clone(), cst(42, 4)],
+                    asm_mnemonic: Some("STORE".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x401009,
+                    output: Some(eax.clone()),
+                    inputs: vec![cst(3, 4), stack_ptr],
+                    asm_mnemonic: Some("LOAD".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x40100c,
+                    output: None,
+                    inputs: vec![cst(0, 8), eax],
+                    asm_mnemonic: Some("RETURN".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "overwritten_stack_slot", 0x401000, &options)
+        .expect("SysV x64 overwritten stack slot preview");
+    assert!(!code.contains("param_7"), "{code}");
 }
 
 #[test]

@@ -239,6 +239,30 @@ impl AbiState {
         usize::try_from(relative / slot_size).ok()
     }
 
+    /// Formal-parameter index for a proven x64 entry-stack value. The caller
+    /// supplies `entry_offset` in the ABI's entry-SP-relative coordinate;
+    /// stack-frame translation belongs to the memory-SSA proof that owns that
+    /// coordinate, not to a frame-size estimate here.
+    pub(crate) fn incoming_x64_stack_parameter_index_from_entry_offset(
+        &self,
+        entry_offset: i64,
+    ) -> Option<usize> {
+        if !self.is_64bit {
+            return None;
+        }
+        let slot_size = i64::from(self.pointer_size);
+        if slot_size == 0 {
+            return None;
+        }
+        let entry_arg_base = self.cspec_stack_arg_base?;
+        let relative = entry_offset.checked_sub(entry_arg_base)?;
+        if relative < 0 || relative % slot_size != 0 {
+            return None;
+        }
+        let stack_index = usize::try_from(relative / slot_size).ok()?;
+        self.effective_param_offsets().len().checked_add(stack_index)
+    }
+
     pub(crate) fn classify_stack_slot_origin(
         &self,
         base: StackBase,

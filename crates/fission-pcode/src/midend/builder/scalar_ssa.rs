@@ -755,6 +755,9 @@ fn build_dynamic_guards(
                 block: block as u32,
                 op: op_index as u32,
             };
+            if is_call_return_address_scaffold_store(pcode, options, site, op) {
+                continue;
+            }
             let guard = match op.opcode {
                 PcodeOpcode::Load if op.inputs.len() >= 2 => memory_guard(
                     pcode,
@@ -1086,9 +1089,21 @@ fn resolve_pointer_value(
                         }
                     }
                     PcodeOpcode::IntSub if op.inputs.len() == 2 => {
-                        let delta = signed_constant_delta(&op.inputs[1])?;
-                        resolve_pointer_input(pcode, ssa, options, site, 0, visiting, budget - 1)?
-                            .shifted(delta.checked_neg()?)
+                        let base = resolve_pointer_input(
+                            pcode,
+                            ssa,
+                            options,
+                            site,
+                            0,
+                            visiting,
+                            budget - 1,
+                        )?;
+                        if is_call_return_address_scaffold_sub(pcode, options, site, op) {
+                            Some(base)
+                        } else {
+                            let delta = signed_constant_delta(&op.inputs[1])?;
+                            base.shifted(delta.checked_neg()?)
+                        }
                     }
                     _ => None,
                 }
@@ -1097,6 +1112,86 @@ fn resolve_pointer_value(
     };
     visiting.remove(&value_id);
     resolved
+}
+
+/// x86/x64 SLEIGH expands a call into `sp -= slot; Store(sp, return); Call`.
+/// The callee's return restores that slot, but raw p-code has no matching
+/// post-call `sp += slot` in the caller. Treating the scaffold subtraction as
+/// persistent makes every later stack address drift by one word per call.
+fn is_call_return_address_scaffold_sub(
+    pcode: &PcodeFunction,
+    options: &MlilPreviewOptions,
+    site: SsaOpSite,
+    op: &PcodeOp,
+) -> bool {
+    if op.opcode != PcodeOpcode::IntSub || op.inputs.len() != 2 {
+        return false;
+    }
+    let Some(output) = op.output.as_ref() else {
+        return false;
+    };
+    let input = &op.inputs[0];
+    let stack_pointer_offset = options.cspec_stack_pointer_offset.or_else(|| {
+        options
+            .calling_convention
+            .native_stack_pointer_register_offset(options.is_64bit)
+    });
+    if stack_pointer_offset != Some(output.offset)
+        || !is_register_space_id(output.space_id)
+        || output.space_id != input.space_id
+        || output.offset != input.offset
+        || output.size != input.size
+        || signed_constant_delta(&op.inputs[1]) != Some(i64::from(options.pointer_size))
+    {
+        return false;
+    }
+    let Some(block) = pcode.blocks.get(site.block as usize) else {
+        return false;
+    };
+    let op_index = site.op as usize;
+    let (Some(store), Some(call)) = (block.ops.get(op_index + 1), block.ops.get(op_index + 2)) else {
+        return false;
+    };
+    if store.opcode != PcodeOpcode::Store
+        || store.address != op.address
+        || store.inputs.len() < 3
+        || !matches!(call.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+        || call.address != op.address
+    {
+        return false;
+    }
+    let address = &store.inputs[1];
+    let return_address = store.inputs.last().expect("three store inputs");
+    address.space_id == output.space_id
+        && address.offset == output.offset
+        && address.size == output.size
+        && return_address.is_constant
+}
+
+fn is_call_return_address_scaffold_store(
+    pcode: &PcodeFunction,
+    options: &MlilPreviewOptions,
+    site: SsaOpSite,
+    op: &PcodeOp,
+) -> bool {
+    if op.opcode != PcodeOpcode::Store || site.op == 0 {
+        return false;
+    }
+    let Some(block) = pcode.blocks.get(site.block as usize) else {
+        return false;
+    };
+    let Some(sub) = block.ops.get(site.op as usize - 1) else {
+        return false;
+    };
+    is_call_return_address_scaffold_sub(
+        pcode,
+        options,
+        SsaOpSite {
+            block: site.block,
+            op: site.op - 1,
+        },
+        sub,
+    )
 }
 
 fn signed_constant_delta(varnode: &Varnode) -> Option<i64> {
@@ -2998,6 +3093,88 @@ mod tests {
                 call_effect_source: None,
             }
         );
+    }
+
+    #[test]
+    fn call_return_address_scaffold_does_not_shift_later_stack_loads() {
+        let rsp = register_sized(0x20, 8);
+        let saved = register_sized(0x28, 8);
+        let call_rsp = rsp.clone();
+        let pointer = unique_sized(0x100, 8);
+        let pcode = function(vec![vec![
+            // A real callee-saved push remains part of the frame.
+            op(
+                0x1000,
+                PcodeOpcode::IntSub,
+                Some(rsp.clone()),
+                vec![rsp.clone(), Varnode::constant(8, 8)],
+            ),
+            op(
+                0x1000,
+                PcodeOpcode::Store,
+                None,
+                vec![Varnode::constant(3, 8), rsp.clone(), saved],
+            ),
+            // SLEIGH's transient call return-address scaffold.
+            op(
+                0x1001,
+                PcodeOpcode::IntSub,
+                Some(call_rsp.clone()),
+                vec![call_rsp.clone(), Varnode::constant(8, 8)],
+            ),
+            op(
+                0x1001,
+                PcodeOpcode::Store,
+                None,
+                vec![
+                    Varnode::constant(3, 8),
+                    call_rsp.clone(),
+                    Varnode::constant(0x1006, 8),
+                ],
+            ),
+            op(
+                0x1001,
+                PcodeOpcode::Call,
+                None,
+                vec![Varnode::constant(0x4000, 8)],
+            ),
+            op(
+                0x1006,
+                PcodeOpcode::IntAdd,
+                Some(pointer.clone()),
+                vec![call_rsp, Varnode::constant(0x10, 8)],
+            ),
+            op(
+                0x100a,
+                PcodeOpcode::Load,
+                Some(unique_sized(0x108, 8)),
+                vec![Varnode::constant(3, 8), pointer],
+            ),
+        ]]);
+        let successors = vec![vec![]];
+        let predecessors = vec![vec![]];
+        let options = MlilPreviewOptions {
+            is_64bit: true,
+            pointer_size: 8,
+            calling_convention: CallingConvention::SystemVAmd64,
+            cspec_stack_pointer_offset: Some(0x20),
+            ..MlilPreviewOptions::default()
+        };
+
+        let ssa = build_scalar_ssa_with_context(
+            &pcode,
+            &successors,
+            &predecessors,
+            &options,
+            None,
+        );
+        let load_site = SsaOpSite { block: 0, op: 6 };
+        let guard = &ssa.dynamic_guards[&load_site];
+        assert_eq!(guard.region, Some(SsaMemoryRegion::Stack));
+        assert_eq!(guard.precision, SsaGuardRangePrecision::Exact);
+        assert_eq!(guard.minimum_offset, 8);
+        assert_eq!(guard.maximum_offset_exclusive, Some(16));
+        assert!(!ssa.dynamic_guards.contains_key(&SsaOpSite { block: 0, op: 3 }));
     }
 
     #[test]

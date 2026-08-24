@@ -1,4 +1,8 @@
 use super::*;
+use fission_midend_core::ir::{
+    SsaGuardRangePrecision, SsaMemoryRegion, SsaMemoryValueId, SsaOpSite, SsaValueDefinition,
+};
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::midend::builder) struct ResolvedGlobalPointer {
@@ -7,6 +11,73 @@ pub(in crate::midend::builder) struct ResolvedGlobalPointer {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    /// Entry-SP-relative offset for a load whose reaching memory value is
+    /// proven to come from function entry rather than a store in this
+    /// function. This is the ownership proof required before an x64 stack
+    /// access may become a formal parameter.
+    fn current_load_entry_stack_value_offset(&self) -> Option<i64> {
+        let site = self.current_lowering_site?;
+        let op = self.pcode.blocks.get(site.block_idx)?.ops.get(site.op_idx)?;
+        if op.opcode != PcodeOpcode::Load {
+            return None;
+        }
+        let ssa_site = SsaOpSite {
+            block: u32::try_from(site.block_idx).ok()?,
+            op: u32::try_from(site.op_idx).ok()?,
+        };
+        let guard = self.scalar_ssa.dynamic_guards.get(&ssa_site)?;
+        if guard.region != Some(SsaMemoryRegion::Stack)
+            || guard.precision != SsaGuardRangePrecision::Exact
+        {
+            return None;
+        }
+        let pieces = self.scalar_ssa.memory_operation_inputs.get(&ssa_site)?;
+        let piece = pieces.iter().find(|piece| piece.byte_offset == 0)?;
+        let value = self.scalar_ssa.memory_value(piece.value)?;
+        if value.storage.region != SsaMemoryRegion::Stack
+            || !self.memory_value_is_entry_owned(piece.value, &mut BTreeSet::new(), 64)
+        {
+            return None;
+        }
+        i64::try_from(value.storage.offset).ok()
+    }
+
+    fn memory_value_is_entry_owned(
+        &self,
+        value_id: SsaMemoryValueId,
+        visiting: &mut BTreeSet<SsaMemoryValueId>,
+        budget: usize,
+    ) -> bool {
+        if budget == 0 || !visiting.insert(value_id) {
+            return false;
+        }
+        let Some(value) = self.scalar_ssa.memory_value(value_id) else {
+            visiting.remove(&value_id);
+            return false;
+        };
+        let result = match value.definition {
+            SsaValueDefinition::Input => true,
+            SsaValueDefinition::Operation(_) => false,
+            SsaValueDefinition::Phi { block } => self
+                .scalar_ssa
+                .memory_phis
+                .get(&block)
+                .and_then(|phis| phis.iter().find(|phi| phi.output == value_id))
+                .is_some_and(|phi| {
+                    !phi.operands.is_empty()
+                        && phi.operands.iter().all(|operand| {
+                            self.memory_value_is_entry_owned(
+                                operand.value,
+                                visiting,
+                                budget - 1,
+                            )
+                        })
+                }),
+        };
+        visiting.remove(&value_id);
+        result
+    }
+
     fn refine_register_param_type_from_varnode(&mut self, param_index: usize, vn: &Varnode) {
         let Some(binding) = self.params.get_mut(&param_index) else {
             return;
@@ -36,7 +107,15 @@ impl<'a> PreviewBuilder<'a> {
         base: StackBase,
         offset: i64,
     ) -> NirBindingOrigin {
-        self.abi_state().classify_stack_slot_origin(base, offset)
+        let abi = self.abi_state();
+        if self.options.is_64bit
+            && let Some(entry_offset) = self.current_load_entry_stack_value_offset()
+            && let Some(index) =
+                abi.incoming_x64_stack_parameter_index_from_entry_offset(entry_offset)
+        {
+            return NirBindingOrigin::ParamIndex(index);
+        }
+        abi.classify_stack_slot_origin(base, offset)
     }
 
     pub(in crate::midend::builder) fn register_param(&mut self, vn: &Varnode) -> Option<String> {
