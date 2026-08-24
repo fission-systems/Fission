@@ -508,4 +508,21 @@ mod tests {
 
         assert!(db.get("getpid").expect("getpid").params.is_empty());
     }
+
+    #[test]
+    fn gettext_contracts_are_available() {
+        let db = ApiTypeDatabase::from_utils_signatures().expect("load utils api signatures");
+
+        let gettext = db.get("gettext").expect("gettext");
+        assert_eq!(gettext.return_type, "char*");
+        assert_eq!(gettext.params.len(), 1);
+        assert_eq!(gettext.params[0].type_name, "char*");
+
+        let dcgettext = db.get("dcgettext").expect("dcgettext");
+        assert_eq!(dcgettext.return_type, "char*");
+        assert_eq!(dcgettext.params.len(), 3);
+        assert_eq!(dcgettext.params[0].type_name, "char*");
+        assert_eq!(dcgettext.params[1].type_name, "char*");
+        assert_eq!(dcgettext.params[2].type_name, "int");
+    }
 }
