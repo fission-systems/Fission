@@ -487,4 +487,25 @@ mod tests {
         let ob_reg = db.get("ObRegisterCallbacks").expect("ObRegisterCallbacks");
         assert_eq!(ob_reg.params.len(), 2);
     }
+
+    #[test]
+    fn posix_multi_argument_contracts_are_not_void() {
+        let db = ApiTypeDatabase::from_utils_signatures().expect("load utils api signatures");
+
+        let stat = db.get("stat").expect("stat");
+        assert_eq!(stat.params.len(), 2);
+        assert_eq!(stat.params[0].type_name, "char*");
+        assert_eq!(stat.params[1].type_name, "stat*");
+
+        let sigaction = db.get("sigaction").expect("sigaction");
+        assert_eq!(sigaction.params.len(), 3);
+        assert_eq!(sigaction.params[1].type_name, "sigaction*");
+        assert_eq!(sigaction.params[2].type_name, "sigaction*");
+
+        let wait = db.get("wait").expect("wait");
+        assert_eq!(wait.params.len(), 1);
+        assert_eq!(wait.params[0].type_name, "int*");
+
+        assert!(db.get("getpid").expect("getpid").params.is_empty());
+    }
 }
