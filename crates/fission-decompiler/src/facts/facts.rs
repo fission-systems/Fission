@@ -876,10 +876,18 @@ fn build_preview_callee_summaries(
     // regions, type fixed points, and cleanup), so they are not a safe fact
     // source for an interactive caller decompilation.
     const MAX_TYPED_PREVIEW_PCODE_OPS: usize = 2_000;
-    let prototype = (detail.op_count <= MAX_TYPED_PREVIEW_PCODE_OPS)
-        .then(|| infer_entry_register_param_arity(&pcode, &register_namer))
-        .flatten()
-        .map(|arity| {
+    let infer_prototype = |candidate_pcode: &PcodeFunction,
+                           evidence_source: &str|
+     -> Option<NirCallPrototypeSummary> {
+        let op_count = candidate_pcode
+            .blocks
+            .iter()
+            .map(|block| block.ops.len())
+            .sum::<usize>();
+        (op_count <= MAX_TYPED_PREVIEW_PCODE_OPS)
+            .then(|| infer_entry_register_param_arity(candidate_pcode, &register_namer))
+            .flatten()
+            .map(|arity| {
             let mut callee_context = type_context.clone();
             callee_context.function_hints = Some(NirFunctionHints {
                 param_names: (1..=arity).map(|index| format!("param_{index}")).collect(),
@@ -888,7 +896,7 @@ fn build_preview_callee_summaries(
             callee_context.call_prototype_summaries.remove(target_name);
 
             let typed_params = fission_pcode::build_raw_hir(
-                &pcode,
+                candidate_pcode,
                 target_name,
                 target_addr,
                 &options,
@@ -927,8 +935,12 @@ fn build_preview_callee_summaries(
 
             if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
                 eprintln!(
-                    "[CALLEE-TYPE-DIAG] target={} arity={} pointer_pointees={:?} surface_types={:?}",
-                    target_name, arity, param_pointer_pointees, param_surface_type_names
+                    "[CALLEE-TYPE-DIAG] target={} evidence={} arity={} pointer_pointees={:?} surface_types={:?}",
+                    target_name,
+                    evidence_source,
+                    arity,
+                    param_pointer_pointees,
+                    param_surface_type_names
                 );
             }
 
@@ -939,7 +951,26 @@ fn build_preview_callee_summaries(
                 param_pointer_pointees,
                 param_surface_type_names,
             }
-        });
+        })
+    };
+
+    let mut prototype = infer_prototype(&pcode, "complete");
+    let stable_prefix_limit = direct_callee_stable_prefix_instruction_limit(max_bytes);
+    if stable_prefix_limit < instruction_limit
+        && let Some(complete) = prototype.as_mut()
+        && let Ok(stable_prefix_pcode) = decode_rust_sleigh_pcode(
+            binary,
+            target_name,
+            target_addr,
+            max_bytes,
+            stable_prefix_limit,
+            true,
+            true,
+        )
+        && let Some(stable_prefix) = infer_prototype(&stable_prefix_pcode, "stable-prefix")
+    {
+        merge_preview_pointer_evidence(complete, stable_prefix);
+    }
     Some((summary, prototype))
 }
 
@@ -963,8 +994,39 @@ fn direct_callee_max_bytes(binary: &LoadedBinary, target_addr: u64) -> Option<us
 }
 
 fn direct_callee_instruction_limit(max_bytes: usize) -> usize {
-    let estimated = (max_bytes / 4).clamp(32, 512);
-    estimated.max(32)
+    max_bytes.clamp(32, 512)
+}
+
+fn direct_callee_stable_prefix_instruction_limit(max_bytes: usize) -> usize {
+    (max_bytes / 4).clamp(32, 512)
+}
+
+fn merge_preview_pointer_evidence(
+    complete: &mut NirCallPrototypeSummary,
+    supplemental: NirCallPrototypeSummary,
+) {
+    for (index, pointee) in supplemental.param_pointer_pointees.into_iter().enumerate() {
+        if pointee.is_none()
+            || complete
+                .param_pointer_pointees
+                .get(index)
+                .is_some_and(Option::is_some)
+        {
+            continue;
+        }
+        if index >= complete.param_pointer_pointees.len() {
+            break;
+        }
+        complete.param_pointer_pointees[index] = pointee;
+        if let Some(surface) = supplemental
+            .param_surface_type_names
+            .get(index)
+            .cloned()
+            .flatten()
+        {
+            complete.param_surface_type_names[index] = Some(surface);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1631,13 +1693,16 @@ fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> O
 #[cfg(test)]
 mod tests {
     use super::{
-        build_nir_call_param_rules, build_nir_call_result_facts, merge_nir_function_hints,
-        record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
-        resolve_nir_struct_name, summarize_preview_callee_effects,
+        build_nir_call_param_rules, build_nir_call_result_facts, direct_callee_instruction_limit,
+        direct_callee_stable_prefix_instruction_limit, merge_nir_function_hints,
+        merge_preview_pointer_evidence, record_interprocedural_arity_facts,
+        record_unambiguous_register_type_hint, resolve_nir_struct_name,
+        summarize_preview_callee_effects,
     };
     use crate::{
-        CallEdgeKind, CallTargetProvenance, CallTargetRef, NirTypeContext, PcodeBasicBlock,
-        PcodeFunction, PcodeOp, PcodeOpcode, Varnode,
+        CallEdgeKind, CallTargetProvenance, CallTargetRef, NirCallPointerPointee,
+        NirCallPrototypeSummary, NirTypeContext, PcodeBasicBlock, PcodeFunction, PcodeOp,
+        PcodeOpcode, Varnode,
     };
     use fission_signatures::win_types::WindowsStructures;
     use fission_static::analysis::decomp::facts::FactStore;
@@ -1647,6 +1712,59 @@ mod tests {
         let mut ctx = NirTypeContext::default();
         ctx.call_targets.insert(addr, name.to_string());
         ctx
+    }
+
+    #[test]
+    fn direct_callee_budget_covers_each_bounded_byte() {
+        assert_eq!(direct_callee_instruction_limit(1), 32);
+        assert_eq!(direct_callee_instruction_limit(117), 117);
+        assert_eq!(direct_callee_instruction_limit(420), 420);
+        assert_eq!(direct_callee_instruction_limit(4096), 512);
+        assert_eq!(direct_callee_stable_prefix_instruction_limit(117), 32);
+        assert_eq!(direct_callee_stable_prefix_instruction_limit(420), 105);
+    }
+
+    #[test]
+    fn stable_prefix_only_supplements_missing_pointer_evidence() {
+        let concrete = NirCallPointerPointee::Int {
+            bits: 64,
+            signed: true,
+        };
+        let mut complete = NirCallPrototypeSummary {
+            min_arity: 2,
+            max_arity: 2,
+            locked_exact_arity: Some(2),
+            param_pointer_pointees: vec![None, Some(concrete.clone())],
+            param_surface_type_names: vec![None, Some("long*".to_string())],
+        };
+        let supplemental = NirCallPrototypeSummary {
+            min_arity: 3,
+            max_arity: 3,
+            locked_exact_arity: Some(3),
+            param_pointer_pointees: vec![
+                Some(NirCallPointerPointee::Unknown),
+                Some(NirCallPointerPointee::Unknown),
+                Some(NirCallPointerPointee::Unknown),
+            ],
+            param_surface_type_names: vec![
+                Some("char*".to_string()),
+                Some("void*".to_string()),
+                Some("char*".to_string()),
+            ],
+        };
+
+        merge_preview_pointer_evidence(&mut complete, supplemental);
+
+        assert_eq!(complete.max_arity, 2);
+        assert_eq!(complete.locked_exact_arity, Some(2));
+        assert_eq!(
+            complete.param_pointer_pointees,
+            vec![Some(NirCallPointerPointee::Unknown), Some(concrete)]
+        );
+        assert_eq!(
+            complete.param_surface_type_names,
+            vec![Some("char*".to_string()), Some("long*".to_string())]
+        );
     }
 
     #[test]
