@@ -238,10 +238,16 @@ fn recurse(
 /// `if` it reaches the following statements on that same condition alone --
 /// the `then` arm never gets there. So lifting the arm out changes no path.
 ///
-/// The source this recovers wrote a guard, not a two-armed choice, and the
-/// shapes are not interchangeable to the structure metric: the unwrapped form
-/// gives the tail a second predecessor (the guard falls into it), which is the
-/// edge the source CFG has and the `else` form does not.
+/// **Only an arm that leaves by a non-returning call qualifies, never one
+/// that leaves by `return`.** The distinction is not stylistic. A CFG builder
+/// reading the source cannot tell that `exit` does not come back, so it gives
+/// that guard a fall-through edge into the tail -- the edge the `else` form
+/// does not have, and the reason unwrapping recovers the source's shape. An
+/// arm ending in `return` is modelled correctly as leaving, the source's own
+/// `if`/`else` keeps the two arms as separate blocks, and lifting the arm out
+/// merges it into whatever follows and *loses* a node. Measured: unwrapping
+/// on `return` took `libacl/getfacl`'s `user_name` from an exact match to 3
+/// (10 nodes down to 9) while fixing nothing.
 ///
 /// This pairs with [`drop_unreachable_tails`] and neither is worth anything
 /// alone. Measured on `bzip2`'s `copyFileName` against its published source
@@ -264,7 +270,8 @@ pub fn unwrap_else_after_diverging_then(body: Vec<PreHirStmt>) -> (Vec<PreHirStm
             continue;
         };
         // An empty `then` is a negated guard, not this shape.
-        if then_body.is_empty() || else_body.is_empty() || !then_body.iter().any(diverges) {
+        let leaves_by_call = then_body.last().is_some_and(is_diverging_call);
+        if then_body.is_empty() || else_body.is_empty() || !leaves_by_call {
             out.push(PreHirStmt::If {
                 cond,
                 then_body,
@@ -489,6 +496,18 @@ mod tests {
         assert!(else_body.is_empty());
     }
 
+    /// An arm that leaves by `return` is modelled as leaving by any CFG
+    /// builder, so the source's own `if`/`else` already keeps the two arms
+    /// apart. Unwrapping it merges the arm into what follows and loses a
+    /// node -- measured on `libacl/getfacl`'s `user_name`.
+    #[test]
+    fn keeps_an_else_whose_then_leaves_by_return() {
+        let (out, changed) =
+            unwrap_else_after_diverging_then(vec![if_both(vec![ret(1)], vec![assign()])]);
+        assert!(!changed);
+        assert_eq!(out.len(), 1);
+    }
+
     /// A `then` arm that falls through is a real two-armed choice; unwrapping
     /// it would run the `else` body on both paths.
     #[test]
@@ -511,7 +530,7 @@ mod tests {
     /// Nested bodies get the same treatment.
     #[test]
     fn unwraps_inside_a_loop_body() {
-        let inner = if_both(vec![ret(1)], vec![assign()]);
+        let inner = if_both(vec![call("abort")], vec![assign()]);
         let (out, changed) = unwrap_else_after_diverging_then(vec![PreHirStmt::While {
             cond: cond(),
             body: Rc::new(vec![inner]),
