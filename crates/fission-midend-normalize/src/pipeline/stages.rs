@@ -15,7 +15,7 @@ use super::super::cleanup::{
     apply_subvar_trim_pass, apply_switch_norm_pass, canonicalize_minmax_conditional_returns,
     canonicalize_orphaned_stack_slot_names, cast_elision_pass, elide_unused_popcount_assigns,
     eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
-    eliminate_overwritten_assigns,
+    eliminate_overwritten_assigns, hoist_shared_select_casts,
     eliminate_redundant_var_assigns,
     hoist_param_alias_copies_before_first_use, inline_loop_condition_trailing_temps,
     normalize_dowhile_decrement_condition, prune_unused_dead_local_bindings,
@@ -132,6 +132,7 @@ pub(super) fn cleanup_after_constant_folding_init(func: &mut PreHirFunction) {
     cleanup_func_stmt_list(func);
     eliminate_dead_local_clobber_assigns(func);
     eliminate_overwritten_assigns(func);
+    hoist_shared_select_casts(func);
     prune_unused_temp_bindings(func);
 }
 
@@ -154,6 +155,7 @@ pub(super) fn cleanup_after_conditional_const(func: &mut PreHirFunction) {
     constant_folding_pass(&mut func.body);
     eliminate_dead_local_clobber_assigns(func);
     eliminate_overwritten_assigns(func);
+    hoist_shared_select_casts(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
@@ -192,6 +194,7 @@ pub(super) fn cleanup_elim_8(func: &mut PreHirFunction) {
     cleanup_func_stmt_list(func);
     eliminate_dead_local_clobber_assigns(func);
     eliminate_overwritten_assigns(func);
+    hoist_shared_select_casts(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
 }
