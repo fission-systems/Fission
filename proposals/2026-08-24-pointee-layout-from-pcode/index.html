@@ -1228,6 +1228,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#6-shipped-as-analysis-not-yet-as-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Shipped as analysis, not yet as types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#6-the-question-this-does-not-answer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1329,11 +1340,14 @@ which this becomes a hundred times slower, and it is written here so the next
 person crosses the line knowingly.</p>
 <h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
 <ul>
-<li>[x] Feasibility on the anchor, and on two more compilers.</li>
+<li>[x] Feasibility on the anchor and two more compilers (prototype).</li>
+<li>[x] Production pass, <code>builder::pointee_layout</code>, with five tests built from
+      the shapes the corpus actually lifts.</li>
+<li>[x] <code>cargo nextest run -p fission-pcode</code> -- 1,022 passed.</li>
+<li>[x] <code>rustfmt --check</code> and clippy clean; no new dependency.</li>
+<li>[ ] <strong>Not yet wired to bindings.</strong> See section 6.</li>
 <li>[ ] Prevalence: how many of the 26 pointee rows show a recoverable layout.</li>
-<li>[ ] Whether recovering the <em>shape</em> moves the metric, which scores <em>names</em>.</li>
-<li>[ ] Aliasing: two different structs reached through one base.</li>
-<li>[ ] Production implementation, tests, corpus regression.</li>
+<li>[ ] Whether recovering the <em>shape</em> moves a metric that scores <em>names</em>.</li>
 </ul>
 <p>Feasibility, from <code>raw-pcode</code> alone with no Rust changes:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>target                              source struct                 recovered
@@ -1345,11 +1359,25 @@ person crosses the line knowingly.</p>
 <p>Exact on every one, across two compilers and both widths, including the 32-bit
 pointer shrinking <code>next</code> from eight bytes to four. Stack-frame accesses appear
 under the stack pointer's own base and separate themselves without a rule.</p>
-<p>A defect in the probe found and fixed along the way: a negative displacement is
-written as the unsigned two's complement of <em>the operand's own width</em>, so
-sign-extending at 64 bits regardless turned a 32-bit <code>-8</code> into
-<code>18446744073709551608</code>. Only stack offsets were affected; the struct extraction
-was already correct.</p>
+<p>A defect in the prototype found and fixed along the way, and carried into the
+production <code>const_offset</code>: a negative displacement is written as the unsigned
+two's complement of <em>the operand's own width</em>, so sign-extending at 64 bits
+regardless turned a 32-bit <code>-8</code> into <code>18446744073709551608</code>.</p>
+<p>The five tests pin the analysis rather than an output string: the two-offset
+struct, the same struct narrowing with pointer width, a single access refusing
+to become an aggregate, a base reached from the middle (the stack pointer,
+dereferenced above and below) yielding no size, and a <code>Copy</code> keeping one struct
+on one base rather than splitting it.</p>
+<h2 id="6-shipped-as-analysis-not-yet-as-types">6. Shipped as analysis, not yet as types<a class="headerlink" href="#6-shipped-as-analysis-not-yet-as-types" title="Permanent link">&para;</a></h2>
+<p>The pass runs over p-code and produces <code>VarnodeKey -&gt; [(offset, width)]</code>. The
+bindings it would retype are addressed <strong>by name</strong>, and the builder holds no
+varnode-to-name map: <code>operand_metatypes</code>, the closest existing analogue, is
+keyed by name and populated <em>during</em> lowering, at the point where the name is
+known.</p>
+<p>So wiring this means recording the evidence during lowering rather than reading
+it back afterwards -- a change on the lowering path, which is not the same size
+of change as the analysis and is not attempted here. The analysis is the part
+that was uncertain; it is now tested and costs nothing.</p>
 <h2 id="6-the-question-this-does-not-answer">6. The question this does not answer<a class="headerlink" href="#6-the-question-this-does-not-answer" title="Permanent link">&para;</a></h2>
 <p>The metric scores type <em>names</em>. This recovers <em>shapes</em>. <code>(0,4) (8,8)</code> is not
 <code>Node *</code>, and <code>normalize_type</code> will not accept it.</p>
