@@ -1398,19 +1398,23 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> bool {
-        if !self.register_namer().is_primary_return_register(output) {
+        // Built once. `register_namer()` reconstructs the whole register
+        // model on every call -- two fresh hash maps of every register in the
+        // architecture -- and this loop used to ask for a new one per op. A
+        // `sample` profile of `bzip2`'s `sendMTFValues` (112 blocks) put
+        // essentially all of that function's 55 seconds inside this method.
+        let namer = self.register_namer();
+        if !namer.is_primary_return_register(output) {
             return false;
         }
         for later_idx in (op_idx + 1)..block.ops.len() {
-            if !Self::op_is_inside_same_block_forward_cmov_body(block, later_idx) {
+            if !self.op_is_inside_same_block_forward_cmov_body(block, later_idx) {
                 continue;
             }
             let Some(later_out) = block.ops[later_idx].output.as_ref() else {
                 continue;
             };
-            if self.register_namer().is_primary_return_register(later_out)
-                && later_out.offset == output.offset
-            {
+            if later_out.offset == output.offset && namer.is_primary_return_register(later_out) {
                 return true;
             }
         }
@@ -3949,7 +3953,7 @@ impl<'a> PreviewBuilder<'a> {
         // skip target) is conditional. Complete replacement would make later
         // uses always see the taken-path RHS (x64 clamp: cmovle into R8 then
         // cmovge from R8 collapsed to max(lo, value)).
-        if Self::op_is_inside_same_block_forward_cmov_body(block, op_idx) {
+        if self.op_is_inside_same_block_forward_cmov_body(block, op_idx) {
             return false;
         }
         let uses = self.output_use_sites_in_block(block, op_idx, output);
@@ -3964,32 +3968,56 @@ impl<'a> PreviewBuilder<'a> {
 
     /// True when `op_idx` is strictly inside a same-block-forward CBranch skip
     /// range (the guarded cmov / instruction-local body).
+    /// The `(branch_idx, target_idx)` spans of this block's same-block forward
+    /// branches, computed once per block.
+    ///
+    /// Resolving them is a scan of the block, and the question "is this op
+    /// inside one of them" was asked from inside a loop over the block's
+    /// suffix, which was itself run once per op -- so the block was walked
+    /// cubically to answer a question whose answer never changes. Measured on
+    /// `bzip2`'s `sendMTFValues` (112 blocks): a `sample` profile put
+    /// essentially all of that function's 55 seconds here.
+    fn same_block_forward_cmov_spans(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+    ) -> std::rc::Rc<Vec<(usize, usize)>> {
+        let key = self.lowering_block_index(block);
+        if let Some(cached) = self.cmov_body_spans.borrow().get(&key).cloned() {
+            return cached;
+        }
+        let mut spans = Vec::new();
+        for (branch_idx, op) in block.ops.iter().enumerate() {
+            if op.opcode != PcodeOpcode::CBranch || op.inputs.len() < 2 {
+                continue;
+            }
+            if let Some(target) = crate::midend::cfg::same_block_forward_branch_target_op_idx(
+                block,
+                branch_idx,
+                block.ops.len(),
+                op,
+                &op.inputs[0],
+            ) {
+                spans.push((branch_idx, target));
+            }
+        }
+        let spans = std::rc::Rc::new(spans);
+        self.cmov_body_spans
+            .borrow_mut()
+            .insert(key, std::rc::Rc::clone(&spans));
+        spans
+    }
+
     fn op_is_inside_same_block_forward_cmov_body(
+        &self,
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
     ) -> bool {
         if op_idx == 0 || op_idx >= block.ops.len() {
             return false;
         }
-        for branch_idx in 0..op_idx {
-            let op = &block.ops[branch_idx];
-            if op.opcode != PcodeOpcode::CBranch || op.inputs.len() < 2 {
-                continue;
-            }
-            let Some(target) = crate::midend::cfg::same_block_forward_branch_target_op_idx(
-                block,
-                branch_idx,
-                block.ops.len(),
-                op,
-                &op.inputs[0],
-            ) else {
-                continue;
-            };
-            if branch_idx < op_idx && op_idx < target {
-                return true;
-            }
-        }
-        false
+        self.same_block_forward_cmov_spans(block)
+            .iter()
+            .any(|&(branch_idx, target)| branch_idx < op_idx && op_idx < target)
     }
 
     fn build_replacement_value_plan(
@@ -4005,7 +4033,7 @@ impl<'a> PreviewBuilder<'a> {
             .replacement_plan_candidate_count += 1;
         // Guarded cmov body must keep a materialization binding; complete plans
         // would unconditionalize the taken-path value for later uses.
-        if Self::op_is_inside_same_block_forward_cmov_body(block, op_idx) {
+        if self.op_is_inside_same_block_forward_cmov_body(block, op_idx) {
             return ReplacementValuePlan::incomplete(
                 ReplacementReadClass::SameBlockData,
                 MaterializationRejectionReason::ConsumerRequiresStableRepresentative,

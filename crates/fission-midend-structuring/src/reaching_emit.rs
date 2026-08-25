@@ -52,7 +52,7 @@
 
 use crate::HashMap;
 use crate::reaching_conditions::{
-    NodeId, always, conditions_are_complementary, conjunction, conjuncts, is_always,
+    NodeId, always, conditions_are_complementary, conjunct_refs, conjunction, is_always,
 };
 use fission_midend_prehir::util::negate_expr;
 use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt};
@@ -111,7 +111,7 @@ pub fn structure_guarded_entries(entries: &[GuardedEntry]) -> Vec<PreHirStmt> {
             i += 1;
             continue;
         }
-        let Some(split) = conjuncts(&entry.cond).into_iter().next() else {
+        let Some(split) = conjunct_refs(&entry.cond).first().map(|c| (*c).clone()) else {
             i += 1;
             continue;
         };
@@ -175,12 +175,18 @@ fn push_if(out: &mut Vec<PreHirStmt>, cond: PreHirExpr, then_body: Vec<PreHirStm
 }
 
 fn has_conjunct(e: &PreHirExpr, needle: &PreHirExpr) -> bool {
-    conjuncts(e).iter().any(|c| c == needle)
+    conjunct_refs(e).iter().any(|c| *c == needle)
 }
 
 /// Remove `needle` from a conjunction; `true` once nothing is left.
 fn strip_conjunct(e: &PreHirExpr, needle: &PreHirExpr) -> PreHirExpr {
-    conjunction(conjuncts(e).into_iter().filter(|c| c != needle).collect())
+    conjunction(
+        conjunct_refs(e)
+            .into_iter()
+            .filter(|c| *c != needle)
+            .cloned()
+            .collect(),
+    )
 }
 
 /// Fold a guard binding into the `if` that immediately consumes it.

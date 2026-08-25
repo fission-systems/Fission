@@ -104,6 +104,29 @@ fn or(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
 
 /// Flatten a conjunction into its terms; a non-conjunction is a single term.
 pub(crate) fn conjuncts(e: &PreHirExpr) -> Vec<PreHirExpr> {
+    conjunct_refs(e).into_iter().cloned().collect()
+}
+
+/// The terms of a conjunction, borrowed.
+///
+/// The owning [`conjuncts`] deep-copies every term, and a `PreHirExpr` term is
+/// a whole expression tree. Structuring asks for these constantly -- to test
+/// whether a guard mentions a conjunct, to take just the first one, to compare
+/// two guards' terms -- and almost none of those need to own anything.
+///
+/// Measured on `bzip2`'s `main` (113 blocks, 3.3KB), where a `sample` profile
+/// put `PreHirExpr::clone` and its drop glue at the top by a wide margin and
+/// named `conjuncts` as the caller: 41s to decompile that one function, next
+/// to 3.6s for `mainSort` at 56 blocks and twice the p-code. Cost tracked
+/// block count, not size, which is what a per-block guard built by cloning
+/// looks like.
+pub(crate) fn conjunct_refs(e: &PreHirExpr) -> Vec<&PreHirExpr> {
+    let mut out = Vec::new();
+    collect_conjunct_refs(e, &mut out);
+    out
+}
+
+fn collect_conjunct_refs<'a>(e: &'a PreHirExpr, out: &mut Vec<&'a PreHirExpr>) {
     match e {
         PreHirExpr::Binary {
             op: PreHirBinaryOp::LogicalAnd,
@@ -111,11 +134,10 @@ pub(crate) fn conjuncts(e: &PreHirExpr) -> Vec<PreHirExpr> {
             rhs,
             ..
         } => {
-            let mut out = conjuncts(lhs);
-            out.extend(conjuncts(rhs));
-            out
+            collect_conjunct_refs(lhs, out);
+            collect_conjunct_refs(rhs, out);
         }
-        other => vec![other.clone()],
+        other => out.push(other),
     }
 }
 
@@ -137,15 +159,27 @@ pub(crate) fn conjunction(terms: Vec<PreHirExpr>) -> PreHirExpr {
 /// their disjunction is just that shared part. `None` when they do not have
 /// that form.
 fn common_part_of_complementary(a: &PreHirExpr, b: &PreHirExpr) -> Option<PreHirExpr> {
-    let ca = conjuncts(a);
-    let cb = conjuncts(b);
-    let shared: Vec<PreHirExpr> = ca.iter().filter(|x| cb.contains(x)).cloned().collect();
-    let rest_a: Vec<PreHirExpr> = ca.into_iter().filter(|x| !shared.contains(x)).collect();
-    let rest_b: Vec<PreHirExpr> = cb.into_iter().filter(|x| !shared.contains(x)).collect();
+    let ca = conjunct_refs(a);
+    let cb = conjunct_refs(b);
+    let shared: Vec<&PreHirExpr> = ca
+        .iter()
+        .copied()
+        .filter(|x| cb.iter().any(|y| y == x))
+        .collect();
+    let rest_a: Vec<&PreHirExpr> = ca
+        .into_iter()
+        .filter(|x| !shared.iter().any(|y| y == x))
+        .collect();
+    let rest_b: Vec<&PreHirExpr> = cb
+        .into_iter()
+        .filter(|x| !shared.iter().any(|y| y == x))
+        .collect();
     let ([only_a], [only_b]) = (&rest_a[..], &rest_b[..]) else {
         return None;
     };
-    conditions_are_complementary(only_a, only_b).then(|| conjunction(shared))
+    // Only the terms that survive are copied.
+    conditions_are_complementary(only_a, only_b)
+        .then(|| conjunction(shared.into_iter().cloned().collect()))
 }
 
 /// Compute the condition under which each node executes.

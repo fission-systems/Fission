@@ -40,6 +40,11 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) successors: Vec<Vec<usize>>,
     pub(crate) predecessors: Vec<Vec<usize>>,
     pub(crate) reachability_cache: RefCell<BuilderCacheMap<(usize, usize, usize), bool>>,
+    /// Per block: the `(branch_idx, target_idx)` spans of its same-block
+    /// forward branches -- the "cmov body" intervals. Answering whether one op
+    /// sits inside one of them used to rescan the block's whole prefix, inside
+    /// a loop that already scanned its suffix, from a caller that ran per op.
+    pub(crate) cmov_body_spans: RefCell<BuilderCacheMap<usize, std::rc::Rc<Vec<(usize, usize)>>>>,
     pub(crate) cfg_facts: crate::midend::structuring::CfgFactCache,
     pub(crate) dom_tree: crate::midend::structuring::DomTree,
     pub(crate) irreducible_edges: HashSet<(usize, usize)>,

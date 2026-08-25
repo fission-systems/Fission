@@ -231,6 +231,7 @@ impl<'a> PreviewBuilder<'a> {
             successors,
             predecessors,
             reachability_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
+            cmov_body_spans: std::cell::RefCell::new(BuilderCacheMap::default()),
             cfg_facts,
             dom_tree,
             irreducible_edges,
