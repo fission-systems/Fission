@@ -4,9 +4,9 @@ use fission_core::resources::ResourceProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::{Mutex, OnceLock};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -157,40 +157,54 @@ pub fn canonical_variadic_runtime_symbol(name: &str) -> String {
     symbol
 }
 
+/// Zero-based format-string argument for runtime entries whose variadic
+/// suffix follows printf conversion rules.
+///
+/// This is signature metadata rather than a normalize policy: the packed API
+/// records retain only the fixed prefix and cannot encode either `...` or the
+/// distinguished format slot themselves.
+pub fn printf_style_format_string_arg_index(name: &str) -> Option<usize> {
+    match canonical_variadic_runtime_symbol(name).as_str() {
+        "printf" | "printf_s" => Some(0),
+        "fprintf" | "fprintf_s" | "sprintf" => Some(1),
+        "sprintf_s" | "snprintf" | "snprintf_s" => Some(2),
+        "printf_chk" => Some(1),
+        "fprintf_chk" => Some(2),
+        "sprintf_chk" => Some(3),
+        "snprintf_chk" => Some(4),
+        "error" => Some(2),
+        "error_at_line" => Some(4),
+        _ => None,
+    }
+}
+
 pub fn is_known_variadic_runtime_symbol(name: &str) -> bool {
-    matches!(
-        canonical_variadic_runtime_symbol(name).as_str(),
-        "printf"
-            | "fprintf"
-            | "sprintf"
-            | "snprintf"
-            | "scanf"
-            | "fscanf"
-            | "sscanf"
-            | "wprintf"
-            | "fwprintf"
-            | "swprintf"
-            | "snwprintf"
-            | "wscanf"
-            | "fwscanf"
-            | "swscanf"
-            | "sprintf_s"
-            | "snprintf_s"
-            | "fprintf_s"
-            | "printf_s"
-            | "scanf_s"
-            | "fscanf_s"
-            | "sscanf_s"
-            | "swprintf_s"
-            | "snwprintf_s"
-            | "fwprintf_s"
-            | "wprintf_s"
-            | "wscanf_s"
-            | "fwscanf_s"
-            | "swscanf_s"
-            | "wsprintf"
-            | "wsprintfw"
-    )
+    printf_style_format_string_arg_index(name).is_some()
+        || matches!(
+            canonical_variadic_runtime_symbol(name).as_str(),
+            "scanf"
+                | "fscanf"
+                | "sscanf"
+                | "wprintf"
+                | "fwprintf"
+                | "swprintf"
+                | "snwprintf"
+                | "wscanf"
+                | "fwscanf"
+                | "swscanf"
+                | "wscanf_s"
+                | "fwscanf_s"
+                | "swscanf_s"
+                | "wsprintf"
+                | "wsprintfw"
+                | "scanf_s"
+                | "fscanf_s"
+                | "sscanf_s"
+                | "swprintf_s"
+                | "snwprintf_s"
+                | "fwprintf_s"
+                | "wprintf_s"
+        )
 }
 
 impl ApiSignature {
@@ -207,7 +221,6 @@ impl ApiSignature {
                 .count()
     }
 }
-
 
 /// One `name|return_type|param:type,...` record.
 fn parse_record(line: &str) -> Result<ApiSignature, String> {
@@ -520,6 +533,23 @@ mod tests {
     }
 
     #[test]
+    fn printf_style_runtime_metadata_keeps_fixed_prefixes_variadic() {
+        assert_eq!(printf_style_format_string_arg_index("printf"), Some(0));
+        assert_eq!(
+            printf_style_format_string_arg_index("__fprintf_chk"),
+            Some(2)
+        );
+        assert_eq!(printf_style_format_string_arg_index("error"), Some(2));
+        assert_eq!(
+            printf_style_format_string_arg_index("error_at_line"),
+            Some(4)
+        );
+        assert!(is_known_variadic_runtime_symbol("__imp___printf_chk"));
+        assert!(is_known_variadic_runtime_symbol("error"));
+        assert_eq!(printf_style_format_string_arg_index("fputs"), None);
+    }
+
+    #[test]
     fn loads_utils_win_api_signatures() {
         let db = ApiTypeDatabase::from_utils_signatures().expect("load utils api signatures");
         assert!(db.get("CloseHandle").is_some());
@@ -594,5 +624,24 @@ mod tests {
         assert_eq!(dcgettext.params[0].type_name, "char*");
         assert_eq!(dcgettext.params[1].type_name, "char*");
         assert_eq!(dcgettext.params[2].type_name, "int");
+    }
+
+    #[test]
+    fn translated_format_runtime_contracts_are_available() {
+        let db = ApiTypeDatabase::from_utils_signatures().expect("load utils api signatures");
+
+        let error = db.get("error").expect("error");
+        assert_eq!(error.return_type, "void");
+        assert_eq!(error.params.len(), 3);
+        assert_eq!(error.params[2].type_name, "char*");
+
+        let error_at_line = db.get("error_at_line").expect("error_at_line");
+        assert_eq!(error_at_line.params.len(), 5);
+        assert_eq!(error_at_line.params[4].type_name, "char*");
+
+        let fprintf_chk = db.get("__fprintf_chk").expect("__fprintf_chk");
+        assert_eq!(fprintf_chk.params.len(), 3);
+        assert_eq!(fprintf_chk.params[0].type_name, "FILE*");
+        assert_eq!(fprintf_chk.params[2].type_name, "char*");
     }
 }

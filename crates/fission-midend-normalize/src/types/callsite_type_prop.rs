@@ -50,7 +50,8 @@ use fission_midend_core::wave_stats::{
 use fission_midend_prehir::util::rename_vars_in_stmts;
 use fission_signatures::{
     ApiSignature, SIGNATURE_RESOURCES, canonical_variadic_runtime_symbol,
-    is_known_variadic_runtime_symbol, symbol_for_win_api_database_lookup, type_name_is_informative,
+    is_known_variadic_runtime_symbol, printf_style_format_string_arg_index,
+    symbol_for_win_api_database_lookup, type_name_is_informative,
 };
 
 /// Convert a Windows API type name string to a `NirType`, or `None` for
@@ -532,7 +533,7 @@ fn apply_variadic_printf_format_string_arg_types(
 
     let mut changed = false;
     for (_, callee, arg_vars) in callsites {
-        let Some(format_index) = printf_family_format_string_arg_index(callee) else {
+        let Some(format_index) = admitted_printf_style_format_index(func, callee) else {
             continue;
         };
         let Some(literal) = arg_vars
@@ -552,6 +553,323 @@ fn apply_variadic_printf_format_string_arg_types(
                 continue;
             };
             changed |= apply_variadic_printf_arg_ty_transitively(func, &copy_sources, arg_var, &ty);
+        }
+    }
+    changed
+}
+
+fn admitted_printf_style_format_index(func: &PreHirFunction, target: &str) -> Option<usize> {
+    let format_index = printf_style_format_string_arg_index(target)?;
+    let canonical = canonical_variadic_runtime_symbol(target);
+    if matches!(
+        canonical.as_str(),
+        "error" | "error_at_line" | "printf_chk" | "fprintf_chk" | "sprintf_chk" | "snprintf_chk"
+    ) {
+        let summary = func.callee_summaries.get(target)?;
+        if !summary.target.is_import_locked() {
+            return None;
+        }
+    }
+    Some(format_index)
+}
+
+#[derive(Clone, Default)]
+struct FormatFlowState {
+    translated_literals: HashMap<String, String>,
+    copy_chains: HashMap<String, Vec<String>>,
+}
+
+impl FormatFlowState {
+    fn clear(&mut self) {
+        self.translated_literals.clear();
+        self.copy_chains.clear();
+    }
+
+    fn copy_chain_for_expr(&self, expr: &PreHirExpr) -> Vec<String> {
+        let Some(name) = plain_copy_var(expr) else {
+            return Vec::new();
+        };
+        self.copy_chains
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| vec![name.to_string()])
+    }
+
+    fn format_literal_for_expr(&self, expr: &PreHirExpr) -> Option<String> {
+        match expr {
+            PreHirExpr::AddressOfGlobal(name) => {
+                quoted_string_literal_text(name).map(str::to_string)
+            }
+            PreHirExpr::Var(name) => self.translated_literals.get(name).cloned(),
+            PreHirExpr::Cast { expr, .. } => self.format_literal_for_expr(expr),
+            _ => None,
+        }
+    }
+}
+
+fn plain_copy_var(expr: &PreHirExpr) -> Option<&str> {
+    match expr {
+        PreHirExpr::Var(name) => Some(name),
+        PreHirExpr::Cast { expr, .. } => plain_copy_var(expr),
+        _ => None,
+    }
+}
+
+fn imported_translation_message_index(func: &PreHirFunction, target: &str) -> Option<usize> {
+    let message_index = match canonical_variadic_runtime_symbol(target).as_str() {
+        "gettext" => 0,
+        "dcgettext" => 1,
+        _ => return None,
+    };
+    func.callee_summaries
+        .get(target)
+        .filter(|summary| summary.target.is_import_locked())?;
+    Some(message_index)
+}
+
+fn translated_literal_from_expr(func: &PreHirFunction, expr: &PreHirExpr) -> Option<String> {
+    let expr = match expr {
+        PreHirExpr::Cast { expr, .. } => expr.as_ref(),
+        _ => expr,
+    };
+    let PreHirExpr::Call { target, args, .. } = expr else {
+        return None;
+    };
+    let message_index = imported_translation_message_index(func, target)?;
+    args.get(message_index).and_then(|message| match message {
+        PreHirExpr::AddressOfGlobal(name) => quoted_string_literal_text(name).map(str::to_string),
+        PreHirExpr::Cast { expr, .. } => match expr.as_ref() {
+            PreHirExpr::AddressOfGlobal(name) => {
+                quoted_string_literal_text(name).map(str::to_string)
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+type FormatCallEvidence = (usize, String, Vec<Vec<String>>);
+
+fn collect_site_sensitive_format_evidence_expr(
+    func: &PreHirFunction,
+    expr: &PreHirExpr,
+    state: &FormatFlowState,
+    out: &mut Vec<FormatCallEvidence>,
+) {
+    match expr {
+        PreHirExpr::Call { target, args, .. } => {
+            if let Some(format_index) = admitted_printf_style_format_index(func, target)
+                && let Some(literal) = args
+                    .get(format_index)
+                    .and_then(|format| state.format_literal_for_expr(format))
+            {
+                out.push((
+                    format_index,
+                    literal,
+                    args.iter()
+                        .map(|arg| state.copy_chain_for_expr(arg))
+                        .collect(),
+                ));
+            }
+            for arg in args {
+                collect_site_sensitive_format_evidence_expr(func, arg, state, out);
+            }
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_site_sensitive_format_evidence_expr(func, lhs, state, out);
+            collect_site_sensitive_format_evidence_expr(func, rhs, state, out);
+        }
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. } => {
+            collect_site_sensitive_format_evidence_expr(func, expr, state, out);
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_site_sensitive_format_evidence_expr(func, base, state, out);
+            collect_site_sensitive_format_evidence_expr(func, index, state, out);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_site_sensitive_format_evidence_expr(func, cond, state, out);
+            collect_site_sensitive_format_evidence_expr(func, then_expr, state, out);
+            collect_site_sensitive_format_evidence_expr(func, else_expr, state, out);
+        }
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+    }
+}
+
+fn collect_site_sensitive_format_evidence_stmts(
+    func: &PreHirFunction,
+    stmts: &[PreHirStmt],
+    state: &mut FormatFlowState,
+    out: &mut Vec<FormatCallEvidence>,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                collect_site_sensitive_format_evidence_expr(func, rhs, state, out);
+                let PreHirLValue::Var(target) = lhs else {
+                    continue;
+                };
+                let translated_literal = translated_literal_from_expr(func, rhs).or_else(|| {
+                    plain_copy_var(rhs)
+                        .and_then(|source| state.translated_literals.get(source).cloned())
+                });
+                match translated_literal {
+                    Some(literal) => {
+                        state.translated_literals.insert(target.clone(), literal);
+                    }
+                    None => {
+                        state.translated_literals.remove(target);
+                    }
+                }
+
+                if let Some(source) = plain_copy_var(rhs) {
+                    let mut chain = vec![target.clone()];
+                    chain.extend(
+                        state
+                            .copy_chains
+                            .get(source)
+                            .cloned()
+                            .unwrap_or_else(|| vec![source.to_string()]),
+                    );
+                    if chain.iter().collect::<HashSet<_>>().len() == chain.len() {
+                        state.copy_chains.insert(target.clone(), chain);
+                    } else {
+                        state.copy_chains.remove(target);
+                    }
+                } else {
+                    state
+                        .copy_chains
+                        .insert(target.clone(), vec![target.clone()]);
+                }
+            }
+            PreHirStmt::Expr(expr) => {
+                collect_site_sensitive_format_evidence_expr(func, expr, state, out)
+            }
+            PreHirStmt::Return(Some(expr)) => {
+                collect_site_sensitive_format_evidence_expr(func, expr, state, out);
+                state.clear();
+            }
+            PreHirStmt::VaStart { va_list, .. } => {
+                collect_site_sensitive_format_evidence_expr(func, va_list, state, out)
+            }
+            PreHirStmt::Block(body) => {
+                collect_site_sensitive_format_evidence_stmts(func, body, state, out)
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_site_sensitive_format_evidence_expr(func, cond, state, out);
+                let mut then_state = state.clone();
+                collect_site_sensitive_format_evidence_stmts(func, then_body, &mut then_state, out);
+                let mut else_state = state.clone();
+                collect_site_sensitive_format_evidence_stmts(func, else_body, &mut else_state, out);
+                state.clear();
+            }
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+                collect_site_sensitive_format_evidence_expr(func, cond, state, out);
+                let mut body_state = state.clone();
+                collect_site_sensitive_format_evidence_stmts(func, body, &mut body_state, out);
+                state.clear();
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                let mut loop_state = state.clone();
+                if let Some(init) = init {
+                    collect_site_sensitive_format_evidence_stmts(
+                        func,
+                        std::slice::from_ref(init.as_ref()),
+                        &mut loop_state,
+                        out,
+                    );
+                }
+                if let Some(cond) = cond {
+                    collect_site_sensitive_format_evidence_expr(func, cond, &loop_state, out);
+                }
+                collect_site_sensitive_format_evidence_stmts(func, body, &mut loop_state, out);
+                if let Some(update) = update {
+                    collect_site_sensitive_format_evidence_stmts(
+                        func,
+                        std::slice::from_ref(update.as_ref()),
+                        &mut loop_state,
+                        out,
+                    );
+                }
+                state.clear();
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_site_sensitive_format_evidence_expr(func, expr, state, out);
+                for case in cases {
+                    let mut case_state = state.clone();
+                    collect_site_sensitive_format_evidence_stmts(
+                        func,
+                        &case.body,
+                        &mut case_state,
+                        out,
+                    );
+                }
+                let mut default_state = state.clone();
+                collect_site_sensitive_format_evidence_stmts(
+                    func,
+                    default,
+                    &mut default_state,
+                    out,
+                );
+                state.clear();
+            }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Return(None)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => state.clear(),
+        }
+    }
+}
+
+fn apply_site_sensitive_translated_format_types(func: &mut PreHirFunction) -> bool {
+    let mut evidence = Vec::new();
+    collect_site_sensitive_format_evidence_stmts(
+        func,
+        &func.body,
+        &mut FormatFlowState::default(),
+        &mut evidence,
+    );
+
+    let mut changed = false;
+    for (format_index, literal, arg_chains) in evidence {
+        for (offset, ty) in parse_printf_format_specifier_types(&literal)
+            .into_iter()
+            .enumerate()
+        {
+            let Some(ty) = ty else { continue };
+            let Some(chain) = arg_chains.get(format_index + 1 + offset) else {
+                continue;
+            };
+            for name in chain {
+                if let Some(binding) = binding_by_name_mut(&mut func.locals, name)
+                    .or_else(|| binding_by_name_mut(&mut func.params, name))
+                {
+                    changed |= apply_variadic_printf_arg_ty(binding, &ty);
+                }
+            }
         }
     }
     changed
@@ -988,20 +1306,6 @@ fn apply_direct_callee_pointer_transitively(
     changed
 }
 
-/// 0-based argument index of the format-string parameter for a known
-/// printf-family symbol, or `None` if `target` isn't one of the (narrow-
-/// string-only, see [`apply_variadic_printf_format_string_arg_types`]'s
-/// doc comment) symbols this recognizes.
-fn printf_family_format_string_arg_index(target: &str) -> Option<usize> {
-    let canonical = canonical_variadic_runtime_symbol(target);
-    match canonical.as_str() {
-        "printf" | "printf_s" => Some(0),
-        "fprintf" | "fprintf_s" | "sprintf" => Some(1),
-        "sprintf_s" | "snprintf" | "snprintf_s" => Some(2),
-        _ => None,
-    }
-}
-
 /// Strips the surrounding quotes `NirRenderOptions::from_loaded_binary`
 /// wraps every extracted string constant in, or `None` if `name` isn't
 /// one (e.g. an ordinary symbol/global name, or a non-constant argument
@@ -1060,8 +1364,9 @@ fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirType>> {
             }
         }
         // Length modifiers: `hh`/`h` (narrower, doesn't affect promoted
-        // vararg width so ignored), `l`/`ll` (widens to 64-bit at `ll`;
-        // a lone `l` also means wide-char for `%s`/`%c`), `L`/`z`/`j`/`t`
+        // vararg width so ignored), `l`/`ll` (`ll` is always 64-bit, while
+        // a lone `l` has ABI-dependent integer width and also means wide-char
+        // for `%s`/`%c`), `L`/`z`/`j`/`t`
         // (ignored, doesn't change the promoted vararg width this cares
         // about), MSVC `I32`/`I64`.
         let mut long_count = 0u8;
@@ -1106,14 +1411,15 @@ fn parse_printf_format_specifier_types(text: &str) -> Vec<Option<NirType>> {
             break;
         };
         let is_wide = long_count >= 1;
-        let is_64 = long_count >= 2;
+        let integer_bits = match long_count {
+            0 => Some(32),
+            1 => None,
+            _ => Some(64),
+        };
         let ty = match conv {
-            'd' | 'i' => Some(NirType::Int {
-                bits: if is_64 { 64 } else { 32 },
-                signed: true,
-            }),
-            'u' | 'x' | 'X' | 'o' => Some(NirType::Int {
-                bits: if is_64 { 64 } else { 32 },
+            'd' | 'i' => integer_bits.map(|bits| NirType::Int { bits, signed: true }),
+            'u' | 'x' | 'X' | 'o' => integer_bits.map(|bits| NirType::Int {
+                bits,
                 signed: false,
             }),
             'c' => Some(NirType::Int {
@@ -1162,6 +1468,7 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     let mut callsites: Vec<(Option<String>, String, Vec<Option<String>>)> = Vec::new();
     collect_callsites_stmts(&func.body, &mut callsites);
     changed |= apply_variadic_printf_format_string_arg_types(func, &callsites);
+    changed |= apply_site_sensitive_translated_format_types(func);
     let call_target_rewrites = build_call_target_rewrites(&func.callee_summaries);
 
     for (receiver, callee, arg_vars) in &callsites {
@@ -1772,6 +2079,91 @@ mod tests {
                 wrapper_of: None,
                 confidence: 160,
             },
+        }
+    }
+
+    fn imported_variadic_summary(target: &str, fixed_arity: usize) -> CallSummary {
+        CallSummary {
+            target: CallTargetRef {
+                address: Some(0x3000),
+                symbol: target.to_string(),
+                provenance: CallTargetProvenance::Import,
+                edge_kind: CallEdgeKind::Import,
+                confidence: 255,
+            },
+            prototype: PrototypeSummary {
+                min_arity: fixed_arity,
+                max_arity: fixed_arity,
+                locked_exact_arity: None,
+                return_lattice: NirType::Unknown,
+                param_lattices: vec![NirType::Unknown; fixed_arity],
+                param_surface_type_names: vec![None; fixed_arity],
+                soundness: SummarySoundness::Optimistic,
+            },
+            effect_summary: CallEffectSummary {
+                reads_memory: Some(true),
+                writes_memory: None,
+                escapes_args: None,
+                regions: vec![],
+                wrapper_class: WrapperClass::None,
+                wrapper_of: None,
+                confidence: 224,
+            },
+        }
+    }
+
+    fn translated_error_fixture() -> PreHirFunction {
+        PreHirFunction {
+            name: "caller".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![
+                unsigned_binding("param_name", 64, Some(NirBindingOrigin::ParamIndex(0))),
+                unsigned_binding("param_count", 64, Some(NirBindingOrigin::ParamIndex(1))),
+            ],
+            locals: vec![
+                unsigned_binding("format_result", 64, Some(NirBindingOrigin::Temp)),
+                unsigned_binding("name_alias", 64, Some(NirBindingOrigin::Temp)),
+            ],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("format_result".to_string()),
+                    rhs: PreHirExpr::Call {
+                        target: "gettext".to_string(),
+                        args: vec![PreHirExpr::AddressOfGlobal(
+                            "\"name=%s count=%u\"".to_string(),
+                        )],
+                        ty: NirType::Unknown,
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("name_alias".to_string()),
+                    rhs: PreHirExpr::Var("param_name".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    target: "error".to_string(),
+                    args: vec![
+                        PreHirExpr::Const(0, NirType::Unknown),
+                        PreHirExpr::Const(0, NirType::Unknown),
+                        PreHirExpr::Var("format_result".to_string()),
+                        PreHirExpr::Var("name_alias".to_string()),
+                        PreHirExpr::Var("param_count".to_string()),
+                    ],
+                    ty: NirType::Unknown,
+                }),
+            ],
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: indexmap::IndexMap::from([
+                (
+                    "gettext".to_string(),
+                    imported_variadic_summary("gettext", 1),
+                ),
+                ("error".to_string(), imported_variadic_summary("error", 3)),
+            ]),
         }
     }
 
@@ -2486,6 +2878,71 @@ mod tests {
         );
         assert_eq!(func.locals[0].ty, want_int);
         assert_eq!(func.locals[1].ty, want_str);
+    }
+
+    #[test]
+    fn printf_format_parser_does_not_guess_abi_dependent_long_width() {
+        let types = parse_printf_format_specifier_types("%u %lu %llu %s");
+        assert_eq!(
+            types,
+            vec![
+                Some(NirType::Int {
+                    bits: 32,
+                    signed: false,
+                }),
+                None,
+                Some(NirType::Int {
+                    bits: 64,
+                    signed: false,
+                }),
+                Some(NirType::Ptr(Box::new(NirType::Int {
+                    bits: 8,
+                    signed: false,
+                }))),
+            ]
+        );
+    }
+
+    #[test]
+    fn translated_format_literal_types_imported_error_arguments_site_sensitively() {
+        let mut func = translated_error_fixture();
+
+        assert!(apply_site_sensitive_translated_format_types(&mut func));
+        let want_str = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let want_uint = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        assert_eq!(func.params[0].ty, want_str);
+        assert_eq!(func.locals[1].ty, want_str);
+        assert_eq!(func.params[1].ty, want_uint);
+    }
+
+    #[test]
+    fn translated_format_literal_does_not_cross_overwrite_or_internal_name() {
+        let mut overwritten = translated_error_fixture();
+        overwritten.body.insert(
+            1,
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("format_result".to_string()),
+                rhs: PreHirExpr::Const(0, NirType::Unknown),
+            },
+        );
+        assert!(!apply_site_sensitive_translated_format_types(
+            &mut overwritten
+        ));
+
+        let mut internal = translated_error_fixture();
+        let summary = internal
+            .callee_summaries
+            .get_mut("error")
+            .expect("error summary");
+        summary.target.provenance = CallTargetProvenance::Direct;
+        summary.target.edge_kind = CallEdgeKind::Direct;
+        assert!(!apply_site_sensitive_translated_format_types(&mut internal));
     }
 
     #[test]
