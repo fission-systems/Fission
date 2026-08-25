@@ -21,9 +21,45 @@
 //! nothing else** -- every one of them one node and zero edges away. Removing
 //! it takes that binary from 30% exact to 52%.
 
-use fission_midend_prehir::PreHirStmt;
+use fission_midend_prehir::{PreHirExpr, PreHirStmt};
 
 use crate::HashMap;
+
+/// Library functions that never return to their caller.
+///
+/// A call to one of these ends the path as surely as a `return` does, and the
+/// `return` a lifter emits behind it is reachable by nothing. Ghidra marks the
+/// same set (it prints `WARNING: Subroutine does not return` there). Kept to
+/// names whose non-returning contract is part of the C standard or POSIX, so
+/// no binary-specific knowledge enters this file.
+fn call_never_returns(target: &str) -> bool {
+    matches!(
+        target.trim_start_matches('_'),
+        "exit"
+            | "Exit"
+            | "abort"
+            | "assert_fail"
+            | "longjmp"
+            | "siglongjmp"
+            | "pthread_exit"
+            | "stack_chk_fail"
+            | "quick_exit"
+            | "err"
+            | "errx"
+            | "verr"
+            | "verrx"
+    )
+}
+
+/// Whether `stmt` is a call to a function that never returns.
+fn is_diverging_call(stmt: &PreHirStmt) -> bool {
+    let expr = match stmt {
+        PreHirStmt::Expr(expr) => expr,
+        PreHirStmt::Assign { rhs, .. } => rhs,
+        _ => return false,
+    };
+    matches!(expr, PreHirExpr::Call { target, .. } if call_never_returns(target))
+}
 
 /// Whether control can continue past `stmt` to the next statement.
 ///
@@ -37,6 +73,7 @@ fn diverges(stmt: &PreHirStmt) -> bool {
         PreHirStmt::Return(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
             true
         }
+        _ if is_diverging_call(stmt) => true,
         PreHirStmt::Block(body) => body.iter().any(diverges),
         PreHirStmt::If {
             then_body,
@@ -190,6 +227,119 @@ fn recurse(
     }
 }
 
+/// Unwrap an `else` whose `then` arm cannot fall through.
+///
+/// ```text
+/// if (c) { report(); exit(1); } else { work(); }   ->   if (c) { report(); exit(1); }
+///                                                       work();
+/// ```
+///
+/// Control reaches the `else` body exactly when `c` is false, and after the
+/// `if` it reaches the following statements on that same condition alone --
+/// the `then` arm never gets there. So lifting the arm out changes no path.
+///
+/// The source this recovers wrote a guard, not a two-armed choice, and the
+/// shapes are not interchangeable to the structure metric: the unwrapped form
+/// gives the tail a second predecessor (the guard falls into it), which is the
+/// edge the source CFG has and the `else` form does not.
+///
+/// This pairs with [`drop_unreachable_tails`] and neither is worth anything
+/// alone. Measured on `bzip2`'s `copyFileName` against its published source
+/// CFG: the emitted `else` plus the dead `return` behind `exit` scores 6;
+/// removing either one by itself still scores 6; removing both scores 0,
+/// which is what Ghidra emits for that function.
+pub fn unwrap_else_after_diverging_then(body: Vec<PreHirStmt>) -> (Vec<PreHirStmt>, bool) {
+    let mut changed = false;
+    let mut out: Vec<PreHirStmt> = Vec::with_capacity(body.len());
+
+    for stmt in body {
+        let stmt = unwrap_recurse(stmt, &mut changed);
+        let PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } = stmt
+        else {
+            out.push(stmt);
+            continue;
+        };
+        // An empty `then` is a negated guard, not this shape.
+        if then_body.is_empty() || else_body.is_empty() || !then_body.iter().any(diverges) {
+            out.push(PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            });
+            continue;
+        }
+        out.push(PreHirStmt::If {
+            cond,
+            then_body,
+            else_body: std::rc::Rc::new(Vec::new()),
+        });
+        out.extend(else_body.as_ref().iter().cloned());
+        changed = true;
+    }
+    (out, changed)
+}
+
+fn unwrap_recurse(stmt: PreHirStmt, changed: &mut bool) -> PreHirStmt {
+    fn body_of(
+        body: &std::rc::Rc<Vec<PreHirStmt>>,
+        changed: &mut bool,
+    ) -> std::rc::Rc<Vec<PreHirStmt>> {
+        let (next, did) = unwrap_else_after_diverging_then(body.as_ref().clone());
+        *changed |= did;
+        std::rc::Rc::new(next)
+    }
+    match stmt {
+        PreHirStmt::Block(body) => PreHirStmt::Block(body_of(&body, changed)),
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => PreHirStmt::If {
+            cond,
+            then_body: body_of(&then_body, changed),
+            else_body: body_of(&else_body, changed),
+        },
+        PreHirStmt::While { cond, body } => PreHirStmt::While {
+            cond,
+            body: body_of(&body, changed),
+        },
+        PreHirStmt::DoWhile { body, cond } => PreHirStmt::DoWhile {
+            body: body_of(&body, changed),
+            cond,
+        },
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body: body_of(&body, changed),
+        },
+        PreHirStmt::Switch {
+            expr,
+            mut cases,
+            default,
+        } => {
+            for case in &mut cases {
+                case.body = body_of(&case.body, changed);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default: body_of(&default, changed),
+            }
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +446,80 @@ mod tests {
             PreHirStmt::If { then_body, .. } => assert_eq!(then_body.len(), 1),
             other => panic!("expected an if, got {other:?}"),
         }
+    }
+
+    fn call(target: &str) -> PreHirStmt {
+        PreHirStmt::Expr(fission_midend_prehir::PreHirExpr::Call {
+            target: target.to_string(),
+            args: Vec::new(),
+            ty: fission_midend_core::ir::NirType::Unknown,
+        })
+    }
+
+    /// `exit` ends the path as surely as `return` does, so the `return` a
+    /// lifter emits behind it is reachable by nothing.
+    #[test]
+    fn drops_a_return_behind_a_call_that_never_returns() {
+        let (out, changed) = run(vec![call("exit"), ret(0)]);
+        assert!(changed);
+        assert_eq!(out.len(), 1);
+    }
+
+    /// An ordinary call returns, so what follows it is reachable.
+    #[test]
+    fn keeps_a_return_behind_an_ordinary_call() {
+        let (out, changed) = run(vec![call("strncpy"), ret(0)]);
+        assert!(!changed);
+        assert_eq!(out.len(), 2);
+    }
+
+    /// The measured shape from `bzip2`'s `copyFileName`: a guard whose body
+    /// leaves, with the function's real work sitting in an `else`.
+    #[test]
+    fn unwraps_an_else_behind_a_diverging_guard() {
+        let (out, changed) = unwrap_else_after_diverging_then(vec![if_both(
+            vec![call("exit")],
+            vec![assign(), ret(0)],
+        )]);
+        assert!(changed);
+        assert_eq!(out.len(), 3, "{out:?}");
+        let PreHirStmt::If { else_body, .. } = &out[0] else {
+            panic!("expected the guard to survive as an if");
+        };
+        assert!(else_body.is_empty());
+    }
+
+    /// A `then` arm that falls through is a real two-armed choice; unwrapping
+    /// it would run the `else` body on both paths.
+    #[test]
+    fn keeps_an_else_whose_then_falls_through() {
+        let (out, changed) =
+            unwrap_else_after_diverging_then(vec![if_both(vec![assign()], vec![assign()])]);
+        assert!(!changed);
+        assert_eq!(out.len(), 1);
+    }
+
+    /// An empty `then` is a negated guard, not this shape.
+    #[test]
+    fn keeps_an_else_with_an_empty_then() {
+        let (out, changed) =
+            unwrap_else_after_diverging_then(vec![if_both(Vec::new(), vec![ret(0)])]);
+        assert!(!changed);
+        assert_eq!(out.len(), 1);
+    }
+
+    /// Nested bodies get the same treatment.
+    #[test]
+    fn unwraps_inside_a_loop_body() {
+        let inner = if_both(vec![ret(1)], vec![assign()]);
+        let (out, changed) = unwrap_else_after_diverging_then(vec![PreHirStmt::While {
+            cond: cond(),
+            body: Rc::new(vec![inner]),
+        }]);
+        assert!(changed);
+        let PreHirStmt::While { body, .. } = &out[0] else {
+            panic!("shape changed");
+        };
+        assert_eq!(body.len(), 2, "{body:?}");
     }
 }

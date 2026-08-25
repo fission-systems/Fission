@@ -80,6 +80,9 @@ pub fn finalize_post_layout_body(
     // right place to decide it.
     let referenced = collect_referenced_label_counts(&body);
     let (body, _) = unreachable_tail::drop_unreachable_tails(body, &referenced);
+    // After the dead tail is gone, and not before: an `else` is only
+    // unwrappable once the `then` arm's real last statement is visible.
+    let (body, _) = unreachable_tail::unwrap_else_after_diverging_then(body);
     body
 }
 
