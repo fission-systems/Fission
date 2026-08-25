@@ -567,6 +567,20 @@ impl<'a> PreviewBuilder<'a> {
         if key.is_constant {
             return None;
         }
+        if let Some(cached) = self.gpr_family_cache.borrow().get(key).copied() {
+            return cached;
+        }
+        let answer = self.gpr_family_index_for_key_uncached(key);
+        self.gpr_family_cache
+            .borrow_mut()
+            .insert(key.clone(), answer);
+        answer
+    }
+
+    /// The answer itself. `gpr_family_index_at` allocates a `String` for the
+    /// register's hardware name before looking it up, and expression lowering
+    /// asks this per operand, so the caller above remembers it per key.
+    fn gpr_family_index_for_key_uncached(&self, key: &VarnodeKey) -> Option<usize> {
         if is_register_space_id(key.space_id) {
             return self
                 .register_namer()

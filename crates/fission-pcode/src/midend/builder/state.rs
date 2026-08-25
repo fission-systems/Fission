@@ -45,6 +45,11 @@ pub(crate) struct PreviewBuilder<'a> {
     /// sits inside one of them used to rescan the block's whole prefix, inside
     /// a loop that already scanned its suffix, from a caller that ran per op.
     pub(crate) cmov_body_spans: RefCell<BuilderCacheMap<usize, std::rc::Rc<Vec<(usize, usize)>>>>,
+    /// Per varnode key: which general-purpose register family it belongs to.
+    ///
+    /// Answering it allocates a `String` for the register's hardware name and
+    /// then looks that name up, and expression lowering asks per operand.
+    pub(crate) gpr_family_cache: RefCell<BuilderCacheMap<VarnodeKey, Option<usize>>>,
     pub(crate) cfg_facts: crate::midend::structuring::CfgFactCache,
     pub(crate) dom_tree: crate::midend::structuring::DomTree,
     pub(crate) irreducible_edges: HashSet<(usize, usize)>,
