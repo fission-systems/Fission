@@ -2,6 +2,63 @@ use super::state::{BuilderCacheMap, BuilderCacheSet};
 use super::*;
 use fission_loader::loader::LoadedBinary;
 
+/// The register spellings a `Call` should count as defining.
+///
+/// `primary_return_registers` names the x86 return slot in `REGISTER_SPACE_ID`
+/// and `UNIQUE_SPACE_ID`, but this pipeline's own p-code for x86 emits it in
+/// `RUST_SLEIGH_REGISTER_SPACE_ID` -- the same split the register model's own
+/// doc comment records for the AArch64 side. Rather than guess which one this
+/// function's p-code uses, keep only the spellings that actually appear in it.
+/// Whether the `Call` at `op_idx` is really this function's *return*.
+///
+/// ARM's `bx lr` lifts to `Call(target)` immediately followed by
+/// `Return(target)`: SLEIGH describes the branch, and only the pair together
+/// says it leaves the function. Treating that `Call` as a call would let it
+/// claim the result register and shadow the value the function actually
+/// returns -- `arm32_bx_lr_returns_primary_r0_not_link_target` and its two
+/// siblings caught exactly that.
+fn op_is_lifted_return(block: &crate::PcodeBasicBlock, op_idx: usize) -> bool {
+    block
+        .ops
+        .get(op_idx + 1)
+        .is_some_and(|next| next.opcode == PcodeOpcode::Return)
+}
+
+fn call_result_definition_varnodes(
+    pcode: &PcodeFunction,
+    options: &crate::midend::MlilPreviewOptions,
+) -> Vec<Varnode> {
+    let namer = crate::midend::cspec::RegisterNamer::from_options(options);
+    let mut candidates = Vec::new();
+    for vn in namer.primary_return_registers() {
+        candidates.push(Varnode {
+            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+            ..vn.clone()
+        });
+        candidates.push(vn);
+    }
+    let mut seen: HashSet<(u64, u64, u32)> = HashSet::default();
+    for block in &pcode.blocks {
+        for op in &block.ops {
+            for vn in op.output.iter().chain(op.inputs.iter()) {
+                if !vn.is_constant {
+                    seen.insert((vn.space_id, vn.offset, vn.size));
+                }
+            }
+        }
+    }
+    // Exactly one spelling. Registering every candidate that happens to
+    // appear was measured to break ARM32 return recovery: at that
+    // architecture's return offset `REGISTER_SPACE_ID` names the link
+    // register rather than r0, so claiming it as the call's result made a
+    // read of the link register resolve to the call.
+    candidates
+        .into_iter()
+        .find(|vn| seen.contains(&(vn.space_id, vn.offset, vn.size)))
+        .into_iter()
+        .collect()
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn new(
         pcode: &'a PcodeFunction,
@@ -20,11 +77,27 @@ impl<'a> PreviewBuilder<'a> {
         let mut defs = HashMap::default();
         let mut def_sites: HashMap<VarnodeKey, Vec<DefSite<'a>>> = HashMap::default();
         let mut block_defs = Vec::with_capacity(pcode.blocks.len());
+        // SLEIGH models a call as a transfer, not a definition: `Call` carries
+        // the target and declares no output. Which register holds the result
+        // is a fact of the calling convention, and until it is stated here a
+        // read of that register after the call resolves to the last definition
+        // *before* it.
+        //
+        // At `-O0` that is wrong in one specific, very common way. Arguments
+        // are staged through the return register (`lea RAX, [..]; mov RSI,
+        // RAX`), so the definition standing when the call returns is an
+        // argument. Measured before this: `stat("/run/initctl", &s) < 0`
+        // lowered to `if (__buf < 0)` and `unlink(p) < 0` to `if (__name <
+        // 0)`, while an argument-less `getpid() < 0` was right -- there being
+        // no earlier definition to find.
+        let call_result_registers = call_result_definition_varnodes(pcode, options);
         for (block_idx, block) in pcode.blocks.iter().enumerate() {
             let mut block_def_map: HashMap<VarnodeKey, Vec<usize>> = HashMap::default();
             for (op_idx, op) in block.ops.iter().enumerate() {
-                if let Some(output) = &op.output {
-                    let key = VarnodeKey::from(output);
+                let record = |key: VarnodeKey,
+                                  block_def_map: &mut HashMap<VarnodeKey, Vec<usize>>,
+                                  def_sites: &mut HashMap<VarnodeKey, Vec<DefSite<'a>>>,
+                                  defs: &mut HashMap<VarnodeKey, DefSite<'a>>| {
                     let site = DefSite {
                         block_idx,
                         op_idx,
@@ -33,6 +106,25 @@ impl<'a> PreviewBuilder<'a> {
                     block_def_map.entry(key.clone()).or_default().push(op_idx);
                     def_sites.entry(key.clone()).or_default().push(site);
                     defs.insert(key, site);
+                };
+                if let Some(output) = &op.output {
+                    record(
+                        VarnodeKey::from(output),
+                        &mut block_def_map,
+                        &mut def_sites,
+                        &mut defs,
+                    );
+                } else if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                    && !op_is_lifted_return(block, op_idx)
+                {
+                    for vn in &call_result_registers {
+                        record(
+                            VarnodeKey::from(vn),
+                            &mut block_def_map,
+                            &mut def_sites,
+                            &mut defs,
+                        );
+                    }
                 }
             }
             block_defs.push(block_def_map);
