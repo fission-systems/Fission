@@ -18,6 +18,7 @@ mod expr;
 mod init;
 mod materialize;
 mod memory;
+mod pointee_layout;
 mod scalar_ssa;
 pub(in crate::midend) use scalar_ssa::resolve_lifted_direct_call_target;
 mod stats;

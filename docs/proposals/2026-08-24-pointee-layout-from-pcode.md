@@ -71,11 +71,14 @@ person crosses the line knowingly.
 
 ## 5. Validation Matrix
 
-- [x] Feasibility on the anchor, and on two more compilers.
+- [x] Feasibility on the anchor and two more compilers (prototype).
+- [x] Production pass, `builder::pointee_layout`, with five tests built from
+      the shapes the corpus actually lifts.
+- [x] `cargo nextest run -p fission-pcode` -- 1,022 passed.
+- [x] `rustfmt --check` and clippy clean; no new dependency.
+- [ ] **Not yet wired to bindings.** See section 6.
 - [ ] Prevalence: how many of the 26 pointee rows show a recoverable layout.
-- [ ] Whether recovering the *shape* moves the metric, which scores *names*.
-- [ ] Aliasing: two different structs reached through one base.
-- [ ] Production implementation, tests, corpus regression.
+- [ ] Whether recovering the *shape* moves a metric that scores *names*.
 
 Feasibility, from `raw-pcode` alone with no Rust changes:
 
@@ -91,11 +94,29 @@ Exact on every one, across two compilers and both widths, including the 32-bit
 pointer shrinking `next` from eight bytes to four. Stack-frame accesses appear
 under the stack pointer's own base and separate themselves without a rule.
 
-A defect in the probe found and fixed along the way: a negative displacement is
-written as the unsigned two's complement of *the operand's own width*, so
-sign-extending at 64 bits regardless turned a 32-bit `-8` into
-`18446744073709551608`. Only stack offsets were affected; the struct extraction
-was already correct.
+A defect in the prototype found and fixed along the way, and carried into the
+production `const_offset`: a negative displacement is written as the unsigned
+two's complement of *the operand's own width*, so sign-extending at 64 bits
+regardless turned a 32-bit `-8` into `18446744073709551608`.
+
+The five tests pin the analysis rather than an output string: the two-offset
+struct, the same struct narrowing with pointer width, a single access refusing
+to become an aggregate, a base reached from the middle (the stack pointer,
+dereferenced above and below) yielding no size, and a `Copy` keeping one struct
+on one base rather than splitting it.
+
+## 6. Shipped as analysis, not yet as types
+
+The pass runs over p-code and produces `VarnodeKey -> [(offset, width)]`. The
+bindings it would retype are addressed **by name**, and the builder holds no
+varnode-to-name map: `operand_metatypes`, the closest existing analogue, is
+keyed by name and populated *during* lowering, at the point where the name is
+known.
+
+So wiring this means recording the evidence during lowering rather than reading
+it back afterwards -- a change on the lowering path, which is not the same size
+of change as the analysis and is not attempted here. The analysis is the part
+that was uncertain; it is now tested and costs nothing.
 
 ## 6. The question this does not answer
 
