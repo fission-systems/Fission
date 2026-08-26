@@ -1797,9 +1797,9 @@ mod tests {
         build_nir_import_call_prototype_summaries, direct_callee_instruction_limit,
         direct_callee_preview_options, direct_callee_stable_prefix_instruction_limit,
         expose_preview_callsite_copy_sources, merge_nir_function_hints,
-        merge_preview_pointer_evidence,
-        record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
-        resolve_nir_struct_name, summarize_preview_callee_effects,
+        merge_preview_pointer_evidence, record_interprocedural_arity_facts,
+        record_unambiguous_register_type_hint, resolve_nir_struct_name,
+        summarize_preview_callee_effects,
     };
     use crate::{
         CallEdgeKind, CallTargetProvenance, CallTargetRef, NirCallPointerPointee,
