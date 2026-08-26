@@ -5,15 +5,15 @@ use crate::cli::oneshot::function_select::{
 };
 use fission_loader::loader::LoadedBinary;
 
-pub(crate) fn collect_target_functions<'a>(
+pub(crate) fn collect_target_functions(
     cli: &OneShotArgs,
-    binary: &'a LoadedBinary,
-) -> crate::cli::oneshot::function_select::BatchFunctionSelection<'a> {
+    binary: &LoadedBinary,
+) -> crate::cli::oneshot::function_select::BatchFunctionSelection {
     if let Some(addr) = cli.address {
         if let Some(func) =
             select_function_by_address(binary, addr).or_else(|| binary.function_at(addr))
         {
-            return select_explicit_functions(vec![func], cli.include_nonuser_functions);
+            return select_explicit_functions(vec![func.clone()], cli.include_nonuser_functions);
         }
         return select_explicit_functions(vec![], cli.include_nonuser_functions);
     }

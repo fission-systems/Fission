@@ -28,7 +28,7 @@ use fission_sleigh::runtime::{DecodeContract, RuntimeSleighFrontend};
 fn select_inventory_functions<'a>(
     cli: &OneShotArgs,
     binary: &'a LoadedBinary,
-) -> io::Result<BatchFunctionSelection<'a>> {
+) -> io::Result<BatchFunctionSelection> {
     if let Some(address_file) = &cli.addresses_file {
         let functions = select_functions_from_addresses_file(binary, address_file)?;
         return Ok(select_explicit_functions(
@@ -40,6 +40,7 @@ fn select_inventory_functions<'a>(
     if let Some(address) = cli.address {
         let functions = select_function_by_address(binary, address)
             .into_iter()
+            .cloned()
             .collect();
         return Ok(select_explicit_functions(
             functions,

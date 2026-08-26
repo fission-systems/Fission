@@ -33,16 +33,16 @@ impl BatchSelectionAccounting {
 }
 
 #[derive(Debug)]
-pub(crate) struct BatchFunctionSelection<'a> {
-    pub(crate) functions: Vec<&'a FunctionInfo>,
+pub(crate) struct BatchFunctionSelection {
+    pub(crate) functions: Vec<FunctionInfo>,
     pub(crate) accounting: BatchSelectionAccounting,
 }
 
-pub(crate) fn select_batch_functions<'a>(
-    binary: &'a LoadedBinary,
+pub(crate) fn select_batch_functions(
+    binary: &LoadedBinary,
     include_nonuser_functions: bool,
     limit: Option<usize>,
-) -> BatchFunctionSelection<'a> {
+) -> BatchFunctionSelection {
     let canonical = canonical_functions_sorted(binary);
     let ext = build_external_symbol_index(binary);
     let prov = build_function_provenance_index(binary, Some(&ext));
@@ -70,7 +70,7 @@ pub(crate) fn select_batch_functions<'a>(
                 continue;
             }
         }
-        selected.push(func);
+        selected.push(func.clone());
     }
 
     if let Some(limit) = limit {
@@ -105,10 +105,18 @@ pub(crate) fn select_function_by_address<'a>(
     best
 }
 
-pub(crate) fn select_functions_from_addresses_file<'a>(
-    binary: &'a LoadedBinary,
+/// The functions named by an address file, one hex address per line.
+///
+/// An address the caller asked for that discovery never found is still
+/// decompiled, under a synthesized `sub_<addr>`. `--addr` has always done
+/// this; only the file form silently dropped such an address, which made the
+/// two flags disagree about the same address on the same binary. That is
+/// most visible on a stripped image whose discovery is weak -- an eval kit
+/// hands you the addresses precisely because the binary does not name them.
+pub(crate) fn select_functions_from_addresses_file(
+    binary: &LoadedBinary,
     address_file: &Path,
-) -> io::Result<Vec<&'a FunctionInfo>> {
+) -> io::Result<Vec<FunctionInfo>> {
     let contents = fs::read_to_string(address_file)?;
     let canonical = canonical_functions_sorted(binary);
     let mut selected = Vec::new();
@@ -119,21 +127,30 @@ pub(crate) fn select_functions_from_addresses_file<'a>(
         }
         let address = parse_hex_address(trimmed)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        if let Some(func) = canonical
+        match canonical
             .iter()
             .copied()
             .find(|func| func.address == address)
+            .or_else(|| binary.function_at(address))
         {
-            selected.push(func);
+            Some(func) => selected.push(func.clone()),
+            None => selected.push(FunctionInfo {
+                name: format!("sub_{address:x}"),
+                address,
+                size: 0,
+                is_export: false,
+                is_import: false,
+                ..Default::default()
+            }),
         }
     }
     Ok(selected)
 }
 
-pub(crate) fn select_explicit_functions<'a>(
-    functions: Vec<&'a FunctionInfo>,
+pub(crate) fn select_explicit_functions(
+    functions: Vec<FunctionInfo>,
     include_nonuser_functions: bool,
-) -> BatchFunctionSelection<'a> {
+) -> BatchFunctionSelection {
     let accounting = BatchSelectionAccounting::exact(functions.len(), include_nonuser_functions);
     BatchFunctionSelection {
         functions,
@@ -284,8 +301,13 @@ mod tests {
     fn explicit_selection_accounting_bypasses_batch_filter() {
         let binary = test_binary();
         let functions = vec![
-            select_function_by_address(&binary, 0x140001080).expect("selected"),
-            binary.function_at(0x140001100).expect("import selected"),
+            select_function_by_address(&binary, 0x140001080)
+                .expect("selected")
+                .clone(),
+            binary
+                .function_at(0x140001100)
+                .expect("import selected")
+                .clone(),
         ];
         let selected = select_explicit_functions(functions, false);
         assert_eq!(selected.accounting.functions_discovered_total, 2);

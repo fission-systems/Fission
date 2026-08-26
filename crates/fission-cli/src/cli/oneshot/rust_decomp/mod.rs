@@ -289,11 +289,7 @@ pub(crate) fn run_decompilation_rust_sleigh(
     let init_start = std::time::Instant::now();
     let selected_functions = collect_target_functions(cli, binary);
     let selection_accounting = selected_functions.accounting;
-    let functions = selected_functions
-        .functions
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let functions = selected_functions.functions;
     if functions.is_empty() && cli.address.is_some() {
         let addr = cli.address.unwrap_or_default();
         let synthetic = vec![FunctionInfo {
