@@ -76,6 +76,11 @@ use fission_midend_prehir::vsa::{apply_jump_resolver_pass, jump_resolver_candida
 use std::time::Instant;
 use tracing::{debug, debug_span};
 
+#[cfg(test)]
+thread_local! {
+    static NORMALIZE_EXPR_CALL_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn apply_type_signature_fixed_point(func: &mut PreHirFunction, diag: bool, perf: bool) {
     let mut interproc_signature_rounds = 0usize;
     for round in 0..TYPE_SIGNATURE_FIXED_POINT_MAX_ROUNDS {
@@ -1516,6 +1521,19 @@ pub fn normalize_stmt(stmt: &mut PreHirStmt) {
 
 fn normalize_condition_expr(expr: &mut PreHirExpr) {
     normalize_expr(expr);
+    normalize_condition_expr_after_value_normalization(expr);
+}
+
+/// Apply condition-only rewrites to an expression whose ordinary value
+/// normalization has already completed.
+///
+/// Logical operands are conditions too, but calling `normalize_condition_expr`
+/// for every operand would re-walk and re-normalize each nested subtree once
+/// per ancestor. Deep guard/select trees turn that repeated work into the
+/// dominant cost even though no rewrite occurs. Recurse through the
+/// condition-only phase instead; a rewrite still receives ordinary value
+/// normalization before it is committed.
+fn normalize_condition_expr_after_value_normalization(expr: &mut PreHirExpr) {
     // `&&`/`||`/`!` operands are themselves truthiness tests (that's what
     // makes them valid logical-connective operands), so the same
     // condition-only rewrites this function applies at the top are equally
@@ -1524,18 +1542,16 @@ fn normalize_condition_expr(expr: &mut PreHirExpr) {
     // just to the AND expression as a whole (which doesn't itself match any
     // `canonicalize_condition_expr` pattern).
     normalize_condition_logical_operands(expr);
-    let mut current = expr.clone();
     loop {
-        let next = canonicalize_condition_expr(&current);
+        let next = canonicalize_condition_expr(expr);
         match next {
-            Some(next_expr) if next_expr != current => {
-                current = next_expr;
-                normalize_expr(&mut current);
+            Some(next_expr) if next_expr != *expr => {
+                *expr = next_expr;
+                normalize_expr(expr);
             }
             _ => break,
         }
     }
-    *expr = current;
 }
 
 fn normalize_condition_logical_operands(expr: &mut PreHirExpr) {
@@ -1546,15 +1562,15 @@ fn normalize_condition_logical_operands(expr: &mut PreHirExpr) {
             rhs,
             ..
         } => {
-            normalize_condition_expr(lhs);
-            normalize_condition_expr(rhs);
+            normalize_condition_expr_after_value_normalization(lhs);
+            normalize_condition_expr_after_value_normalization(rhs);
         }
         PreHirExpr::Unary {
             op: PreHirUnaryOp::Not,
             expr: inner,
             ..
         } => {
-            normalize_condition_expr(inner);
+            normalize_condition_expr_after_value_normalization(inner);
         }
         _ => {}
     }
@@ -2016,6 +2032,9 @@ fn collapse_redundant_conditional_returns_recursive(stmts: &mut Vec<PreHirStmt>)
 }
 
 pub fn normalize_expr(expr: &mut PreHirExpr) {
+    #[cfg(test)]
+    NORMALIZE_EXPR_CALL_COUNT.with(|count| count.set(count.get() + 1));
+
     // Pre-pass: merge consecutive shifts top-down before child recursion so that
     // Shr(Shr(x, K1), K2) → Shr(x, K1+K2) is visible before any child Shr gets
     // converted to a division by recognize_mod_div_power_of_two.
@@ -2059,37 +2078,35 @@ pub fn normalize_expr(expr: &mut PreHirExpr) {
         PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
     }
 
-    let mut current = expr.clone();
     loop {
-        let next = canonicalize_integer_expr(&current)
-            .or_else(|| recognize_dumpty_hump_cast(&current))
-            .or_else(|| recognize_humpty_dumpty_or(&current))
-            .or_else(|| recognize_concat_zext_or(&current))
-            .or_else(|| recognize_dumpty_hump_late(&current))
-            .or_else(|| simplify_negated_const(&current))
-            .or_else(|| simplify_double_add(&current))
-            .or_else(|| simplify_factor_common_mul(&current))
-            .or_else(|| simplify_distribute_common_factor(&current))
-            .or_else(|| simplify_nested_adds_subs(&current))
-            .or_else(|| simplify_collect_mul_terms(&current))
-            .or_else(|| recognize_compiler_runtime_division(&current))
-            .or_else(|| recognize_mod_div_power_of_two(&current))
-            .or_else(|| recognize_magic_number_division(&current))
-            .or_else(|| recognize_hi_lo_extract(&current))
-            .or_else(|| simplify_subpiece_chain(&current))
-            .or_else(|| merge_consecutive_shifts(&current))
-            .or_else(|| recognize_wide_integer_recombine(&current))
-            .or_else(|| canonicalize_flag_intrinsics(&current))
-            .or_else(|| canonicalize_sub_xor_zero_compare(&current))
-            .or_else(|| normalize_boolean_logic(&current))
-            .or_else(|| cleanup_arithmetic_wrappers(&current))
-            .or_else(|| collapse_zero_offset_cast(&current));
+        let next = canonicalize_integer_expr(expr)
+            .or_else(|| recognize_dumpty_hump_cast(expr))
+            .or_else(|| recognize_humpty_dumpty_or(expr))
+            .or_else(|| recognize_concat_zext_or(expr))
+            .or_else(|| recognize_dumpty_hump_late(expr))
+            .or_else(|| simplify_negated_const(expr))
+            .or_else(|| simplify_double_add(expr))
+            .or_else(|| simplify_factor_common_mul(expr))
+            .or_else(|| simplify_distribute_common_factor(expr))
+            .or_else(|| simplify_nested_adds_subs(expr))
+            .or_else(|| simplify_collect_mul_terms(expr))
+            .or_else(|| recognize_compiler_runtime_division(expr))
+            .or_else(|| recognize_mod_div_power_of_two(expr))
+            .or_else(|| recognize_magic_number_division(expr))
+            .or_else(|| recognize_hi_lo_extract(expr))
+            .or_else(|| simplify_subpiece_chain(expr))
+            .or_else(|| merge_consecutive_shifts(expr))
+            .or_else(|| recognize_wide_integer_recombine(expr))
+            .or_else(|| canonicalize_flag_intrinsics(expr))
+            .or_else(|| canonicalize_sub_xor_zero_compare(expr))
+            .or_else(|| normalize_boolean_logic(expr))
+            .or_else(|| cleanup_arithmetic_wrappers(expr))
+            .or_else(|| collapse_zero_offset_cast(expr));
         match next {
-            Some(next_expr) if next_expr != current => current = next_expr,
+            Some(next_expr) if next_expr != *expr => *expr = next_expr,
             _ => break,
         }
     }
-    *expr = current;
 }
 
 fn normalize_diag_enabled() -> bool {
@@ -2100,4 +2117,33 @@ fn normalize_diag_enabled() -> bool {
 fn normalize_perf_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("FISSION_PREVIEW_PERF").is_some())
+}
+
+#[cfg(test)]
+mod condition_normalization_work_tests {
+    use super::*;
+
+    #[test]
+    fn nested_logical_conditions_are_value_normalized_once() {
+        const DEPTH: usize = 128;
+        let mut expr = PreHirExpr::Var("guard_0".into());
+        for index in 1..=DEPTH {
+            expr = PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
+                lhs: Box::new(expr),
+                rhs: Box::new(PreHirExpr::Var(format!("guard_{index}"))),
+                ty: NirType::Bool,
+            };
+        }
+
+        NORMALIZE_EXPR_CALL_COUNT.with(|count| count.set(0));
+        normalize_condition_expr(&mut expr);
+        let calls = NORMALIZE_EXPR_CALL_COUNT.with(|count| count.get());
+
+        let expr_nodes = DEPTH * 2 + 1;
+        assert!(
+            calls <= expr_nodes + 1,
+            "value normalization revisited nested condition subtrees: calls={calls}, nodes={expr_nodes}"
+        );
+    }
 }
