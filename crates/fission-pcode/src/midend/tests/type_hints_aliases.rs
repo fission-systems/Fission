@@ -61,7 +61,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
     // undetermined return is now rendered at word width rather than as
     // `undefined`, which is not a C type and states no width.
     assert!(
-        rendered.contains("FUN_0x140006260(longlong param_1, LPRECT param_2)"),
+        rendered.contains("FUN_0x140006260(long long param_1, LPRECT param_2)"),
         "{rendered}"
     );
     assert!(!rendered.contains("undefined FUN_"), "{rendered}");

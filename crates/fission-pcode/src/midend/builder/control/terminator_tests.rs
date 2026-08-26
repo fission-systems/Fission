@@ -563,7 +563,7 @@ fn x64_return_recovery_uses_eax_source_for_zero_extended_rax() {
         .expect("preview render");
 
     assert!(code.contains("return 7;"), "{code}");
-    assert!(!code.contains("ulonglong narrow_return"), "{code}");
+    assert!(!code.contains("unsigned long long narrow_return"), "{code}");
 }
 
 #[test]

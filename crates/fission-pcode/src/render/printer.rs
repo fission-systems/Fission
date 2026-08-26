@@ -908,7 +908,7 @@ fn print_integer_const(value: i64, ty: &NirType) -> String {
 /// narrower than the value a caller reads.
 fn print_return_type(ty: &NirType) -> String {
     match ty {
-        NirType::Unknown => "ulonglong".to_string(),
+        NirType::Unknown => "unsigned long long".to_string(),
         _ => print_type(ty),
     }
 }
@@ -924,8 +924,8 @@ pub(crate) fn print_type(ty: &NirType) -> String {
             (16, true) => "short".to_string(),
             (32, false) => "uint".to_string(),
             (32, true) => "int".to_string(),
-            (64, false) => "ulonglong".to_string(),
-            (64, true) => "longlong".to_string(),
+            (64, false) => "unsigned long long".to_string(),
+            (64, true) => "long long".to_string(),
             _ => format!("int{}", bits),
         },
         NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Unknown) => "void *".to_string(),
@@ -1186,7 +1186,7 @@ fn print_expr_prec_ctx(
                 inner = cast_pointer_vars_in_bitop_text(inner, ctx);
             }
             if expr_is_ptr && target_is_int {
-                (format!("({})(ulonglong){}", print_type(ty), inner), 110)
+                (format!("({})(unsigned long long){}", print_type(ty), inner), 110)
             } else {
                 (format!("({}){}", print_type(ty), inner), 110)
             }
@@ -1199,7 +1199,7 @@ fn print_expr_prec_ctx(
             };
             let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
             if matches!(op, HirUnaryOp::Neg | HirUnaryOp::BitNot) && ctx.expr_is_pointer(expr) {
-                (format!("{symbol}(ulonglong){inner}"), 110)
+                (format!("{symbol}(unsigned long long){inner}"), 110)
             } else {
                 (format!("{symbol}{inner}"), 110)
             }
@@ -1226,14 +1226,14 @@ fn print_expr_prec_ctx(
             // If both sides are pointers and the operation is Add, this is invalid in C.
             // Cast the rhs to ulonglong to avoid compilation failure.
             if *op == HirBinaryOp::Add && ctx.expr_is_pointer(lhs) && ctx.expr_is_pointer(rhs) {
-                rhs_str = format!("(ulonglong){rhs_str}");
+                rhs_str = format!("(unsigned long long){rhs_str}");
             }
             if is_integer_bitop(*op) {
                 if ctx.expr_is_pointer(lhs) || printed_operand_is_pointer_var(&lhs_str, ctx) {
-                    lhs_str = format!("(ulonglong){lhs_str}");
+                    lhs_str = format!("(unsigned long long){lhs_str}");
                 }
                 if ctx.expr_is_pointer(rhs) || printed_operand_is_pointer_var(&rhs_str, ctx) {
-                    rhs_str = format!("(ulonglong){rhs_str}");
+                    rhs_str = format!("(unsigned long long){rhs_str}");
                 }
             }
 
@@ -1449,11 +1449,11 @@ fn cast_pointer_vars_in_bitop_text(mut text: String, ctx: &PrintCtx<'_>) -> Stri
         for op in ["^", "&", "|"] {
             text = text.replace(
                 &format!(" {op} {name}"),
-                &format!(" {op} (ulonglong){name}"),
+                &format!(" {op} (unsigned long long){name}"),
             );
             text = text.replace(
                 &format!("({name} {op} "),
-                &format!("((ulonglong){name} {op} "),
+                &format!("((unsigned long long){name} {op} "),
             );
         }
     }
@@ -1509,7 +1509,7 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
             .unwrap_or_else(|| "void *".to_string());
         let rhs_str = print_expr_with_ctx(rhs_expr, ctx);
         return Some(format!(
-            "{var_name} = ({ptr_ty})((ulonglong){var_name} {op_str} {rhs_str});"
+            "{var_name} = ({ptr_ty})((unsigned long long){var_name} {op_str} {rhs_str});"
         ));
     }
 
@@ -1538,7 +1538,7 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
         && ctx.expr_is_pointer(lhs_expr)
         && ctx.expr_is_pointer(rhs_expr)
     {
-        rhs_str = format!("(ulonglong){rhs_str}");
+        rhs_str = format!("(unsigned long long){rhs_str}");
     }
 
     Some(format!("{} {} {};", var_name, op_str, rhs_str))
@@ -1557,7 +1557,7 @@ fn print_assignment_rhs(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -> S
             format!("({})({rhs_str})", print_type(lhs_ty))
         }
         NirType::Int { .. } if ctx.expr_has_pointer_like_result(rhs) => {
-            format!("({})(ulonglong)({rhs_str})", print_type(lhs_ty))
+            format!("({})(unsigned long long)({rhs_str})", print_type(lhs_ty))
         }
         _ => rhs_str,
     }
@@ -1570,7 +1570,7 @@ fn print_return_expr(expr: &HirExpr, ctx: &PrintCtx<'_>) -> String {
             format!("({})({expr_str})", print_type(ctx.return_type))
         }
         NirType::Int { .. } if ctx.expr_has_pointer_like_result(expr) => {
-            format!("({})(ulonglong)({expr_str})", print_type(ctx.return_type))
+            format!("({})(unsigned long long)({expr_str})", print_type(ctx.return_type))
         }
         _ => expr_str,
     }
@@ -1888,7 +1888,7 @@ mod tests {
         let rendered = print_hir_function(&hir);
 
         assert!(
-            rendered.contains("local_d = (uchar *)((ulonglong)local_d * 2);"),
+            rendered.contains("local_d = (uchar *)((unsigned long long)local_d * 2);"),
             "{rendered}"
         );
         assert!(!rendered.contains("local_d *= 2;"), "{rendered}");
@@ -1972,7 +1972,7 @@ mod tests {
         let rendered = print_hir_function(&hir);
 
         assert!(
-            rendered.contains("iVar10 = (longlong)(ulonglong)(param_10 - 255);"),
+            rendered.contains("iVar10 = (long long)(unsigned long long)(param_10 - 255);"),
             "{rendered}"
         );
     }
@@ -2000,7 +2000,7 @@ mod tests {
         let rendered = print_hir_function(&hir);
 
         assert!(
-            rendered.contains("return (int)(ulonglong)(local_d);"),
+            rendered.contains("return (int)(unsigned long long)(local_d);"),
             "{rendered}"
         );
     }
@@ -2037,7 +2037,7 @@ mod tests {
 
         assert!(
             rendered.contains(
-                "local_1c = (uchar *)((ulonglong)(ulonglong)local_1c ^ (ulonglong)local_1c);"
+                "local_1c = (uchar *)((unsigned long long)(unsigned long long)local_1c ^ (unsigned long long)local_1c);"
             ),
             "{rendered}"
         );
@@ -2078,7 +2078,7 @@ mod tests {
 
         assert!(
             rendered.contains(
-                "local_10 = (uchar *)((ulonglong)(ulonglong)local_10 ^ (ulonglong)local_10);"
+                "local_10 = (uchar *)((unsigned long long)(unsigned long long)local_10 ^ (unsigned long long)local_10);"
             ),
             "{rendered}"
         );
@@ -2114,7 +2114,7 @@ mod tests {
         let rendered = print_hir_function(&hir);
 
         assert!(
-            rendered.contains("local_10 = (uchar *)-(ulonglong)local_10;"),
+            rendered.contains("local_10 = (uchar *)-(unsigned long long)local_10;"),
             "{rendered}"
         );
     }

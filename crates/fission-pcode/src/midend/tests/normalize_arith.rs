@@ -418,7 +418,7 @@ fn wide_recombine_from_shifted_hi_and_cast_lo_collapses_to_source() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_dir_stmt(&stmt), "return (ulonglong)wide;");
+    assert_eq!(print_dir_stmt(&stmt), "return (unsigned long long)wide;");
 }
 
 #[test]
@@ -482,7 +482,7 @@ fn wide_recombine_from_shifted_hi_and_masked_lo_collapses_to_source() {
         },
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_dir_stmt(&stmt), "return (ulonglong)wide;");
+    assert_eq!(print_dir_stmt(&stmt), "return (unsigned long long)wide;");
 }
 
 #[test]
@@ -526,7 +526,7 @@ fn cast_canonicalizer_drops_redundant_widen_before_narrow() {
         }),
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_dir_stmt(&stmt), "return (longlong)(uint)var1;");
+    assert_eq!(print_dir_stmt(&stmt), "return (long long)(uint)var1;");
 }
 
 #[test]
@@ -545,7 +545,7 @@ fn cast_canonicalizer_preserves_sign_extension_chain() {
         }),
     }));
     normalize_stmt(&mut stmt);
-    assert_eq!(print_dir_stmt(&stmt), "return (longlong)(int)iVar1;");
+    assert_eq!(print_dir_stmt(&stmt), "return (long long)(int)iVar1;");
 }
 
 #[test]

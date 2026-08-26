@@ -298,7 +298,7 @@ fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
 
 fn opaque_pcodeop_return_type_name(return_ty: &NirType) -> String {
     match return_ty {
-        NirType::Unknown => "ulonglong".to_string(),
+        NirType::Unknown => "unsigned long long".to_string(),
         _ => print_type(return_ty),
     }
 }

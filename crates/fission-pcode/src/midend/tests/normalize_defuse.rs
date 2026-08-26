@@ -1043,7 +1043,7 @@ fn normalize_does_not_materialize_low_value_single_input_repeated_expr() {
     normalize_hir_function(&mut func);
     let code = print_prehir_function(&func);
     assert!(
-        !code.contains("uVar0 = 0 - (ulonglong)df;"),
+        !code.contains("uVar0 = 0 - (unsigned long long)df;"),
         "single-input repeated expr should stay inline; got: {code}"
     );
 }

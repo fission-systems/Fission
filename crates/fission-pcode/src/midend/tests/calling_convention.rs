@@ -1132,11 +1132,13 @@ fn arm32_r1_r0_pair_materializes_u64_return() {
 
     let code = render_mlil_preview(&func, "u64_pair", 0x100040, &options).expect("preview render");
     assert!(
-        code.contains("ulonglong u64_pair(int param_1, int param_2)"),
+        code.contains("unsigned long long u64_pair(int param_1, int param_2)"),
         "{code}"
     );
     assert!(
-        code.contains("return (ulonglong)(param_2 + 2) << 32 | (ulonglong)(param_1 + 1);"),
+        code.contains(
+            "return (unsigned long long)(param_2 + 2) << 32 | (unsigned long long)(param_1 + 1);"
+        ),
         "{code}"
     );
 }
@@ -1227,9 +1229,9 @@ fn arm32_address_in_r1_does_not_force_u64_return() {
     let code = render_mlil_preview(&func, "math_like", 0x100040, &options).expect("preview render");
     assert!(code.contains("int math_like(int param_1)"), "{code}");
     assert!(code.contains("return param_1 + 1;"), "{code}");
-    assert!(!code.contains("ulonglong math_like"), "{code}");
+    assert!(!code.contains("unsigned long long math_like"), "{code}");
     assert!(
-        !code.contains("return (ulonglong)&math_sink << 32"),
+        !code.contains("return (unsigned long long)&math_sink << 32"),
         "{code}"
     );
 }
@@ -1930,7 +1932,7 @@ fn aarch64_return_join_with_exact_x0_store_preserves_predecessor_return() {
 
     let code =
         render_mlil_preview(&func, "store_and_return", 0x1060, &options).expect("preview render");
-    assert!(code.contains("longlong store_and_return"), "{code}");
+    assert!(code.contains("long long store_and_return"), "{code}");
     assert!(code.contains("xVar0 = param_1 + 10;"), "{code}");
     assert!(code.contains("result_sink = xVar0;"), "{code}");
     assert!(code.contains("return xVar0;"), "{code}");
@@ -2119,7 +2121,7 @@ fn aarch64_branchind_tail_call_recovers_function_pointer_call() {
 
     let code = render_mlil_preview(&func, "apply_op", 0x100068, &options).expect("preview render");
     assert!(
-        code.contains("return ((ulonglong (*)(uint, uint))param_1)(param_2, param_3);")
+        code.contains("return ((unsigned long long (*)(uint, uint))param_1)(param_2, param_3);")
             || (code.contains("return")
                 && code.contains("param_1")
                 && code.contains("param_2")

@@ -420,7 +420,7 @@ fn preview_proven_void_call_does_not_hide_post_call_return_def() {
         "{code}"
     );
     assert!(
-        code.contains("ulonglong x64_proven_void_call_then_value(void)"),
+        code.contains("unsigned long long x64_proven_void_call_then_value(void)"),
         "{code}"
     );
 }
@@ -720,7 +720,7 @@ fn preview_inlines_lea_register_return() {
     // Win64 register args surface as pointer-width integers on the HIR profile.
     assert!(
         code.contains("lea_add(int param_1, int param_2)")
-            || code.contains("lea_add(longlong param_1, longlong param_2)"),
+            || code.contains("lea_add(long long param_1, long long param_2)"),
         "{code}"
     );
     assert!(code.contains("param_1 + param_2"), "{code}");
@@ -894,7 +894,7 @@ fn preview_refines_win64_param_width_from_later_subregister_use() {
     let code =
         render_mlil_preview(&func, "narrow_param", 0x140001880, &options).expect("preview render");
     assert!(code.contains("int param_3"), "{code}");
-    assert!(!code.contains("longlong param_3"), "{code}");
+    assert!(!code.contains("long long param_3"), "{code}");
 }
 
 #[test]
@@ -1015,7 +1015,7 @@ fn preview_projects_wide_read_from_zero_extending_narrow_register_write() {
     let code = render_mlil_preview(&func, "narrow_to_wide", 0x140001920, &options)
         .expect("preview render");
     assert!(
-        code.contains("return 7;") || code.contains("return (ulonglong)7;"),
+        code.contains("return 7;") || code.contains("return (unsigned long long)7;"),
         "{code}"
     );
     assert!(!code.contains("param_2"), "{code}");
@@ -1226,7 +1226,7 @@ fn preview_projects_cross_space_gpr32_write_to_rust_sleigh_gpr64_read() {
     let code = render_mlil_preview(&func, "cross_space_gpr_alias", 0x140001970, &options)
         .expect("preview render");
     assert!(
-        code.contains("return 9;") || code.contains("return (ulonglong)9;"),
+        code.contains("return 9;") || code.contains("return (unsigned long long)9;"),
         "{code}"
     );
     assert!(!code.contains("rbp"), "{code}");
@@ -1465,7 +1465,7 @@ fn preview_keeps_params_for_zero_entry_relocatable_function() {
     )
     .expect("preview render");
 
-    assert!(code.contains("llvm_smoke(longlong param_1)"), "{code}");
+    assert!(code.contains("llvm_smoke(long long param_1)"), "{code}");
     assert!(code.contains("return param_1;"), "{code}");
     assert!(!code.contains("w0"), "{code}");
 }
@@ -2281,7 +2281,7 @@ fn preview_recovers_win64_register_arg_from_live_call_result() {
     assert!(code.contains("fibonacci("), "{code}");
     assert!(code.contains("printf("), "{code}");
     assert!(
-        code.contains("printf(5368725504, 15, 10, (ulonglong)fibonacci(10), 15, 20);")
+        code.contains("printf(5368725504, 15, 10, (unsigned long long)fibonacci(10), 15, 20);")
             || (code.contains("rax = fibonacci(")
                 && code.contains("printf(")
                 && code.contains("rax")),
