@@ -53,6 +53,7 @@ mod layered;
 mod pipeline;
 mod presentation;
 mod printer;
+mod variables;
 
 pub use layer::{LayeredPseudocode, PrintProfile, PseudocodeLayer};
 
@@ -66,3 +67,4 @@ pub(crate) use printer::{
     print_expr, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_stmt, print_type,
 };
+pub use variables::{RecoveredVariable, recovered_variables};

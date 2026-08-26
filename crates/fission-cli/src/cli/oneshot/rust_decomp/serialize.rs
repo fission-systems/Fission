@@ -32,6 +32,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
             build_stats,
             hint_stats,
             decomp_sec,
+            variables,
         } => {
             let mut obj = serde_json::json!({
                 "address": addr_str,
@@ -44,6 +45,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "engine_used": "rust_sleigh",
                 "fell_back": fell_back,
                 "fallback_reason": fallback_reason,
+                "variables": variables,
             });
             // Only present when `decomp --prehir` was passed -- absence means
             // "not requested", not "structuring produced nothing".

@@ -52,7 +52,9 @@ pub use midend::{
     render_nir_with_context, seed_nir_render_options, structuring_outcome_for_signature,
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
     take_last_prehir_snapshot, take_last_hir_function_snapshot, take_last_layered_pseudocode,
+    take_last_recovered_variables,
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats, take_last_raw_hir_snapshot,
 };
+pub use render::{RecoveredVariable, recovered_variables};
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};

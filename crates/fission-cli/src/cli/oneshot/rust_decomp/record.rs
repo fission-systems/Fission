@@ -38,6 +38,9 @@ pub(crate) enum CliRustOutcome {
         build_stats: Option<NirBuildStats>,
         hint_stats: Option<NirHintStats>,
         decomp_sec: f64,
+        /// Recovered variables, so a consumer does not have to parse them
+        /// back out of the printed declarations.
+        variables: Vec<fission_decompiler::RecoveredVariable>,
     },
     AssemblyFallback {
         fallback_code: String,

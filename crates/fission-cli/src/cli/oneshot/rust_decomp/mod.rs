@@ -44,6 +44,9 @@ struct RustSleighRender {
     build_stats: Option<fission_decompiler::NirBuildStats>,
     hint_stats: Option<fission_decompiler::NirHintStats>,
     evidence: fission_decompiler::RustSleighPipelineEvidence,
+    /// The variables this decompilation recovered, for a consumer that wants
+    /// them as data rather than as printed declarations.
+    variables: Vec<fission_decompiler::RecoveredVariable>,
 }
 
 fn render_with_rust_sleigh(
@@ -76,6 +79,9 @@ fn render_with_rust_sleigh(
     } else {
         None
     };
+    // Same immediacy requirement as the PreHIR snapshot above, and the same
+    // reason: one thread-local slot, overwritten by the next decompile.
+    let variables = fission_decompiler::take_last_recovered_variables().unwrap_or_default();
 
     Ok(RustSleighRender {
         code: result.code,
@@ -87,6 +93,7 @@ fn render_with_rust_sleigh(
         build_stats: result.build_stats,
         hint_stats: result.hint_stats,
         evidence: result.evidence,
+        variables,
     })
 }
 
@@ -210,6 +217,7 @@ pub(crate) fn render_one_function_inner(
                     build_stats: rendered.build_stats.clone(),
                     hint_stats: rendered.hint_stats.clone(),
                     decomp_sec,
+                    variables: rendered.variables,
                 },
             };
 

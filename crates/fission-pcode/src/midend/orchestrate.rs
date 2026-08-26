@@ -376,6 +376,11 @@ pub fn render_mlil_preview_with_binary_and_context(
         debug_log("type_hints_done");
     }
     recover_global_symbol_accesses(&mut hir, options);
+    // Collect the recovered variables here rather than from the snapshot
+    // above: this is after the DWARF/signature overlay has put real names and
+    // real type names on the bindings, which is what the printed declarations
+    // will carry and what a consumer comparing against debug info needs.
+    store_last_recovered_variables(crate::render::recovered_variables(&hir));
     if debug.preview_debug {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
@@ -492,6 +497,28 @@ fn store_last_hir_function_snapshot(func: super::HirFunction) {
 /// `take_last_layered_pseudocode`/`take_last_prehir_snapshot` above.
 pub fn take_last_hir_function_snapshot() -> Option<super::HirFunction> {
     LAST_HIR_FUNCTION_SNAPSHOT.with(|slot| slot.borrow_mut().take())
+}
+
+thread_local! {
+    static LAST_RECOVERED_VARIABLES: std::cell::RefCell<Option<Vec<crate::render::RecoveredVariable>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn store_last_recovered_variables(variables: Vec<crate::render::RecoveredVariable>) {
+    LAST_RECOVERED_VARIABLES.with(|slot| {
+        *slot.borrow_mut() = Some(variables);
+    });
+}
+
+/// The variables the last decompilation on this thread recovered.
+///
+/// Same one-slot discipline as the snapshots above: read it immediately after
+/// the decompile call, before another one on this thread overwrites it.
+/// `None` means no decompile got as far as the typed HIR (an architecture
+/// fallback, say), which is not the same as a function that genuinely has no
+/// variables -- that returns an empty vector.
+pub fn take_last_recovered_variables() -> Option<Vec<crate::render::RecoveredVariable>> {
+    LAST_RECOVERED_VARIABLES.with(|slot| slot.borrow_mut().take())
 }
 
 #[derive(Debug, Clone, Copy)]
