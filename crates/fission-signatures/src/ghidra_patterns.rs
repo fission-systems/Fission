@@ -23,7 +23,25 @@ pub struct GhidraFuncPattern {
 }
 
 impl GhidraFuncPattern {
+    /// Whether this pattern constrains any byte at all.
+    ///
+    /// One that does not matches every address it is offered, which is not a
+    /// pattern -- it is a scan of the whole section. Ghidra's ARM files are
+    /// where this bites: nearly every post-pattern there opens with a
+    /// wildcard byte (`........ 0xb5`), and one that reduces to nothing but
+    /// wildcards reported a function start at all 147,503 bytes of `nuttx`'s
+    /// `.text`.
+    pub fn constrains_any_byte(&self) -> bool {
+        self.pre_bytes
+            .iter()
+            .chain(self.post_bytes.iter())
+            .any(Option::is_some)
+    }
+
     pub fn matches(&self, data: &[u8], data_base: u64, addr: u64) -> bool {
+        if !self.constrains_any_byte() {
+            return false;
+        }
         if addr < data_base {
             return false;
         }
