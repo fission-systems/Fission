@@ -10,6 +10,37 @@ pub(in crate::midend::builder) struct ResolvedGlobalPointer {
     pub byte_offset: i64,
 }
 
+/// A constant operand read as the *signed displacement* it is.
+///
+/// `const_offset` hands back `constant_val` as stored, and a 32-bit lifter
+/// stores `add ebp, -168` as `0xffffff58`. Used unchanged that is a stack
+/// offset of 4,294,967,128, which `incoming_stack_argument_index` then divides
+/// into a parameter index of 1,073,741,780 -- and
+/// `ensure_incoming_stack_param_binding` fills every slot from zero up to it.
+/// Measured on `dexter.dll`: four of its 132 functions each reached 3GB in
+/// about two seconds building `param_N` bindings, one 200MB allocation among
+/// them, before anything else in the function was looked at.
+///
+/// Sign-extension is by the varnode's own width, the same rule
+/// `signed_constant_delta` applies in the SSA builder. A four-byte
+/// displacement whose top bit is set is negative in every calling convention
+/// here; read as unsigned it would address four gigabytes up the stack.
+fn signed_const_displacement(vn: &Varnode) -> Option<i64> {
+    let raw = const_offset(vn)?;
+    let bits = vn.size.checked_mul(8)?;
+    if !(1..64).contains(&bits) {
+        return Some(raw);
+    }
+    let mask = (1_u64 << bits) - 1;
+    let value = (raw as u64) & mask;
+    let sign_bit = 1_u64 << (bits - 1);
+    Some(if value & sign_bit == 0 {
+        value as i64
+    } else {
+        (value | !mask) as i64
+    })
+}
+
 impl<'a> PreviewBuilder<'a> {
     /// Entry-SP-relative offset for a load whose reaching memory value is
     /// proven to come from function entry rather than a store in this
@@ -1013,7 +1044,7 @@ impl<'a> PreviewBuilder<'a> {
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Option<i64> {
-        if let Some(value) = const_offset(vn) {
+        if let Some(value) = signed_const_displacement(vn) {
             return Some(value);
         }
         if !is_register_space_id(vn.space_id) && vn.space_id != UNIQUE_SPACE_ID {
