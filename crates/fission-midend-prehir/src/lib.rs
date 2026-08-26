@@ -35,8 +35,9 @@ pub use ir::*;
 pub use util::{
     cleanup_redundant_labels, collect_referenced_label_counts, collect_referenced_labels,
     expr_has_side_effecting_call, expr_type, fold_logical_chain, format_expr_key,
-    format_lvalue_key, is_pure_intrinsic_call, negate_expr, next_temp_name, rename_vars_in_stmts,
-    simplify_logical_expr, strip_casts,
+    format_lvalue_key, is_pure_intrinsic_call, negate_expr, next_temp_name,
+    pre_hir_body_expr_nodes_fit_budget, pre_hir_function_expr_nodes_fit_budget,
+    rename_vars_in_stmts, simplify_logical_expr, strip_casts,
 };
 
 /// VSA jump-resolver surface used by the normalize pipeline.
