@@ -1,6 +1,20 @@
 use super::*;
 use fission_midend_core::ir::{SsaUseSite, SsaValueDefinition};
 
+/// Total `lower_varnode_inner` entries one top-level lowering may spend.
+///
+/// The two depth caps in this file bound how *deep* a chain may go; neither
+/// bounds how *wide* it gets. `visiting` is path-scoped -- a key is removed on
+/// the way back out -- so a value reachable by many paths is lowered once per
+/// path, and the work is exponential in the number of joins rather than linear
+/// in the ops. Measured on `coreutils/fmt`'s `put_line`, four blocks and 162
+/// p-code ops in 201 bytes: `lower_varnode_inner` was entered more than 14
+/// million times and the function never finished.
+///
+/// Ordinary functions stay far below this -- it does not fire anywhere in
+/// `gzip`, `bzip2` or `coreutils/ls` -- so it only ever catches the runaway.
+const VARNODE_LOWERING_WORK_BUDGET: u64 = 200_000;
+
 const CALL_TARGET_CONST_FOLD_BUDGET: usize = 16;
 const CALL_TARGET_DESCRIPTOR_RECOVERY_BUDGET: usize = 16;
 
@@ -1176,6 +1190,7 @@ impl<'a> PreviewBuilder<'a> {
         let created_trace = if self.active_trace_id.is_none() {
             let trace_id = self.next_trace_id();
             self.active_trace_id = Some(trace_id);
+            self.varnode_lowering_work = 0;
             true
         } else {
             false
@@ -2181,8 +2196,11 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         const VARNODE_REDIRECT_DEPTH_CAP: u32 = 64;
-        if !visiting.insert(key.clone()) {
-            if let Some((site, op)) = def_site
+        self.varnode_lowering_work += 1;
+        let over_budget = self.varnode_lowering_work > VARNODE_LOWERING_WORK_BUDGET;
+        if over_budget || !visiting.insert(key.clone()) {
+            if !over_budget
+                && let Some((site, op)) = def_site
                 && Some(site) != self.current_lowering_site
                 && self.varnode_redirect_depth < VARNODE_REDIRECT_DEPTH_CAP
             {

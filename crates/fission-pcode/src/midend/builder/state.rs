@@ -199,4 +199,16 @@ pub(crate) struct PreviewBuilder<'a> {
     /// (its normal "not a diamond select" outcome) so callers fall back to
     /// `lower_varnode_inner`'s other resolution paths.
     pub(crate) diamond_select_depth: u32,
+    /// Total `lower_varnode_inner` entries spent on the current top-level
+    /// lowering.
+    ///
+    /// The two depth caps above bound how *deep* a chain may go; neither
+    /// bounds how *wide* it gets. `visiting` is path-scoped -- a key is
+    /// removed on the way back out -- so a value reachable by many paths is
+    /// lowered once per path, and the work is exponential in the number of
+    /// joins rather than linear in the ops. Measured on `coreutils/fmt`'s
+    /// `put_line`, four blocks and 162 p-code ops in 201 bytes:
+    /// `lower_varnode_inner` was entered more than 14 million times and the
+    /// function never finished, holding 1.4GB.
+    pub(crate) varnode_lowering_work: u64,
 }
