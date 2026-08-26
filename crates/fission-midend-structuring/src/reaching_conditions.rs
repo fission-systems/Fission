@@ -55,6 +55,38 @@ pub enum ReachingError {
     Cyclic,
     /// `head` is not a node of the graph.
     UnknownHead(NodeId),
+    /// A node's condition outgrew [`MAX_REACHING_CONDITION_TERMS`].
+    ///
+    /// Each node's condition is built from its predecessors' conditions, so a
+    /// branchy region doubles the expression at every merge: the growth is in
+    /// the number of *paths*, not the number of blocks. Measured on `bzip2`'s
+    /// `main` (113 blocks): the largest condition reached 8,729,059 expression
+    /// nodes and the process peaked at 9.2GB across 140 million live
+    /// allocations, against 439MB for `sendMTFValues` at 112 blocks, whose
+    /// conditions all stayed at a single term.
+    ///
+    /// Truncating individual conditions to `true` was rejected: 22% of that
+    /// function's conditions are over the bound, and a body structured from a
+    /// mix of exact and unknown conditions is worse than one the caller
+    /// structures by the fallback it already has. Callers read any error here
+    /// as "not amenable to this path".
+    ConditionTooLarge { node: NodeId, terms: usize },
+}
+
+/// The point past which a reaching condition stops being worth computing.
+///
+/// The median condition in the pathological case measured 71 terms and the
+/// 75th percentile 637, so this clears ordinary work by a wide margin; what it
+/// cuts is the exponential tail.
+pub const MAX_REACHING_CONDITION_TERMS: usize = 4096;
+
+/// Nodes in `e`, counting the shapes conditions are built from.
+fn condition_terms(e: &PreHirExpr) -> usize {
+    match e {
+        PreHirExpr::Binary { lhs, rhs, .. } => 1 + condition_terms(lhs) + condition_terms(rhs),
+        PreHirExpr::Unary { expr, .. } | PreHirExpr::Cast { expr, .. } => 1 + condition_terms(expr),
+        _ => 1,
+    }
 }
 
 /// `true` -- the condition of an unconditionally executed node.
@@ -206,27 +238,48 @@ pub fn compute_reaching_conditions(
     }
 
     let mut reaching: HashMap<NodeId, PreHirExpr> = HashMap::default();
+    let mut sizes: HashMap<NodeId, usize> = HashMap::default();
     reaching.insert(head, always());
+    sizes.insert(head, 1);
 
     for n in order {
         if n == head {
             continue;
         }
         let mut acc: Option<PreHirExpr> = None;
+        let mut acc_terms = 0usize;
         for &p in &predecessors[n] {
             // A predecessor that is itself unreachable contributes nothing.
-            let Some(pred_cond) = reaching.get(&p).cloned() else {
+            let Some(pred_cond) = reaching.get(&p) else {
                 continue;
             };
             let edge = edge_condition(p, n).unwrap_or_else(always);
-            let term = and(pred_cond, edge);
+            // Projected before anything is built, so the bound caps what gets
+            // allocated rather than what gets kept.
+            let projected = acc_terms
+                + sizes
+                    .get(&p)
+                    .copied()
+                    .unwrap_or_else(|| condition_terms(pred_cond))
+                + condition_terms(&edge)
+                + 2;
+            if projected > MAX_REACHING_CONDITION_TERMS {
+                return Err(ReachingError::ConditionTooLarge {
+                    node: n,
+                    terms: projected,
+                });
+            }
+            let term = and(pred_cond.clone(), edge);
+            acc_terms = projected;
             acc = Some(match acc {
                 None => term,
                 Some(prev) => or(term, prev),
             });
         }
         if let Some(cond) = acc {
-            reaching.insert(n, simplify_logical_expr(cond));
+            let simplified = simplify_logical_expr(cond);
+            sizes.insert(n, condition_terms(&simplified));
+            reaching.insert(n, simplified);
         }
     }
     Ok(reaching)
