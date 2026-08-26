@@ -1,7 +1,7 @@
 use crate::midend::ir::MlilPreviewError;
 use crate::midend::pass::{AnalysisStore, InvariantBasis, NirFunc, NirPass, PassResult};
 use crate::midend::structuring::irreducible::{compute_fas_virtual_gotos, compute_node_splits};
-use fission_midend_prehir::PreHirStmt;
+use fission_midend_prehir::{PreHirStmt, pre_hir_body_expr_nodes_fit_budget};
 // ADR 0012: admission / SESE / collapse free-fns owned by midend-structuring.
 use fission_midend_structuring::{
     StructuringAdmissionInput, StructuringAdmissionReason, StructuringHost,
@@ -221,6 +221,21 @@ fn try_alternative_structurings(
     admission: AlternativeAdmission,
 ) -> Vec<PreHirStmt> {
     use fission_midend_structuring::structuring_quality::measure;
+
+    // Alternative drivers are optional quality competitors. Normalizing a
+    // candidate whose materialized expressions have already expanded past
+    // this bound can dominate (or prevent) the actual decompilation, while
+    // keeping the established baseline is always semantically valid.
+    const MAX_ALTERNATIVE_NORMALIZE_EXPR_NODES: usize = 20_000;
+    if !pre_hir_body_expr_nodes_fit_budget(&baseline, MAX_ALTERNATIVE_NORMALIZE_EXPR_NODES) {
+        if diag {
+            eprintln!(
+                "[DIAG] alternatives not asked: expression budget exceeds {} nodes",
+                MAX_ALTERNATIVE_NORMALIZE_EXPR_NODES
+            );
+        }
+        return baseline;
+    }
 
     // Measure through the cleanup that runs after structuring, not the body as
     // it stands here. Both `finalize_structured_body` and normalize's own
