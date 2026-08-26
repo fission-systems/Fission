@@ -120,11 +120,121 @@ fn stmt_contains_rhs_var(stmt: &PreHirStmt, target: &str) -> bool {
 /// as itself or through the memory it was spilled to -- which shouldn't
 /// count as evidence of a genuine incoming argument the way a real
 /// parameter (later read back from its home slot, or used directly) would.
+///
+/// The read-back half of that is what separates the two, and it is a
+/// question about the *slot*, not the register: at `-O0` an argument
+/// register is spilled to its home slot in the prologue and every later use
+/// reads the slot, so the register itself appears exactly once, as a store
+/// value. `usart_set_databits(int, int)` arrives that way --
+///
+/// ```text
+/// *sp = r1;        // spilled
+/// uVar5 = *sp;     // and read straight back
+/// ```
+///
+/// -- and testing only the register said "padding", losing the second of two
+/// parameters and, with it, every match the metric's argument pass could
+/// have made for it.
 fn only_used_as_bare_store_value(stmts: &[PreHirStmt], target: &str) -> bool {
     let mut found_other_use = false;
     let mut found_store_use = false;
     walk_rhs_var_uses(stmts, target, &mut found_other_use, &mut found_store_use);
-    found_store_use && !found_other_use
+    if !found_store_use || found_other_use {
+        return false;
+    }
+    let mut spilled_to = Vec::new();
+    collect_spill_addresses(stmts, target, &mut spilled_to);
+    !spilled_to
+        .iter()
+        .any(|addr| stmts_read_through_address(stmts, addr))
+}
+
+/// Addresses `target` was stored to as a bare value (`*addr = target;`).
+fn collect_spill_addresses<'a>(
+    stmts: &'a [PreHirStmt],
+    target: &str,
+    out: &mut Vec<&'a PreHirExpr>,
+) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ptr, .. },
+                rhs: PreHirExpr::Var(name),
+            } if name == target => out.push(ptr.as_ref()),
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => collect_spill_addresses(body, target, out),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_spill_addresses(then_body, target, out);
+                collect_spill_addresses(else_body, target, out);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_spill_addresses(&case.body, target, out);
+                }
+                collect_spill_addresses(default, target, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether anything loads through `addr`.
+///
+/// Matched structurally, so an address reached by a different spelling is
+/// not recognized. That errs toward leaving the register unpromoted, which
+/// is the behaviour this predicate had for every register before.
+fn stmts_read_through_address(stmts: &[PreHirStmt], addr: &PreHirExpr) -> bool {
+    fn in_expr(expr: &PreHirExpr, addr: &PreHirExpr) -> bool {
+        match expr {
+            PreHirExpr::Load { ptr, .. } if ptr.as_ref() == addr => true,
+            PreHirExpr::Load { ptr, .. } => in_expr(ptr, addr),
+            PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => in_expr(expr, addr),
+            PreHirExpr::Binary { lhs, rhs, .. } => in_expr(lhs, addr) || in_expr(rhs, addr),
+            PreHirExpr::Index { base, index, .. } => in_expr(base, addr) || in_expr(index, addr),
+            PreHirExpr::PtrOffset { base, .. } => in_expr(base, addr),
+            PreHirExpr::FieldAccess { base, .. } => in_expr(base, addr),
+            PreHirExpr::Call { args, .. } => args.iter().any(|a| in_expr(a, addr)),
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => in_expr(cond, addr) || in_expr(then_expr, addr) || in_expr(else_expr, addr),
+            _ => false,
+        }
+    }
+    fn in_stmts(stmts: &[PreHirStmt], addr: &PreHirExpr) -> bool {
+        stmts.iter().any(|stmt| match stmt {
+            PreHirStmt::Assign { rhs, .. } => in_expr(rhs, addr),
+            PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => in_expr(e, addr),
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. }
+            | PreHirStmt::For { body, .. } => in_stmts(body, addr),
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => in_expr(cond, addr) || in_stmts(then_body, addr) || in_stmts(else_body, addr),
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                in_expr(expr, addr)
+                    || cases.iter().any(|c| in_stmts(&c.body, addr))
+                    || in_stmts(default, addr)
+            }
+            _ => false,
+        })
+    }
+    in_stmts(stmts, addr)
 }
 
 fn walk_rhs_var_uses(
