@@ -638,9 +638,21 @@ fn collect_referenced_global_decls(
         return BTreeMap::new();
     }
 
-    let global_decl_types = options
-        .global_names
-        .iter()
+    // Two file-scope statics in different translation units may share a
+    // name, and the emitted C has one declaration for the name -- so one
+    // entry wins. `options.global_names` is a `HashMap<u64, _>`, whose
+    // iteration order changes from process to process, so collecting
+    // straight into a name-keyed map let the winner change run to run:
+    // `gzip` has `bitbuf` at 0xe13c0 sized 2 and at 0xe1670 sized 8, and six
+    // of its functions alternated between `ushort bitbuf` and
+    // `ulonglong bitbuf` across runs of one unchanged binary.
+    //
+    // Visiting in address order makes the choice stable. It is still a
+    // choice between two real globals, but it is the same one every time.
+    let mut by_address: Vec<(&u64, &String)> = options.global_names.iter().collect();
+    by_address.sort_unstable_by_key(|(addr, _)| **addr);
+    let global_decl_types = by_address
+        .into_iter()
         .filter_map(|(addr, name)| {
             options
                 .global_sizes
