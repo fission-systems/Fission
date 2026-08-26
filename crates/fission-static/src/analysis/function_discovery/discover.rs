@@ -1,7 +1,7 @@
 use fission_loader::{FunctionCandidateInfo, FunctionInfo, LoadedBinary};
 use fission_signatures::load_ghidra_patterns;
 use fission_sleigh::runtime::DecodedFlowKind;
-use fission_sleigh::runtime::{RuntimeFrontendStatus, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{PackedContextOverride, RuntimeFrontendStatus, RuntimeSleighFrontend};
 
 use super::ranges::{executable_ranges, is_in_executable_ranges, runtime_load_spec_for};
 use super::targets::{collect_instruction_targets, discovery_candidate_targets};
@@ -54,6 +54,23 @@ fn resolve_pattern_arch_tag(binary: &LoadedBinary) -> Option<String> {
     })
 }
 
+/// The processor context a sweep or validation decode should start from.
+///
+/// `None` everywhere except a Thumb image, whose addresses cannot say what
+/// mode they are in once the ABI's bit-0 marker is gone with the symbols.
+/// Cheap enough to ask per candidate: it reads the vector table's first
+/// words and the language's context-field layout, against validation's own
+/// budget of up to four thousand decoded instructions.
+fn image_decode_context(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+) -> Option<PackedContextOverride> {
+    if !super::thumb::image_executes_thumb(binary) {
+        return None;
+    }
+    frontend.low_bit_code_mode_override()
+}
+
 pub fn discover_functions_with_runtime(
     binary: &mut LoadedBinary,
     profile: FunctionDiscoveryProfile,
@@ -71,6 +88,14 @@ pub fn discover_functions_with_runtime(
     if frontend.status() != RuntimeFrontendStatus::ExecutableCandidate {
         report.unsupported_runtime = true;
         return report;
+    }
+
+    // A stripped Cortex-M image is all Thumb and says so nowhere in its
+    // addresses; without this the sweep below decodes ARM-mode nonsense over
+    // it and finds no targets at all.
+    let sweep_context = image_decode_context(binary, &frontend);
+    if discovery_diag_enabled() && sweep_context.is_some() {
+        eprintln!("DISCOVERY_DIAG: sweeping in thumb mode");
     }
 
     let executable_ranges = executable_ranges(binary);
@@ -158,6 +183,7 @@ pub fn discover_functions_with_runtime(
                 profile,
                 chunk.bytes,
                 chunk.virtual_address,
+                sweep_context,
                 &mut local_calls,
                 &mut local_jumps,
                 &mut local_edges,
@@ -191,7 +217,13 @@ pub fn discover_functions_with_runtime(
         );
 
     if discovery_diag_enabled() {
-        eprintln!("DISCOVERY_DIAG: scan_stage={:?}", stage_start.elapsed());
+        eprintln!(
+            "DISCOVERY_DIAG: scan_stage={:?} decoded={} calls={} jumps={}",
+            stage_start.elapsed(),
+            total_decoded,
+            call_targets.len(),
+            jump_targets.len()
+        );
     }
     report.decoded_instruction_count = total_decoded;
     report.call_target_count = call_targets.len();
@@ -668,12 +700,18 @@ fn collect_section_targets(
     profile: FunctionDiscoveryProfile,
     bytes: &[u8],
     base_address: u64,
+    sweep_context: Option<PackedContextOverride>,
     call_targets: &mut Vec<u64>,
     jump_targets: &mut Vec<u64>,
     jump_edges: &mut Vec<(u64, u64)>,
 ) -> usize {
     if profile == FunctionDiscoveryProfile::Conservative {
-        let Ok(decoded) = frontend.decode_window_no_pcode(bytes, base_address, bytes.len()) else {
+        let Ok(decoded) = frontend.decode_window_no_pcode_in_context(
+            bytes,
+            base_address,
+            bytes.len(),
+            sweep_context,
+        ) else {
             return 0;
         };
         let decoded_count = decoded.len();
@@ -694,6 +732,7 @@ fn collect_section_targets(
         frontend,
         bytes,
         base_address,
+        sweep_context,
         call_targets,
         jump_targets,
         jump_edges,
@@ -705,6 +744,7 @@ fn collect_section_targets_resync(
     frontend: &RuntimeSleighFrontend,
     bytes: &[u8],
     base_address: u64,
+    sweep_context: Option<PackedContextOverride>,
     call_targets: &mut Vec<u64>,
     jump_targets: &mut Vec<u64>,
     jump_edges: &mut Vec<(u64, u64)>,
@@ -715,9 +755,12 @@ fn collect_section_targets_resync(
 
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
-        if let Ok(instructions) =
-            frontend.decode_window_no_pcode(remaining, current, remaining.len().min(4096))
-        {
+        if let Ok(instructions) = frontend.decode_window_no_pcode_in_context(
+            remaining,
+            current,
+            remaining.len().min(4096),
+            sweep_context,
+        ) {
             if !instructions.is_empty() {
                 let mut batch_bytes = 0;
                 for instruction in &instructions {
@@ -737,7 +780,7 @@ fn collect_section_targets_resync(
             }
         }
 
-        match frontend.decode_single_no_pcode(remaining, current, None) {
+        match frontend.decode_single_no_pcode(remaining, current, sweep_context) {
             Ok(instruction) if instruction.length > 0 && instruction.length <= remaining.len() => {
                 let step = instruction.length;
                 collect_instruction_targets(
@@ -752,8 +795,12 @@ fn collect_section_targets_resync(
                 current = current.saturating_add(step as u64);
             }
             _ => {
-                offset = offset.saturating_add(1);
-                current = current.saturating_add(1);
+                // Thumb instructions are 2-byte aligned, so resyncing a byte
+                // at a time only produces misaligned decodes of the same
+                // bytes; step by the architecture's own alignment instead.
+                let step = if sweep_context.is_some() { 2 } else { 1 };
+                offset = offset.saturating_add(step);
+                current = current.saturating_add(step as u64);
             }
         }
     }
@@ -1847,6 +1894,7 @@ pub(crate) fn validate_subroutine_candidate(
     cache: &mut std::collections::HashMap<u64, ValidationResult>,
     global_references: Option<&std::collections::HashSet<u64>>,
 ) -> (bool, ValidationResult) {
+    let decode_context = image_decode_context(binary, frontend);
     let res = if let Some(&cached) = cache.get(&addr) {
         cached
     } else {
@@ -1909,7 +1957,8 @@ pub(crate) fn validate_subroutine_candidate(
                 // dominant cost: up to `max_instructions` decodes per
                 // candidate, across every candidate from every scanner
                 // (ghidra-patterns, tail-call recovery, dynamic prologues).
-                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, None) else {
+                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, decode_context)
+                else {
                     invalid = true;
                     break;
                 };

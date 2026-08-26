@@ -9,6 +9,7 @@ mod load_config;
 mod msvc_eh;
 pub(crate) mod ranges;
 pub(crate) mod targets;
+mod thumb;
 mod types;
 
 pub use discover::discover_functions_with_runtime;

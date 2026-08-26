@@ -326,6 +326,30 @@ impl RuntimeSleighFrontend {
         address: u64,
         limit: usize,
     ) -> Result<Vec<DecodedInstruction>> {
+        self.decode_window_no_pcode_in_context(bytes, address, limit, None)
+    }
+
+    /// [`decode_window_no_pcode`], starting from a known processor context.
+    ///
+    /// A caller sweeping an image whose mode is not recoverable from the
+    /// addresses themselves needs to say what the mode is. The clearest case
+    /// is a stripped Cortex-M image: every address in it is even, because the
+    /// ABI's bit-0 Thumb marker lives on function symbols and there are none
+    /// left, yet every instruction in it is Thumb.
+    ///
+    /// `base_context` seeds the decode and applies to each instruction that a
+    /// preceding one has not already committed a context for -- those still
+    /// win, so a mode switch encoded in the instruction stream is honoured
+    /// rather than overridden.
+    ///
+    /// [`decode_window_no_pcode`]: Self::decode_window_no_pcode
+    pub fn decode_window_no_pcode_in_context(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+        base_context: Option<PackedContextOverride>,
+    ) -> Result<Vec<DecodedInstruction>> {
         if limit == 0 || bytes.is_empty() {
             return Ok(Vec::new());
         }
@@ -338,7 +362,7 @@ impl RuntimeSleighFrontend {
         while offset < bytes.len() && decoded.len() < limit {
             let remaining = &bytes[offset..];
 
-            let ctx_override = pending_overrides.get(&current).copied();
+            let ctx_override = pending_overrides.get(&current).copied().or(base_context);
 
             let instruction = match self.decode_single_no_pcode(remaining, current, ctx_override) {
                 Ok(instruction) => instruction,
