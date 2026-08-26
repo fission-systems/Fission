@@ -12,8 +12,10 @@ use fission_midend_core::ir::{SsaUseSite, SsaValueDefinition};
 /// million times and the function never finished.
 ///
 /// Ordinary functions stay far below this -- it does not fire anywhere in
-/// `gzip`, `bzip2` or `coreutils/ls` -- so it only ever catches the runaway.
-const VARNODE_LOWERING_WORK_BUDGET: u64 = 200_000;
+/// `gzip`, `bzip2` or `coreutils/ls`. A 200,000-entry ceiling still allowed a
+/// join-heavy value to expand into a 1.8-million-character expression before
+/// normalization, so keep the fallback well below that measured output cliff.
+const VARNODE_LOWERING_WORK_BUDGET: u64 = 20_000;
 
 const CALL_TARGET_CONST_FOLD_BUDGET: usize = 16;
 const CALL_TARGET_DESCRIPTOR_RECOVERY_BUDGET: usize = 16;
