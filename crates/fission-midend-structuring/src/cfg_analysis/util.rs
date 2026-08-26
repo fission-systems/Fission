@@ -15,6 +15,23 @@ pub fn cooper_intersect(
     let rpo = |x: usize| rpo_number.get(x).copied().unwrap_or(usize::MAX);
     let max_iter = n + 2;
     let mut steps = 0usize;
+    // Both the outer meet and each finger's climb are bounded. Cooper's
+    // algorithm gets termination from RPO numbers strictly decreasing up the
+    // idom chain, which holds only when every node is reachable from the
+    // root. A truncated CFG breaks that: nodes missing from `rpo_number` read
+    // as `usize::MAX`, the chain can close into a cycle of two, and the climb
+    // below walks it forever -- the outer `max_iter` never gets a turn.
+    //
+    // Measured on `coreutils/test`'s `strintcmp`, one basic block of 37 ops:
+    // its callee summary re-decodes `numcompare` at a reduced instruction
+    // limit, 87 blocks truncated to 71, and postdominator analysis over that
+    // truncated graph never returned. `test`, `expr` and `[` all carry the
+    // same pair and all three hung.
+    //
+    // A chain with no cycle is at most `n` long, so a climb past that has
+    // found one; returning the finger where it stands is the same answer the
+    // `p == b1` self-loop case already gives.
+    let mut climb = 0usize;
     while b1 != b2 {
         while rpo(b1) > rpo(b2) {
             let p = idom[b1];
@@ -22,6 +39,10 @@ pub fn cooper_intersect(
                 return b1;
             }
             b1 = p;
+            climb += 1;
+            if climb > n {
+                return b1;
+            }
         }
         while rpo(b2) > rpo(b1) {
             let p = idom[b2];
@@ -29,6 +50,10 @@ pub fn cooper_intersect(
                 return b2;
             }
             b2 = p;
+            climb += 1;
+            if climb > n {
+                return b2;
+            }
         }
         steps += 1;
         if steps > max_iter {
@@ -250,3 +275,35 @@ pub fn compute_postdominator_sets_for_exit(
     }
     postdom
 }
+
+#[cfg(test)]
+mod cycle_guard_tests {
+    use super::cooper_intersect;
+
+    /// A truncated CFG can leave the idom array holding a two-cycle, and the
+    /// RPO numbers that make Cooper's climb terminate no longer order it.
+    /// Without a bound on the climb itself this spins forever -- the outer
+    /// meet counter never gets a turn. Measured on `coreutils/test`'s
+    /// `strintcmp`, where the callee summary re-decodes `numcompare` at a
+    /// reduced instruction limit and postdominator analysis over the
+    /// truncated graph never returned.
+    #[test]
+    fn a_two_cycle_in_the_idom_chain_terminates() {
+        // 0 <-> 1 in the idom chain, and RPO numbers that keep the first
+        // finger climbing: neither node is ever "not greater" than node 2.
+        let idom = vec![1usize, 0, 2];
+        let rpo = vec![9usize, 9, 0];
+        let out = cooper_intersect(0, 2, &idom, &rpo);
+        assert!(out < idom.len(), "returned a node, got {out}");
+    }
+
+    /// The ordinary case still answers: a straight chain 2 -> 1 -> 0 meets at
+    /// its root.
+    #[test]
+    fn a_chain_still_meets_at_its_root() {
+        let idom = vec![0usize, 0, 1];
+        let rpo = vec![0usize, 1, 2];
+        assert_eq!(cooper_intersect(2, 1, &idom, &rpo), 1);
+    }
+}
+

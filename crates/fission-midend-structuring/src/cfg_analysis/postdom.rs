@@ -302,8 +302,19 @@ impl ImmPostDomTree {
             return None;
         }
         // Walk up the idom tree until both fingers meet.
+        //
+        // Each climb is bounded as well as the meet. Termination comes from
+        // RPO numbers strictly decreasing up the idom chain, which holds only
+        // when every node is reachable from the root; a truncated CFG breaks
+        // it, the chain can close into a cycle of two, and a climb walks that
+        // cycle forever without the outer counter ever getting a turn. A
+        // chain with no cycle is at most `idom.len()` long, so a climb past
+        // that has found one -- the same "no common ancestor" answer the
+        // `parent == a` self-loop case already gives.
         let max_iter = self.idom.len() + 2;
         let mut steps = 0usize;
+        let mut climb = 0usize;
+        let climb_cap = self.idom.len() + 2;
         while a != b {
             while self.rpo_number.get(a).copied().unwrap_or(usize::MAX)
                 > self.rpo_number.get(b).copied().unwrap_or(usize::MAX)
@@ -313,6 +324,10 @@ impl ImmPostDomTree {
                     return None; // no common ancestor
                 }
                 a = parent;
+                climb += 1;
+                if climb > climb_cap {
+                    return None;
+                }
             }
             while self.rpo_number.get(b).copied().unwrap_or(usize::MAX)
                 > self.rpo_number.get(a).copied().unwrap_or(usize::MAX)
@@ -322,6 +337,10 @@ impl ImmPostDomTree {
                     return None;
                 }
                 b = parent;
+                climb += 1;
+                if climb > climb_cap {
+                    return None;
+                }
             }
             steps += 1;
             if steps > max_iter {
