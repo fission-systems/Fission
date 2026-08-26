@@ -93,40 +93,65 @@ fn display_value_from_handle(handle: &RuntimeHandle, role: &str) -> Result<Bound
     bail!("{role} {} has no display debug value", handle.operand_index)
 }
 
+/// How an instruction leaves, read off the p-code its constructors build.
+///
+/// The whole constructor tree is examined, not just the instruction's
+/// top-level constructor. Where an architecture spells the flow op in the
+/// top constructor -- x86's `CALL` -- either would do; where it delegates to
+/// a subtable, only the tree has it. ARM does delegate: a Thumb `bl`'s
+/// `Call` op is emitted by a sub-constructor, so reading only the top
+/// constructor classified *every* ARM instruction as `None`, and function
+/// discovery's sweep found no call or jump targets in any ARM binary.
 pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowKind {
-    if state
-        .constructor_template
-        .ops
-        .iter()
-        .any(|op| matches!(op.opcode, CompiledOpTplOpcode::Return))
-    {
-        return DecodedFlowKind::Return;
-    }
-    if state.constructor_template.ops.iter().any(|op| {
-        matches!(
-            op.opcode,
-            CompiledOpTplOpcode::Call | CompiledOpTplOpcode::CallInd
-        )
-    }) {
-        return DecodedFlowKind::Call;
-    }
-    if state
-        .constructor_template
-        .ops
-        .iter()
-        .any(|op| matches!(op.opcode, CompiledOpTplOpcode::CBranch))
-    {
-        return DecodedFlowKind::ConditionalJump;
-    }
-    if state.constructor_template.ops.iter().any(|op| {
-        matches!(
-            op.opcode,
-            CompiledOpTplOpcode::Branch | CompiledOpTplOpcode::BranchInd
-        )
-    }) {
-        return DecodedFlowKind::Jump;
+    // Same precedence as before, applied across the tree: a constructor that
+    // both returns and branches is a return.
+    for (kind, matches_opcode) in FLOW_KIND_PRECEDENCE {
+        if state_has_op(state, *matches_opcode) {
+            return *kind;
+        }
     }
     DecodedFlowKind::None
+}
+
+type OpcodePredicate = fn(CompiledOpTplOpcode) -> bool;
+
+static FLOW_KIND_PRECEDENCE: &[(DecodedFlowKind, OpcodePredicate)] = &[
+    (DecodedFlowKind::Return, |opcode| {
+        matches!(opcode, CompiledOpTplOpcode::Return)
+    }),
+    (DecodedFlowKind::Call, |opcode| {
+        matches!(
+            opcode,
+            CompiledOpTplOpcode::Call | CompiledOpTplOpcode::CallInd
+        )
+    }),
+    (DecodedFlowKind::ConditionalJump, |opcode| {
+        matches!(opcode, CompiledOpTplOpcode::CBranch)
+    }),
+    (DecodedFlowKind::Jump, |opcode| {
+        matches!(
+            opcode,
+            CompiledOpTplOpcode::Branch | CompiledOpTplOpcode::BranchInd
+        )
+    }),
+];
+
+/// Whether this constructor or any it delegates to emits a matching op.
+fn state_has_op(state: &RuntimeConstructState, matches_opcode: OpcodePredicate) -> bool {
+    if state
+        .constructor_template
+        .ops
+        .iter()
+        .any(|op| matches_opcode(op.opcode))
+    {
+        return true;
+    }
+    state.handles.iter().any(|handle| {
+        handle
+            .subtable_state
+            .as_deref()
+            .is_some_and(|sub| state_has_op(sub, matches_opcode))
+    })
 }
 
 fn flow_reference_kind(flow_kind: DecodedFlowKind) -> Option<DecodedReferenceKind> {
@@ -580,9 +605,19 @@ pub(super) fn decoded_references(
                 }
             }
             BoundOperand::Immediate { value, .. } if *value != 0 => {
+                // On an instruction that calls or branches, the immediate is
+                // where it goes. The `Relative` and `Memory` arms above
+                // already say so; this one used to report every immediate as
+                // a plain address, which is how ARM's `bl` -- whose target
+                // binds as an already-resolved immediate rather than a
+                // relative displacement -- reached function discovery as a
+                // reference it does not look at, leaving every ARM binary
+                // with no call targets at all.
+                let kind = flow_reference_kind(flow_kind)
+                    .unwrap_or(DecodedReferenceKind::ImmediateAddress);
                 refs.push(DecodedReference {
                     target: *value,
-                    kind: DecodedReferenceKind::ImmediateAddress,
+                    kind,
                     operand_index,
                 });
             }
