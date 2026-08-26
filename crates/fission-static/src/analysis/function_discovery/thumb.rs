@@ -67,11 +67,18 @@ fn has_cortex_m_vector_table(binary: &LoadedBinary) -> bool {
 }
 
 /// The first `EXAMINED_VECTORS + 1` words at the lowest loaded address.
+///
+/// The table is looked for in the lowest *loaded* section, not the lowest
+/// executable one. A Cortex-M vector table is a table of addresses, so
+/// toolchains mark it allocated and not executable -- crazyflie's
+/// `.isr_vector` is `A` while `.text` is `AX` -- and starting from the
+/// lowest executable section reads the first instructions of `.text`
+/// instead, which look nothing like a vector table.
 fn vector_table_words(binary: &LoadedBinary) -> Option<Vec<u64>> {
     let section = binary
         .sections
         .iter()
-        .filter(|section| section.is_executable)
+        .filter(|section| section.virtual_address != 0 && section.file_size >= 4)
         .min_by_key(|section| section.virtual_address)?;
     let start = section.file_offset as usize;
     let needed = (EXAMINED_VECTORS + 1) * 4;

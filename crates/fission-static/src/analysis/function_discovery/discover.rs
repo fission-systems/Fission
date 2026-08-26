@@ -553,7 +553,7 @@ pub fn discover_functions_with_runtime(
             // completion line.
             let mut validated_shared_returns: Vec<u64> = shared_returns
                 .into_par_iter()
-                .filter(|&sr| !tracker.is_overlap(sr) && is_strict_boundary(binary, sr))
+                .filter(|&sr| !tracker.is_overlap(sr) && is_strict_boundary(binary, Some(&frontend), sr))
                 .filter_map(|sr| {
                     let mut local_cache = std::collections::HashMap::new();
                     let (valid, _) = validate_subroutine_candidate(
@@ -1008,7 +1008,7 @@ fn validate_after_condition(
             }
             false
         }
-        "function" => is_strict_boundary(binary, addr),
+        "function" => is_strict_boundary(binary, None, addr),
         _ => true,
     }
 }
@@ -1137,10 +1137,10 @@ fn scan_ghidra_patterns(
                                 if let Some(cond) = &pat.after_cond {
                                     validate_after_condition(binary, addr, cond, executable_ranges)
                                 } else {
-                                    is_strict_boundary(binary, addr)
+                                    is_strict_boundary(binary, Some(frontend), addr)
                                 }
                             } else {
-                                is_strict_boundary(binary, addr)
+                                is_strict_boundary(binary, Some(frontend), addr)
                             };
 
                             if boundary_ok {
@@ -1172,10 +1172,10 @@ fn scan_ghidra_patterns(
                             if let Some(cond) = &pat.after_cond {
                                 validate_after_condition(binary, addr, cond, executable_ranges)
                             } else {
-                                is_strict_boundary(binary, addr)
+                                is_strict_boundary(binary, Some(frontend), addr)
                             }
                         } else {
-                            is_strict_boundary(binary, addr)
+                            is_strict_boundary(binary, Some(frontend), addr)
                         };
 
                         if boundary_ok {
@@ -1244,7 +1244,92 @@ fn scan_ghidra_patterns(
 /// places adjacent subroutines with no padding. The CALL itself is a
 /// valid function-end because the next sequential address is either
 /// unreachable (tail-call) or a new function entry point.
-fn is_strict_boundary(binary: &LoadedBinary, addr: u64) -> bool {
+fn is_x86(binary: &LoadedBinary) -> bool {
+    binary
+        .architecture
+        .as_ref()
+        .is_some_and(|arch| arch.processor == "x86")
+}
+
+/// The architecture-neutral form of [`is_strict_boundary`].
+///
+/// Asks what the x86 path asks -- does something end just before `addr`? --
+/// but by decoding rather than by recognizing opcode bytes. On a fixed-width
+/// architecture the instruction before `addr` can only begin at one of a
+/// couple of places, so trying each and checking that it both ends exactly
+/// at `addr` and leaves the function is a complete test, not a heuristic.
+///
+/// Without a decoder to ask, alignment is all that is left; a pattern hit at
+/// an address no instruction could begin at is still worth rejecting.
+fn non_x86_strict_boundary(
+    binary: &LoadedBinary,
+    frontend: Option<&RuntimeSleighFrontend>,
+    decode_context: Option<PackedContextOverride>,
+    addr: u64,
+) -> bool {
+    let Some(alignment) = instruction_alignment(binary) else {
+        return true;
+    };
+    if addr % alignment != 0 {
+        return false;
+    }
+    let Some(frontend) = frontend else {
+        return true;
+    };
+    // Widths an instruction of this architecture can have, smallest first.
+    let widths: &[u64] = if alignment == 2 { &[2, 4] } else { &[4] };
+    widths.iter().any(|width| {
+        let Some(start) = addr.checked_sub(*width) else {
+            return false;
+        };
+        let Some(bytes) = binary.view_bytes(start, *width as usize) else {
+            return false;
+        };
+        let Ok(instruction) = frontend.decode_single_no_pcode(bytes, start, decode_context) else {
+            return false;
+        };
+        instruction.length as u64 == *width
+            && matches!(
+                instruction.flow_kind,
+                DecodedFlowKind::Return | DecodedFlowKind::Jump
+            )
+    })
+}
+
+/// Byte alignment every instruction of this architecture starts on, where it
+/// has a fixed one. `None` for a variable-length architecture, whose
+/// instructions may begin anywhere.
+fn instruction_alignment(binary: &LoadedBinary) -> Option<u64> {
+    let arch = binary.architecture.as_ref()?;
+    match arch.processor.as_str() {
+        // Thumb is 2-byte aligned and ARM mode 4; take the weaker of the two
+        // rather than guess the mode, since a Thumb image's addresses do not
+        // say which they are.
+        "ARM" => Some(2),
+        "AARCH64" | "MIPS" | "PowerPC" | "Sparc" | "RISCV" | "Loongarch" => Some(4),
+        _ => None,
+    }
+}
+
+/// Whether `addr` looks like a place a function can start: the bytes before
+/// it end something.
+///
+/// The tests below read x86 opcodes -- `c3`, `c2`, `eb`, `e9`, `e8`, `ff /2`,
+/// `cc`/`90` padding. On any other architecture those byte values mean
+/// something else entirely, and asking them of ARM bytes answers yes often
+/// enough to be no gate at all: it let the Ghidra prologue-pattern scanner
+/// through 50,962 times on `nuttx`, a binary with 1,036 functions. Ask the
+/// question in the architecture's own terms instead -- see
+/// [`ends_with_terminator`].
+fn is_strict_boundary(
+    binary: &LoadedBinary,
+    frontend: Option<&RuntimeSleighFrontend>,
+    addr: u64,
+) -> bool {
+    if !is_x86(binary) {
+        let decode_context = frontend.and_then(|f| image_decode_context(binary, f));
+        return non_x86_strict_boundary(binary, frontend, decode_context, addr);
+    }
     // Look back up to 16 bytes to find a boundary
     let mut check_addr = addr;
     let mut skipped = 0;
@@ -1518,7 +1603,7 @@ fn scan_cc_padding_regions(
             // immediately before the padding run.  This eliminates interior
             // padding hits that lack a real function-end context, which is the
             // primary source of FP inflation on large binaries.
-            if !is_strict_boundary(binary, candidate) {
+            if !is_strict_boundary(binary, Some(frontend), candidate) {
                 continue;
             }
             let (valid, _) = validate_subroutine_candidate(
@@ -1573,7 +1658,7 @@ fn scan_data_references(
                         val,
                         executable_ranges,
                     ) {
-                        if is_strict_boundary(binary, val) {
+                        if is_strict_boundary(binary, Some(frontend), val) {
                             sec_candidates.push(val);
                         }
                     }
@@ -1787,7 +1872,7 @@ fn scan_dynamic_prologues(
             .filter(|&candidate| {
                 !known_functions.contains(&candidate) && !tracker.is_overlap(candidate)
             })
-            .filter(|&candidate| is_strict_boundary(binary, candidate))
+            .filter(|&candidate| is_strict_boundary(binary, Some(frontend), candidate))
             .filter_map(|candidate| {
                 let fp = function_start_fingerprint(binary, frontend, candidate)?;
                 if !common_fingerprints.contains(&fp) {
@@ -1853,7 +1938,7 @@ fn scan_jmp_thunks(
         while offset + 5 <= bytes.len() {
             if bytes[offset] == 0xe9 {
                 let addr = section.virtual_address + offset as u64;
-                if is_strict_boundary(binary, addr) {
+                if is_strict_boundary(binary, Some(frontend), addr) {
                     if let Some(target_bytes) = binary.view_bytes(addr, 15) {
                         if let Ok(decoded) = frontend.decode_window_no_pcode(target_bytes, addr, 1) {
                             if !decoded.is_empty() && decoded[0].flow_kind == DecodedFlowKind::Jump
