@@ -6,6 +6,50 @@
 
 use crate::prelude::*;
 
+/// The constant's value read at the width its type declares, when that
+/// reading is negative.
+///
+/// A lifter stores `add esp, -168` as the four-byte pattern `0xffffff58`, and
+/// `lower_varnode_inner` carries that through as the `i64` 4,294,967,128 with
+/// a 32-bit unsigned type. `simplify_negated_const` turns `x + (-c)` into
+/// `x - c`, but it tested `c < 0` and so never fired for those: the emitted
+/// body printed `esp + 4294967128` where `esp - 168` belongs. Measured on
+/// `dexter.dll`'s `GetOSVersion` among others.
+///
+/// Only a value inside the unsigned range of its own width qualifies, so a
+/// constant already stored as a negative `i64`, or one wider than its type
+/// claims, is left to the existing `c < 0` path.
+fn negative_at_declared_width(value: i64, ty: &NirType) -> Option<i64> {
+    let NirType::Int { bits, .. } = ty else {
+        return None;
+    };
+    let bits = *bits;
+    if !(2..64).contains(&bits) || value <= 0 {
+        return None;
+    }
+    let span = 1_i128 << bits;
+    let value = i128::from(value);
+    // Strictly above the midpoint. At exactly `span / 2` -- the most negative
+    // value of the width -- `span - value` is the same value again, so the
+    // `Add`/`Sub` rewrite flips forever inside the normalize fixpoint. The
+    // existing `c != i64::MIN` guard on the already-signed path excludes the
+    // same number for the same reason; leaving it out here hung
+    // `dexter.dll`'s `DetectShutdown@16`.
+    if value >= span || value <= span / 2 {
+        return None;
+    }
+    i64::try_from(span - value).ok()
+}
+
+/// The magnitude to subtract for `x + c`, whether `c` is stored negative or
+/// is negative only at its declared width.
+fn subtractable_magnitude(value: i64, ty: &NirType) -> Option<i64> {
+    if value < 0 && value != i64::MIN {
+        return Some(-value);
+    }
+    negative_at_declared_width(value, ty)
+}
+
 pub fn simplify_negated_const(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
         PreHirExpr::Binary {
@@ -14,25 +58,25 @@ pub fn simplify_negated_const(expr: &PreHirExpr) -> Option<PreHirExpr> {
             rhs,
             ty,
         } => {
-            if let PreHirExpr::Const(c, cty) = rhs.as_ref() {
-                if *c < 0 && *c != i64::MIN {
-                    return Some(PreHirExpr::Binary {
-                        op: PreHirBinaryOp::Sub,
-                        lhs: lhs.clone(),
-                        rhs: Box::new(PreHirExpr::Const(-*c, cty.clone())),
-                        ty: ty.clone(),
-                    });
-                }
+            if let PreHirExpr::Const(c, cty) = rhs.as_ref()
+                && let Some(magnitude) = subtractable_magnitude(*c, cty)
+            {
+                return Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Sub,
+                    lhs: lhs.clone(),
+                    rhs: Box::new(PreHirExpr::Const(magnitude, cty.clone())),
+                    ty: ty.clone(),
+                });
             }
-            if let PreHirExpr::Const(c, cty) = lhs.as_ref() {
-                if *c < 0 && *c != i64::MIN {
-                    return Some(PreHirExpr::Binary {
-                        op: PreHirBinaryOp::Sub,
-                        lhs: rhs.clone(),
-                        rhs: Box::new(PreHirExpr::Const(-*c, cty.clone())),
-                        ty: ty.clone(),
-                    });
-                }
+            if let PreHirExpr::Const(c, cty) = lhs.as_ref()
+                && let Some(magnitude) = subtractable_magnitude(*c, cty)
+            {
+                return Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Sub,
+                    lhs: rhs.clone(),
+                    rhs: Box::new(PreHirExpr::Const(magnitude, cty.clone())),
+                    ty: ty.clone(),
+                });
             }
             None
         }
@@ -42,15 +86,15 @@ pub fn simplify_negated_const(expr: &PreHirExpr) -> Option<PreHirExpr> {
             rhs,
             ty,
         } => {
-            if let PreHirExpr::Const(c, cty) = rhs.as_ref() {
-                if *c < 0 && *c != i64::MIN {
-                    return Some(PreHirExpr::Binary {
-                        op: PreHirBinaryOp::Add,
-                        lhs: lhs.clone(),
-                        rhs: Box::new(PreHirExpr::Const(-*c, cty.clone())),
-                        ty: ty.clone(),
-                    });
-                }
+            if let PreHirExpr::Const(c, cty) = rhs.as_ref()
+                && let Some(magnitude) = subtractable_magnitude(*c, cty)
+            {
+                return Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: lhs.clone(),
+                    rhs: Box::new(PreHirExpr::Const(magnitude, cty.clone())),
+                    ty: ty.clone(),
+                });
             }
             None
         }
@@ -449,3 +493,63 @@ mod term_order_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod width_signed_const_tests {
+    use super::*;
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn add_const(c: i64) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("esp".to_string())),
+            rhs: Box::new(PreHirExpr::Const(c, u32_ty())),
+            ty: u32_ty(),
+        }
+    }
+
+    /// A lifter stores `add esp, -168` as the four-byte `0xffffff58`, which
+    /// arrives here as a positive `i64`. Read at its declared width it is
+    /// negative, and the emitted body should say so.
+    #[test]
+    fn rewrites_a_constant_that_is_negative_at_its_declared_width() {
+        let out = simplify_negated_const(&add_const(0xffff_ff58)).expect("rewritten");
+        let PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sub,
+            rhs,
+            ..
+        } = &out
+        else {
+            panic!("expected a subtraction, got {out:?}");
+        };
+        assert_eq!(**rhs, PreHirExpr::Const(168, u32_ty()));
+    }
+
+    /// The most negative value of the width negates to itself, so rewriting it
+    /// would flip `Add` and `Sub` forever inside the normalize fixpoint.
+    /// `dexter.dll`'s `DetectShutdown@16` hung on exactly this.
+    #[test]
+    fn leaves_the_most_negative_value_of_the_width_alone() {
+        assert!(simplify_negated_const(&add_const(0x8000_0000)).is_none());
+    }
+
+    /// A value below the midpoint is a genuine positive constant.
+    #[test]
+    fn leaves_an_ordinary_positive_constant_alone() {
+        assert!(simplify_negated_const(&add_const(168)).is_none());
+    }
+
+    /// A constant wider than the type it carries is not a width-signed value;
+    /// the already-signed `c < 0` path owns those.
+    #[test]
+    fn leaves_a_constant_outside_its_declared_width_alone() {
+        assert!(simplify_negated_const(&add_const(0x1_0000_0000)).is_none());
+    }
+}
+
