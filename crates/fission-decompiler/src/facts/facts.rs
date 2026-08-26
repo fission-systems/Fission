@@ -3,8 +3,8 @@ use crate::pipeline::rust_sleigh::apply_spec_overrides;
 use crate::{
     CallEdgeKind, CallEffectSummarySource, CallTargetProvenance, CallTargetRef,
     NirCallEffectSummary, NirCallParamRule, NirCallPointerPointee, NirCallPrototypeSummary,
-    NirFunctionHints, NirStructFieldHint, NirStructTypeHint, NirType, NirTypeContext,
-    PcodeFunction, PcodeOpcode, RegisterNamer, infer_entry_register_param_arity,
+    NirFunctionHints, NirRenderOptions, NirStructFieldHint, NirStructTypeHint, NirType,
+    NirTypeContext, PcodeFunction, PcodeOpcode, RegisterNamer, infer_entry_register_param_arity,
 };
 use fission_analysis_db::SymbolKind;
 use fission_core::PATHS;
@@ -14,6 +14,7 @@ use fission_core::core::ghidra_no_return::{
 use fission_core::{normalize_named_type_identity, sanitize_symbol_name};
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
+use fission_midend_normalize::prelude::pre_hir_function_expr_nodes_fit_budget;
 use fission_signatures::golang_typeinfo::GoTypeinfoDatabase;
 use fission_signatures::win_types::WindowsStructures;
 use fission_signatures::{
@@ -914,8 +915,9 @@ fn build_preview_callee_summaries(
     // regions, type fixed points, and cleanup), so they are not a safe fact
     // source for an interactive caller decompilation.
     const MAX_TYPED_PREVIEW_PCODE_OPS: usize = 2_000;
+    const MAX_TYPED_PREVIEW_EXPR_NODES: usize = 20_000;
     let infer_prototype = |candidate_pcode: &PcodeFunction,
-                           evidence_source: &str|
+                           evidence: DirectCalleePrototypeEvidence|
      -> Option<NirCallPrototypeSummary> {
         let op_count = candidate_pcode
             .blocks
@@ -933,19 +935,37 @@ fn build_preview_callee_summaries(
             });
             callee_context.call_prototype_summaries.remove(target_name);
 
+            // Direct-callee previews are a fact-extraction path, not a second
+            // user-visible decompilation. Graph structuring here can synthesize
+            // very deep guard/select trees (especially for a truncated stable
+            // prefix) before we get a chance to inspect the typed bindings.
+            // Keep both evidence sources on the bounded linear path.
+            let preview_options = direct_callee_preview_options(&options);
+
             let typed_params = fission_pcode::build_raw_hir(
                 candidate_pcode,
                 target_name,
                 target_addr,
-                &options,
+                &preview_options,
                 Some(binary),
                 Some(&callee_context),
             )
             .ok()
-            .map(|mut callee| {
+            .and_then(|mut callee| {
+                if !pre_hir_function_expr_nodes_fit_budget(&callee, MAX_TYPED_PREVIEW_EXPR_NODES) {
+                    if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
+                        eprintln!(
+                            "[CALLEE-TYPE-DIAG] target={} evidence={} skipped=expr-budget limit={}",
+                            target_name,
+                            evidence.label(),
+                            MAX_TYPED_PREVIEW_EXPR_NODES,
+                        );
+                    }
+                    return None;
+                }
                 fission_midend_normalize::normalize_hir_function(&mut callee);
                 expose_preview_callsite_copy_sources(&mut callee);
-                callee.params
+                Some(callee.params)
             })
             .unwrap_or_default();
 
@@ -976,7 +996,7 @@ fn build_preview_callee_summaries(
                 eprintln!(
                     "[CALLEE-TYPE-DIAG] target={} evidence={} arity={} pointer_pointees={:?} surface_types={:?}",
                     target_name,
-                    evidence_source,
+                    evidence.label(),
                     arity,
                     param_pointer_pointees,
                     param_surface_type_names
@@ -993,7 +1013,7 @@ fn build_preview_callee_summaries(
         })
     };
 
-    let mut prototype = infer_prototype(&pcode, "complete");
+    let mut prototype = infer_prototype(&pcode, DirectCalleePrototypeEvidence::Complete);
     let stable_prefix_limit = direct_callee_stable_prefix_instruction_limit(max_bytes);
     if stable_prefix_limit < instruction_limit
         && let Some(complete) = prototype.as_mut()
@@ -1006,11 +1026,39 @@ fn build_preview_callee_summaries(
             true,
             true,
         )
-        && let Some(stable_prefix) = infer_prototype(&stable_prefix_pcode, "stable-prefix")
+        && let Some(stable_prefix) = infer_prototype(
+            &stable_prefix_pcode,
+            DirectCalleePrototypeEvidence::StablePrefix,
+        )
     {
         merge_preview_pointer_evidence(complete, stable_prefix);
     }
     Some((summary, prototype))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectCalleePrototypeEvidence {
+    Complete,
+    StablePrefix,
+}
+
+impl DirectCalleePrototypeEvidence {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::StablePrefix => "stable-prefix",
+        }
+    }
+}
+
+/// Options for a direct-callee prototype preview.
+///
+/// Every evidence source takes the same bounded linear path, so this does not
+/// vary by `DirectCalleePrototypeEvidence`.
+fn direct_callee_preview_options(base: &NirRenderOptions) -> NirRenderOptions {
+    let mut options = base.clone();
+    options.force_linear_structuring = true;
+    options
 }
 
 /// Match the ordinary render path's bounded post-layout type opportunity
@@ -1747,8 +1795,9 @@ mod tests {
     use super::{
         build_nir_call_param_rules, build_nir_call_result_facts,
         build_nir_import_call_prototype_summaries, direct_callee_instruction_limit,
-        direct_callee_stable_prefix_instruction_limit, expose_preview_callsite_copy_sources,
-        merge_nir_function_hints, merge_preview_pointer_evidence,
+        direct_callee_preview_options, direct_callee_stable_prefix_instruction_limit,
+        expose_preview_callsite_copy_sources, merge_nir_function_hints,
+        merge_preview_pointer_evidence,
         record_interprocedural_arity_facts, record_unambiguous_register_type_hint,
         resolve_nir_struct_name, summarize_preview_callee_effects,
     };
@@ -1759,7 +1808,7 @@ mod tests {
     };
     use fission_midend_normalize::prelude::{
         NirBindingOrigin, NirType, PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue,
-        PreHirStmt,
+        PreHirStmt, pre_hir_function_expr_nodes_fit_budget,
     };
     use fission_signatures::win_types::WindowsStructures;
     use fission_static::analysis::decomp::facts::FactStore;
@@ -1779,6 +1828,34 @@ mod tests {
         assert_eq!(direct_callee_instruction_limit(4096), 512);
         assert_eq!(direct_callee_stable_prefix_instruction_limit(117), 32);
         assert_eq!(direct_callee_stable_prefix_instruction_limit(420), 105);
+    }
+
+    #[test]
+    fn direct_callee_prototype_previews_force_linear_structuring() {
+        let mut base = crate::NirRenderOptions::default();
+        base.force_linear_structuring = false;
+
+        assert!(direct_callee_preview_options(&base).force_linear_structuring);
+    }
+
+    #[test]
+    fn typed_preview_expr_budget_counts_nested_nodes() {
+        let ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let func = PreHirFunction {
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: fission_midend_normalize::prelude::PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Const(1, ty.clone())),
+                rhs: Box::new(PreHirExpr::Const(2, ty.clone())),
+                ty,
+            }))],
+            ..Default::default()
+        };
+
+        assert!(pre_hir_function_expr_nodes_fit_budget(&func, 3));
+        assert!(!pre_hir_function_expr_nodes_fit_budget(&func, 2));
     }
 
     #[test]
